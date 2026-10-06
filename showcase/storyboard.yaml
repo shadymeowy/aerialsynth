@@ -31,7 +31,8 @@ shots:
     text: "Rivers drain downhill through carved valleys and floodplains"
     seconds: 5.5
     scenario:
-      trajectory: { synth: { kind: line, lat: 39.89, lon: 36.57, heading_deg: 60, altitude: 650 } }
+      # on the river centreline (39.9060N 36.5059E, flowing towards 59°), along it
+      trajectory: { synth: { kind: line, lat: 39.9060, lon: 36.5059, heading_deg: 59, altitude: 650 } }
       render: { lighting: { time_utc: "07:10:00" } }
       cameras: [ { extrinsics: { mount: nadir, pitch_deg: 0 } } ]
 
@@ -49,7 +50,8 @@ shots:
     text: "Street grids, parks and buildings — part of the elevation model"
     seconds: 6
     scenario:
-      trajectory: { synth: { kind: line, lat: 41.585, lon: 32.972, heading_deg: 100, altitude: 450 } }
+      # into the town centred at 41.573N 32.984E from its north-west
+      trajectory: { synth: { kind: line, lat: 41.580, lon: 32.976, heading_deg: 115, altitude: 450 } }
       cameras: [ { extrinsics: { pitch_deg: -55 } } ]
 
   - id: coast
@@ -57,8 +59,8 @@ shots:
     text: "Shallows, surf and sun glint on open water"
     seconds: 5.5
     scenario:
-      # over the headland at 40.23N 36.76E towards the sea to the north-east, morning sun ahead
-      trajectory: { synth: { kind: line, lat: 40.215, lon: 36.745, heading_deg: 40, altitude: 600 } }
+      # ~800 m offshore, flying in towards the shoreline at 40.2834N 36.833E (land to the north)
+      trajectory: { synth: { kind: line, lat: 40.276, lon: 36.834, heading_deg: 352, altitude: 600 } }
       render: { lighting: { time_utc: "06:00:00" } }
       cameras: [ { extrinsics: { pitch_deg: -38 } } ]
 
@@ -142,8 +144,8 @@ shots:
     text: "Street lamps, porch lights, glowing haze and a starry sky"
     seconds: 6
     scenario:
-      # over the dense town at 41.585N 32.975E on a moonless night; a dark exposure keeps the lamps crisp
-      trajectory: { synth: { kind: line, lat: 41.581, lon: 32.955, heading_deg: 95, altitude: 600, speed: 50 } }
+      # over the town centred at 41.573N 32.984E on a moonless night; a dark exposure keeps the lamps crisp
+      trajectory: { synth: { kind: line, lat: 41.5705, lon: 32.970, heading_deg: 80, altitude: 600, speed: 50 } }
       render: { lighting: { date: "2026-03-19", time_utc: "21:30:00" } }
       cameras:
         - extrinsics: { pitch_deg: -45 }

@@ -310,6 +310,17 @@ pub struct Cell3 {
     pub point2: DVec3,
 }
 
+/// Id and feature point (meters) of lattice cell `c` of the jittered 3D lattice of [`worley3`].
+pub fn worley3_site(seed: u64, c: (i64, i64, i64), cell: f64, jitter: f64) -> (u64, DVec3) {
+    let h = hash3(seed, c.0, c.1, c.2);
+    let fp = DVec3::new(
+        c.0 as f64 + 0.5 + jitter * (u01k(h, 1) - 0.5),
+        c.1 as f64 + 0.5 + jitter * (u01k(h, 2) - 0.5),
+        c.2 as f64 + 0.5 + jitter * (u01k(h, 3) - 0.5),
+    );
+    (h, fp * cell)
+}
+
 /// Nearest two feature points of a jittered 3D lattice with cell size `cell` (meters).
 pub fn worley3(seed: u64, p: DVec3, cell: f64, jitter: f64) -> Cell3 {
     let q = p / cell;

@@ -138,6 +138,8 @@ pub struct TownInfo {
 pub struct Caches {
     regions: HashMap<u64, RegionInfo>,
     towns: HashMap<u64, TownInfo>,
+    /// existing towns around each cell of the town lattice
+    town_cands: HashMap<(i64, i64, i64), Vec<TownInfo>>,
 }
 
 /// Sampling context at the surface point below a 3D Worley site.
@@ -403,12 +405,11 @@ impl SurfaceModel {
         info
     }
 
-    fn town_info(&self, world: &World, cache: &mut Caches, t: &Terrain) -> TownInfo {
-        if let Some(r) = cache.towns.get(&t.town.id) {
+    fn town_info(&self, world: &World, cache: &mut Caches, id: u64, center: DVec3) -> TownInfo {
+        if let Some(r) = cache.towns.get(&id) {
             return *r;
         }
-        let id = t.town.id;
-        let ctx = site_ctx(world, t.town.center, 300.0);
+        let ctx = site_ctx(world, center, 300.0);
         let (east, north) = (ctx.east, ctx.north);
         let tc = world.terrain(&ctx);
         let p_exist = (tc.habit * 1.1 * world.cfg.landuse.towns).min(0.95);
@@ -419,6 +420,7 @@ impl SurfaceModel {
         if u01k(id, 4) < 0.03 {
             radius *= 4.0; // occasional city
         }
+        let elong = 1.0 + 1.6 * u01k(id, 11) * u01k(id, 12);
         let info = TownInfo {
             exists,
             center: ctx.p,
@@ -431,7 +433,7 @@ impl SurfaceModel {
             roof_style: u01k(id, 8),
             height: u01k(id, 9),
             lot: 13.0 + 12.0 * u01k(id, 10),
-            elong: 1.0 + 1.6 * u01k(id, 11) * u01k(id, 12),
+            elong,
             seed: mix64(id ^ 0x70E5),
             sun: east * self.sun_h.x + north * self.sun_h.y,
         };
@@ -633,15 +635,44 @@ impl SurfaceModel {
             }
         }
 
-        // built-up part of a town: no natural forest there (parks and street trees come from
-        // the town model); without this, forest bands ran through towns over lots and streets
-        let town_urban = if t.town.id != 0 && world.cfg.landuse.towns > 0.0 {
-            let town = self.town_info(world, cache, t);
-            if town.exists { self.town_urban(&town, p, gsd, slope, pf).0 } else { 0.0 }
-        } else {
-            0.0
-        };
-        let not_urban = 1.0 - smoothstep(0.03, 0.35, town_urban);
+        // no trees anywhere in a town's footprint, only a short fade at its outer edge (forest
+        // bands ran through towns, and trees between the lots of the sparse outskirts cut into
+        // roofs and streets). The town is evaluated here (drawn below, over the roads) so that its
+        // lots and streets also mask the trees in that fade.
+        // Every existing town of the surrounding lattice cells is tried and the most built-up one
+        // wins: a large town reaches beyond its own cell, where it was cut off along straight
+        // lines (taking only the nearest site, or the two nearest, did that)
+        let mut town_sel: Option<(TownInfo, f64)> = None;
+        if t.town.id != 0 && world.cfg.landuse.towns > 0.0 {
+            let cell = world.cfg.landuse.town_cell_km * 1000.0;
+            let qf = (p / cell).floor();
+            let key = (qf.x as i64, qf.y as i64, qf.z as i64);
+            if !cache.town_cands.contains_key(&key) {
+                let mut v = Vec::new();
+                for dz in -1..=1 {
+                    for dy in -1..=1 {
+                        for dx in -1..=1 {
+                            let (id, c) = worley3_site(world.seed ^ 0x70E1, (key.0 + dx, key.1 + dy, key.2 + dz), cell, 0.8);
+                            let info = self.town_info(world, cache, id, c);
+                            if info.exists {
+                                v.push(info);
+                            }
+                        }
+                    }
+                }
+                cache.town_cands.insert(key, v);
+            }
+            for info in &cache.town_cands[&key] {
+                let u = self.town_urban(info, p, gsd, slope, pf).0;
+                if u > town_sel.map_or(0.0, |b| b.1) {
+                    town_sel = Some((*info, u));
+                }
+            }
+        }
+        let town_urban = town_sel.map_or(0.0, |x| x.1);
+        let town_px = town_sel.and_then(|(town, _)| self.town(&town, p, gsd, fw, slope, world.cfg.look.shadows, pf));
+        let town_cov = town_px.map_or(0.0, |x| x.2);
+        let not_urban = (1.0 - smoothstep(0.0, 0.08, town_urban)) * (1.0 - town_cov);
 
         // ------------------------------------------------------------- trees
         let veg = &world.cfg.vegetation;
@@ -732,8 +763,10 @@ impl SurfaceModel {
         let roads = world.cfg.landuse.roads;
         let mut road_major_cov: f64 = 0.0;
         if roads > 0.0 {
-            let steep = 1.0 - smoothstep(0.25, 0.45, slope);
-            let habit = smoothstep(0.02, 0.25, t.habit) * steep * (1.0 - snow) * (1.0 - t.sand * 0.7);
+            // a road is there or not (crisp cutoffs): roads fading with habitation or slope were
+            // half-transparent ghosts with the trees showing through
+            let steep = smoothstep(-0.02, 0.02, 0.5 - slope);
+            let habit = smoothstep(-0.005, 0.005, t.habit - 0.03) * steep * (1.0 - snow) * (1.0 - t.sand * 0.7);
             let mut road_cov: f64 = 0.0;
             let mut road_col = pal.asphalt;
             if habit > 0.0 {
@@ -747,7 +780,7 @@ impl SurfaceModel {
                     road_col = mixc(pal.asphalt, pal.concrete, sh.max(0.0) * 0.6);
                 }
                 let w_minor = 6.0;
-                let c2 = band_cov(l.road_minor, w_minor * 0.5, fw.max(gsd * 0.5)) * habit * 0.9;
+                let c2 = band_cov(l.road_minor, w_minor * 0.5, fw.max(gsd * 0.5)) * habit;
                 if c2 > road_cov {
                     road_cov = c2;
                     road_col = mixc(pal.asphalt, pal.gravel, smoothstep(0.4, 0.7, st[0]));
@@ -794,9 +827,8 @@ impl SurfaceModel {
         }
 
         // ------------------------------------------------------------- lit main roads near towns
-        if road_major_cov > 0.0 && t.town.id != 0 && world.cfg.landuse.towns > 0.0 {
-            let town = self.town_info(world, cache, t);
-            if town.exists {
+        if road_major_cov > 0.0 {
+            if let Some((town, _)) = town_sel {
                 let dist = (p - town.center).length();
                 let near = 1.0 - smoothstep(1.2 * town.radius, 2.2 * town.radius, dist);
                 let sp = 38.0;
@@ -813,20 +845,15 @@ impl SurfaceModel {
         }
 
         // ------------------------------------------------------------- towns
-        if t.town.id != 0 && world.cfg.landuse.towns > 0.0 {
-            let town = self.town_info(world, cache, t);
-            if town.exists {
-                if let Some((tcol, th, cov, cls, shadow, em)) = self.town(&town, p, gsd, fw, slope, world.cfg.look.shadows, pf) {
-                    emission += em * cov;
-                    col = mixc(col, tcol, cov);
-                    if world.cfg.landuse.buildings_in_dsm {
-                        height = lerp(height, l.ground + th, cov);
-                    }
-                    lit = lit.min(1.0 - shadow);
-                    if cov > 0.5 {
-                        class = cls;
-                    }
-                }
+        if let Some((tcol, th, cov, cls, shadow, em)) = town_px {
+            emission += em * cov;
+            col = mixc(col, tcol, cov);
+            if world.cfg.landuse.buildings_in_dsm {
+                height = lerp(height, l.ground + th, cov);
+            }
+            lit = lit.min(1.0 - shadow);
+            if cov > 0.5 {
+                class = cls;
             }
         }
 
@@ -1237,7 +1264,7 @@ impl SurfaceModel {
         let n1 = 0.32 * perlin3(town.seed ^ 0x71, p / (0.9 * r)) + 0.18 * perlin3(town.seed ^ 0x72, p / (0.35 * r)) * band(0.35 * r, gsd)
             + 0.08 * pf.warp2;
         let rel = qa.length() / (r * (1.0 + n1)).max(1.0);
-        ((1.0 - smoothstep(0.3, 1.0, rel)) * (1.0 - smoothstep(0.2, 0.4, slope)), rel)
+        ((1.0 - smoothstep(0.3, 1.0, rel)) * (1.0 - smoothstep(0.45, 0.8, slope)), rel)
     }
 
     fn town(&self, town: &TownInfo, p: DVec3, gsd: f64, fw: f64, slope: f64, shadows: bool, pf: &PixFields) -> Option<(DVec3, f64, f64, u8, f64, DVec3)> {
@@ -1266,13 +1293,22 @@ impl SurfaceModel {
         };
         let (bix, bqx, bsx) = cell(0, q.x);
         let (biy, bqy, bsy) = cell(1, q.y);
-        let ds = bqx.min(bsx - bqx).min(bqy).min(bsy - bqy);
-        let big_street = bix.rem_euclid(4) == 0 && bqx < bsx * 0.5 || biy.rem_euclid(4) == 0 && bqy < bsy * 0.5;
-        let sw = if big_street { town.street * 1.4 } else { town.street } * 0.5;
+        let sw = town.street * 0.7; // lots start beyond the widest street (a verge along narrower ones)
         // streets exist where the town is dense enough; outskirts keep only some of them
         let sh = hash2(town.seed ^ 0x57, bix, biy);
-        let street_here = smoothstep(0.15, 0.3, urban) * if urban < 0.45 && u01k(sh, 3) < 0.4 { 0.0 } else { 1.0 };
-        let street = band_cov(ds, sw, fw.max(gsd * 0.5)) * street_here;
+        // streets exist where the town is dense enough; outskirts keep only some of them. Decided
+        // per street segment (axis, line, and the segment along it), so the blocks on both sides
+        // agree, and per axis, so streets end square at a crossing; crisp: a street is there or
+        // not (a fading street left half-transparent asphalt with half-masked trees on it)
+        let near_x = bix + (bqx > bsx - bqx) as i64; // nearest line across x and across y
+        let near_y = biy + (bqy > bsy - bqy) as i64;
+        let seg_here = |h: u64| smoothstep(-0.01, 0.01, urban - (0.15 + 0.12 * u01k(h, 4))) * if urban < 0.45 && u01k(h, 3) < 0.4 { 0.0 } else { 1.0 };
+        let here_x = seg_here(hash2(town.seed ^ 0x57, near_x, biy));
+        let here_y = seg_here(hash2(town.seed ^ 0x58, near_y, bix));
+        let sw_of = |line: i64| if line.rem_euclid(4) == 0 { town.street * 1.4 } else { town.street } * 0.5;
+        let (sw_x, sw_y) = (sw_of(near_x), sw_of(near_y));
+        let fws = fw.max(gsd * 0.5);
+        let street = f64::max(band_cov(bqx.min(bsx - bqx), sw_x, fws) * here_x, band_cov(bqy.min(bsy - bqy), sw_y, fws) * here_y);
         let bh = hash2(town.seed ^ 0xB10C, bix, biy);
         let block_kind = u01k(bh, 1);
         let mut col = pal.asphalt;
@@ -1281,6 +1317,7 @@ impl SurfaceModel {
         let mut shadow = 0.0;
         let mut cov_lot = 0.0;
         let mut porch = 0.0;
+        let mut roof_frac = 0.0; // building roof coverage of this sample
         let inner = DVec2::new(bqx - sw, bqy - sw);
         let (bw, bd) = (bsx - 2.0 * sw, bsy - 2.0 * sw);
         let central = (1.0 - rel).max(0.0);
@@ -1343,6 +1380,7 @@ impl SurfaceModel {
                         if inside > 0.0 {
                             col = mixc(col, roof, inside);
                             height = h_here * inside;
+                            roof_frac = inside * buildings_resolved;
                             if inside > 0.5 {
                                 class = lc::BUILDING;
                             }
@@ -1395,26 +1433,43 @@ impl SurfaceModel {
         let lamp_col = if led { DVec3::new(0.86, 0.9, 1.0) } else { DVec3::new(1.0, 0.58, 0.24) };
         let lamp_res = band(lamp_sp, gsd);
         let mut emission = DVec3::ZERO;
-        if lamp_res > 0.0 && street_here > 0.0 {
-            let ql = (q / lamp_sp).round() * lamp_sp;
-            let (_, lqx, lsx) = cell(0, ql.x);
-            let (_, lqy, lsy) = cell(1, ql.y);
-            let dsl = lqx.min(lsx - lqx).min(lqy).min(lsy - lqy);
-            let lh = hash2(town.seed ^ 0x1A3B, (ql.x / lamp_sp) as i64, (ql.y / lamp_sp) as i64);
-            if dsl < sw * 1.6 && u01k(lh, 1) < 0.9 {
-                let d2 = (q - ql).length_squared();
-                let pool = 0.35 * (-d2 / (2.0 * 7.0 * 7.0)).exp();
-                let core = 4.0 * (-d2 / (2.0 * 0.7 * 0.7)).exp() * band(1.5, gsd);
-                emission += lamp_col * (pool + core) * (0.7 + 0.6 * u01k(lh, 2));
+        if lamp_res > 0.0 && here_x.max(here_y) > 0.0 {
+            // street lamps along every street: for the nearest street line on each axis, lamps
+            // every lamp_sp along it, alternating sides of the carriageway
+            for axis in 0..2u64 {
+                let (bi, bq, bs, along) = if axis == 0 { (bix, bqx, bsx, q.y) } else { (biy, bqy, bsy, q.x) };
+                // signed offset of the pixel from the nearest street centreline, and that line's index
+                let (off, li) = if bq < bs - bq { (bq, bi) } else { (-(bs - bq), bi + 1) };
+                let (here, swa) = if axis == 0 { (here_x, sw_x) } else { (here_y, sw_y) };
+                if here <= 0.0 || off.abs() > swa + 22.0 {
+                    continue;
+                }
+                let k = (along / lamp_sp).round();
+                let side = if (k as i64).rem_euclid(2) == 0 { 1.0 } else { -1.0 };
+                let lamp_off = side * swa * 0.85;
+                let (dp, da) = (off - lamp_off, along - k * lamp_sp);
+                let d2 = dp * dp + da * da;
+                let lh = hash2(town.seed ^ 0x1A3B ^ (axis << 40), li, k as i64);
+                if u01k(lh, 1) < 0.93 {
+                    let pool = 0.30 * (-d2 / (2.0 * 5.5 * 5.5)).exp();
+                    let core = 4.0 * (-d2 / (2.0 * 0.6 * 0.6)).exp() * band(1.2, gsd);
+                    emission += lamp_col * (pool + core) * (0.7 + 0.6 * u01k(lh, 2));
+                }
             }
         }
+        // the lamps light the ground below them, not the roofs (lit roofs read as glowing spikes)
+        let ground_lit = 1.0 - roof_frac * (1.0 - street);
+        emission *= ground_lit;
+        porch *= ground_lit;
         // prefiltered mean when lamps are unresolved (town glow)
         emission = emission * lamp_res + lamp_col * 0.07 * (1.0 - lamp_res) * smoothstep(0.15, 0.4, urban);
+        // plazas / parking and industrial yards: a dim base (their lamps are the street lamps
+        // around them), not uniformly glowing slabs
         if urban > 0.45 && (0.07..0.12).contains(&block_kind) {
-            emission += lamp_col * 0.12; // lit plaza / parking
+            emission += lamp_col * 0.025 * lamp_res;
         }
         if block_kind > 0.92 && central < 0.5 {
-            emission += DVec3::new(0.9, 0.95, 1.0) * 0.08; // industrial yard floodlights
+            emission += DVec3::new(0.9, 0.95, 1.0) * 0.02 * lamp_res;
         }
         emission += DVec3::new(1.0, 0.72, 0.42) * porch;
         Some((col, height, cov, class, shadow * (1.0 - street * 0.5), emission / cov.max(0.05)))

@@ -172,7 +172,7 @@ impl Macro {
 pub struct World {
     pub cfg: Config,
     pub ell: Ellipsoid,
-    seed: u64,
+    pub(crate) seed: u64,
     cont: Fbm,
     cont_warp: [Fbm; 3],
     belt: Fbm,
