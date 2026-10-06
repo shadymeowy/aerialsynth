@@ -601,9 +601,19 @@ impl SurfaceModel {
             }
         }
 
+        // built-up part of a town: no natural forest there (parks and street trees come from
+        // the town model); without this, forest bands ran through towns over lots and streets
+        let town_urban = if t.town.id != 0 && world.cfg.landuse.towns > 0.0 {
+            let town = self.town_info(world, cache, t);
+            if town.exists { self.town_urban(&town, p, gsd, slope, pf).0 } else { 0.0 }
+        } else {
+            0.0
+        };
+        let not_urban = 1.0 - smoothstep(0.03, 0.35, town_urban);
+
         // ------------------------------------------------------------- trees
         let veg = &world.cfg.vegetation;
-        if veg.tree_density > 0.0 && natural_ok > 0.05 {
+        if veg.tree_density > 0.0 && natural_ok * not_urban > 0.05 {
             let base_cover = smoothstep(0.3, 0.68, wet) * smoothstep(-6.0, 2.0, temp) * veg.tree_density;
             let fpat = pf.forest; // ~[-1,1]
             let fpu = 0.5 + 0.5 * fpat;
@@ -619,10 +629,11 @@ impl SurfaceModel {
             dens = (dens + 0.35 * smoothstep(0.2, 0.9, -t.gully) * smoothstep(0.2, 0.5, wet) * natural_ok).min(1.0);
             dens *= 1.0 - smoothstep(0.9, 1.4, slope);
             dens *= 1.0 - smoothstep(0.0, 0.6, t.mountain * smoothstep(-2.0, -6.0, temp)); // tree line
+            dens *= not_urban;
             // shrubs / bushes in steppe, maquis and rocky slopes (texture of natural ground)
             let shrub_clim = smoothstep(0.15, 0.3, wet) * (1.0 - smoothstep(0.6, 0.8, wet)) * smoothstep(2.0, 10.0, temp);
             let shrub_patch = smoothstep(-0.2, 0.5, patch + 0.4 * pf.land);
-            let shrub = (0.45 * shrub_clim * shrub_patch * (1.0 - forest) * natural_ok.max(0.4 * rock) * (1.0 - field_cov) * veg.tree_density)
+            let shrub = (0.45 * shrub_clim * shrub_patch * (1.0 - forest) * natural_ok.max(0.4 * rock) * (1.0 - field_cov) * veg.tree_density * not_urban)
                 .clamp(0.0, 0.6);
             if dens > 0.0 || shrub > 0.01 {
                 let conifer = 1.0 - smoothstep(4.0, 13.0, temp);
@@ -1148,20 +1159,28 @@ impl SurfaceModel {
     /// Coverage is crisp: streets and built lots cover the ground fully, open land in the
     /// outskirts shows the underlying fields / nature.
     #[allow(clippy::too_many_arguments)]
-    fn town(&self, town: &TownInfo, p: DVec3, gsd: f64, fw: f64, slope: f64, shadows: bool, pf: &PixFields) -> Option<(DVec3, f64, f64, u8, f64, DVec3)> {
-        let pal = &self.pal;
+    /// How built-up the town is at `p` (1 in the centre, 0 outside its irregular footprint), and
+    /// the relative distance from the centre.
+    fn town_urban(&self, town: &TownInfo, p: DVec3, gsd: f64, slope: f64, pf: &PixFields) -> (f64, f64) {
         let d = p - town.center;
         let q0 = DVec2::new(d.dot(town.ex), d.dot(town.ey));
         let r = town.radius;
         // elongated, irregular footprint (noise relative to the town size)
         let qa = DVec2::new(q0.x / town.elong.sqrt(), q0.y * town.elong.sqrt());
         if qa.length() > r * 2.0 {
-            return None;
+            return (0.0, 2.0);
         }
         let n1 = 0.32 * perlin3(town.seed ^ 0x71, p / (0.9 * r)) + 0.18 * perlin3(town.seed ^ 0x72, p / (0.35 * r)) * band(0.35 * r, gsd)
             + 0.08 * pf.warp2;
         let rel = qa.length() / (r * (1.0 + n1)).max(1.0);
-        let urban = (1.0 - smoothstep(0.3, 1.0, rel)) * (1.0 - smoothstep(0.2, 0.4, slope));
+        ((1.0 - smoothstep(0.3, 1.0, rel)) * (1.0 - smoothstep(0.2, 0.4, slope)), rel)
+    }
+
+    fn town(&self, town: &TownInfo, p: DVec3, gsd: f64, fw: f64, slope: f64, shadows: bool, pf: &PixFields) -> Option<(DVec3, f64, f64, u8, f64, DVec3)> {
+        let pal = &self.pal;
+        let d = p - town.center;
+        let q0 = DVec2::new(d.dot(town.ex), d.dot(town.ey));
+        let (urban, rel) = self.town_urban(town, p, gsd, slope, pf);
         if urban <= 0.02 {
             return None;
         }

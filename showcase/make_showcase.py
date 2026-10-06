@@ -587,9 +587,23 @@ def compose(base, story, out_mp4, shots_scn, preview_seconds=None):
     print(f"wrote {out_mp4}: {written} frames, {written / fps:.1f} s")
 
 
+def export_stills(shot, scn):
+    """Every still frame as its own PNG: out/showcase/stills/<shot>[_<camera>]_<k>.png."""
+    d = os.path.join(OUT, "stills")
+    os.makedirs(d, exist_ok=True)
+    with h5py.File(scn["output"]["file"], "r") as f:
+        cams = [c["path"] for c in scn["cameras"]]
+        for c in cams:
+            rgb = f[c]["rgb"]
+            tag = shot["id"] if len(cams) == 1 else f"{shot['id']}_{c.strip('/').replace('/', '_')}"
+            for k in range(rgb.shape[0]):
+                Image.fromarray(rgb[k]).save(os.path.join(d, f"{tag}_{k}.png"))
+
+
 def stills_sheet(base, story, shots_scn, path):
     rows = []
     for shot, scn in shots_scn:
+        export_stills(shot, scn)
         f = h5py.File(scn["output"]["file"], "r")
         ims = []
         for c in scn["cameras"][:4]:

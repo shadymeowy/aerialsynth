@@ -33,76 +33,88 @@ shots:
     scenario:
       trajectory: { synth: { kind: line, lat: 39.89, lon: 36.57, heading_deg: 60, altitude: 380 } }
       render: { lighting: { time_utc: "07:10:00" } }
+      cameras: [ { extrinsics: { pitch_deg: -22, yaw_deg: -28 } } ]
 
   - id: mountains
     label: "Snow-capped mountains"
     text: "Ridged mountains, erosion gullies and a climate-driven snow line"
     seconds: 6
     scenario:
-      trajectory: { synth: { kind: line, lat: 39.17, lon: 33.70, heading_deg: 80, altitude: 900, speed: 70 } }
-      render: { lighting: { time_utc: "11:40:00" } }
-      cameras: [ { extrinsics: { pitch_deg: -10 } } ]
+      trajectory: { synth: { kind: line, lat: 39.17, lon: 33.70, heading_deg: 80, altitude: 1100, speed: 70 } }
+      render: { lighting: { time_utc: "04:45:00" } }
+      cameras: [ { extrinsics: { pitch_deg: -14 } } ]
 
   - id: town
-    label: "Town and fields"
-    text: "Street grids, buildings, field systems and farm tracks"
+    label: "Town"
+    text: "Street grids, parks and buildings — part of the elevation model"
     seconds: 6
     scenario:
-      trajectory: { synth: { kind: circle, lat: 39.93, lon: 32.80, heading_deg: 0, radius: 900, altitude: 550 } }
-      cameras: [ { extrinsics: { pitch_deg: -32, yaw_deg: 25 } } ]
+      trajectory: { synth: { kind: line, lat: 41.585, lon: 32.975, heading_deg: 100, altitude: 450 } }
+      cameras: [ { extrinsics: { pitch_deg: -35 } } ]
 
   - id: coast
     label: "Coastline"
     text: "Shallows, surf and sun glint on open water"
     seconds: 5.5
     scenario:
-      trajectory: { synth: { kind: line, lat: 40.25, lon: 36.88, heading_deg: 15, altitude: 350 } }
-      render: { lighting: { time_utc: "05:20:00" } }
-      cameras: [ { extrinsics: { pitch_deg: -14, yaw_deg: 55 } } ]
+      # over the headland at 40.23N 36.76E towards the sea to the north-east, morning sun ahead
+      trajectory: { synth: { kind: line, lat: 40.215, lon: 36.745, heading_deg: 40, altitude: 350 } }
+      render: { lighting: { time_utc: "06:00:00" } }
+      cameras: [ { extrinsics: { pitch_deg: -16 } } ]
 
   - id: forest
-    label: "Forest and meanders"
-    text: "Individual tree crowns with cast shadows, meandering rivers"
+    label: "Forest"
+    text: "Individual tree crowns with cast shadows, and a river winding through"
     seconds: 5.5
     scenario:
-      trajectory: { synth: { kind: line, lat: 41.585, lon: 32.975, heading_deg: 100, altitude: 450 } }
-      cameras: [ { extrinsics: { pitch_deg: -35 } } ]
+      # a river through the forest at 41.591N 33.201E
+      trajectory: { synth: { kind: line, lat: 41.583, lon: 33.175, heading_deg: 68, altitude: 250 } }
+      render: { lighting: { time_utc: "05:40:00" } }
+      cameras: [ { extrinsics: { pitch_deg: -30 } } ]
 
   - id: golden
     label: "Golden hour"
     text: "A real solar ephemeris: date, time and place set the light"
     seconds: 6
     scenario:
-      trajectory: { synth: { kind: line, lat: 39.25, lon: 33.95, heading_deg: 285, altitude: 700 } }
-      render: { lighting: { time_utc: "16:48:00" } }
-      cameras: [ { extrinsics: { pitch_deg: -12 } } ]
+      # low sun (~11°) from the west-northwest, camera side-on: warm light, long shadows
+      trajectory: { synth: { kind: line, lat: 39.25, lon: 33.95, heading_deg: 20, altitude: 700 } }
+      render: { lighting: { time_utc: "16:08:00" } }
+      cameras: [ { extrinsics: { pitch_deg: -14 } } ]
 
   - id: dusk
     label: "Day to night · time-lapse"
     text: "A continuous day cycle: twilight, and the lamps switching on"
     seconds: 7
     scenario:
-      trajectory: { synth: { kind: line, lat: 39.89, lon: 32.74, heading_deg: 75, altitude: 700, speed: 40 } }
-      render: { lighting: { time_utc: "16:55:00", time_scale: 420 } }
-      cameras: [ { extrinsics: { pitch_deg: -18 }, rgb: { sensor: { exposure: { max_time: 0.04, max_gain: 128, tau: 0.25 } } } } ]
+      # towards the town at 39.893N 32.925E from 2.5 km west; ~86 min of dusk in 8.6 s
+      trajectory: { synth: { kind: line, lat: 39.894, lon: 32.896, heading_deg: 90, altitude: 600, speed: 40 } }
+      render: { lighting: { time_utc: "16:50:00", time_scale: 600 } }
+      cameras: [ { extrinsics: { pitch_deg: -17 }, rgb: { sensor: { exposure: { max_time: 0.04, max_gain: 160, tau: 0.25 } } } } ]
 
   - id: night
     label: "Night · towns"
     text: "Street lamps, porch lights, glowing haze and a starry sky"
     seconds: 6
     scenario:
-      trajectory: { synth: { kind: line, lat: 39.86, lon: 32.70, heading_deg: 40, altitude: 900, speed: 60 } }
+      # over the dense town at 41.585N 32.975E on a moonless night; a dark exposure keeps the lamps crisp
+      trajectory: { synth: { kind: line, lat: 41.581, lon: 32.955, heading_deg: 95, altitude: 600, speed: 50 } }
       render: { lighting: { date: "2026-03-19", time_utc: "21:30:00" } }
-      cameras: [ { extrinsics: { pitch_deg: -12 }, rgb: { sensor: { exposure: { max_time: 0.04, max_gain: 200 } } } } ]
+      cameras:
+        - extrinsics: { pitch_deg: -24 }
+          rgb: { sensor: { exposure: { target: 0.05, max_time: 0.033, max_gain: 24 }, optics: { bloom: 0.03 }, noise: { read: 0.05, shot: 0.08 } } }
 
   - id: moon
     label: "Full moon"
     text: "Moonlight and the lunar disc from the true lunar position and phase"
     seconds: 6
     scenario:
-      trajectory: { synth: { kind: line, lat: 40.03, lon: 32.90, heading_deg: 20, altitude: 1200 } }
-      render: { lighting: { date: "2026-03-03", time_utc: "21:00:00" } }
-      cameras: [ { extrinsics: { pitch_deg: -8 }, rgb: { sensor: { exposure: { max_time: 0.05, max_gain: 256 } } } } ]
+      # full moon low in the east over the snowy massif, ~2 h after moonrise
+      trajectory: { synth: { kind: line, lat: 39.17, lon: 33.62, heading_deg: 95, altitude: 1300 } }
+      render: { lighting: { date: "2026-03-03", time_utc: "17:40:00" } }
+      cameras:
+        - extrinsics: { pitch_deg: -3 }
+          rgb: { sensor: { exposure: { target: 0.07, max_time: 0.04, max_gain: 48 }, optics: { bloom: 0.03 }, noise: { read: 0.05, shot: 0.08 } } }
 
   - id: cruise
     label: "High altitude · 10 km"
@@ -114,12 +126,12 @@ shots:
       cameras: [ { intrinsics: { intrinsics: [640.0, 640.0, 639.5, 359.5] }, extrinsics: { pitch_deg: -22 } } ]
 
   - id: low
-    label: "Low altitude · 60 m"
-    text: "… down to treetop level, in the same consistent world"
+    label: "Low altitude · 120 m"
+    text: "… down to low-level flight, in the same consistent world"
     seconds: 5
     scenario:
-      trajectory: { synth: { kind: line, lat: 39.915, lon: 32.76, heading_deg: 100, altitude: 60, speed: 55 } }
-      cameras: [ { extrinsics: { pitch_deg: -9 } } ]
+      trajectory: { synth: { kind: line, lat: 39.902, lon: 32.785, heading_deg: 75, altitude: 120, speed: 55 } }
+      cameras: [ { extrinsics: { pitch_deg: -14 } } ]
 
   - id: bank
     label: "Steep turns"
@@ -146,14 +158,14 @@ shots:
       trajectory:
         synth:
           kind: line
-          lat: 39.92
-          lon: 32.70
-          heading_deg: 120
-          altitude: 110
+          lat: 39.902
+          lon: 32.79
+          heading_deg: 75
+          altitude: 220
           speed: 60
           vibration: { harmonic_deg: 0.35, harmonic_hz: 24, broadband_deg: 0.3 }
       render: { lighting: { time_utc: "17:00:00" } }
-      cameras: [ { extrinsics: { pitch_deg: -14 }, rgb: { sensor: { exposure: { max_time: 0.03, target: 0.19 }, motion_blur: { max_samples: 48 } } } } ]
+      cameras: [ { extrinsics: { pitch_deg: -18 }, rgb: { sensor: { exposure: { max_time: 0.03, target: 0.19 }, motion_blur: { max_samples: 48 } } } } ]
 
   - id: fisheye
     label: "Fisheye · 200°"
