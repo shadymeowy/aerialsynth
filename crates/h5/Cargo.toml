@@ -1,0 +1,13 @@
+[package]
+name = "h5"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hdf5-sys.workspace = true
+thiserror.workspace = true
+# Same major version as hdf5-sys uses for its global `LOCK`, so we can name the guard type.
+parking_lot = "0.12"
+
+[dev-dependencies]
+flate2 = "1"

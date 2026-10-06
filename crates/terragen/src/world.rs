@@ -1,0 +1,644 @@
+//! Macro-scale world model ("pass A"): continents, relief, hydrology and climate.
+//!
+//! Evaluated once per pixel centre. All functions are smooth at sub-pixel scale (band-limited by the
+//! pixel GSD), so the fine detail pass ("pass B", `surface.rs`) can interpolate these values.
+
+use crate::config::Config;
+use crate::noise::*;
+use geodesy::{Ellipsoid, Geodetic};
+use glam::{DVec2, DVec3};
+
+/// Sampling context of a point on the ellipsoid surface.
+#[derive(Clone, Copy, Debug)]
+pub struct Ctx {
+    /// ECEF position on the ellipsoid (h = 0), meters. Noise domain.
+    pub p: DVec3,
+    pub up: DVec3,
+    pub east: DVec3,
+    pub north: DVec3,
+    pub lat: f64,
+    pub lon: f64,
+    /// Pixel ground sample distance (m): features smaller than ~2 gsd are averaged out.
+    pub gsd: f64,
+}
+
+impl Ctx {
+    pub fn new(lat: f64, lon: f64, gsd: f64, ell: &Ellipsoid) -> Self {
+        let p = geodesy::geodetic2ecef(Geodetic::new(lat, lon, 0.0), ell);
+        let (sl, cl) = lat.sin_cos();
+        let (so, co) = lon.sin_cos();
+        Ctx {
+            p,
+            up: DVec3::new(cl * co, cl * so, sl),
+            east: DVec3::new(-so, co, 0.0),
+            north: DVec3::new(-sl * co, -sl * so, cl),
+            lat,
+            lon,
+            gsd,
+        }
+    }
+    /// Point offset by (east, north) meters in the tangent plane (good for small offsets).
+    #[inline]
+    pub fn offset(&self, de: f64, dn: f64) -> DVec3 {
+        self.p + self.east * de + self.north * dn
+    }
+}
+
+/// Water body kinds.
+pub mod water {
+    pub const NONE: u8 = 0;
+    pub const OCEAN: u8 = 1;
+    pub const LAKE: u8 = 2;
+    pub const RIVER: u8 = 3;
+}
+
+/// Pass-A result at a pixel centre.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Terrain {
+    /// Bare-earth elevation (m above ellipsoid). Under water this is the bed.
+    pub ground: f64,
+    /// Standing water level (ocean/lake) or `NEG_INFINITY`.
+    pub water: f64,
+    pub water_kind: u8,
+    /// Signed distance-like value to the river centre line (m), and river half width (m).
+    pub river_d: f64,
+    pub river_hw: f64,
+    pub river_level: f64,
+    /// River is perennial (1) or a dry wash (0).
+    pub river_wet: f64,
+    /// Climate: mean annual temperature (°C) at this elevation, moisture 0..1.
+    pub temp: f64,
+    pub moist: f64,
+    /// 0..1 masks
+    pub mountain: f64,
+    pub rock_expect: f64,
+    pub sand: f64,
+    pub floodplain: f64,
+    pub mesa: f64,
+    /// signed continent value (>0 land)
+    pub cont: f64,
+    /// Agricultural intensity 0..1 (before slope test).
+    pub agri: f64,
+    /// Settlement suitability 0..1.
+    pub habit: f64,
+    /// Regional style parameters 0..1 (colour variations etc.)
+    pub style: [f64; 4],
+    /// Signed distance-like values to the major / minor road centre lines (m).
+    pub road_major: f64,
+    pub road_minor: f64,
+    /// Land-use region (field system) Worley site.
+    pub region: Site,
+    /// Nearest potential town site.
+    pub town: Site,
+}
+
+/// A Worley site: id hash, centre (ECEF, on the surface), distance to its Voronoi border (m).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Site {
+    pub id: u64,
+    /// id of the neighbouring site across the nearest border
+    pub id2: u64,
+    pub center: DVec3,
+    pub dist: f64,
+    pub edge: f64,
+}
+
+pub struct World {
+    pub cfg: Config,
+    pub ell: Ellipsoid,
+    seed: u64,
+    cont: Fbm,
+    cont_warp: [Fbm; 3],
+    belt: Fbm,
+    belt2: Fbm,
+    belt_var: Fbm,
+    mtn_frames: OctaveFrames,
+    mtn_warp: [Fbm; 2],
+    plateau: Fbm,
+    hills: OctaveFrames,
+    hill_amp: Fbm,
+    rough: Fbm,
+    micro: Fbm,
+    temp_n: Fbm,
+    moist_n: Fbm,
+    river_major: Fbm,
+    river_minor: Fbm,
+    river_warp: [Fbm; 2],
+    river_width_n: Fbm,
+    river_mask: [Fbm; 2],
+    mesa_n: Fbm,
+    dune_frames: OctaveFrames,
+    sand_n: Fbm,
+    agri_n: Fbm,
+    style_n: [Fbm; 4],
+    road_major: Fbm,
+    road_minor: Fbm,
+    home: Option<(DVec3, f64, f64)>,
+}
+
+const KM: f64 = 1000.0;
+
+impl World {
+    pub fn new(cfg: Config) -> Self {
+        let ell = Ellipsoid::from_a_invf(cfg.planet.a, cfg.planet.inv_f);
+        let s = cfg.seed;
+        let k = |i: u64| mix64(s.wrapping_mul(0x9E37_79B9).wrapping_add(i * 7919));
+        let c = &cfg.continents;
+        let r = &cfg.relief;
+        let h = &cfg.hydro;
+        let cw = c.wavelength_km * KM;
+        let home = cfg.home.as_ref().map(|h| {
+            let p = geodesy::geodetic2ecef(Geodetic::from_deg(h.lat, h.lon, 0.0), &ell);
+            (p, h.radius_km * KM, h.strength)
+        });
+        World {
+            seed: s,
+            cont: Fbm::new(k(1), cw, 7, 2.0, 0.52),
+            cont_warp: [
+                Fbm::new(k(2), cw * 0.8, 3, 2.0, 0.5),
+                Fbm::new(k(3), cw * 0.8, 3, 2.0, 0.5),
+                Fbm::new(k(4), cw * 0.8, 3, 2.0, 0.5),
+            ],
+            belt: Fbm::new(k(5), r.belt_wavelength_km * KM, 3, 2.0, 0.45),
+            belt2: Fbm::new(k(6), r.belt_wavelength_km * KM * 0.43, 3, 2.0, 0.5),
+            belt_var: Fbm::new(k(7), r.belt_wavelength_km * KM * 0.3, 3, 2.0, 0.5),
+            mtn_frames: OctaveFrames::new(k(8), 24),
+            mtn_warp: [Fbm::new(k(9), 30.0 * KM, 3, 2.0, 0.5), Fbm::new(k(10), 30.0 * KM, 3, 2.0, 0.5)],
+            plateau: Fbm::new(k(11), 1100.0 * KM, 3, 2.0, 0.5),
+            hills: OctaveFrames::new(k(12), 24),
+            hill_amp: Fbm::new(k(13), 180.0 * KM, 3, 2.0, 0.5),
+            rough: Fbm::new(k(14), 90.0 * KM, 3, 2.0, 0.5),
+            micro: Fbm::new(k(15), 160.0, 9, 2.0, 0.55),
+            temp_n: Fbm::new(k(16), 900.0 * KM, 3, 2.0, 0.5),
+            moist_n: Fbm::new(k(17), 1400.0 * KM, 5, 2.0, 0.55),
+            river_major: Fbm::new(k(18), h.major_river_wavelength_km * KM, 3, 2.1, 0.45),
+            river_minor: Fbm::new(k(19), h.minor_river_wavelength_km * KM, 3, 2.1, 0.45),
+            river_warp: [Fbm::new(k(20), 12.0 * KM, 3, 2.0, 0.5), Fbm::new(k(21), 12.0 * KM, 3, 2.0, 0.5)],
+            river_width_n: Fbm::new(k(22), 300.0 * KM, 2, 2.0, 0.5),
+            river_mask: [Fbm::new(k(33), h.major_river_wavelength_km * KM * 0.8, 3, 2.0, 0.5), Fbm::new(k(34), h.minor_river_wavelength_km * KM * 0.7, 3, 2.0, 0.5)],
+            mesa_n: Fbm::new(k(23), 250.0 * KM, 3, 2.0, 0.5),
+            dune_frames: OctaveFrames::new(k(24), 8),
+            sand_n: Fbm::new(k(25), 350.0 * KM, 3, 2.0, 0.5),
+            agri_n: Fbm::new(k(26), 70.0 * KM, 3, 2.0, 0.5),
+            style_n: [
+                Fbm::new(k(27), 120.0 * KM, 3, 2.0, 0.5),
+                Fbm::new(k(28), 60.0 * KM, 3, 2.0, 0.5),
+                Fbm::new(k(29), 200.0 * KM, 3, 2.0, 0.5),
+                Fbm::new(k(30), 25.0 * KM, 3, 2.0, 0.5),
+            ],
+            road_major: Fbm::new(k(31), 34.0 * KM, 2, 2.2, 0.4),
+            road_minor: Fbm::new(k(32), 7.5 * KM, 2, 2.2, 0.4),
+            home,
+            ell,
+            cfg,
+        }
+    }
+
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
+    /// Continent field (>0 land), smooth at ≥100 km scales.
+    pub fn continent(&self, p: DVec3, gsd: f64) -> f64 {
+        let cw = self.cont.wavelength;
+        let warp = DVec3::new(
+            self.cont_warp[0].eval(p, gsd),
+            self.cont_warp[1].eval(p, gsd),
+            self.cont_warp[2].eval(p, gsd),
+        ) * (self.cfg.continents.warp * cw);
+        // keep the continental field coarse: octaves down to ~30 km; finer coast detail comes
+        // from the hill/micro relief crossing sea level (fractal coastlines at every zoom).
+        let gl = gsd.max(15.0 * KM);
+        let mut c = self.cont.eval(p + warp, gl) * self.cont.norm() * 1.6 - self.cfg.continents.threshold;
+        if let Some((hp, r, st)) = self.home {
+            let d = (p - hp).length();
+            let w = 1.0 - smoothstep(0.4 * r, r, d);
+            c = lerp(c, c.max(0.18 + 0.1 * c), w * st);
+        }
+        c
+    }
+
+    /// Ridged multifractal mountains, 0..~1.
+    fn ridged(&self, p: DVec3, gsd: f64, sharp: f64) -> (f64, f64) {
+        let mut lam = 14.0 * KM;
+        let mut amp = 1.0;
+        let mut weight = 1.0;
+        let mut sum = 0.0;
+        let mut low = 0.0;
+        let mut norm = 0.0;
+        for i in 0..self.mtn_frames.rot.len() {
+            // ridges contain harmonics above the octave frequency: band-limit more strictly
+            let wb = band(lam, 1.6 * gsd);
+            if wb <= 0.0 {
+                break;
+            }
+            let q = self.mtn_frames.rot[i] * (p / lam) + self.mtn_frames.off[i];
+            let n = perlin3(self.mtn_frames.seeds[i], q);
+            let mut r = (1.0 - n.abs()).max(0.0);
+            r = r.powf(sharp);
+            r *= weight;
+            weight = (r * 1.8).clamp(0.0, 1.0);
+            sum += r * amp * wb;
+            if lam > 6.0 * KM {
+                low += r * amp * wb;
+            }
+            norm += amp;
+            lam *= 0.5;
+            amp *= if lam > 1.0 * KM { 0.58 } else { 0.42 };
+        }
+        let _ = norm;
+        (sum * 0.5, low * 0.5)
+    }
+
+    /// Band-limited hill fBm with regionally varying roughness. Returns (full, lowpass>=15km).
+    fn hills(&self, p: DVec3, gsd: f64, gain: f64) -> (f64, f64) {
+        let mut lam = 9.0 * KM;
+        let mut amp = 1.0;
+        let mut sum = 0.0;
+        let mut low = 0.0;
+        for i in 0..self.hills.rot.len() {
+            let wb = band(lam, gsd);
+            if wb <= 0.0 || lam < 20.0 {
+                break;
+            }
+            let q = self.hills.rot[i] * (p / lam) + self.hills.off[i];
+            let n = perlin3(self.hills.seeds[i], q);
+            sum += n * amp * wb;
+            if lam >= 4.0 * KM {
+                low += n * amp * wb;
+            }
+            lam *= 0.5;
+            amp *= gain;
+        }
+        (sum * 0.7, low * 0.7)
+    }
+
+    fn dunes(&self, p: DVec3, gsd: f64) -> f64 {
+        let mut lam = 900.0;
+        let mut amp = 1.0;
+        let mut sum = 0.0;
+        for i in 0..5 {
+            let wb = band(lam, gsd);
+            if wb <= 0.0 {
+                break;
+            }
+            let q = self.dune_frames.rot[i] * (p / lam) + self.dune_frames.off[i];
+            let n = perlin3(self.dune_frames.seeds[i], q);
+            let r = 1.0 - n.abs();
+            sum += (r * r * r) * amp * wb;
+            lam *= 0.45;
+            amp *= 0.35;
+        }
+        sum
+    }
+
+    /// River network: returns (signed distance to centre line in m, gradient length) for a warped
+    /// noise iso-line. `gsd` controls the band limit of the warp.
+    fn river_field(&self, f: &Fbm, ctx: &Ctx, warp_amp: f64) -> f64 {
+        let eval = |q: DVec3| {
+            let w = DVec3::new(self.river_warp[0].eval(q, ctx.gsd), self.river_warp[1].eval(q, ctx.gsd), 0.0);
+            let qw = q + (ctx.east * w.x + ctx.north * w.y) * warp_amp;
+            f.eval(qw, ctx.gsd.max(200.0))
+        };
+        let e = (ctx.gsd * 0.5).clamp(2.0, 400.0);
+        let n0 = eval(ctx.p);
+        let ne = eval(ctx.p + ctx.east * e);
+        let nn = eval(ctx.p + ctx.north * e);
+        let g = DVec2::new(ne - n0, nn - n0) / e;
+        let gl = g.length().max(1e-12);
+        n0 / gl
+    }
+
+    /// Climate at a point given its elevation.
+    pub fn climate(&self, p: DVec3, lat: f64, elev: f64, cont: f64) -> (f64, f64) {
+        let c = &self.cfg.climate;
+        let la = lat.abs() / std::f64::consts::FRAC_PI_2;
+        let mut t = c.equator_temp - c.pole_drop * la.powf(1.6);
+        t += 5.0 * self.temp_n.eval(p, 50.0 * KM);
+        t -= c.lapse_rate * elev.max(0.0) / KM;
+        let latd = lat.abs().to_degrees();
+        let hadley = (-((latd - 24.0) / 9.0).powi(2)).exp();
+        let mut w = 0.58 + 0.55 * self.moist_n.eval(p, 20.0 * KM) * self.moist_n.norm() * 1.6;
+        w -= 0.32 * hadley;
+        w += 0.12 * (1.0 - smoothstep(0.0, 0.25, cont)); // coastal
+        w -= 0.10 * smoothstep(1500.0, 3500.0, elev); // continental interiors/high plateaus drier
+        w += c.moisture_bias;
+        (t, w.clamp(0.0, 1.0))
+    }
+
+    /// Smooth (≥ ~5 km) elevation at a point; used for water levels.
+    pub fn smooth_elevation(&self, p: DVec3) -> f64 {
+        let gsd = 1500.0;
+        let r = &self.cfg.relief;
+        let s = self.continent(p, gsd);
+        let base = if s > 0.0 {
+            20.0 + 900.0 * s.powf(1.3)
+        } else {
+            20.0 - 120.0 * smoothstep(0.0, 0.04, -s) - 3800.0 * smoothstep(0.03, 0.35, -s)
+        };
+        let plat = smoothstep(0.15, 0.55, self.plateau.eval(p, gsd) * self.plateau.norm() * 1.8);
+        let plateau = plat * 900.0 * smoothstep(0.02, 0.15, s);
+        let (mountain, amp_m) = self.mountain_mask(p, gsd, s);
+        let _ = mountain;
+        let land = smoothstep(-0.06, 0.05, s);
+        let ha = self.hill_amp.eval(p, gsd) * self.hill_amp.norm() * 1.6;
+        let hill_amp = r.hill_height * (0.15 + 0.85 * smoothstep(-0.5, 0.6, ha)) * (0.25 + 0.75 * land);
+        let rough = self.rough.eval(p, gsd) * self.rough.norm() * 1.6;
+        let (_, hl_low) = self.hills(p, gsd, 0.47 + 0.08 * rough);
+        base + plateau + 0.22 * amp_m + amp_m * 0.12 + hill_amp * hl_low
+    }
+
+    fn mountain_mask(&self, p: DVec3, gsd: f64, s: f64) -> (f64, f64) {
+        let b1 = 1.0 - (self.belt.eval(p, gsd) * self.belt.norm() * 2.0).abs();
+        let b2 = 1.0 - (self.belt2.eval(p, gsd) * self.belt2.norm() * 2.0).abs();
+        let var = self.belt_var.eval(p, gsd) * self.belt_var.norm() * 1.6;
+        let belt = (b1 * 0.75 + b2 * 0.45 + 0.35 * var).max(0.0);
+        let mountain = smoothstep(0.62, 0.92, belt) * smoothstep(-0.04, 0.08, s);
+        let amp_m = self.cfg.relief.mountain_height * (0.55 + 0.45 * smoothstep(-0.4, 0.6, var)) * mountain;
+        (mountain, amp_m)
+    }
+
+    /// Lake surface level: the spill height of the basin (lowest rim sample), or None when the
+    /// site is on a slope / in the sea. Cached per thread (pure function of the lake).
+    fn lake_level(&self, id: u64, center: DVec3, rad: f64) -> Option<f64> {
+        thread_local! {
+            static CACHE: std::cell::RefCell<std::collections::HashMap<u64, Option<f64>>> = Default::default();
+        }
+        let key = id ^ self.seed.rotate_left(17);
+        if let Some(v) = CACHE.with(|c| c.borrow().get(&key).copied()) {
+            return v;
+        }
+        let g = geodesy::ecef2geodetic(center, &self.ell);
+        let cctx = Ctx::new(g.lat, g.lon, 20.0, &self.ell);
+        let tc = self.terrain_impl(&cctx, false);
+        let v = if tc.water_kind != water::NONE || tc.ground < 1.0 {
+            None
+        } else {
+            let mut rim = f64::MAX;
+            for k in 0..10 {
+                let a = k as f64 * std::f64::consts::TAU / 10.0;
+                let q = cctx.offset(rad * a.cos(), rad * a.sin());
+                let gq = geodesy::ecef2geodetic(q, &self.ell);
+                let tq = self.terrain_impl(&Ctx::new(gq.lat, gq.lon, 20.0, &self.ell), false);
+                rim = rim.min(tq.ground);
+            }
+            if rim < tc.ground - 4.0 {
+                None
+            } else {
+                Some((rim - 0.7).max(tc.ground + 1.0))
+            }
+        };
+        CACHE.with(|c| {
+            let mut c = c.borrow_mut();
+            if c.len() > 100_000 {
+                c.clear();
+            }
+            c.insert(key, v);
+        });
+        v
+    }
+
+    /// Pass A at one point.
+    pub fn terrain(&self, ctx: &Ctx) -> Terrain {
+        self.terrain_impl(ctx, true)
+    }
+
+    fn terrain_impl(&self, ctx: &Ctx, with_lakes: bool) -> Terrain {
+        let p = ctx.p;
+        let gsd = ctx.gsd;
+        let r = &self.cfg.relief;
+        let cont = self.continent(p, gsd);
+        let s = cont;
+        let land = smoothstep(-0.06, 0.05, s);
+
+        // ---- base elevation from the continent field
+        let base = if s > 0.0 {
+            20.0 + 900.0 * s.powf(1.3)
+        } else {
+            20.0 - 120.0 * smoothstep(0.0, 0.04, -s) - 3800.0 * smoothstep(0.03, 0.35, -s)
+        };
+
+        // ---- high plateaus
+        let plat = smoothstep(0.15, 0.55, self.plateau.eval(p, gsd) * self.plateau.norm() * 1.8);
+        let plateau = plat * 900.0 * smoothstep(0.02, 0.15, s);
+
+        // ---- mountain belts
+        let (mountain, amp_m) = self.mountain_mask(p, gsd, s);
+        let (ridged, ridged_low) = if mountain > 1e-3 {
+            let wp = DVec3::new(self.mtn_warp[0].eval(p, gsd), self.mtn_warp[1].eval(p, gsd), 0.0) * 9.0 * KM;
+            let pw = p + ctx.east * wp.x + ctx.north * wp.y;
+            let sharp = 1.6 + 0.8 * self.style_n[2].eval(p, gsd);
+            self.ridged(pw, gsd, sharp)
+        } else {
+            (0.0, 0.0)
+        };
+        let uplift = 0.22 * amp_m;
+        let mtn = amp_m * ridged;
+
+        // ---- hills
+        let ha = self.hill_amp.eval(p, gsd) * self.hill_amp.norm() * 1.6;
+        let rough = self.rough.eval(p, gsd) * self.rough.norm() * 1.6;
+        let hill_amp = r.hill_height * (0.15 + 0.85 * smoothstep(-0.5, 0.6, ha)) * (0.25 + 0.75 * land);
+        let gain = 0.47 + 0.08 * rough;
+        let (hl, hl_low) = self.hills(p, gsd, gain);
+        let hills = hill_amp * hl;
+
+        // ---- micro relief
+        let micro = if r.micro_height > 0.0 {
+            r.micro_height * (0.4 + 0.6 * smoothstep(-0.3, 0.6, rough) + mountain) * self.micro.eval(p, gsd)
+        } else {
+            0.0
+        };
+
+        let mut h = base + plateau + uplift + mtn + hills + micro;
+        let smooth = base + plateau + uplift + amp_m * ridged_low * 0.6 + hill_amp * hl_low;
+
+        // ---- climate (from smooth elevation, so it does not alias)
+        let (temp0, moist) = self.climate(p, ctx.lat, smooth.max(0.0), s);
+
+        // ---- mesas (arid terraces)
+        let arid = 1.0 - smoothstep(0.18, 0.42, moist);
+        let mesa_noise = self.mesa_n.eval(p, gsd) * self.mesa_n.norm() * 1.8;
+        let mesa = arid * smoothstep(0.1, 0.45, mesa_noise) * (1.0 - mountain) * smoothstep(0.02, 0.1, s) * r.mesas;
+        if mesa > 1e-3 {
+            let step = 35.0 + 90.0 * u01(hash1(self.seed, (mesa_noise * 7.0) as i64));
+            let x = h / step;
+            let k = x.floor();
+            let f = x - k;
+            let ft = smoothstep(0.72, 0.97, f);
+            let ht = (k + ft) * step;
+            h = lerp(h, ht, mesa * band(step, gsd).max(0.35));
+        }
+
+        // ---- sand seas with dunes
+        let sand_n = self.sand_n.eval(p, gsd) * self.sand_n.norm() * 1.8;
+        let sand = (1.0 - smoothstep(0.08, 0.24, moist))
+            * smoothstep(6.0, 14.0, temp0)
+            * smoothstep(-0.05, 0.3, sand_n)
+            * (1.0 - mountain)
+            * smoothstep(0.01, 0.06, s);
+        if sand > 1e-3 && r.dune_height > 0.0 {
+            h += r.dune_height * sand * self.dunes(p, gsd);
+        }
+
+        // ---- rivers: major + minor networks carve valleys, set water level
+        let mut t = Terrain {
+            river_d: f64::MAX,
+            river_hw: 0.0,
+            water: f64::NEG_INFINITY,
+            ..Default::default()
+        };
+        let mut floodplain: f64 = 0.0;
+        if self.cfg.hydro.rivers && land > 0.2 {
+            let wn = smoothstep(-0.6, 0.6, self.river_width_n.eval(p, gsd));
+            let nets = [
+                (&self.river_major, &self.river_mask[0], 900.0, 30.0 + 240.0 * wn, 2500.0 + 3500.0 * wn, 0.08),
+                (&self.river_minor, &self.river_mask[1], 450.0, 5.0 + 20.0 * wn, 300.0 + 500.0 * wn, 0.3),
+            ];
+            for (ni, (net, mask_n, warp, width, valley, wet_thr)) in nets.into_iter().enumerate() {
+                if net.wavelength < 3.0 * gsd || (ni == 1 && mountain > 0.5) {
+                    continue;
+                }
+                // the mask breaks the closed iso-lines into open, tapering segments (sources)
+                let m = smoothstep(-0.35, 0.25, mask_n.eval(p, gsd.max(200.0)) * mask_n.norm() * 1.8)
+                    * if ni == 1 { 1.0 - smoothstep(0.1, 0.5, mountain) } else { 1.0 };
+                if m < 0.02 {
+                    continue;
+                }
+                let valley = valley * (0.4 + 0.6 * m);
+                let d = self.river_field(net, ctx, warp);
+                let ad = d.abs();
+                if ad > valley * 1.2 + 2.2 * (h - smooth).max(0.0) {
+                    continue;
+                }
+                let width = width * m.powf(0.8);
+                let hw = width * 0.5;
+                let wet = smoothstep(wet_thr, wet_thr + 0.12, moist);
+                let fp_w = hw + width * (1.5 + 4.0 * wn);
+                let incision = (2.0 + 0.02 * width) * m;
+                // minor rivers follow the hills more closely (shallow valleys)
+                let base_floor = if ni == 0 { smooth } else { smooth + 0.7 * hill_amp * (hl - hl_low) };
+                let floor = base_floor.max(1.0) - incision;
+                if h > floor {
+                    // valley profile: bed, floodplain, then walls; depth fades with the mask.
+                    // Walls are kept below ~30° by widening the valley with its depth (V shape).
+                    let valley = valley.max(fp_w + 2.2 * (h - floor));
+                    let wall = smoothstep(fp_w, valley, ad);
+                    let wall = wall * wall * (3.0 - 2.0 * wall);
+                    let fp = floor + 1.0 + 0.4 * micro.abs();
+                    let target = if ad < hw { floor - 1.0 - 0.03 * width } else { fp };
+                    let hv = lerp(target, h, wall);
+                    h = lerp(h, h.min(hv), smoothstep(0.02, 0.4, m));
+                    floodplain = floodplain.max((1.0 - wall) * land * m);
+                }
+                if hw > 0.5 && ad - hw < t.river_d.abs() - t.river_hw {
+                    t.river_d = d;
+                    t.river_hw = hw;
+                    t.river_level = floor;
+                    t.river_wet = wet;
+                }
+            }
+        }
+
+        // ---- lakes (Worley cells; flat surface at the basin spill height)
+        let lake_cell = self.cfg.hydro.lake_cell_km * KM;
+        if with_lakes && self.cfg.hydro.lake_density > 0.0 && land > 0.3 && lake_cell > 3.0 * gsd {
+            let wc = worley3(self.seed ^ 0x1A4E, p, lake_cell, 0.85);
+            for (id, pt) in [(wc.id, wc.point), (wc.id2, wc.point2)] {
+                let prob = self.cfg.hydro.lake_density * (0.3 + 0.9 * moist) * (1.0 - 0.8 * mountain);
+                if u01k(id, 1) > prob {
+                    continue;
+                }
+                let rad = (300.0 * (u01k(id, 2) * 2.7).exp()).min(lake_cell * 0.3);
+                // centre on the surface below the 3D feature point
+                let pc = pt.normalize() * p.length();
+                let d = (p - pc).length();
+                if d > rad * 1.5 {
+                    continue;
+                }
+                let Some(level) = self.lake_level(id, pt, rad) else { continue };
+                let lw = rad * 0.6;
+                let warpn = perlin3(id, p / lw) * 0.3 + perlin3(id ^ 7, p / (lw * 0.3)) * 0.12 * band(lw * 0.3, gsd);
+                let de = d / rad * (1.0 + warpn);
+                let depth = 3.0 + 0.01 * rad;
+                if de < 1.0 {
+                    let bowl = level - depth * (1.0 - de * de);
+                    h = h.min(lerp(h, bowl, smoothstep(1.0, 0.7, de)));
+                }
+                if de < 1.0 && h < level {
+                    t.water = t.water.max(level);
+                    t.water_kind = water::LAKE;
+                } else if de < 1.3 && h < level + 0.8 {
+                    // low natural levee keeps the water inside
+                    h = lerp(level + 0.8, h, smoothstep(1.0, 1.3, de));
+                }
+            }
+        }
+
+        // ---- ocean
+        if h < 0.0 && t.water_kind == water::NONE {
+            t.water = 0.0;
+            t.water_kind = water::OCEAN;
+        }
+
+        // ---- climate at actual elevation (for snow etc.)
+        let temp = temp0 - self.cfg.climate.lapse_rate * (h.max(0.0) - smooth.max(0.0)) / KM;
+
+        // ---- land use suitability
+        let an = self.agri_n.eval(p, gsd) * self.agri_n.norm() * 1.8;
+        let climate_ok = smoothstep(2.0, 8.0, temp) * (1.0 - smoothstep(27.0, 31.0, temp));
+        let wet_ok = smoothstep(0.22, 0.42, moist);
+        let irrig = (1.0 - wet_ok) * smoothstep(0.15, 0.6, an) * smoothstep(14.0, 20.0, temp); // dry: pivots
+        let agri = (climate_ok * (wet_ok + 0.7 * irrig) * (0.35 + 0.65 * smoothstep(-0.6, 0.2, an))
+            * (1.0 - mountain * 0.9)
+            * self.cfg.landuse.agriculture)
+            .clamp(0.0, 1.0);
+        let habit = climate_ok * (0.4 + 0.6 * wet_ok) * (1.0 - mountain) * land;
+
+        let style = [
+            0.5 + 0.5 * self.style_n[0].eval(p, gsd) * 1.4,
+            0.5 + 0.5 * self.style_n[1].eval(p, gsd) * 1.4,
+            0.5 + 0.5 * self.style_n[2].eval(p, gsd) * 1.4,
+            0.5 + 0.5 * self.style_n[3].eval(p, gsd) * 1.4,
+        ]
+        .map(saturate);
+
+        // ---- land-use sites (only relevant when such features can be resolved)
+        let region_cell = self.cfg.landuse.region_km * KM;
+        if gsd < region_cell * 0.1 {
+            let wc = worley3(self.seed ^ 0x5E61, p, region_cell, 0.9);
+            t.region = Site { id: wc.id, id2: wc.id2, center: wc.point, dist: wc.f1, edge: worley_edge_dist(&wc, p) };
+        }
+        let town_cell = self.cfg.landuse.town_cell_km * KM;
+        if gsd < town_cell * 0.05 && self.cfg.landuse.towns > 0.0 {
+            let wc = worley3(self.seed ^ 0x70E1, p, town_cell, 0.8);
+            t.town = Site { id: wc.id, id2: wc.id2, center: wc.point, dist: wc.f1, edge: worley_edge_dist(&wc, p) };
+        }
+
+        // ---- road networks (iso-lines of warped noise), only where people live
+        t.road_major = f64::MAX;
+        t.road_minor = f64::MAX;
+        if self.cfg.landuse.roads > 0.0 && habit > 0.02 && gsd < 60.0 {
+            t.road_major = self.river_field(&self.road_major, ctx, 2500.0);
+            if gsd < 15.0 {
+                t.road_minor = self.river_field(&self.road_minor, ctx, 700.0);
+            }
+        }
+
+        let rock_expect = (mountain * smoothstep(0.15, 0.6, ridged) + 0.25 * mesa).clamp(0.0, 1.0);
+
+        t.ground = h;
+        t.temp = temp;
+        t.moist = moist;
+        t.mountain = mountain;
+        t.rock_expect = rock_expect;
+        t.sand = sand;
+        t.floodplain = floodplain;
+        t.mesa = mesa;
+        t.cont = s;
+        t.agri = agri;
+        t.habit = habit;
+        t.style = style;
+        t
+    }
+}

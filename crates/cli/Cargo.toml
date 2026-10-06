@@ -1,0 +1,20 @@
+[package]
+name = "terrain"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "terrain"
+path = "src/main.rs"
+
+[dependencies]
+geodesy.workspace = true
+terragen.workspace = true
+glam.workspace = true
+anyhow.workspace = true
+rayon.workspace = true
+clap.workspace = true
+image.workspace = true
+indicatif.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true

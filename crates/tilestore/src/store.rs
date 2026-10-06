@@ -1,0 +1,370 @@
+use crate::codec;
+use crate::{Layer, TileData, TileId, FORMAT, FORMAT_VERSION, TILE_SIZE};
+use anyhow::{bail, Context, Result};
+use h5::Attrs;
+use parking_lot::RwLock;
+use rayon::prelude::*;
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
+
+const DEFLATE_LEVEL: u32 = 4;
+
+/// File-level metadata.
+#[derive(Clone, Debug)]
+pub struct StoreMeta {
+    pub ellipsoid_a: f64,
+    pub ellipsoid_b: f64,
+    /// Generator configuration (YAML) that produced the tiles, if any.
+    pub generator_config: String,
+    pub seed: u64,
+    /// Layers stored in this file.
+    pub layers: Vec<Layer>,
+}
+
+impl Default for StoreMeta {
+    fn default() -> Self {
+        let e = geodesy::Ellipsoid::WGS84;
+        StoreMeta { ellipsoid_a: e.a, ellipsoid_b: e.b, generator_config: String::new(), seed: 0, layers: Layer::ALL.to_vec() }
+    }
+}
+
+impl StoreMeta {
+    pub fn ellipsoid(&self) -> geodesy::Ellipsoid {
+        geodesy::Ellipsoid { a: self.ellipsoid_a, b: self.ellipsoid_b }
+    }
+}
+
+struct Level {
+    rows: Vec<(u32, u32)>,
+    index: HashMap<(u32, u32), usize>,
+    ranges: Vec<(f32, f32)>,
+    idx_ds: h5::Dataset,
+    range_ds: h5::Dataset,
+    layers: HashMap<Layer, h5::Dataset>,
+}
+
+/// A tile pyramid in an HDF5 file. Safe to share between threads: reads decode in parallel,
+/// writes are serialized.
+pub struct TileStore {
+    file: h5::File,
+    path: PathBuf,
+    writable: bool,
+    meta: StoreMeta,
+    levels: RwLock<BTreeMap<u8, Level>>,
+}
+
+fn layer_shape(l: Layer, n: usize) -> Vec<usize> {
+    if l.channels() > 1 {
+        vec![n, TILE_SIZE, TILE_SIZE, l.channels()]
+    } else {
+        vec![n, TILE_SIZE, TILE_SIZE]
+    }
+}
+
+impl TileStore {
+    /// Create (truncate) a store.
+    pub fn create(path: impl AsRef<Path>, meta: StoreMeta) -> Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        if let Some(p) = path.parent() {
+            if !p.as_os_str().is_empty() {
+                std::fs::create_dir_all(p)?;
+            }
+        }
+        let file = h5::File::create(&path).with_context(|| format!("creating {}", path.display()))?;
+        file.set_attr_str("format", FORMAT)?;
+        file.set_attr("format_version", FORMAT_VERSION)?;
+        file.set_attr("tile_size", TILE_SIZE as i32)?;
+        file.set_attr_str("scheme", "xyz")?;
+        file.set_attr_str("projection", "EPSG:3857")?;
+        file.set_attr_str("pixel_registration", "center")?;
+        file.set_attr_str("vertical_datum", "ellipsoid")?;
+        file.set_attr("ellipsoid_a", meta.ellipsoid_a)?;
+        file.set_attr("ellipsoid_b", meta.ellipsoid_b)?;
+        file.set_attr_str("generator_config", &meta.generator_config)?;
+        file.set_attr("seed", meta.seed)?;
+        let names: Vec<&str> = meta.layers.iter().map(|l| l.name()).collect();
+        file.set_attr_str("layers", &names.join(","))?;
+        file.ensure_group("levels")?;
+        Ok(TileStore { file, path, writable: true, meta, levels: RwLock::new(BTreeMap::new()) })
+    }
+
+    /// Open read-only.
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_impl(path.as_ref(), false)
+    }
+
+    /// Open for appending tiles.
+    pub fn open_rw(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_impl(path.as_ref(), true)
+    }
+
+    /// Open for appending, or create with `meta` if it does not exist.
+    pub fn open_or_create(path: impl AsRef<Path>, meta: StoreMeta) -> Result<Self> {
+        if path.as_ref().exists() {
+            Self::open_rw(path)
+        } else {
+            Self::create(path, meta)
+        }
+    }
+
+    fn open_impl(path: &Path, writable: bool) -> Result<Self> {
+        let file = if writable { h5::File::open_rw(path) } else { h5::File::open(path) }
+            .with_context(|| format!("opening {}", path.display()))?;
+        let format = file.attr_str("format").unwrap_or_default();
+        if format != FORMAT {
+            bail!("{} is not a terrain tile store (format attr = {format:?})", path.display());
+        }
+        let layers = file
+            .attr_str("layers")?
+            .split(',')
+            .filter_map(Layer::from_name)
+            .collect::<Vec<_>>();
+        let meta = StoreMeta {
+            ellipsoid_a: file.attr("ellipsoid_a")?,
+            ellipsoid_b: file.attr("ellipsoid_b")?,
+            generator_config: file.attr_str("generator_config").unwrap_or_default(),
+            seed: file.attr("seed").unwrap_or(0),
+            layers,
+        };
+        let mut levels = BTreeMap::new();
+        let lg = file.group("levels")?;
+        for name in lg.member_names()? {
+            let Ok(z) = name.parse::<u8>() else { continue };
+            let g = lg.group(&name)?;
+            let idx_ds = g.dataset("index")?;
+            let range_ds = g.dataset("elev_range")?;
+            let n = idx_ds.shape()?[0];
+            let idx: Vec<i32> = if n > 0 { idx_ds.read_slice(&[0, 0], &[n, 2])? } else { vec![] };
+            let rng: Vec<f32> = if n > 0 { range_ds.read_slice(&[0, 0], &[n, 2])? } else { vec![] };
+            let rows: Vec<(u32, u32)> = idx.chunks_exact(2).map(|c| (c[0] as u32, c[1] as u32)).collect();
+            let index = rows.iter().enumerate().map(|(i, r)| (*r, i)).collect();
+            let ranges = rng.chunks_exact(2).map(|c| (c[0], c[1])).collect();
+            let mut lds = HashMap::new();
+            for l in &meta.layers {
+                if g.exists(l.name()) {
+                    lds.insert(*l, g.dataset(l.name())?);
+                }
+            }
+            levels.insert(z, Level { rows, index, ranges, idx_ds, range_ds, layers: lds });
+        }
+        Ok(TileStore { file, path: path.to_path_buf(), writable, meta, levels: RwLock::new(levels) })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+    pub fn meta(&self) -> &StoreMeta {
+        &self.meta
+    }
+    pub fn file(&self) -> &h5::File {
+        &self.file
+    }
+
+    pub fn contains(&self, id: TileId) -> bool {
+        self.levels.read().get(&id.z).is_some_and(|l| l.index.contains_key(&(id.x, id.y)))
+    }
+
+    pub fn zooms(&self) -> Vec<u8> {
+        self.levels.read().keys().copied().collect()
+    }
+
+    pub fn tiles_at(&self, z: u8) -> Vec<TileId> {
+        self.levels
+            .read()
+            .get(&z)
+            .map(|l| l.rows.iter().map(|&(x, y)| TileId::new(z, x, y)).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn tiles(&self) -> Vec<TileId> {
+        let lv = self.levels.read();
+        lv.iter().flat_map(|(z, l)| l.rows.iter().map(move |&(x, y)| TileId::new(*z, x, y))).collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.levels.read().values().map(|l| l.rows.len()).sum()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// (min, max) elevation of a stored tile.
+    pub fn elev_range(&self, id: TileId) -> Option<(f32, f32)> {
+        let lv = self.levels.read();
+        let l = lv.get(&id.z)?;
+        l.index.get(&(id.x, id.y)).map(|&r| l.ranges[r])
+    }
+
+    fn create_level(&self, z: u8) -> Result<Level> {
+        let g = self.file.ensure_group(&format!("levels/{z}"))?;
+        let idx_ds = g
+            .new_dataset::<i32>()
+            .shape(&[0, 2])
+            .max_shape(&[None, Some(2)])
+            .chunk(&[1024, 2])
+            .deflate(4)
+            .create("index")?;
+        let range_ds = g
+            .new_dataset::<f32>()
+            .shape(&[0, 2])
+            .max_shape(&[None, Some(2)])
+            .chunk(&[1024, 2])
+            .deflate(4)
+            .create("elev_range")?;
+        let mut layers = HashMap::new();
+        for &l in &self.meta.layers {
+            let shape = layer_shape(l, 0);
+            let mut max: Vec<Option<usize>> = shape.iter().map(|&s| Some(s)).collect();
+            max[0] = None;
+            let mut chunk = shape.clone();
+            chunk[0] = 1;
+            let ds = match l {
+                Layer::Elevation => g.new_dataset::<f32>().shape(&shape).max_shape(&max).chunk(&chunk).shuffle(true).deflate(DEFLATE_LEVEL as u8).create(l.name())?,
+                Layer::Normal => g.new_dataset::<i8>().shape(&shape).max_shape(&max).chunk(&chunk).shuffle(true).deflate(DEFLATE_LEVEL as u8).create(l.name())?,
+                _ => g.new_dataset::<u8>().shape(&shape).max_shape(&max).chunk(&chunk).shuffle(true).deflate(DEFLATE_LEVEL as u8).create(l.name())?,
+            };
+            ds.set_attr_str("description", match l {
+                Layer::Rgb => "satellite-look imagery (baked lighting), sRGB u8",
+                Layer::Albedo => "surface albedo, sRGB-encoded u8",
+                Layer::Elevation => "DSM height above the ellipsoid (m) at pixel centres",
+                Layer::Normal => "unit surface normal (east, north, up) * 127, i8",
+                Layer::Landcover => "land-cover class id (terragen::landcover)",
+            })?;
+            layers.insert(l, ds);
+        }
+        Ok(Level { rows: vec![], index: HashMap::new(), ranges: vec![], idx_ds, range_ds, layers })
+    }
+
+    /// Write (append or overwrite) tiles. Compression runs in parallel outside the HDF5 lock.
+    pub fn write_tiles(&self, tiles: &[TileData]) -> Result<()> {
+        if !self.writable {
+            bail!("tile store {} opened read-only", self.path.display());
+        }
+        let layers = self.meta.layers.clone();
+        let encoded: Vec<Vec<(Layer, Vec<u8>)>> = tiles
+            .par_iter()
+            .map(|t| {
+                layers
+                    .iter()
+                    .filter(|l| t.has(**l))
+                    .map(|&l| (l, codec::encode(t.layer_bytes(l), l.elem_size(), DEFLATE_LEVEL)))
+                    .collect()
+            })
+            .collect();
+        let mut lv = self.levels.write();
+        // group by level so each level is resized once
+        let mut by_level: BTreeMap<u8, Vec<usize>> = BTreeMap::new();
+        for (i, t) in tiles.iter().enumerate() {
+            by_level.entry(t.id.z).or_default().push(i);
+        }
+        for (z, idxs) in by_level {
+            if !lv.contains_key(&z) {
+                let l = self.create_level(z)?;
+                lv.insert(z, l);
+            }
+            let level = lv.get_mut(&z).unwrap();
+            let mut rows = Vec::with_capacity(idxs.len());
+            let n0 = level.rows.len();
+            for &i in &idxs {
+                let id = tiles[i].id;
+                let key = (id.x, id.y);
+                let row = match level.index.get(&key) {
+                    Some(&r) => r,
+                    None => {
+                        let r = level.rows.len();
+                        level.rows.push(key);
+                        level.ranges.push((0.0, 0.0));
+                        level.index.insert(key, r);
+                        r
+                    }
+                };
+                level.ranges[row] = (tiles[i].elev_min, tiles[i].elev_max);
+                rows.push(row);
+            }
+            let n = level.rows.len();
+            if n > n0 {
+                for (&l, ds) in &level.layers {
+                    ds.resize(&layer_shape(l, n))?;
+                }
+                level.idx_ds.resize(&[n, 2])?;
+                level.range_ds.resize(&[n, 2])?;
+            }
+            for (k, &i) in idxs.iter().enumerate() {
+                let row = rows[k];
+                for (l, bytes) in &encoded[i] {
+                    let ds = &level.layers[l];
+                    let off = if l.channels() > 1 { vec![row, 0, 0, 0] } else { vec![row, 0, 0] };
+                    ds.write_chunk_raw(&off, 0, bytes)?;
+                }
+            }
+            // rewrite the touched part of the index / ranges
+            let lo = rows.iter().copied().min().unwrap_or(0);
+            let hi = n;
+            let idx: Vec<i32> = level.rows[lo..hi].iter().flat_map(|&(x, y)| [x as i32, y as i32]).collect();
+            let rng: Vec<f32> = level.ranges[lo..hi].iter().flat_map(|&(a, b)| [a, b]).collect();
+            level.idx_ds.write_slice(&idx, &[lo, 0], &[hi - lo, 2])?;
+            level.range_ds.write_slice(&rng, &[lo, 0], &[hi - lo, 2])?;
+        }
+        Ok(())
+    }
+
+    pub fn write_tile(&self, t: &TileData) -> Result<()> {
+        self.write_tiles(std::slice::from_ref(t))
+    }
+
+    /// Read selected layers of a tile; `None` if the tile is not stored.
+    pub fn read_tile(&self, id: TileId, layers: &[Layer]) -> Result<Option<TileData>> {
+        // (layer, bytes, still compressed?)
+        let raw: Vec<(Layer, Vec<u8>, bool)> = {
+            let lv = self.levels.read();
+            let Some(level) = lv.get(&id.z) else { return Ok(None) };
+            let Some(&row) = level.index.get(&(id.x, id.y)) else { return Ok(None) };
+            let mut out = Vec::with_capacity(layers.len());
+            for &l in layers {
+                let Some(ds) = level.layers.get(&l) else { continue };
+                let off = if l.channels() > 1 { vec![row, 0, 0, 0] } else { vec![row, 0, 0] };
+                let (mask, bytes) = ds.read_chunk_raw(&off)?;
+                if mask != 0 {
+                    // filters skipped: fall back to the regular (filtered) read path
+                    let mut count = layer_shape(l, 1);
+                    count[0] = 1;
+                    let data = match l {
+                        Layer::Elevation => {
+                            let v: Vec<f32> = ds.read_slice(&off, &count)?;
+                            v.iter().flat_map(|f| f.to_le_bytes()).collect()
+                        }
+                        _ => ds.read_slice::<u8>(&off, &count)?,
+                    };
+                    out.push((l, data, false));
+                    continue;
+                }
+                out.push((l, bytes, true));
+            }
+            out
+        };
+        let mut t = TileData { id, ..Default::default() };
+        if let Some((a, b)) = self.elev_range(id) {
+            t.elev_min = a;
+            t.elev_max = b;
+        }
+        for (l, bytes, compressed) in raw {
+            let data = if compressed {
+                let d = codec::decode(&bytes, l.elem_size(), l.tile_bytes())
+                    .with_context(|| format!("decoding {id} layer {}", l.name()))?;
+                if d.len() != l.tile_bytes() {
+                    bail!("corrupt chunk for {id} layer {}", l.name());
+                }
+                d
+            } else {
+                bytes
+            };
+            t.set_layer_bytes(l, data);
+        }
+        Ok(Some(t))
+    }
+
+    pub fn flush(&self) -> Result<()> {
+        self.file.flush()?;
+        Ok(())
+    }
+}

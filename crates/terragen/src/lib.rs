@@ -1,0 +1,14 @@
+//! Procedural, deterministic, lazily evaluable terrain for XYZ tiles.
+//!
+//! `Generator::tile(TileId)` is a pure function of (config, tile id): any subset of tiles at any
+//! zoom can be generated independently, and coarse zooms approximate the average of finer ones.
+
+pub mod config;
+pub mod landcover;
+pub mod noise;
+pub mod surface;
+pub mod tile;
+pub mod world;
+
+pub use config::Config;
+pub use tile::{Generator, TileData, TILE_SIZE};

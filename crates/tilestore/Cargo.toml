@@ -1,0 +1,12 @@
+[package]
+name = "tilestore"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+geodesy.workspace = true
+h5.workspace = true
+flate2.workspace = true
+rayon.workspace = true
+anyhow.workspace = true
+parking_lot.workspace = true

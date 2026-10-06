@@ -1,0 +1,13 @@
+[package]
+name = "terragen"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+geodesy.workspace = true
+tilestore.workspace = true
+glam.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+anyhow.workspace = true
+rayon.workspace = true

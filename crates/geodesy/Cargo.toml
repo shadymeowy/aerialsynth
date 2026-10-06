@@ -1,0 +1,9 @@
+[package]
+name = "geodesy"
+version.workspace = true
+edition.workspace = true
+description = "WGS84 geodesy, local tangent frames, attitude helpers and Web-Mercator XYZ tile math (f64)."
+
+[dependencies]
+glam = { workspace = true }
+serde = { workspace = true }
