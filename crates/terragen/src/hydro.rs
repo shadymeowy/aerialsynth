@@ -56,12 +56,12 @@ impl World {
     }
 
     fn flow_point(&self, lvl: usize, c: (i64, i64, i64)) -> FlowPt {
-        let key = (self.level_key(lvl), c.0, c.1, c.2);
+        let key = (self.level_key(lvl) ^ self.cache_key, c.0, c.1, c.2);
         if let Some(p) = PTS.with(|m| m.borrow().get(&key).copied()) {
             return p;
         }
         let cell = self.cfg.hydro.levels[lvl].cell_km * KM;
-        let hh = hash3(key.0, c.0, c.1, c.2);
+        let hh = hash3(self.level_key(lvl), c.0, c.1, c.2);
         let p = DVec3::new(
             c.0 as f64 + 0.5 + 0.8 * (u01k(hh, 1) - 0.5),
             c.1 as f64 + 0.5 + 0.8 * (u01k(hh, 2) - 0.5),
@@ -90,7 +90,7 @@ impl World {
 
     /// Downstream neighbour (steepest descent) of an active point; None for sinks and the sea.
     fn flow_target(&self, lvl: usize, c: (i64, i64, i64)) -> Option<(i64, i64, i64)> {
-        let key = (self.level_key(lvl), c.0, c.1, c.2);
+        let key = (self.level_key(lvl) ^ self.cache_key, c.0, c.1, c.2);
         if let Some(t) = TGT.with(|m| m.borrow().get(&key).copied()) {
             return t;
         }
@@ -141,8 +141,9 @@ impl World {
         }
         for (lvl, lc) in self.cfg.hydro.levels.iter().enumerate() {
             let cell = lc.cell_km * KM;
-            // skip levels that cannot be resolved at all (channel and valley sub-pixel)
-            if lc.valley_m < 0.5 * gsd && lc.width_m[1] < 0.3 * gsd {
+            // skip levels far below the resolution (the carve fades out per pixel before that,
+            // see `World::terrain_impl`, so tiles at slightly different GSD agree)
+            if lc.valley_m < 0.2 * gsd && lc.width_m[1] < 0.15 * gsd {
                 continue;
             }
             let reach = radius + 2.0 * cell + lc.valley_m + 0.2 * cell;
@@ -168,16 +169,19 @@ impl World {
         out
     }
 
-    /// Closest channel to `ctx` among `segs` (meandered by a domain warp per level).
-    pub fn river_query(&self, ctx: &Ctx, segs: &[Seg]) -> Option<RiverHit> {
-        let mut best: Option<RiverHit> = None;
-        let mut warped: [Option<DVec3>; 4] = [None; 4];
+    /// Channels among `segs` whose valley may reach `ctx` with ground height `h` (meandered by
+    /// a domain warp per level). The valley widens with the height above the floor, so the
+    /// reach depends on `h`; the caller carves with every hit (min) and takes the channel
+    /// attributes from the nearest one.
+    pub fn river_query(&self, ctx: &Ctx, segs: &[Seg], h: f64) -> Vec<RiverHit> {
+        let mut hits = Vec::new();
+        let mut warped: Vec<Option<DVec3>> = vec![None; self.cfg.hydro.levels.len()];
         for s in segs {
             let li = s.level as usize;
             let lc = &self.cfg.hydro.levels[li];
-            let pw = *warped[li.min(3)].get_or_insert_with(|| {
+            let pw = *warped[li].get_or_insert_with(|| {
                 let cell = lc.cell_km * KM;
-                let lam = lc.meander * cell;
+                let lam = lc.meander.max(1e-3) * cell;
                 let k = self.level_key(li);
                 let w1 = perlin3(k ^ 1, ctx.p / lam) + 0.45 * perlin3(k ^ 2, ctx.p / (0.37 * lam));
                 let w2 = perlin3(k ^ 3, ctx.p / lam) + 0.45 * perlin3(k ^ 4, ctx.p / (0.37 * lam));
@@ -189,19 +193,15 @@ impl World {
             let q = s.a + ab * u;
             let dv = pw - q;
             let dist = dv.length();
-            if dist > s.valley * 1.5 + s.hw + 200.0 {
+            let floor = s.ha + (s.hb - s.ha) * u;
+            // bound of the carve extent (floodplain ≤ 9 hw, walls 2.2 m per m above the floor)
+            let reach = (s.valley * 1.5 + s.hw + 200.0).max(9.0 * s.hw + 2.2 * (h - floor + 2.0 + 0.04 * s.hw) + 50.0);
+            if dist > reach {
                 continue;
             }
             let sign = if ab.cross(dv).dot(ctx.up) >= 0.0 { 1.0 } else { -1.0 };
-            let floor = s.ha + (s.hb - s.ha) * u;
-            let better = match &best {
-                None => true,
-                Some(b) => dist - s.hw < b.d.abs() - b.hw,
-            };
-            if better {
-                best = Some(RiverHit { d: sign * dist, hw: s.hw, valley: s.valley, floor, level: s.level });
-            }
+            hits.push(RiverHit { d: sign * dist, hw: s.hw, valley: s.valley, floor, level: s.level });
         }
-        best
+        hits
     }
 }

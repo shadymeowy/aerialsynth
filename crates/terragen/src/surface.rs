@@ -331,20 +331,21 @@ impl SurfaceModel {
 
     /// Per-pixel smooth fields (band-limited at the pixel GSD).
     pub fn pixel_fields(&self, p: DVec3, gsd: f64) -> PixFields {
+        // a field evaluated at p·k sees a sample spacing of gsd·k in its own domain
         PixFields {
             detail: self.detail.eval(p, gsd),
             patch: self.patch.eval(p, gsd),
             land: self.land_n.eval(p, gsd) * self.land_n.norm() * 1.8,
             strata: self.strata.eval(p, gsd),
-            strata2: self.strata.eval(p * 1.7, gsd),
+            strata2: self.strata.eval(p * 1.7, gsd * 1.7),
             snow: self.snow_n.eval(p, gsd),
             forest: self.forest.eval(p, gsd) * self.forest.norm() * 1.8,
-            stand: self.patch.eval(p * 0.3, gsd) + 0.5 * perlin3(0x57A, p / 1200.0),
+            stand: self.patch.eval(p * 0.3, gsd * 0.3) + 0.5 * perlin3(0x57A, p / 1200.0) * crate::noise::band(1200.0, gsd),
             field_var: self.field_var.eval(p, gsd),
-            field_var2: self.field_var.eval(p * 1.7, gsd),
-            field_var3: self.field_var.eval(p * 3.0, gsd),
+            field_var2: self.field_var.eval(p * 1.7, gsd * 1.7),
+            field_var3: self.field_var.eval(p * 3.0, gsd * 3.0),
             warp2: self.warp2.eval(p, gsd),
-            water: self.patch.eval(p * 0.37, gsd),
+            water: self.patch.eval(p * 0.37, gsd * 0.37),
         }
     }
 

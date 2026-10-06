@@ -1,10 +1,12 @@
-//! Tile generation: combines pass A (per pixel centre, with a 1-pixel apron) and pass B
-//! (supersampled detail), then derives normals and the baked "satellite" rgb.
+//! Tile generation: combines pass A (per pixel centre, with a 2-pixel apron) and pass B
+//! (supersampled detail, 1-pixel apron), then derives normals and the baked "satellite" rgb.
+//! Pass B interpolates pass A between pixel centres, so its apron pixels need pass-A values one
+//! pixel further out; the normals of the edge pixels use pass B's apron.
 
 use crate::config::Config;
 use crate::surface::{l2s, Caches, Local, SurfaceModel};
 use crate::world::{water, Ctx, Macro, Terrain, World};
-use geodesy::tiles::{gsd_ew, pixel_to_latlon, TileId};
+use geodesy::tiles::{gsd_ew, gsd_ns, pixel_to_latlon, TileId};
 use glam::{DVec2, DVec3};
 use rayon::prelude::*;
 
@@ -63,7 +65,8 @@ impl Generator {
     /// Generate one tile (parallel over rows internally).
     pub fn tile(&self, id: TileId) -> TileData {
         let n = TILE_SIZE;
-        let na = n + 2; // with apron
+        let na = n + 2; // pass B, 1-px apron
+        let na2 = n + 4; // pass A, 2-px apron
         let z = id.z;
         let ell = self.world.ell;
         let ss = self.world.cfg.supersample.max(1) as usize;
@@ -104,29 +107,31 @@ impl Generator {
             let (i0, j0) = ((u.floor() as usize).min(ng - 2), (v.floor() as usize).min(ng - 2));
             let (fx, fy) = (u - i0 as f64, v - j0 as f64);
             let g = |i: usize, j: usize| &macro_grid[j * ng + i];
-            Macro::bilerp(g(i0, j0), g(i0 + 1, j0), g(i0, j0 + 1), g(i0 + 1, j0 + 1), fx, fy)
+            let mut m = Macro::bilerp(g(i0, j0), g(i0 + 1, j0), g(i0, j0 + 1), g(i0 + 1, j0 + 1), fx, fy);
+            m.mtn_warp = self.world.mtn_warp_at(ctx.p, ctx.gsd);
+            m
         };
 
         // ---------------- drainage segments that can affect this tile
         let segs = {
             let (lat_c, lon_c) = pixel_to_latlon(DVec2::new(ox + 128.0, oy + 128.0), z, n as u32);
             let c = Ctx::new(lat_c, lon_c, 1.0, &ell);
-            let (lat0, lon0) = pixel_to_latlon(DVec2::new(ox - 1.0, oy - 1.0), z, n as u32);
+            let (lat0, lon0) = pixel_to_latlon(DVec2::new(ox - 2.0, oy - 2.0), z, n as u32);
             let corner = Ctx::new(lat0, lon0, 1.0, &ell).p;
             let gsd_c = gsd_ew(lat_c, z, n as u32, &ell);
             self.world.river_segments(c.p, (corner - c.p).length(), gsd_c)
         };
 
-        // ---------------- pass A on pixel centres incl. 1px apron
-        let rows_a: Vec<Vec<Terrain>> = (0..na)
+        // ---------------- pass A on pixel centres incl. 2px apron
+        let rows_a: Vec<Vec<Terrain>> = (0..na2)
             .into_par_iter()
             .map(|j| {
-                let mut row = Vec::with_capacity(na);
-                let py = oy + j as f64 - 1.0 + 0.5;
+                let mut row = Vec::with_capacity(na2);
+                let py = oy + j as f64 - 2.0 + 0.5;
                 let (lat, _) = pixel_to_latlon(DVec2::new(ox, py), z, n as u32);
                 let gsd = gsd_ew(lat, z, n as u32, &ell);
-                for i in 0..na {
-                    let px = ox + i as f64 - 1.0 + 0.5;
+                for i in 0..na2 {
+                    let px = ox + i as f64 - 2.0 + 0.5;
                     let (lat, lon) = pixel_to_latlon(DVec2::new(px, py), z, n as u32);
                     let ctx = Ctx::new(lat, lon, gsd, &ell);
                     let m = macro_at(px, py, &ctx);
@@ -136,28 +141,30 @@ impl Generator {
             })
             .collect();
         let grid: Vec<Terrain> = rows_a.into_iter().flatten().collect();
+        // pass-A value at pass-B grid coordinates (i, j) ∈ [-1, na]
         let at = |i: isize, j: isize| -> &Terrain {
-            let i = i.clamp(0, na as isize - 1) as usize;
-            let j = j.clamp(0, na as isize - 1) as usize;
-            &grid[j * na + i]
+            let i = (i + 1).clamp(0, na2 as isize - 1) as usize;
+            let j = (j + 1).clamp(0, na2 as isize - 1) as usize;
+            &grid[j * na2 + i]
         };
 
-        // per-row gsd (mercator scale varies with latitude)
-        let row_gsd: Vec<f64> = (0..na)
+        // per-row pixel size, east-west and north-south (mercator scale varies with latitude;
+        // on the ellipsoid the N-S size is smaller by M/N)
+        let row_lat: Vec<f64> = (0..na)
             .map(|j| {
                 let py = oy + j as f64 - 1.0 + 0.5;
-                let (lat, _) = pixel_to_latlon(DVec2::new(ox, py), z, n as u32);
-                gsd_ew(lat, z, n as u32, &ell)
+                pixel_to_latlon(DVec2::new(ox, py), z, n as u32).0
             })
             .collect();
+        let row_gsd: Vec<f64> = row_lat.iter().map(|&lat| gsd_ew(lat, z, n as u32, &ell)).collect();
+        let row_gsd_ns: Vec<f64> = row_lat.iter().map(|&lat| gsd_ns(lat, z, n as u32, &ell)).collect();
 
         // ---------------- slope of the bare ground at pixel scale
         let slope: Vec<f64> = (0..na * na)
             .map(|k| {
                 let (i, j) = ((k % na) as isize, (k / na) as isize);
-                let g = row_gsd[j as usize];
-                let dx = (at(i + 1, j).ground - at(i - 1, j).ground) / (2.0 * g);
-                let dy = (at(i, j + 1).ground - at(i, j - 1).ground) / (2.0 * g);
+                let dx = (at(i + 1, j).ground - at(i - 1, j).ground) / (2.0 * row_gsd[j as usize]);
+                let dy = (at(i, j + 1).ground - at(i, j - 1).ground) / (2.0 * row_gsd_ns[j as usize]);
                 (dx * dx + dy * dy).sqrt()
             })
             .collect();
@@ -189,7 +196,7 @@ impl Generator {
                     let mut acc_e = DVec3::ZERO;
                     let mut acc_h = 0.0;
                     let mut acc_l = 0.0;
-                    let mut counts = [0u8; 32];
+                    let mut counts = [0u16; 32];
                     for sy in 0..ss {
                         for sx in 0..ss {
                             let fxo = (sx as f64 + 0.5) / ss as f64 - 0.5;
@@ -273,12 +280,12 @@ impl Generator {
         let mut emax = f32::MIN;
         let hb = |i: usize, j: usize| pb[j * na + i].height;
         for j in 0..n {
-            let g = row_gsd[j + 1];
+            let (g, gn) = (row_gsd[j + 1], row_gsd_ns[j + 1]);
             for i in 0..n {
                 let (ia, ja) = (i + 1, j + 1);
                 let px = &pb[ja * na + ia];
                 let dhdx = (hb(ia + 1, ja) - hb(ia - 1, ja)) / (2.0 * g);
-                let dhdn = -(hb(ia, ja + 1) - hb(ia, ja - 1)) / (2.0 * g);
+                let dhdn = -(hb(ia, ja + 1) - hb(ia, ja - 1)) / (2.0 * gn);
                 let nrm = DVec3::new(-dhdx, -dhdn, 1.0).normalize();
                 let k = j * n + i;
                 let h = px.height as f32;

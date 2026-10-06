@@ -19,8 +19,6 @@ pub struct Config {
     pub look: SatelliteLook,
     /// Supersampling per axis for colour (1 = one sample per pixel).
     pub supersample: u32,
-    /// Finest zoom level the generator is tuned for (features below its GSD are not modelled).
-    pub max_zoom: u8,
 }
 
 impl Default for Config {
@@ -37,7 +35,6 @@ impl Default for Config {
             landuse: Landuse::default(),
             look: SatelliteLook::default(),
             supersample: 2,
-            max_zoom: 19,
         }
     }
 }

@@ -197,6 +197,9 @@ pub struct World {
     road_major: Fbm,
     road_minor: Fbm,
     home: Option<(DVec3, f64, f64)>,
+    /// Hash of the whole config: key of the thread-local caches, so generators with the same
+    /// seed but different settings in one process do not share cached hydrology / lakes.
+    cache_key: u64,
 }
 
 const KM: f64 = 1000.0;
@@ -214,7 +217,9 @@ impl World {
             let p = geodesy::geodetic2ecef(Geodetic::from_deg(h.lat, h.lon, 0.0), &ell);
             (p, h.radius_km * KM, h.strength)
         });
+        let cache_key = serde_yaml::to_string(&cfg).unwrap_or_default().bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3));
         World {
+            cache_key,
             seed: s,
             cont: Fbm::new(k(1), cw, 7, 2.0, 0.52),
             cont_warp: [
@@ -418,6 +423,12 @@ impl World {
         sum
     }
 
+    /// Mountain domain warp (exact). Short wavelength x 9 km gain: too fine for the 16-px macro
+    /// grid (bilinear error ~100 m in ridge position), so tiles evaluate it per pixel.
+    pub fn mtn_warp_at(&self, p: DVec3, gsd: f64) -> [f64; 2] {
+        [self.mtn_warp[0].eval(p, gsd), self.mtn_warp[1].eval(p, gsd)]
+    }
+
     /// Evaluate all large-scale fields at a point.
     pub fn macro_at(&self, p: DVec3, gsd: f64) -> Macro {
         Macro {
@@ -435,7 +446,7 @@ impl World {
             agri: self.agri_n.eval(p, gsd) * self.agri_n.norm() * 1.8,
             style: [self.style_n[0].eval(p, gsd), self.style_n[1].eval(p, gsd), self.style_n[2].eval(p, gsd), self.style_n[3].eval(p, gsd)],
             river_width: self.river_width_n.eval(p, gsd),
-            mtn_warp: [self.mtn_warp[0].eval(p, gsd), self.mtn_warp[1].eval(p, gsd)],
+            mtn_warp: self.mtn_warp_at(p, gsd),
         }
     }
 
@@ -520,7 +531,7 @@ impl World {
         thread_local! {
             static CACHE: std::cell::RefCell<std::collections::HashMap<u64, Option<f64>>> = Default::default();
         }
-        let key = id ^ self.seed.rotate_left(17);
+        let key = id ^ self.cache_key.rotate_left(17);
         if let Some(v) = CACHE.with(|c| c.borrow().get(&key).copied()) {
             return v;
         }
@@ -648,7 +659,12 @@ impl World {
         let mesa_noise = m.mesa;
         let mesa = arid * smoothstep(0.1, 0.45, mesa_noise) * (1.0 - mountain) * smoothstep(0.02, 0.1, s) * r.mesas;
         if mesa > 1e-3 {
-            let step = 35.0 + 90.0 * u01(hash1(self.seed, (mesa_noise * 7.0) as i64));
+            // terrace height: hashed per band of the mesa field, blended between neighbouring
+            // bands (a hard switch made cliffs along the band borders)
+            let xb = mesa_noise * 7.0;
+            let kb = xb.floor();
+            let sh = |k: f64| 35.0 + 90.0 * u01(hash1(self.seed, k as i64));
+            let step = lerp(sh(kb), sh(kb + 1.0), smoothstep(0.0, 1.0, xb - kb));
             let x = h / step;
             let k = x.floor();
             let f = x - k;
@@ -685,39 +701,53 @@ impl World {
                     &local[..]
                 }
             };
-            if let Some(rh) = self.river_query(ctx, segs) {
+            let hits = self.river_query(ctx, segs, h);
+            let h0 = h;
+            let wn = smoothstep(-0.6, 0.6, m.river_width);
+            for rh in &hits {
                 let lc = &self.cfg.hydro.levels[rh.level as usize];
-                let wn = smoothstep(-0.6, 0.6, m.river_width);
                 let ad = rh.d.abs();
                 let hw = rh.hw;
                 let width = 2.0 * hw;
-                let wet = smoothstep(lc.wet_moisture, lc.wet_moisture + 0.12, moist);
                 let fp_w = hw + width * (1.0 + 3.0 * wn);
                 let incision = 1.0 + 0.02 * width;
                 let floor = rh.floor.max(1.0) - incision;
-                if h > floor && ad < rh.valley * 1.2 + 2.2 * (h - floor) {
-                    // valley profile: bed, floodplain, walls kept below ~30° (V shape)
-                    let valley = rh.valley.max(fp_w + 2.2 * (h - floor));
+                // valley profile: bed, floodplain, walls kept below ~30° (V shape); every channel
+                // carves from the uncarved height and the lowest result wins (continuous where
+                // the nearest channel changes)
+                let valley = rh.valley.max(fp_w + 2.2 * (h0 - floor));
+                if h0 > floor && ad < valley {
                     let wall = smoothstep(fp_w, valley, ad);
                     let wall = wall * wall * (3.0 - 2.0 * wall);
                     let fp = floor + 0.8 + 0.4 * micro.abs();
                     let target = if ad < hw { floor - 0.8 - 0.02 * width } else { fp };
-                    let carved = h.min(lerp(target, h, wall));
+                    let carved = h0.min(lerp(target, h0, wall));
                     // limit the carve depth (small streams only notch the terrain)
-                    h = carved.max(h - lc.max_depth_m * (1.0 - 0.3 * wall));
-                    floodplain = floodplain.max((1.0 - wall) * land * smoothstep(20.0, 120.0, width));
+                    let carved = carved.max(h0 - lc.max_depth_m * (1.0 - 0.3 * wall));
+                    // valleys narrower than a pixel fade out per pixel (no hard level cutoff)
+                    let fade = if width < 0.3 * ctx.gsd { smoothstep(0.25, 0.5, rh.valley / ctx.gsd) } else { 1.0 };
+                    h = h.min(h0 + (carved - h0) * fade);
+                    floodplain = floodplain.max((1.0 - wall) * land * smoothstep(20.0, 120.0, width) * fade);
                 }
+            }
+            // channel attributes from the nearest channel
+            if let Some(rh) = hits.iter().min_by(|a, b| (a.d.abs() - a.hw).total_cmp(&(b.d.abs() - b.hw))) {
+                let lc = &self.cfg.hydro.levels[rh.level as usize];
+                let ad = rh.d.abs();
+                let floor = rh.floor.max(1.0) - (1.0 + 0.04 * rh.hw);
                 t.river_d = rh.d;
-                t.river_hw = hw;
+                t.river_hw = rh.hw;
                 // water surface: the drainage floor, but never buried below the (notched) ground
-                t.river_level = if ad < hw { floor.max(h + 0.6) } else { floor.max(h) };
-                t.river_wet = wet;
+                t.river_level = if ad < rh.hw { floor.max(h + 0.6) } else { floor.max(h) };
+                t.river_wet = smoothstep(lc.wet_moisture, lc.wet_moisture + 0.12, moist);
             }
         }
 
         // ---- lakes (Worley cells; flat surface at the basin spill height)
         let lake_cell = self.cfg.hydro.lake_cell_km * KM;
-        if with_lakes && self.cfg.hydro.lake_density > 0.0 && land > 0.3 && lake_cell > 3.0 * gsd {
+        // (resolution cutoffs below are placed where the feature covers at most a few percent of a
+        // pixel, so switching it off along a row of constant GSD is invisible)
+        if with_lakes && self.cfg.hydro.lake_density > 0.0 && land > 0.3 && lake_cell > gsd {
             let wc = worley3(self.seed ^ 0x1A4E, p, lake_cell, 0.85);
             for (id, pt) in [(wc.id, wc.point), (wc.id2, wc.point2)] {
                 let prob = self.cfg.hydro.lake_density * (0.3 + 0.9 * moist) * (1.0 - 0.8 * mountain);
@@ -781,7 +811,7 @@ impl World {
 
         // ---- land-use sites (only relevant when such features can be resolved)
         let region_cell = self.cfg.landuse.region_km * KM;
-        if mode != Mode::Relief && gsd < region_cell * 0.1 {
+        if mode != Mode::Relief && gsd < region_cell * 0.5 {
             // warped lookup → curvy (not straight) borders between field systems
             let wq = DVec3::new(
                 perlin3(self.seed ^ 0xA1, p / (0.9 * region_cell)),
@@ -794,7 +824,7 @@ impl World {
             t.region = Site { id: wc.id, id2: wc.id2, center: wc.point, dist: wc.f1, edge: worley_edge_dist(&wc, pw) };
         }
         let town_cell = self.cfg.landuse.town_cell_km * KM;
-        if mode != Mode::Relief && gsd < town_cell * 0.05 && self.cfg.landuse.towns > 0.0 {
+        if mode != Mode::Relief && gsd < town_cell * 0.25 && self.cfg.landuse.towns > 0.0 {
             let wc = worley3(self.seed ^ 0x70E1, p, town_cell, 0.8);
             t.town = Site { id: wc.id, id2: wc.id2, center: wc.point, dist: wc.f1, edge: worley_edge_dist(&wc, p) };
         }
@@ -802,10 +832,11 @@ impl World {
         // ---- road networks (iso-lines of warped noise), only where people live
         t.road_major = f64::MAX;
         t.road_minor = f64::MAX;
-        if mode != Mode::Relief && self.cfg.landuse.roads > 0.0 && habit > 0.02 && gsd < 60.0 {
+        // (roads are drawn by pixel coverage: 12 m at 400 m/px or 6 m at 200 m/px is ~3%)
+        if mode != Mode::Relief && self.cfg.landuse.roads > 0.0 && habit > 0.02 && gsd < 400.0 {
             let warp = self.network_warp(ctx);
             t.road_major = self.network_dist(&self.road_major, ctx, &warp, 2500.0);
-            if gsd < 15.0 {
+            if gsd < 200.0 {
                 t.road_minor = self.network_dist(&self.road_minor, ctx, &warp, 700.0);
             }
         }
