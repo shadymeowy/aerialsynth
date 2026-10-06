@@ -100,6 +100,10 @@ pub struct Relief {
     pub mesas: f64,
     /// Sand dunes amplitude in sand seas (m).
     pub dune_height: f64,
+    /// Strength of the erosion-gully filter on mountain / hill slopes (0 disables).
+    pub erosion: f64,
+    /// Wavelength of the coarsest gully octave (m).
+    pub gully_wavelength: f64,
 }
 impl Default for Relief {
     fn default() -> Self {
@@ -110,6 +114,8 @@ impl Default for Relief {
             micro_height: 3.0,
             mesas: 0.5,
             dune_height: 25.0,
+            erosion: 1.0,
+            gully_wavelength: 1400.0,
         }
     }
 }

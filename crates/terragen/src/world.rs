@@ -81,6 +81,8 @@ pub struct Terrain {
     pub agri: f64,
     /// Settlement suitability 0..1.
     pub habit: f64,
+    /// Erosion gully signal (−: channel / valley floor, +: spur / ridge), ~[-1.5, 1.5].
+    pub gully: f64,
     /// Regional style parameters 0..1 (colour variations etc.)
     pub style: [f64; 4],
     /// Signed distance-like values to the major / minor road centre lines (m).
@@ -325,6 +327,57 @@ impl World {
         (sum * 0.7, low * 0.7)
     }
 
+    /// One octave of gradient-aligned gully noise in a 3D jittered lattice (point `q` in lattice
+    /// units). Returns the stripe value and its derivative (lattice units).
+    fn gully_octave(seed: u64, q: DVec3, dir: DVec3) -> (f64, DVec3) {
+        let qf = q.floor();
+        let (ix, iy, iz) = (qf.x as i64, qf.y as i64, qf.z as i64);
+        let f = q - qf;
+        let mut v = 0.0;
+        let mut d = DVec3::ZERO;
+        let mut wt = 0.0;
+        for dz in -1..=1i64 {
+            for dy in -1..=1i64 {
+                for dx in -1..=1i64 {
+                    let h = hash3(seed, ix + dx, iy + dy, iz + dz);
+                    let jit = DVec3::new(u01k(h, 1), u01k(h, 2), u01k(h, 3)) * 0.5;
+                    let pp = f - DVec3::new(dx as f64, dy as f64, dz as f64) - jit;
+                    let w = (-2.0 * pp.length_squared()).exp();
+                    wt += w;
+                    let mag = pp.dot(dir) * std::f64::consts::TAU;
+                    let (s, c) = mag.sin_cos();
+                    v += c * w;
+                    d -= dir * (s * w);
+                }
+            }
+        }
+        (v / wt, d / wt)
+    }
+
+    /// Erosion-like gullies: stripes running down the large-scale slope `grad` (m/m, tangent),
+    /// bent by the gullies of previous octaves → dendritic patterns. Returns a height offset in
+    /// units of the first octave amplitude (roughly within [-1.5, 1.5]).
+    fn gullies(&self, p: DVec3, up: DVec3, grad: DVec3, gsd: f64, lam0: f64) -> f64 {
+        let dir0 = up.cross(grad).normalize_or_zero();
+        let mut a = 1.0;
+        let mut lam = lam0;
+        let mut h = 0.0;
+        let mut hd = DVec3::ZERO;
+        for i in 0..5u64 {
+            let wb = band(lam, gsd);
+            if wb <= 0.0 {
+                break;
+            }
+            let freq = lam0 / lam;
+            let (v, d) = Self::gully_octave(self.seed ^ (0xE205 + i * 0x9E37), p / lam, dir0 + up.cross(hd));
+            h += v * a * wb;
+            hd += d * (a * freq * wb);
+            a *= 0.45;
+            lam *= 0.5;
+        }
+        h
+    }
+
     fn dunes(&self, p: DVec3, gsd: f64) -> f64 {
         let mut lam = 900.0;
         let mut amp = 1.0;
@@ -379,13 +432,19 @@ impl World {
     /// Signed distance (m) to the zero iso-line of a warped noise network, from the noise value
     /// and its analytic gradient (chain rule through the warp).
     fn network_dist(&self, f: &Fbm, ctx: &Ctx, warp: &([f64; 2], [DVec3; 2]), amp: f64) -> f64 {
+        self.network_dist_g(f, ctx, warp, amp).0
+    }
+
+    /// Like `network_dist`, also returning the gradient magnitude normalized by the network
+    /// wavelength (small near noise extrema, where iso-lines form small closed loops).
+    fn network_dist_g(&self, f: &Fbm, ctx: &Ctx, warp: &([f64; 2], [DVec3; 2]), amp: f64) -> (f64, f64) {
         let ([w0, w1], [g0, g1]) = *warp;
         let qw = ctx.p + (ctx.east * w0 + ctx.north * w1) * amp;
         let (n, g) = f.eval_d(qw, ctx.gsd.max(200.0), 99);
         // d n / d p = J^T g with J = I + amp (east ⊗ ∇w0 + north ⊗ ∇w1)
         let grad = g + (g0 * ctx.east.dot(g) + g1 * ctx.north.dot(g)) * amp;
         let gl = DVec2::new(grad.dot(ctx.east), grad.dot(ctx.north)).length().max(1e-12);
-        n / gl
+        (n / gl, gl * f.wavelength)
     }
 
     /// Climate (temperature °C, moisture 0..1) from macro fields at a given elevation.
@@ -522,6 +581,35 @@ impl World {
         let (hl, hl_low) = self.hills(p, gsd, gain);
         let hills = hill_amp * hl;
 
+        // ---- erosion gullies on mountain and hill slopes
+        let relief_amp = amp_m + 0.8 * hill_amp;
+        let lam_e = self.cfg.relief.gully_wavelength;
+        let mut gully = 0.0;
+        let mut gully_n = 0.0;
+        if self.cfg.relief.erosion > 0.0 && relief_amp > 40.0 && gsd < lam_e * 0.5 {
+            // large-scale gradient by finite differences of the low-passed relief
+            let gl = lam_e * 0.5;
+            let low = |q: DVec3| -> f64 {
+                let mut v = hill_amp * self.hills(q, gl, gain).0;
+                if mountain > 1e-3 {
+                    let wp = DVec2::new(m.mtn_warp[0], m.mtn_warp[1]) * 9.0 * KM;
+                    v += amp_m * self.ridged(q + ctx.east * wp.x + ctx.north * wp.y, gl, 1.6 + 0.8 * m.style[2]).0;
+                }
+                v
+            };
+            let e = lam_e * 0.15;
+            let h0 = low(p);
+            let ge = (low(p + ctx.east * e) - h0) / e;
+            let gn = (low(p + ctx.north * e) - h0) / e;
+            let grad = ctx.east * ge + ctx.north * gn;
+            let slope_l = (ge * ge + gn * gn).sqrt();
+            let mask = smoothstep(0.03, 0.25, slope_l) * smoothstep(40.0, 140.0, relief_amp);
+            if mask > 0.0 {
+                gully_n = self.gullies(p, ctx.up, grad, gsd, lam_e) * mask;
+                gully = gully_n * self.cfg.relief.erosion * (0.05 * amp_m + 0.12 * hill_amp);
+            }
+        }
+
         // ---- micro relief
         let micro = if r.micro_height > 0.0 {
             r.micro_height * (0.4 + 0.6 * smoothstep(-0.3, 0.6, rough) + mountain) * self.micro.eval(p, gsd)
@@ -529,7 +617,7 @@ impl World {
             0.0
         };
 
-        let mut h = base + plateau + uplift + mtn + hills + micro;
+        let mut h = base + plateau + uplift + mtn + hills + micro + gully;
         let smooth = base + plateau + uplift + amp_m * ridged_low * 0.6 + hill_amp * hl_low;
 
         // ---- climate (from smooth elevation, so it does not alias)
@@ -586,7 +674,12 @@ impl World {
                     continue;
                 }
                 let valley = valley * (0.4 + 0.6 * mk);
-                let d = self.network_dist(net, ctx, &warp, warp_amp);
+                let (d, gn) = self.network_dist_g(net, ctx, &warp, warp_amp);
+                // fade out near noise extrema (tiny closed loops) → open, river-like segments
+                let mk = mk * smoothstep(1.2, 2.6, gn);
+                if mk < 0.02 {
+                    continue;
+                }
                 let ad = d.abs();
                 if ad > valley * 1.2 + 2.2 * (h - smooth).max(0.0) {
                     continue;
@@ -671,6 +764,7 @@ impl World {
         let irrig = (1.0 - wet_ok) * smoothstep(0.15, 0.6, an) * smoothstep(14.0, 20.0, temp); // dry: pivots
         let agri = (climate_ok * (wet_ok + 0.7 * irrig) * (0.35 + 0.65 * smoothstep(-0.6, 0.2, an))
             * (1.0 - mountain * 0.9)
+            * (1.0 - 0.75 * smoothstep(120.0, 320.0, hill_amp * (0.6 + 0.8 * smoothstep(-0.3, 0.6, rough))))
             * self.cfg.landuse.agriculture)
             .clamp(0.0, 1.0);
         let habit = climate_ok * (0.4 + 0.6 * wet_ok) * (1.0 - mountain) * land;
@@ -686,8 +780,16 @@ impl World {
         // ---- land-use sites (only relevant when such features can be resolved)
         let region_cell = self.cfg.landuse.region_km * KM;
         if gsd < region_cell * 0.1 {
-            let wc = worley3(self.seed ^ 0x5E61, p, region_cell, 0.9);
-            t.region = Site { id: wc.id, id2: wc.id2, center: wc.point, dist: wc.f1, edge: worley_edge_dist(&wc, p) };
+            // warped lookup → curvy (not straight) borders between field systems
+            let wq = DVec3::new(
+                perlin3(self.seed ^ 0xA1, p / (0.9 * region_cell)),
+                perlin3(self.seed ^ 0xA2, p / (0.9 * region_cell)),
+                perlin3(self.seed ^ 0xA3, p / (0.9 * region_cell)),
+            ) * (0.18 * region_cell)
+                + DVec3::new(perlin3(self.seed ^ 0xA4, p / 1500.0), perlin3(self.seed ^ 0xA5, p / 1500.0), perlin3(self.seed ^ 0xA6, p / 1500.0)) * 120.0;
+            let pw = p + wq;
+            let wc = worley3(self.seed ^ 0x5E61, pw, region_cell, 0.9);
+            t.region = Site { id: wc.id, id2: wc.id2, center: wc.point, dist: wc.f1, edge: worley_edge_dist(&wc, pw) };
         }
         let town_cell = self.cfg.landuse.town_cell_km * KM;
         if gsd < town_cell * 0.05 && self.cfg.landuse.towns > 0.0 {
@@ -709,6 +811,7 @@ impl World {
         let rock_expect = (mountain * smoothstep(0.15, 0.6, ridged) + 0.25 * mesa).clamp(0.0, 1.0);
 
         t.ground = h;
+        t.gully = gully_n;
         t.temp = temp;
         t.moist = moist;
         t.mountain = mountain;

@@ -171,6 +171,7 @@ pub struct Palette {
     crown_decid: DVec3,
     crown_tropic: DVec3,
     crown_dry: DVec3,
+    shrub: DVec3,
     crop: [DVec3; 9],
     pub crop_mean: DVec3,
     asphalt: DVec3,
@@ -207,16 +208,17 @@ impl Palette {
             crown_decid: srgb(52.0, 80.0, 36.0),
             crown_tropic: srgb(36.0, 76.0, 34.0),
             crown_dry: srgb(88.0, 96.0, 58.0),
+            shrub: srgb(78.0, 82.0, 56.0),
             crop: [
-                srgb(86.0, 108.0, 58.0),   // green crop
-                srgb(118.0, 132.0, 76.0),  // light green
-                srgb(194.0, 176.0, 122.0), // ripe cereal
-                srgb(188.0, 174.0, 140.0), // stubble
-                srgb(122.0, 102.0, 80.0),  // ploughed
-                srgb(152.0, 132.0, 102.0), // dry soil
-                srgb(122.0, 132.0, 84.0),  // pasture
-                srgb(206.0, 194.0, 92.0),  // rapeseed
-                srgb(100.0, 104.0, 70.0),  // orchard ground
+                srgb(92.0, 108.0, 66.0),   // green crop
+                srgb(124.0, 132.0, 86.0),  // light green
+                srgb(184.0, 168.0, 124.0), // ripe cereal
+                srgb(178.0, 166.0, 138.0), // stubble
+                srgb(124.0, 108.0, 88.0),  // ploughed
+                srgb(152.0, 136.0, 110.0), // dry soil
+                srgb(120.0, 126.0, 88.0),  // pasture
+                srgb(196.0, 186.0, 104.0), // rapeseed
+                srgb(104.0, 106.0, 76.0),  // orchard ground
             ],
             crop_mean: DVec3::ZERO,
             asphalt: srgb(78.0, 78.0, 82.0),
@@ -360,9 +362,9 @@ impl SurfaceModel {
         let u = u01k(id, 2);
         let style = if dry > 0.5 && u < 0.6 * dry {
             2 // centre pivots
-        } else if u < 0.45 {
+        } else if u < 0.5 {
             0 // rectangular grid
-        } else if u < 0.75 {
+        } else if u < 0.88 {
             1 // irregular voronoi fields
         } else {
             3 // long strips
@@ -489,6 +491,12 @@ impl SurfaceModel {
             }
         }
         col *= 1.0 + 0.22 * detail;
+        // drainage lines: moister, greener, darker channels; dry bright spurs
+        if t.gully != 0.0 {
+            let ch = smoothstep(0.1, 0.8, -t.gully);
+            col = mixc(col, mixc(col * 0.8, pal.grass_wet * 0.85, 0.5 * smoothstep(-6.0, 4.0, temp)), 0.6 * ch);
+            col *= 1.0 + 0.06 * smoothstep(0.2, 1.0, t.gully);
+        }
 
         // ------------------------------------------------------------- rock (slope + expected)
         // effective slope: at coarse zooms the resolved slope underestimates the true one, so blend
@@ -496,15 +504,15 @@ impl SurfaceModel {
         let resolve = 1.0 - smoothstep(8.0, 80.0, gsd);
         let exp_slope = 0.12 + 0.75 * t.rock_expect;
         let slope_eff = lerp(exp_slope, slope.max(exp_slope * 0.6), resolve);
-        let rock_n = 0.6 * patch + 0.4 * pf.strata2;
-        let rock = smoothstep(0.55, 0.85, slope_eff + 0.25 * detail + 0.25 * rock_n + 0.2 * (t.rock_expect - 0.4))
+        let rock_n = 0.7 * patch + 0.3 * pf.land;
+        let rock = smoothstep(0.55, 0.85, slope_eff + 0.25 * detail + 0.25 * rock_n + 0.2 * (t.rock_expect - 0.4) + 0.15 * t.gully)
             * (1.0 - 0.5 * smoothstep(0.3, 0.8, cover) * (1.0 - t.mountain));
         if rock > 0.0 {
             let ri = st[2] * 2.0;
             let j = (ri.floor() as usize).min(1);
             let mut rc = mixc(pal.rock[j], pal.rock[j + 1], ri - j as f64);
             let strata = (l.ground / (6.0 + 10.0 * st[3]) + 3.0 * pf.strata).sin();
-            rc *= 1.0 + 0.12 * strata * band(8.0, gsd) + 0.25 * detail;
+            rc *= 1.0 + 0.06 * strata * band(8.0, gsd) + 0.25 * detail + 0.12 * pf.strata2;
             col = mixc(col, rc, rock);
             if rock > 0.5 {
                 class = lc::ROCK;
@@ -597,9 +605,15 @@ impl SurfaceModel {
             let clear = 1.0 - 0.85 * smoothstep(0.05, 0.4, t.agri) * flat_ok;
             let mut dens = (forest * 0.9 * clear + savanna + groves) * natural_ok * (1.0 - field_cov) * veg.tree_density;
             dens = dens.max(0.8 * riparian * veg.tree_density);
+            dens = (dens + 0.35 * smoothstep(0.2, 0.9, -t.gully) * smoothstep(0.2, 0.5, wet) * natural_ok).min(1.0);
             dens *= 1.0 - smoothstep(0.9, 1.4, slope);
             dens *= 1.0 - smoothstep(0.0, 0.6, t.mountain * smoothstep(-2.0, -6.0, temp)); // tree line
-            if dens > 0.0 {
+            // shrubs / bushes in steppe, maquis and rocky slopes (texture of natural ground)
+            let shrub_clim = smoothstep(0.15, 0.3, wet) * (1.0 - smoothstep(0.6, 0.8, wet)) * smoothstep(2.0, 10.0, temp);
+            let shrub_patch = smoothstep(-0.2, 0.5, patch + 0.4 * pf.land);
+            let shrub = (0.45 * shrub_clim * shrub_patch * (1.0 - forest) * natural_ok.max(0.4 * rock) * (1.0 - field_cov) * veg.tree_density)
+                .clamp(0.0, 0.6);
+            if dens > 0.0 || shrub > 0.01 {
                 let conifer = 1.0 - smoothstep(4.0, 13.0, temp);
                 let tropic = smoothstep(19.0, 25.0, temp) * smoothstep(0.55, 0.75, wet);
                 let dry = 1.0 - smoothstep(0.3, 0.5, wet);
@@ -615,6 +629,7 @@ impl SurfaceModel {
                         conifer: 0.0,
                     },
                     TreeLayer { cell: 13.0, seed: 0x7EE3, density: dens * tropic, height: 22.0 + 14.0 * tall, color: pal.crown_tropic, conifer: 0.0 },
+                    TreeLayer { cell: 3.2, seed: 0x7EE4, density: shrub, height: 1.6, color: pal.shrub, conifer: 0.0 },
                 ];
                 let (mut tc, th, tcov) = self.trees(&layers, q_loc, gsd, fw, p);
                 if tcov > 0.0 {
@@ -867,10 +882,19 @@ impl SurfaceModel {
                 (mix64(hc ^ k as u64), fx, fy2, edge, 1.0, fc)
             }
             1 => {
-                let wc = worley2(r.split.to_bits(), q, r.fw, 0.75);
-                let e = worley2_edge_dist(&wc, q);
-                let rel = q - wc.point;
-                (wc.id, rel.x, rel.y, e, 1.0, wc.point)
+                // irregular fields: Voronoi cells in a stretched frame (elongated fields), cell
+                // size modulated across the region
+                let aspect = 1.0 + 2.2 * u01k(r.split.to_bits(), 21);
+                let qs = DVec2::new(q.x / aspect, q.y);
+                let scale = 0.7 + 0.6 * (0.5 + 0.5 * perlin3(r.split.to_bits() ^ 0x5CA1, p / 2500.0));
+                let cell = r.fw / aspect.sqrt() * scale;
+                let wc = worley2(r.split.to_bits(), qs, cell, 0.85);
+                // edge distance back in metres: the bisector normal is stretched by the aspect
+                let dn = wc.point2 - wc.point;
+                let nrm = DVec2::new(dn.x / aspect, dn.y).length() / dn.length().max(1e-9);
+                let e = worley2_edge_dist(&wc, qs) / nrm.max(1e-6) * 1.0;
+                let rel = q - DVec2::new(wc.point.x * aspect, wc.point.y);
+                (wc.id, rel.x, rel.y, e, 1.0, DVec2::new(wc.point.x * aspect, wc.point.y))
             }
             _ => {
                 let s = r.fw;
@@ -905,21 +929,34 @@ impl SurfaceModel {
         col *= 1.0 + 0.10 * pf.field_var
             + 0.07 * perlin3(id, p / 35.0) * band(35.0, gsd)
             + 0.08 * perlin3(id ^ 1, p / (0.8 * r.fw));
+        // management direction: rows / tramlines along one field axis; in the headland (strip
+        // along the field edge where the tractor turns) the pattern runs parallel to the edge
         let row_ang = if u01k(id, 9) < 0.7 { 0.0 } else { std::f64::consts::FRAC_PI_2 };
+        let headland_w = 8.0 + 10.0 * u01k(id, 11);
+        let in_headland = edge < headland_w && matches!(kind, 0..=4);
+        let row_ang = if in_headland { row_ang + std::f64::consts::FRAC_PI_2 } else { row_ang };
         let (sa, ca) = row_ang.sin_cos();
         let along = fx * ca + fy * sa;
         let mut extra_h = 0.0;
+        // soil / growth texture at several scales (band-limited)
+        let tex = 0.08 * perlin3(id ^ 0x7E1, p / 7.0) * band(7.0, gsd)
+            + 0.06 * perlin3(id ^ 0x7E2, p / 2.5) * band(2.5, gsd)
+            + 0.05 * perlin3(id ^ 0x7E4, p / 22.0) * band(22.0, gsd)
+            + 0.08 * perlin3(id ^ 0x7E3, p / 90.0) * band(90.0, gsd);
+        col *= 1.0 + tex;
+        // wet hollows / bare patches inside some fields
+        if u01k(id, 12) < 0.35 {
+            let wp = perlin3(id ^ 0x5A7, p / (40.0 + 60.0 * u01k(id, 13)));
+            let m = smoothstep(0.25, 0.45, wp) * band(30.0, gsd).max(0.3);
+            col = mixc(col, col * DVec3::new(0.82, 0.86, 0.80), m);
+        }
+        if in_headland {
+            col *= 0.96 + 0.03 * u01k(id, 14);
+        }
         match kind {
             0 | 1 => {
                 let sp = 0.8 + 0.8 * u01k(id, 10);
                 col *= 1.0 + 0.12 * (along * std::f64::consts::TAU / sp).sin() * band(sp, gsd);
-            }
-            2 => {
-                // tramlines
-                let sp = 18.0 + 6.0 * u01k(id, 10);
-                let m = along.rem_euclid(sp);
-                let tl = band_cov(m - 0.75, 0.25, fw) + band_cov(m - 2.6, 0.25, fw);
-                col = mixc(col, col * 0.7, tl * band(1.0, gsd).max(0.4 * band(sp, gsd)));
             }
             3 => {
                 let sp = 6.0 + 4.0 * u01k(id, 10);
@@ -942,6 +979,14 @@ impl SurfaceModel {
                 extra_h = 4.0 * cov;
             }
             _ => {}
+        }
+        // tramlines (wheel tracks every ~18-36 m) in cereals / green crops / stubble
+        if matches!(kind, 0 | 1 | 2 | 3 | 7) && !in_headland {
+            let sp = 18.0 + 18.0 * (u01k(id, 15) * 2.0).floor() / 2.0;
+            let m = along.rem_euclid(sp);
+            let tl = band_cov(m - 0.9, 0.22, fw) + band_cov(m - 2.7, 0.22, fw);
+            let vis = band(1.2, gsd).max(0.35 * band(sp, gsd));
+            col = mixc(col, col * DVec3::new(0.78, 0.76, 0.74), tl * vis);
         }
         // field borders: hedges (trees) or tracks or simply a thin margin
         let bw = r.border_w;

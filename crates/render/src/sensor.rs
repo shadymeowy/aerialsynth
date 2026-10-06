@@ -436,13 +436,13 @@ mod tests {
     fn auto_exposure_converges_with_lag() {
         let mut s = Sensor::new(SensorSettings::default(), 8, 8);
         let bright = vec![1.0f32; 8 * 8 * 3];
-        let dark = vec![0.01f32; 8 * 8 * 3];
+        let dark = vec![0.002f32; 8 * 8 * 3];
         s.meter(&bright);
         let e0 = s.exposure_for(0.0);
         assert!((e0.ev - (0.16f64).log2()).abs() < 1e-9);
         s.meter(&dark);
         let e1 = s.exposure_for(0.1);
-        let e_inf = (0.16f64 / 0.01).log2();
+        let e_inf = (0.16f64 / 0.002).log2();
         // after 0.1 s with tau 0.6 only ~15% of the way
         let frac = (e1.ev - e0.ev) / (e_inf - e0.ev);
         assert!(frac > 0.1 && frac < 0.2, "{frac}");
