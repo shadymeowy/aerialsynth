@@ -32,7 +32,7 @@ python scripts/view_seq.py out/quick/seq.h5 view.png  # rgb | depth | flow | val
 |-----------|--------------|
 | `config`  | print the (merged) scenario YAML with all defaults |
 | `traj`    | synthesize a flight record → `trajectory.file` (CSV) |
-| `plan`    | tiles needed for all cameras along the trajectory (`-o tiles.txt`) |
+| `plan`    | tiles needed for all cameras along the trajectory, plus `tiles.margin` (default 2) rings of neighbours per zoom, so a consumer whose pose estimate is slightly off still finds the surrounding tiles (`-o tiles.txt`) |
 | `gen`     | generate tiles into `tiles.file` (from the plan, `--tiles list`, or `--bbox … --zooms a-b`); existing tiles are skipped, so the store grows lazily |
 | `render`  | create the sequence file: body poses, IMU, every camera's frame modalities (`--lazy` generates missing tiles on the fly and stores them) |
 | `events`  | add the event streams of cameras with an `events` modality (ESIM-style, realistic sensor noise); see `docs/events.md` |
@@ -236,6 +236,8 @@ attribute `t0` holds it in trajectory seconds).
 - **Trajectories:**
   - arc-length spline path (line, circle, figure8, lawnmower, random, waypoints)
   - AGL terrain following, crab angle into the crosswind
+  - the path is laid out in the tangent plane at its origin; heading, velocity and IMU truth are
+    expressed in the local NED frame along it (meridian convergence included)
   - Dryden-like turbulence and 1-cosine gusts acting on position/attitude through small ODEs
   - engine-harmonic and band-limited broadband vibration
   - optional stabilized gimbal (the whole sensor platform: `/pose` is then the gimbal frame)

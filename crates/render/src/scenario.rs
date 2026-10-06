@@ -194,7 +194,9 @@ pub struct TilesConfig {
     pub max_zoom: u8,
     /// Planning refines until a texel covers at most this many pixels (smaller = finer, safer).
     pub plan_texel_px: f64,
-    /// Neighbour tiles added around every planned tile (per zoom).
+    /// Rings of neighbour tiles added around every planned tile (per zoom), so that consumers
+    /// of the tile store (e.g. an odometry / SLAM system whose pose estimate is slightly off)
+    /// find the neighbourhood of every viewed tile.
     pub margin: u32,
     /// Plan with every n-th frame of each camera.
     pub plan_every: usize,
@@ -211,7 +213,7 @@ impl Default for TilesConfig {
             min_zoom: 2,
             max_zoom: 18,
             plan_texel_px: 0.8,
-            margin: 1,
+            margin: 2,
             plan_every: 1,
             lazy: false,
             cache_tiles: 2000,

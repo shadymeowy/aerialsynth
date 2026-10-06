@@ -196,13 +196,21 @@ impl<'a> Selector<'a> {
     }
 
     fn recurse(&self, id: TileId, data: Option<TileId>, out: &mut Vec<Unit>) {
-        // elevation range: the tile's own, else its data ancestor's (with margin), else default
-        let range = match data {
-            Some(d) if d == id => self.oracle.range(d),
-            Some(d) => self.oracle.range(d).map(|(a, b)| (a - 50.0, b + 50.0)),
-            None => None,
-        }
-        .unwrap_or(self.params.default_range);
+        // elevation range: the tile's own if known, else the nearest ancestor's with a margin
+        // (a tile that exists but is not generated yet, or is drawn from ancestor data), else the
+        // default. The default (-100..6000 m) makes far tiles look close and over-refines them.
+        let range = (data.is_some().then(|| self.oracle.range(id)).flatten())
+            .or_else(|| {
+                let mut a = id;
+                while let Some(p) = a.parent() {
+                    if let Some((lo, hi)) = self.oracle.range(p) {
+                        return Some((lo - 50.0, hi + 50.0));
+                    }
+                    a = p;
+                }
+                None
+            })
+            .unwrap_or(self.params.default_range);
         let Some((dist, r)) = self.visible(id, range) else { return };
         if self.wants_refine(id, dist, r) && id.children().iter().any(|c| self.oracle.exists(*c)) {
             for c in id.children() {

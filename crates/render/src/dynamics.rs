@@ -587,6 +587,7 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
 
     let mut out = Vec::new();
     let mut q_prev: Option<DQuat> = None;
+    let mut conv_prev: Option<f64> = None;
     let mut imu_f_acc = DVec3::ZERO;
     let mut imu_w_acc = DVec3::ZERO;
     let mut imu_n = 0usize;
@@ -645,6 +646,20 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
         let bank_cmd = (v * v * kappa / g).atan().clamp(-max_bank, max_bank);
         let gamma = (dhds + dev_d[1] / v).atan();
         let pitch_cmd = gamma + rc.trim_aoa_deg.to_radians();
+        // The path lives in the tangent plane at the origin; the local north at the aircraft is
+        // turned against the plane's north (meridian convergence, ~0.4° after 50 km east-west at
+        // 40°N). Track, heading, velocity and acceleration are expressed in the local NED frame:
+        // measure the plane direction of travel in local NED through the plane → geodetic map.
+        let (e, n) = path.at(s_eff);
+        let (stp, ctp) = track.sin_cos();
+        let conv = {
+            let (g0, g1) = (to_geo(e, n), to_geo(e + stp, n + ctp));
+            let d = geodesy::geodetic2ned(Geodetic::new(g1.lat, g1.lon, 0.0), Geodetic::new(g0.lat, g0.lon, 0.0), ell);
+            (d.y.atan2(d.x) - track + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+        };
+        let conv_rate = conv_prev.map(|c| (conv - c) / dt).unwrap_or(0.0);
+        conv_prev = Some(conv);
+        let track = track + conv;
         // heading: crab into the crosswind (air velocity = ground velocity - wind)
         let (st, ct) = track.sin_cos();
         // the crab angle is the yaw command (the airframe weathervanes through its yaw dynamics;
@@ -691,10 +706,9 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
         let tr = cfg.gimbal.vibration_transmission;
         let q = geodesy::euler_zyx_to_quat(heading + att[2] + tr * vib_a[2], p_out + tr * vib_a[1], r_out + tr * vib_a[0]);
 
-        // ---------------- position: path + cross / vertical deviation
-        let (e, n) = path.at(s_eff);
-        let (ce, cn) = (ct, -st); // right-hand normal of the track (east, north)
-        let geo = to_geo(e + ce * dev[0], n + cn * dev[0]);
+        // ---------------- position: path + cross / vertical deviation (in the plane)
+        let geo = to_geo(e + ctp * dev[0], n - stp * dev[0]);
+        let (ce, cn) = (ct, -st); // right-hand normal of the track (east, north), local
         let h = h_nom + dev[1];
         // along-track speed includes the along deviation rate (s_eff = s + dev[2])
         let va = v + dev_d[2];
@@ -706,7 +720,8 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
             let a_along = dev_acc[2];
             let a_cross = va * va * kappa + dev_acc[0];
             let a_up = va * va * alt_dd(s_eff) + dhds * dev_acc[2] + dev_acc[1];
-            let a_ned = DVec3::new(a_along * ct - a_cross * st, a_along * st + a_cross * ct, -a_up);
+            // (+ the turn of the local frame against the plane: d/dt of the rotated components)
+            let a_ned = DVec3::new(a_along * ct - a_cross * st - conv_rate * vel[1], a_along * st + a_cross * ct + conv_rate * vel[0], -a_up);
             let v_ned = DVec3::from_array(vel);
             let (sl, cl) = geo.lat.sin_cos();
             let rm = ell.meridian_radius(geo.lat) + h;
@@ -805,6 +820,34 @@ pub fn save_records(path: &std::path::Path, recs: &[Record], header_note: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Heading and velocity are in the local NED frame along a long east-west line (the path
+    /// lives in the origin's tangent plane; local north turns by the meridian convergence).
+    #[test]
+    fn local_frame_heading_far_from_origin() {
+        let ell = Ellipsoid::WGS84;
+        let mut cfg = SynthConfig { kind: PathKind::Line, heading_deg: 90.0, speed: 100.0, duration: 500.0, rate: 10.0, altitude_ref: AltitudeRef::Ellipsoid, altitude: 1000.0, ..Default::default() };
+        cfg.wind.speed = 0.0;
+        cfg.wind.turbulence = 0.0;
+        cfg.wind.gust_rate_per_min = 0.0;
+        cfg.vibration.harmonic_deg = 0.0;
+        cfg.vibration.broadband_deg = 0.0;
+        let recs = simulate(&cfg, (39.9, 32.8), &ell, None);
+        let (mut max_yaw, mut max_vel, mut conv): (f64, f64, f64) = (0.0, 0.0, 0.0);
+        for w in recs[10..].windows(3).step_by(50) {
+            // track from positions, in the local NED frame of the middle record
+            let d = geodesy::geodetic2ned(w[2].pose.geo, w[0].pose.geo, &ell);
+            let track = d.y.atan2(d.x);
+            let (yaw, _, _) = geodesy::quat_to_euler_zyx(w[1].pose.q_ned_body);
+            let v = w[1].vel_ned;
+            max_yaw = max_yaw.max((yaw - track).abs());
+            max_vel = max_vel.max((v[1].atan2(v[0]) - track).abs());
+            conv = conv.max((track - std::f64::consts::FRAC_PI_2).abs());
+        }
+        // the local track turns by ~0.4° over 50 km; heading and velocity follow it
+        assert!(conv.to_degrees() > 0.2, "{}", conv.to_degrees());
+        assert!(max_yaw.to_degrees() < 0.01 && max_vel.to_degrees() < 0.01, "yaw {} vel {} (deg)", max_yaw.to_degrees(), max_vel.to_degrees());
+    }
 
     /// Strapdown check: integrating the IMU truth with the navigation equation reproduces the
     /// recorded velocity changes; a coordinated turn shows the expected load factor.
