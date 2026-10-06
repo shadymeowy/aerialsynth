@@ -65,7 +65,7 @@ pub struct TilesConfig {
     pub plan_every: usize,
     /// Generate tiles missing from the store while rendering (and write them back).
     pub lazy: bool,
-    /// Tile cache size (tiles in memory) for rendering.
+    /// Tile cache size (tiles in memory, ~0.7 MB each) for rendering.
     pub cache_tiles: usize,
 }
 
@@ -79,7 +79,7 @@ impl Default for TilesConfig {
             margin: 1,
             plan_every: 1,
             lazy: false,
-            cache_tiles: 3000,
+            cache_tiles: 2000,
         }
     }
 }

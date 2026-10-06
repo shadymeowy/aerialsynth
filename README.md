@@ -16,7 +16,15 @@ cargo build --release
 ./target/release/terrain config > my.yaml             # full default scenario, every option documented by name
 ./target/release/terrain run -c configs/quick.yaml    # traj → plan → gen → render
 python scripts/check_gt.py out/quick/seq.h5           # validate flow vs depth + poses
+python scripts/view_seq.py out/quick/seq.h5 view.png  # rgb | depth | flow | validity
 ```
+
+`configs/dataset.yaml` is a fuller example:
+
+- 60 s of 600 m AGL flight with wind, gusts and vibration
+- forward-oblique distorted camera
+- clock-driven sun
+- full sensor model
 
 ## Subcommands
 
@@ -111,7 +119,9 @@ All subcommands read **one scenario YAML** (`-c`). Its sections are `world`, `ti
   - mountain belts (ridged multifractal with domain warp) carved by dendritic erosion gullies
   - hills with varying roughness, plateaus, arid mesas, dunes in sand seas
 - **Water:**
-  - river networks with valleys and floodplains, wet or dry beds
+  - rivers as a downhill flow graph with 3 levels (rivers, tributaries, streams; see
+    `world.hydro.levels`): dendritic, always draining downhill, meandering
+  - valleys, floodplains and riparian woods; wet or dry beds
   - lakes filled to their spill level, oceans with shallows and surf, beaches
 - **Climate:** latitude, lapse rate, Hadley dryness, coast and noise. It drives biomes: snow, rock,
   tundra, boreal, temperate and tropical forests, steppe, savanna, desert, wetlands.
@@ -131,6 +141,7 @@ All subcommands read **one scenario YAML** (`-c`). Its sections are `world`, `ti
 **Rendering (`crates/render`)**
 - **Geometry:**
   - CPU reference rasterizer; tile meshes are built on the fly from the elevation layer
+  - generic `CameraModel` trait: pinhole radtan and Kannala-Brandt fisheye included (`configs/fisheye.yaml`)
   - quadtree LOD by projected texel size, with skirts against cracks
   - f64 transforms and an exact per-vertex camera model (incl. distortion)
 - **Shading:**
@@ -160,8 +171,8 @@ crates/tilestore  HDF5 tile pyramid (layout above), parallel codec
 crates/terragen   procedural terrain generator
 crates/render     camera, trajectories/dynamics, LOD, rasterizer, lighting, sensor, writers, pipeline
 crates/cli        `terrain` binary
-scripts/          contact.py (generator contact sheets), check_gt.py (GT validation)
-configs/          example scenarios (quick, oblique_sunset, night, cruise)
+scripts/          contact.py (generator contact sheets), check_gt.py (GT validation), view_seq.py
+configs/          example scenarios (quick, dataset, fisheye, oblique_sunset, night, cruise)
 ```
 
 ## Performance (8 cores)
@@ -172,3 +183,18 @@ configs/          example scenarios (quick, oblique_sunset, night, cruise)
 | rendering 640×512, 3×3 supersampled, shadows | ~0.5 s per frame |
 
 `--lazy` rendering generates exactly the tiles each view needs.
+
+## Tests
+
+```
+cargo test --release
+```
+
+- **Geodesy:** checked against pymap3d.
+- **h5:** round trips, raw chunks, concurrency.
+- **Tile store:** round-trip test.
+- **Camera models and trajectories:** includes NED/ECEF CSV formats.
+- **LOD and dynamics.**
+- **Sensor:** auto-exposure ODE.
+- **Solar position.**
+- **Generator invariants:** determinism, seamless tile borders, parent ≈ mean of its children.

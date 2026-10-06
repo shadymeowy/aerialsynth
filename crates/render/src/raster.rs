@@ -382,7 +382,8 @@ impl Renderer {
         let rays: Vec<[f32; 3]> = (0..w * h)
             .into_par_iter()
             .map(|k| {
-                let r = model_ss.unproject(DVec2::new((k % w) as f64, (k / w) as f64)).unwrap_or(DVec3::Z);
+                // pixels outside the camera model's domain get a zero ray (rendered black)
+                let r = model_ss.unproject(DVec2::new((k % w) as f64, (k / w) as f64)).unwrap_or(DVec3::ZERO);
                 [r.x as f32, r.y as f32, r.z as f32]
             })
             .collect();
@@ -670,6 +671,9 @@ impl Renderer {
                         let g = gbuf[y * w + x];
                         let ray = self.rays[y * w + x];
                         let ray = DVec3::new(ray[0] as f64, ray[1] as f64, ray[2] as f64);
+                        if ray == DVec3::ZERO {
+                            continue; // outside the lens image circle
+                        }
                         let dir_w = cam.r_ecef_cam * ray;
                         if g.unit == NO_UNIT {
                             acc += atmo.sky(dir_w, cam_up);

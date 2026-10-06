@@ -208,7 +208,13 @@ pub fn render_sequence(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, ge
     let ell = store.meta().ellipsoid();
     let model = scn.camera.build()?;
     let (w, h) = (model.width() as usize, model.height() as usize);
-    let mut cache = TileCache::new(store.clone(), Layer::ALL.to_vec(), scn.tiles.cache_tiles);
+    // load only the layers the shading mode needs (~40% less memory per cached tile)
+    let mut layers = vec![Layer::Elevation, Layer::Landcover, Layer::Emission];
+    match scn.render.shading {
+        crate::raster::Shading::Relit => layers.extend([Layer::Albedo, Layer::Normal]),
+        crate::raster::Shading::Satellite => layers.push(Layer::Rgb),
+    }
+    let mut cache = TileCache::new(store.clone(), layers, scn.tiles.cache_tiles);
     if scn.tiles.lazy {
         if let Some(g) = gen.clone() {
             cache = cache.with_generator(g, scn.tiles.max_zoom, true);

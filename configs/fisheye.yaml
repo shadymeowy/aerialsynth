@@ -1,0 +1,9 @@
+# Nadir fisheye (Kannala-Brandt, ~180° diagonal) at 800 m AGL; reuses the quick tile store lazily.
+world: { seed: 1 }
+tiles: { file: out/quick/world.h5, max_zoom: 17, lazy: true }
+trajectory:
+  file: out/fisheye/traj.csv
+  synth: { kind: circle, altitude: 800, speed: 40, duration: 2, radius: 900 }
+camera: { model: kannala_brandt, width: 640, height: 640, fx: 205, fy: 205, cx: 319.5, cy: 319.5, k1: 0.02, k2: -0.005 }
+extrinsics: { mount: nadir }
+output: { dir: out/fisheye/seq, h5: out/fisheye/seq.h5, frame_rate: 5 }

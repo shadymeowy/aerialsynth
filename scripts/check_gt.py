@@ -26,15 +26,31 @@ a = ap.parse_args()
 f = h5py.File(a.seq, "r")
 rgb = f["rgb"]; flow = f["flow"]; valid = f["flow_valid"]; depth = f["depth"]
 K = np.array(f["camera"].attrs["K"]).reshape(3, 3)
-dist = np.array(f["camera"].attrs["dist_radtan"])
+cam_attrs = f["camera"].attrs
+fisheye = "dist_kb" in cam_attrs
+dist = np.array(cam_attrs["dist_kb"] if fisheye else cam_attrs["dist_radtan"])
 pos = f["pose/cam_position_ecef"][:]; q = f["pose/cam_q_ecef"][:]
 n = rgb.shape[0]
 frames = [int(x) for x in a.frames.split(",")] if a.frames else list(range(0, n - 1, max(1, (n - 1) // 6)))
 H, W = rgb.shape[1:3]
 yy, xx = np.mgrid[0:H, 0:W].astype(np.float64)
 
+def kb_rd(th):
+    k1, k2, k3, k4 = dist
+    t2 = th * th
+    return th * (1 + t2 * (k1 + t2 * (k2 + t2 * (k3 + t2 * k4))))
+
 def undistort(u, v):
+    """pixel -> normalized ray (x/z, y/z) for radtan, or unit-sphere based (sinθ/cosθ) for KB"""
     xd = (u - K[0, 2]) / K[0, 0]; yd = (v - K[1, 2]) / K[1, 1]
+    if fisheye:
+        rd = np.hypot(xd, yd); th = rd.copy()
+        for _ in range(30):
+            e = 1e-7
+            df = (kb_rd(th + e) - kb_rd(th - e)) / (2 * e)
+            th = th - (kb_rd(th) - rd) / df
+        s = np.where(rd > 1e-12, np.tan(th) / np.maximum(rd, 1e-12), 1.0)
+        return xd * s, yd * s
     x, y = xd.copy(), yd.copy()
     k1, k2, p1, p2, k3 = dist
     for _ in range(20):
@@ -44,6 +60,10 @@ def undistort(u, v):
     return x, y
 
 def project(Pc):
+    if fisheye:
+        r = np.hypot(Pc[..., 0], Pc[..., 1]); th = np.arctan2(r, Pc[..., 2]); rd = kb_rd(th)
+        s = np.where(r > 1e-12, rd / np.maximum(r, 1e-12), 0.0)
+        return K[0, 0] * Pc[..., 0] * s + K[0, 2], K[1, 1] * Pc[..., 1] * s + K[1, 2]
     x = Pc[..., 0] / Pc[..., 2]; y = Pc[..., 1] / Pc[..., 2]
     k1, k2, p1, p2, k3 = dist
     r2 = x * x + y * y; rad = 1 + r2 * (k1 + r2 * (k2 + r2 * k3))

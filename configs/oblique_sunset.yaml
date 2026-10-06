@@ -8,4 +8,4 @@ camera: { model: pinhole_radtan, width: 640, height: 480, fx: 400, fy: 400, cx: 
 extrinsics: { mount: forward, pitch_deg: -35 }
 render:
   lighting: { mode: clock, date: "2026-06-21", time_utc: "16:20:00" }
-output: { dir: out/oblique/seq, h5: null, frame_rate: 2, max_frames: 3 }
+output: { dir: out/oblique/seq, h5: null, frame_rate: 2, max_frames: 2 }

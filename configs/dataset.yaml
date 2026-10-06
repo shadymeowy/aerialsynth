@@ -1,0 +1,53 @@
+# Example dataset scenario: 60 s of low-level flight (600 m AGL) with a forward-oblique camera,
+# wind / turbulence / vibration from the flight recorder, late-afternoon sun, full sensor model.
+#   terrain run -c configs/dataset.yaml
+world:
+  seed: 7
+  supersample: 2
+tiles:
+  file: out/dataset/world.h5
+  max_zoom: 18
+  plan_every: 2          # plan with every 2nd frame (views overlap heavily)
+camera:
+  model: pinhole_radtan
+  width: 752
+  height: 480
+  fx: 420.0
+  fy: 420.0
+  cx: 375.5
+  cy: 239.5
+  k1: -0.12
+  k2: 0.02
+  p1: 0.0003
+  p2: -0.0002
+extrinsics:
+  mount: forward
+  pitch_deg: -40         # look 40° below the nose
+  translation: [0.4, 0.0, 0.1]
+trajectory:
+  file: out/dataset/traj.csv
+  synth:
+    kind: random
+    altitude: 600
+    altitude_ref: agl
+    speed: 40
+    duration: 60
+    rate: 400            # high-rate record for motion blur / vibration
+    radius: 1500
+    seed: 3
+    wind: { speed: 7, direction_deg: 250, turbulence: 1.2, gust_rate_per_min: 1.0, gust_amplitude: 4 }
+    vibration: { harmonic_deg: 0.05, harmonic_hz: 42, broadband_deg: 0.04 }
+render:
+  supersample: 3
+  shading: relit
+  lighting: { mode: clock, date: "2026-09-15", time_utc: "14:30:00", time_scale: 1.0 }
+  atmosphere: { visibility_km: 45 }
+sensor:
+  exposure: { mode: auto, tau: 0.5, max_time: 0.008 }
+  motion_blur: { enabled: true, max_samples: 16 }
+  optics: { defocus_px: 0.4, chromatic_aberration_px: 0.5, vignette: 0.3 }
+  noise: { enabled: true, read: 0.8, shot: 0.2 }
+output:
+  dir: out/dataset/seq
+  h5: out/dataset/seq.h5
+  frame_rate: 10

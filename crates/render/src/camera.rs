@@ -54,6 +54,23 @@ pub enum CameraConfig {
         #[serde(default)]
         k3: f64,
     },
+    /// Kannala–Brandt / OpenCV fisheye (equidistant + polynomial): r_d = θ (1 + k1 θ² + k2 θ⁴ + k3 θ⁶ + k4 θ⁸).
+    KannalaBrandt {
+        width: u32,
+        height: u32,
+        fx: f64,
+        fy: f64,
+        cx: f64,
+        cy: f64,
+        #[serde(default)]
+        k1: f64,
+        #[serde(default)]
+        k2: f64,
+        #[serde(default)]
+        k3: f64,
+        #[serde(default)]
+        k4: f64,
+    },
 }
 
 impl CameraConfig {
@@ -83,7 +100,137 @@ impl CameraConfig {
                 }
                 Ok(Arc::new(PinholeRadtan::new(width, height, fx, fy, cx, cy, [k1, k2, p1, p2, k3])))
             }
+            CameraConfig::KannalaBrandt { width, height, fx, fy, cx, cy, k1, k2, k3, k4 } => {
+                if width == 0 || height == 0 || fx <= 0.0 || fy <= 0.0 {
+                    bail!("invalid fisheye intrinsics");
+                }
+                Ok(Arc::new(KannalaBrandt::new(width, height, fx, fy, cx, cy, [k1, k2, k3, k4])))
+            }
         }
+    }
+}
+
+/// Kannala–Brandt (OpenCV fisheye) camera.
+#[derive(Clone, Debug)]
+pub struct KannalaBrandt {
+    pub w: u32,
+    pub h: u32,
+    pub fx: f64,
+    pub fy: f64,
+    pub cx: f64,
+    pub cy: f64,
+    pub k: [f64; 4],
+    theta_max: f64,
+    half_angle: f64,
+}
+
+impl KannalaBrandt {
+    pub fn new(w: u32, h: u32, fx: f64, fy: f64, cx: f64, cy: f64, k: [f64; 4]) -> Self {
+        let mut c = KannalaBrandt { w, h, fx, fy, cx, cy, k, theta_max: std::f64::consts::PI * 0.95, half_angle: 0.0 };
+        // validity: r_d(θ) must be monotonic
+        let mut prev = 0.0;
+        let mut th = 0.0;
+        while th < std::f64::consts::PI * 0.95 {
+            th += 0.002;
+            let r = c.rd(th);
+            if r <= prev {
+                c.theta_max = th - 0.002;
+                break;
+            }
+            prev = r;
+        }
+        // half angle of the cone covering the image: from the border pixels; if part of the image
+        // lies outside the model's domain (image circle), the whole valid domain is visible
+        let mut ha: f64 = 0.0;
+        let (wf, hf) = (w as f64, h as f64);
+        for k in 0..=16 {
+            let t = k as f64 / 16.0;
+            for (u, v) in [(t * wf - 0.5, -0.5), (t * wf - 0.5, hf - 0.5), (-0.5, t * hf - 0.5), (wf - 0.5, t * hf - 0.5)] {
+                match c.unproject(DVec2::new(u, v)) {
+                    Some(r) => ha = ha.max(r.z.clamp(-1.0, 1.0).acos()),
+                    None => ha = c.theta_max,
+                }
+            }
+        }
+        c.half_angle = ha.min(c.theta_max);
+        c
+    }
+    #[inline]
+    fn rd(&self, th: f64) -> f64 {
+        let t2 = th * th;
+        th * (1.0 + t2 * (self.k[0] + t2 * (self.k[1] + t2 * (self.k[2] + t2 * self.k[3]))))
+    }
+}
+
+impl CameraModel for KannalaBrandt {
+    fn width(&self) -> u32 {
+        self.w
+    }
+    fn height(&self) -> u32 {
+        self.h
+    }
+    fn project(&self, p: DVec3) -> Option<DVec2> {
+        let r = (p.x * p.x + p.y * p.y).sqrt();
+        let th = r.atan2(p.z);
+        if th > self.theta_max {
+            return None;
+        }
+        let rd = self.rd(th);
+        let (ux, uy) = if r > 1e-12 { (p.x / r, p.y / r) } else { (0.0, 0.0) };
+        Some(DVec2::new(self.fx * rd * ux + self.cx, self.fy * rd * uy + self.cy))
+    }
+    fn unproject(&self, px: DVec2) -> Option<DVec3> {
+        let mx = (px.x - self.cx) / self.fx;
+        let my = (px.y - self.cy) / self.fy;
+        let rd = (mx * mx + my * my).sqrt();
+        if rd < 1e-12 {
+            return Some(DVec3::Z);
+        }
+        if rd > self.rd(self.theta_max) {
+            return None; // outside the model's valid (monotonic) domain
+        }
+        // Newton on θ
+        let mut th = rd.min(self.theta_max);
+        for _ in 0..30 {
+            let f = self.rd(th) - rd;
+            let e = 1e-7;
+            let df = (self.rd(th + e) - self.rd(th - e)) / (2.0 * e);
+            if df.abs() < 1e-12 {
+                break;
+            }
+            let step = f / df;
+            th -= step;
+            if step.abs() < 1e-14 {
+                break;
+            }
+        }
+        if !(0.0..=self.theta_max + 1e-6).contains(&th) {
+            return None;
+        }
+        let s = th.sin();
+        Some(DVec3::new(mx / rd * s, my / rd * s, th.cos()))
+    }
+    fn max_half_angle(&self) -> f64 {
+        self.half_angle
+    }
+    fn focal_px(&self) -> f64 {
+        self.fx.max(self.fy)
+    }
+    fn scaled(&self, s: u32) -> Arc<dyn CameraModel> {
+        let sf = s as f64;
+        let off = (sf - 1.0) * 0.5;
+        let mut c = self.clone();
+        c.w = self.w * s;
+        c.h = self.h * s;
+        c.fx *= sf;
+        c.fy *= sf;
+        c.cx = self.cx * sf + off;
+        c.cy = self.cy * sf + off;
+        Arc::new(c)
+    }
+    fn config(&self) -> CameraConfig {
+        let [k1, k2, k3, k4] = self.k;
+        CameraConfig::KannalaBrandt { width: self.w, height: self.h, fx: self.fx, fy: self.fy, cx: self.cx, cy: self.cy, k1, k2, k3, k4 }
     }
 }
 
@@ -306,6 +453,18 @@ mod tests {
         for (u, v) in [(0.0, 0.0), (639.0, 479.0), (320.0, 240.0), (100.0, 400.0)] {
             let r = c.unproject(DVec2::new(u, v)).unwrap();
             let px = c.project(r * 7.0).unwrap();
+            assert!((px - DVec2::new(u, v)).length() < 1e-6, "{u},{v} -> {px:?}");
+        }
+    }
+
+    #[test]
+    fn fisheye_roundtrip() {
+        let c = KannalaBrandt::new(800, 800, 250.0, 250.0, 399.5, 399.5, [0.02, -0.01, 0.003, -0.0005]);
+        assert!(c.max_half_angle() > 1.2, "{}", c.max_half_angle());
+        assert!(c.unproject(DVec2::new(0.0, 0.0)).is_none() || c.max_half_angle() < std::f64::consts::PI);
+        for (u, v) in [(60.0, 60.0), (799.0, 400.0), (399.5, 399.5), (100.0, 650.0)] {
+            let r = c.unproject(DVec2::new(u, v)).unwrap();
+            let px = c.project(r * 3.0).unwrap();
             assert!((px - DVec2::new(u, v)).length() < 1e-6, "{u},{v} -> {px:?}");
         }
     }
