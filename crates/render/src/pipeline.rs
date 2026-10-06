@@ -212,7 +212,7 @@ fn tile_cache(scn: &Scenario, store: Arc<TileStore>, gen: Option<Arc<Generator>>
 fn renderer(scn: &Scenario, model: Arc<dyn CameraModel>, supersample: u32, ell: Ellipsoid, cache: Arc<TileCache>) -> Renderer {
     let mut rs = scn.render.clone();
     rs.supersample = supersample.max(1);
-    rs.min_zoom = scn.tiles.min_zoom;
+    rs.min_zoom = rs.min_zoom.max(scn.tiles.min_zoom);
     rs.max_zoom = rs.max_zoom.min(scn.tiles.max_zoom);
     Renderer::new(model, rs, ell, cache)
 }
@@ -230,8 +230,22 @@ fn compute_flow(points: &[Option<DVec3>], w: usize, h: usize, cam_b: &CamPose, d
             fr[2 * x + 1] = (px.y - y as f64) as f32;
             let (u, v) = (px.x.round(), px.y.round());
             if u >= 0.0 && v >= 0.0 && (u as usize) < w && (v as usize) < h {
-                let d = depth_b[v as usize * w + u as usize] as f64;
-                if (pc.z - d).abs() < 0.02 * pc.z.abs() + 0.5 {
+                // visible if the target pixel's depth matches; the tolerance covers the rounding
+                // to the nearest pixel (local depth gradient) plus a small relative margin, so
+                // occluders (buildings, trees) of a few metres are detected even at 1 km
+                let (u, v) = (u as usize, v as usize);
+                let d = depth_b[v * w + u] as f64;
+                let mut grad: f64 = 0.0;
+                for (du, dv) in [(-1i64, 0i64), (1, 0), (0, -1), (0, 1)] {
+                    let (uu, vv) = (u as i64 + du, v as i64 + dv);
+                    if uu >= 0 && vv >= 0 && (uu as usize) < w && (vv as usize) < h {
+                        let dn = depth_b[vv as usize * w + uu as usize] as f64;
+                        if dn.is_finite() {
+                            grad = grad.max((dn - d).abs());
+                        }
+                    }
+                }
+                if (pc.z - d).abs() < 0.5 + 0.003 * pc.z.abs() + 0.6 * grad.min(0.05 * pc.z.abs()) {
                     vr[x] = 1;
                 }
             }
@@ -305,13 +319,13 @@ fn render_camera(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], win: Window,
     let (w, h) = (model.width() as usize, model.height() as usize);
     let times = frame_times(scn, spec, win);
     let n = times.len();
-    let ss = match &spec.rgb {
-        Some(r) => r.supersample.unwrap_or(scn.render.supersample),
-        None => 1, // geometry only: sampled at the pixel centres
-    };
-    let mut renderer = renderer(scn, model.clone(), ss, ell, cache);
+    let mut renderer = renderer(scn, model.clone(), spec.supersample(&scn.render), ell, cache);
     renderer.geometry_only = spec.rgb.is_none();
-    let mut sensor = spec.rgb.as_ref().map(|r| Sensor::new(r.sensor.clone(), w, h));
+    let mut sensor = spec.rgb.as_ref().map(|r| {
+        let mut cfg = r.sensor.clone();
+        cfg.noise.seed ^= spec.seed_mix();
+        Sensor::new(cfg, w, h)
+    });
     let mut writer = CameraWriter::new(file, spec, n, &scn.output.compression, win.t0)?;
     let mut png = match &scn.output.png_dir {
         Some(d) => Some(PngWriter::new(&d.join(spec.slug()), spec, win.t0)?),
@@ -400,7 +414,7 @@ fn write_imu(scn: &Scenario, imu: &crate::imu::ImuConfig, poses: &[Pose], win: W
         eprintln!("imu: trajectory has no IMU truth columns (f_*, w_*); deriving from poses numerically (lower fidelity)");
     }
     let d = crate::imu::synthesize(imu, poses, truth.as_deref(), ell, win.t0, win.t1)?;
-    crate::imu::write_h5(file, imu, &d, win.t0)?;
+    crate::imu::write_h5(file, imu, &d, win.t0, scn.output.compression.level)?;
     Ok(d.t.len())
 }
 

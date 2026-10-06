@@ -27,7 +27,8 @@ pub struct TileCache {
 struct Inner {
     map: HashMap<TileId, (Arc<TileData>, u64)>,
     tick: u64,
-    generated: Vec<TileData>,
+    /// tiles generated (and written back) so far
+    generated: usize,
 }
 
 impl TileCache {
@@ -59,26 +60,40 @@ impl TileCache {
                 return Some(e.0.clone());
             }
         }
-        let t = self.load(id).ok().flatten()?;
+        let (t, gen) = self.load(id).ok().flatten()?;
+        let t = if gen { self.store_generated(vec![t]).ok()?.pop()? } else { t };
         let t = Arc::new(t);
         self.insert(id, t.clone());
         Some(t)
     }
 
-    fn load(&self, id: TileId) -> Result<Option<TileData>> {
+    /// Read a tile from the store, or generate it (second value = generated).
+    fn load(&self, id: TileId) -> Result<Option<(TileData, bool)>> {
         if let Some(t) = self.store.read_tile(id, &self.layers)? {
-            return Ok(Some(t));
+            return Ok(Some((t, false)));
         }
         if let Some(g) = &self.generator {
             if id.z <= self.lazy_max_zoom {
-                let t = g.tile(id);
-                if self.write_back {
-                    self.inner.lock().generated.push(t.clone());
-                }
-                return Ok(Some(t));
+                return Ok(Some((g.tile(id), true)));
             }
         }
         Ok(None)
+    }
+
+    /// Write generated tiles back right away (so memory stays bounded and an evicted tile is
+    /// re-read instead of re-generated); returns them reduced to the cached layers.
+    fn store_generated(&self, mut tiles: Vec<TileData>) -> Result<Vec<TileData>> {
+        if tiles.is_empty() {
+            return Ok(tiles);
+        }
+        if self.write_back {
+            self.store.write_tiles(&tiles)?;
+            self.inner.lock().generated += tiles.len();
+        }
+        for t in &mut tiles {
+            t.retain_layers(&self.layers);
+        }
+        Ok(tiles)
     }
 
     fn insert(&self, id: TileId, t: Arc<TileData>) {
@@ -102,19 +117,25 @@ impl TileCache {
             let g = self.inner.lock();
             ids.iter().copied().filter(|id| !g.map.contains_key(id)).collect()
         };
-        let loaded: Vec<(TileId, TileData)> =
-            missing.par_iter().filter_map(|&id| self.load(id).ok().flatten().map(|t| (id, t))).collect();
-        for (id, t) in loaded {
-            self.insert(id, Arc::new(t));
+        let loaded: Vec<(TileData, bool)> = missing.par_iter().filter_map(|&id| self.load(id).ok().flatten()).collect();
+        let (gen, stored): (Vec<_>, Vec<_>) = loaded.into_iter().partition(|(_, g)| *g);
+        let gen = match self.store_generated(gen.into_iter().map(|(t, _)| t).collect()) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("warning: writing generated tiles back failed: {e:#}");
+                vec![]
+            }
+        };
+        for t in stored.into_iter().map(|(t, _)| t).chain(gen) {
+            self.insert(t.id, Arc::new(t));
         }
     }
 
-    /// Write lazily generated tiles back to the store.
+    /// Flush the store; returns the number of tiles generated and written back so far.
     pub fn flush_generated(&self) -> Result<usize> {
-        let tiles = std::mem::take(&mut self.inner.lock().generated);
-        let n = tiles.len();
+        let n = self.inner.lock().generated;
         if n > 0 {
-            self.store.write_tiles(&tiles)?;
+            self.store.flush()?;
         }
         Ok(n)
     }

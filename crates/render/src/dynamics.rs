@@ -153,7 +153,9 @@ impl Default for VibrationConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct GimbalConfig {
-    /// Stabilize the camera against body roll/pitch (camera stays level; heading follows body).
+    /// Stabilize against body roll / pitch (heading follows the body). The recorded pose is
+    /// then that of the stabilized platform: every sensor (cameras and IMU) is assumed to sit
+    /// on the gimbal, and /pose describes the gimbal frame, not the airframe.
     pub stabilized: bool,
     /// Gimbal response time constant (s).
     pub tau: f64,
@@ -180,7 +182,9 @@ pub struct SynthConfig {
     /// True airspeed (m/s).
     pub speed: f64,
     pub duration: f64,
-    /// Recording rate (Hz). Keep ≥ ~4x the vibration frequency for faithful blur.
+    /// Recording rate (Hz). Keep ≥ ~4x the vibration frequency for faithful blur. Records are
+    /// written every round(1 / (rate·dt)) integration steps, so the effective rate is
+    /// 1 / (k·dt) (e.g. 300 Hz with dt = 1 ms becomes 333 Hz).
     pub rate: f64,
     /// Integration step (s).
     pub dt: f64,

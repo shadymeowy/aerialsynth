@@ -6,10 +6,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SunMode {
-    /// Use `sun_azimuth_deg` / `sun_elevation_deg` (in the local frame of the first pose).
+    /// Use `sun_azimuth_deg` / `sun_elevation_deg`, relative to the local ENU frame at each
+    /// camera position.
     Fixed,
-    /// Solar position from `date` + `time_utc` at the camera location; time advances with the
-    /// trajectory time multiplied by `time_scale` (0 = static clock).
+    /// Solar position from `date` + `time_utc` at the camera location; the clock advances with
+    /// the time since the trajectory start multiplied by `time_scale` (0 = static clock).
     Clock,
 }
 

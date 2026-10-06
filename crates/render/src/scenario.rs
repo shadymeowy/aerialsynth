@@ -117,6 +117,20 @@ impl CameraSpec {
         self.rgb.is_some() || self.depth.is_some() || self.flow.is_some() || self.landcover.is_some()
     }
 
+    /// Seed offset of this camera (FNV-1a of the path), mixed into its noise seeds so that two
+    /// cameras with the same settings do not get identical noise.
+    pub fn seed_mix(&self) -> u64 {
+        self.path.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3))
+    }
+
+    /// Supersampling of this camera's frames.
+    pub fn supersample(&self, render: &RenderSettings) -> u32 {
+        match &self.rgb {
+            Some(r) => r.supersample.unwrap_or(render.supersample).max(1),
+            None => 1, // geometry only: sampled at the pixel centres
+        }
+    }
+
     /// File-name friendly version of the path ("/ovc/left" → "ovc_left").
     pub fn slug(&self) -> String {
         let s: String = self.path.trim_matches('/').chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
@@ -308,10 +322,32 @@ impl Scenario {
         if let Some(imu) = &self.imu {
             groups.push(("imu", imu.path.clone()));
         }
+        if self.output.pose.rate_hz <= 0.0 {
+            bail!("output.pose.rate_hz must be > 0");
+        }
+        if let Some(imu) = &self.imu {
+            if imu.rate_hz <= 0.0 {
+                bail!("imu.rate_hz must be > 0");
+            }
+        }
         for c in &self.cameras {
             groups.push(("camera", c.path.clone()));
             if c.has_frames() && c.frame_rate <= 0.0 {
                 bail!("camera {}: frame_rate must be > 0", c.path);
+            }
+            if c.time_offset < 0.0 {
+                bail!("camera {}: time_offset must be >= 0 (frames before the sequence start)", c.path);
+            }
+            // geometry GT is taken at the central sub-sample, which is the pixel centre only for
+            // odd supersampling
+            let geometry = c.depth.is_some() || c.flow.is_some() || c.landcover.is_some();
+            if geometry && c.supersample(&self.render) % 2 == 0 {
+                bail!("camera {}: supersample {} is even; depth / flow / landcover need an odd supersample (pixel-centre sample)", c.path, c.supersample(&self.render));
+            }
+            if let Some(e) = &c.events {
+                if e.max_px_per_step <= 0.0 || e.min_rate_hz <= 0.0 || e.max_rate_hz < e.min_rate_hz {
+                    bail!("camera {}: events need max_px_per_step > 0 and 0 < min_rate_hz <= max_rate_hz", c.path);
+                }
             }
             c.intrinsics.build().with_context(|| format!("camera {}", c.path))?;
         }

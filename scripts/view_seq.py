@@ -18,7 +18,8 @@ def flow_to_rgb(f, maxmag=None):
     return (np.stack(rgb, -1) * 255).astype(np.uint8)
 
 def depth_to_rgb(d):
-    fin = np.isfinite(d)
+    d = np.abs(d)  # z-depth is negative beyond 90° on wide-angle models
+    fin = np.isfinite(d) & (d > 0)
     out = np.zeros(d.shape + (3,), np.uint8)
     if fin.any():
         lo, hi = np.percentile(np.log(d[fin]), [1, 99])
@@ -34,6 +35,8 @@ f = h5py.File(a.seq, "r")
 path = a.camera or next(p for p in cameras(f) if "t" in f[p])
 g = f[path]
 n = g["t"].shape[0]
+if n == 0:
+    raise SystemExit(f"{path}: no frames")
 frames = [int(x) for x in a.frames.split(",")] if a.frames else sorted({0, n // 2, max(n - 2, 0)})
 rows = []
 for k in frames:

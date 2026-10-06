@@ -260,7 +260,7 @@ pub fn synthesize(cfg: &ImuConfig, poses: &[Pose], truth: Option<&[ImuTruth]>, e
 }
 
 /// Write the IMU group into the sequence file. `t0` = trajectory time of the sequence start.
-pub fn write_h5(f: &h5::File, cfg: &ImuConfig, d: &ImuData, t0: f64) -> Result<()> {
+pub fn write_h5(f: &h5::File, cfg: &ImuConfig, d: &ImuData, t0: f64, level: u8) -> Result<()> {
     use crate::output::{fresh_group, to_us, transform_4x4};
     let g = fresh_group(f, &cfg.path)?;
     let n = d.t.len();
@@ -268,7 +268,7 @@ pub fn write_h5(f: &h5::File, cfg: &ImuConfig, d: &ImuData, t0: f64) -> Result<(
     g.new_dataset::<i64>().shape(&[n]).create("t")?.write_all(&ts)?;
     let put = |name: &str, v: &[DVec3]| -> Result<()> {
         let flat: Vec<f64> = v.iter().flat_map(|x| x.to_array()).collect();
-        g.new_dataset::<f64>().shape(&[n, 3]).chunk(&[n.clamp(1, 4096), 3]).deflate(4).create(name)?.write_all(&flat)?;
+        g.new_dataset::<f64>().shape(&[n, 3]).chunk(&[n.clamp(1, 4096), 3]).deflate(level.min(9)).create(name)?.write_all(&flat)?;
         Ok(())
     };
     put("accel", &d.accel)?;

@@ -90,6 +90,22 @@ pub struct TileData {
 }
 
 impl TileData {
+    /// Drop the layers not in `keep` (to save memory in caches).
+    pub fn retain_layers(&mut self, keep: &[Layer]) {
+        for l in Layer::ALL {
+            if !keep.contains(&l) {
+                match l {
+                    Layer::Rgb => self.rgb = vec![],
+                    Layer::Albedo => self.albedo = vec![],
+                    Layer::Elevation => self.elevation = vec![],
+                    Layer::Normal => self.normal = vec![],
+                    Layer::Landcover => self.landcover = vec![],
+                    Layer::Emission => self.emission = vec![],
+                }
+            }
+        }
+    }
+
     pub fn has(&self, l: Layer) -> bool {
         match l {
             Layer::Rgb => !self.rgb.is_empty(),

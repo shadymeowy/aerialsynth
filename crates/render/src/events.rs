@@ -478,11 +478,11 @@ pub fn simulate(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], cache: Arc<Ti
     let (w, h) = (model.width() as usize, model.height() as usize);
     let mut rs: RenderSettings = scn.render.clone();
     rs.supersample = ec.supersample.max(1);
-    rs.min_zoom = scn.tiles.min_zoom;
+    rs.min_zoom = rs.min_zoom.max(scn.tiles.min_zoom);
     rs.max_zoom = rs.max_zoom.min(scn.tiles.max_zoom);
     let mut renderer = Renderer::new(model.clone(), rs, ell, cache);
     renderer.split_flicker = true;
-    let mut sensor = EventSensor::new(ec.clone(), w, h);
+    let mut sensor = EventSensor::new(EventConfig { seed: ec.seed ^ spec.seed_mix(), ..ec.clone() }, w, h);
     let g = file.ensure_group(crate::scenario::h5path(&spec.path))?;
     if !g.exists("calib") {
         crate::output::write_camera_calib(&g, &spec.intrinsics, crate::output::transform_4x4(ext.r_body_cam(), ext.t_body_cam()))?;
