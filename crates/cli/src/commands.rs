@@ -270,8 +270,11 @@ fn do_events(s: &Scenario) -> Result<()> {
     })?;
     b.finish();
     eprintln!("simulated events in {:.1}s → {}", t0.elapsed().as_secs_f64(), s.output.file.display());
-    for (cam, n) in &res {
-        eprintln!("  {cam}/events: {n} events");
+    for (cam, st) in &res {
+        eprintln!(
+            "  {cam}/events: {} events; {} renders ({:.1}s), {} sensor steps ({:.1}s)",
+            st.events, st.renders, st.render_s, st.steps, st.step_s
+        );
     }
     Ok(())
 }

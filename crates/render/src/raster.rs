@@ -79,12 +79,44 @@ pub struct FrameOut {
     pub radiance: Vec<f32>,
     /// z-depth along the optical axis (m); +inf where no terrain (sky)
     pub depth: Vec<f32>,
-    /// ECEF point of each pixel centre (None = sky); used for flow
+    /// ECEF point of each pixel (None = sky), taken at the central sub-sample; used for flow.
+    /// With an even supersample there is no sub-sample at the pixel centre: the points (and
+    /// depth, land cover) belong to pixel + `sample_offset` in both axes.
     pub points: Vec<Option<DVec3>>,
+    /// Offset (px) of the geometry sample from the pixel centre: 0 for odd supersampling,
+    /// 1/4 for 2x, 1/8 for 4x.
+    pub sample_offset: f64,
     /// land-cover class at the pixel centre (255 = sky)
     pub landcover: Vec<u8>,
+    /// Lamp flicker split (only with `Renderer::split_flicker` while lights flicker; else empty):
+    /// `radiance` then holds the flicker-free mean, and the radiance at time t is
+    /// `radiance + flicker_cos·cos(ωt) + flicker_sin·sin(ωt)` with ω = 2π · 2 · mains_hz
+    /// (instantaneous, no exposure averaging). f32 x3 like `radiance`.
+    pub flicker_cos: Vec<f32>,
+    pub flicker_sin: Vec<f32>,
     /// render units used (for statistics / planning feedback)
     pub units: Vec<Unit>,
+}
+
+impl FrameOut {
+    /// Instantaneous radiance at time `t` (trajectory time) given the flicker split.
+    pub fn radiance_at(&self, t: f64, omega: f64) -> Vec<f32> {
+        if self.flicker_cos.is_empty() {
+            return self.radiance.clone();
+        }
+        let (c, s) = ((omega * t).cos() as f32, (omega * t).sin() as f32);
+        self.radiance.iter().zip(&self.flicker_cos).zip(&self.flicker_sin).map(|((r, a), b)| r + a * c + b * s).collect()
+    }
+}
+
+/// One shaded output row.
+struct RowOut {
+    rad: Vec<f32>,
+    dep: Vec<f32>,
+    pts: Vec<Option<DVec3>>,
+    lcs: Vec<u8>,
+    fc: Vec<f32>,
+    fs: Vec<f32>,
 }
 
 const NO_UNIT: u32 = u32::MAX;
@@ -376,6 +408,8 @@ pub struct Renderer {
     /// Skip shading: only depth, 3D points and land cover (radiance stays zero). Used for
     /// cameras that produce geometry ground truth but no images.
     pub geometry_only: bool,
+    /// Return lamp flicker as separate cos / sin images instead of applying it (see `FrameOut`).
+    pub split_flicker: bool,
     /// unit rays of the supersampled grid (camera frame)
     rays: Vec<[f32; 3]>,
 }
@@ -393,7 +427,7 @@ impl Renderer {
                 [r.x as f32, r.y as f32, r.z as f32]
             })
             .collect();
-        Renderer { model, model_ss, settings, ell, cache, geometry_only: false, rays }
+        Renderer { model, model_ss, settings, ell, cache, geometry_only: false, split_flicker: false, rays }
     }
 
     pub fn select_units(&self, cam: &CamPose) -> Vec<Unit> {
@@ -650,13 +684,15 @@ impl Renderer {
         let cs = ss / 2; // central sub-sample
         let alpha = 1.0 / focal; // sub-sample angular size
         let do_shadow = self.settings.shading == Shading::Relit && self.settings.lighting.shadows && sun_state.direct > 1e-4;
-        let rows_out: Vec<(Vec<f32>, Vec<f32>, Vec<Option<DVec3>>, Vec<u8>)> = (0..oh)
+        let split = self.split_flicker && !self.geometry_only && sun_state.lights > 1e-3 && sun_state.flicker.enabled;
+        let rows_out: Vec<RowOut> = (0..oh)
             .into_par_iter()
             .map(|oy| {
                 let mut rad = vec![0f32; ow * 3];
                 let mut dep = vec![f32::INFINITY; ow];
                 let mut pts = vec![None; ow];
                 let mut lcs = vec![255u8; ow];
+                let (mut fc, mut fs) = if split { (vec![0f32; ow * 3], vec![0f32; ow * 3]) } else { (vec![], vec![]) };
                 for ox in 0..ow {
                     if self.geometry_only {
                         let k = (oy * ss + cs) * w + ox * ss + cs;
@@ -688,7 +724,19 @@ impl Renderer {
                         }
                     }
                     let mut ctx: Option<PixShade> = None;
-                    let mut acc = DVec3::ZERO;
+                    // radiance, flicker cos / sin parts
+                    let mut acc = [DVec3::ZERO; 3];
+                    // surface sample: lit colour + lamp emission (flickering, or split into cos/sin)
+                    let add = |acc: &mut [DVec3; 3], pc: &PixShade, (base, emis): (DVec3, DVec3)| {
+                        if split {
+                            let (d, phase) = pc.flicker_mod;
+                            acc[0] += base + emis;
+                            acc[1] += emis * (d * phase.cos());
+                            acc[2] -= emis * (d * phase.sin());
+                        } else {
+                            acc[0] += base + emis * pc.flicker;
+                        }
+                    };
                     for &(sx, sy) in &order[..no] {
                         let x = ox * ss + sx;
                         let y = oy * ss + sy;
@@ -700,7 +748,7 @@ impl Renderer {
                         }
                         let dir_w = cam.r_ecef_cam * ray;
                         if g.unit == NO_UNIT {
-                            acc += atmo.sky(dir_w, cam_up);
+                            acc[0] += atmo.sky(dir_w, cam_up);
                             continue;
                         }
                         let u = &units[g.unit as usize];
@@ -720,18 +768,23 @@ impl Renderer {
                             if ctx.is_none() {
                                 ctx = Some(pc);
                             } else {
-                                acc += self.texture(&view, &pc, z, gx, gy);
+                                add(&mut acc, &pc, self.texture(&view, &pc, z, gx, gy));
                                 continue;
                             }
                         }
-                        acc += self.texture(&view, ctx.as_ref().unwrap(), z, gx, gy);
+                        let pc = ctx.as_ref().unwrap();
+                        add(&mut acc, pc, self.texture(&view, pc, z, gx, gy));
                     }
-                    let c = acc / (ss * ss) as f64;
+                    let n = (ss * ss) as f64;
                     for ch in 0..3 {
-                        rad[3 * ox + ch] = c[ch] as f32;
+                        rad[3 * ox + ch] = (acc[0][ch] / n) as f32;
+                        if split {
+                            fc[3 * ox + ch] = (acc[1][ch] / n) as f32;
+                            fs[3 * ox + ch] = (acc[2][ch] / n) as f32;
+                        }
                     }
                 }
-                (rad, dep, pts, lcs)
+                RowOut { rad, dep, pts, lcs, fc, fs }
             })
             .collect();
         if prof {
@@ -755,13 +808,18 @@ impl Renderer {
             depth: Vec::with_capacity(ow * oh),
             points: Vec::with_capacity(ow * oh),
             landcover: Vec::with_capacity(ow * oh),
+            sample_offset: (cs as f64 + 0.5) / ss as f64 - 0.5,
+            flicker_cos: Vec::with_capacity(if split { ow * oh * 3 } else { 0 }),
+            flicker_sin: Vec::with_capacity(if split { ow * oh * 3 } else { 0 }),
             units,
         };
-        for (r, d, p, l) in rows_out {
-            out.radiance.extend(r);
-            out.depth.extend(d);
-            out.points.extend(p);
-            out.landcover.extend(l);
+        for r in rows_out {
+            out.radiance.extend(r.rad);
+            out.depth.extend(r.dep);
+            out.points.extend(r.pts);
+            out.landcover.extend(r.lcs);
+            out.flicker_cos.extend(r.fc);
+            out.flicker_sin.extend(r.fs);
         }
         out
     }
@@ -901,15 +959,16 @@ impl Renderer {
             }
         }
         // lamp flicker: one supply phase per ~40 m cell (global zoom-17 grid of 32 px)
-        let flicker = if sun_state.lights > 1e-3 && sun_state.flicker.enabled {
+        let (flicker, flicker_mod) = if sun_state.lights > 1e-3 && sun_state.flicker.enabled {
             let s17 = 2f64.powi(17 - z as i32);
             let cell = ((gx * s17 / 32.0).floor() as i64 as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ ((gy * s17 / 32.0).floor() as i64 as u64);
-            sun_state.flicker.factor(cell, sun_state.time, sun_state.exposure)
+            (sun_state.flicker.factor(cell, sun_state.time, sun_state.exposure), sun_state.flicker.modulation(cell))
         } else {
-            1.0
+            (1.0, (0.0, 0.0))
         };
         PixShade {
             flicker,
+            flicker_mod,
             z,
             range,
             lam,
@@ -924,7 +983,8 @@ impl Renderer {
 
     /// Filtered texture fetch (trilinear across pyramid levels, anisotropic taps) for a sample
     /// of zoom `z` at global pixel coords (gx, gy), with the pixel's shading context.
-    fn texture(&self, view: &TileView, ps: &PixShade, z: u8, gx: f64, gy: f64) -> DVec3 {
+    /// Returns (lit surface colour, lamp emission before flicker).
+    fn texture(&self, view: &TileView, ps: &PixShade, z: u8, gx: f64, gy: f64) -> (DVec3, DVec3) {
         let which = match self.settings.shading {
             Shading::Satellite => Which::Rgb,
             Shading::Relit => Which::Albedo,
@@ -964,8 +1024,7 @@ impl Renderer {
             }
         }
         let (c0, e0) = if wsum > 0.0 { (col / wsum, emis / wsum) } else { (DVec3::splat(0.2), DVec3::ZERO) };
-        let e0 = if lights_on { e0 * ps.flicker } else { e0 };
-        c0 * ps.mul + ps.add + e0 * ps.emis
+        (c0 * ps.mul + ps.add, e0 * ps.emis)
     }
 }
 
@@ -980,8 +1039,10 @@ struct PixShade {
     mul: DVec3,
     add: DVec3,
     emis: DVec3,
-    /// lamp flicker factor of the pixel's lamp cell
+    /// lamp flicker factor of the pixel's lamp cell (at the render time, exposure-averaged)
     flicker: f64,
+    /// (depth, phase) of that cell's modulation, for the cos / sin split
+    flicker_mod: (f64, f64),
 }
 
 /// Rasterize one triangle into a band of the G-buffer (rows [y0, y0+rows)).

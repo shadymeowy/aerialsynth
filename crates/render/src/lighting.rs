@@ -81,23 +81,33 @@ impl Default for FlickerConfig {
 }
 
 impl FlickerConfig {
-    /// Mean-preserving light modulation of the lamp cell `cell` averaged over the exposure
-    /// window [t - T/2, t + T/2] (T = 0: instantaneous).
-    pub fn factor(&self, cell: u64, t: f64, exposure: f64) -> f64 {
-        if !self.enabled {
-            return 1.0;
-        }
+    /// Flicker angular frequency (rad/s): lamps flicker at twice the mains frequency.
+    pub fn omega(&self) -> f64 {
+        std::f64::consts::TAU * 2.0 * self.mains_hz
+    }
+
+    /// (modulation depth, phase) of the lamp cell `cell`: its light is
+    /// `1 + depth · cos(ω t + phase)` (mean-preserving).
+    pub fn modulation(&self, cell: u64) -> (f64, f64) {
         let mut h = cell ^ 0xF11C;
         h = (h ^ (h >> 33)).wrapping_mul(0xff51_afd7_ed55_8ccd);
         h ^= h >> 33;
         let u = (h >> 11) as f64 / (1u64 << 53) as f64;
-        let led = u < self.led_fraction;
-        let d = if led { self.led_depth } else { self.depth };
+        let d = if u < self.led_fraction { self.led_depth } else { self.depth };
         let phase = (h % 3) as f64 * std::f64::consts::TAU / 3.0 + 0.2 * ((h >> 8) % 7) as f64 / 7.0;
-        let f = 2.0 * self.mains_hz;
-        let x = std::f64::consts::PI * f * exposure;
+        (d, phase)
+    }
+
+    /// Light modulation of the lamp cell `cell` averaged over the exposure window
+    /// [t - T/2, t + T/2] (T = 0: instantaneous).
+    pub fn factor(&self, cell: u64, t: f64, exposure: f64) -> f64 {
+        if !self.enabled {
+            return 1.0;
+        }
+        let (d, phase) = self.modulation(cell);
+        let x = 0.5 * self.omega() * exposure;
         let sinc = if x.abs() < 1e-9 { 1.0 } else { x.sin() / x };
-        1.0 + d * sinc * (std::f64::consts::TAU * f * t + phase).cos()
+        1.0 + d * sinc * (self.omega() * t + phase).cos()
     }
 }
 

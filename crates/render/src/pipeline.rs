@@ -456,8 +456,8 @@ pub fn render_sequence(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, ge
 }
 
 /// Simulate every camera with an `events` modality into the existing sequence file.
-/// `progress(camera path, simulated s, total s)`. Returns (camera path, events) per camera.
-pub fn render_events(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, gen: Option<Arc<Generator>>, progress: &dyn Fn(&str, f64, f64)) -> Result<Vec<(String, usize)>> {
+/// `progress(camera path, simulated s, total s)`. Returns (camera path, statistics) per camera.
+pub fn render_events(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, gen: Option<Arc<Generator>>, progress: &dyn Fn(&str, f64, f64)) -> Result<Vec<(String, crate::events::EventStats)>> {
     let ell = store.meta().ellipsoid();
     let win = Window::new(scn, poses)?;
     let cache = tile_cache(scn, store, gen);
