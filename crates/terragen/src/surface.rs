@@ -490,6 +490,8 @@ impl SurfaceModel {
         let soil_i = st[0] * 3.0;
         let i0 = (soil_i.floor() as usize).min(2);
         let soil = mixc(pal.soil[i0], pal.soil[i0 + 1], soil_i - i0 as f64);
+        // red laterite soils in hot, wet climates
+        let soil = mixc(soil, srgb(146.0, 82.0, 54.0), 0.75 * smoothstep(19.0, 25.0, temp) * smoothstep(0.45, 0.7, wet));
         let grass_green = mixc(pal.grass_dry, pal.grass_wet, smoothstep(0.25, 0.75, wet + 0.15 * patch));
         let grass = mixc(pal.grass_cold, grass_green, smoothstep(-2.0, 8.0, temp));
         // hue drift per region so neighbouring areas differ
@@ -583,7 +585,13 @@ impl SurfaceModel {
 
         // ------------------------------------------------------------- snow
         let snow_n = pf.snow;
-        let snow = smoothstep(-1.0, -5.0, temp + 4.0 * snow_n) * (1.0 - 0.75 * smoothstep(0.9, 1.6, slope));
+        // snow cover with crisp, ragged edges (a transition over several degrees looked like
+        // cloud or fog lying on the land)
+        // follows the terrain: a snow line in altitude (temperature), lingering longer in gullies
+        // and hollows; noise only roughens it (a strong noise term drew blobs unrelated to the land)
+        let snow_t = temp + 1.0 * snow_n - 1.6 * smoothstep(0.1, 0.8, -t.gully) + 0.6 * smoothstep(0.2, 0.8, t.gully)
+            + 0.5 * perlin3(0x5E0, p / 60.0) * band(60.0, gsd) + 0.25 * perlin3(0x5E1, p / 18.0) * band(18.0, gsd);
+        let snow = smoothstep(-2.6, -2.8, snow_t) * (1.0 - 0.75 * smoothstep(0.9, 1.6, slope));
         if snow > 0.0 {
             col = mixc(col, pal.snow * (1.0 + 0.03 * detail), snow);
             if snow > 0.5 {
@@ -637,7 +645,9 @@ impl SurfaceModel {
         };
 
         // ------------------------------------------------------------- fields
-        let flat_ok = 1.0 - smoothstep(0.12, 0.22, slope);
+        // fields on gentle to moderate slopes (up to ~17°): a lower limit turned every scarp,
+        // terrace edge and gully wall in farmland into a thin strip of forest
+        let flat_ok = 1.0 - smoothstep(0.22, 0.32, slope);
         let mut field_cov = 0.0;
         if let Some(r) = &region {
             if t.agri > 0.02 && natural_ok * flat_ok > 0.3 && world.cfg.landuse.agriculture > 0.0 {
@@ -666,6 +676,12 @@ impl SurfaceModel {
         // Every existing town of the surrounding lattice cells is tried and the most built-up one
         // wins: a large town reaches beyond its own cell, where it was cut off along straight
         // lines (taking only the nearest site, or the two nearest, did that)
+        // towns end at the bank of a river (with a riverside strip), not under the water
+        let river_clear = if l.river_hw > 0.0 {
+            1.0 - (1.0 - smoothstep(l.river_hw + 6.0, l.river_hw + 30.0, l.river_d.abs())) * smoothstep(0.3, 0.6, t.river_wet)
+        } else {
+            1.0
+        };
         let mut town_sel: Option<(TownInfo, f64)> = None;
         if t.town.id != 0 && world.cfg.landuse.towns > 0.0 {
             let cell = world.cfg.landuse.town_cell_km * 1000.0;
@@ -673,9 +689,10 @@ impl SurfaceModel {
             let key = (qf.x as i64, qf.y as i64, qf.z as i64);
             if !cache.town_cands.contains_key(&key) {
                 let mut v = Vec::new();
-                for dz in -1..=1 {
-                    for dy in -1..=1 {
-                        for dx in -1..=1 {
+                // ±2 cells: a large town's footprint reaches up to ~1.5 cells from its site
+                for dz in -2..=2 {
+                    for dy in -2..=2 {
+                        for dx in -2..=2 {
                             let (id, c) = worley3_site(world.seed ^ 0x70E1, (key.0 + dx, key.1 + dy, key.2 + dz), cell, 0.8);
                             let info = self.town_info(world, cache, id, c);
                             if info.exists {
@@ -687,14 +704,14 @@ impl SurfaceModel {
                 cache.town_cands.insert(key, v);
             }
             for info in &cache.town_cands[&key] {
-                let u = self.town_urban(info, p, gsd, slope, pf).0;
+                let u = self.town_urban(info, p, gsd, slope, river_clear, pf).0;
                 if u > town_sel.map_or(0.0, |b| b.1) {
                     town_sel = Some((*info, u));
                 }
             }
         }
         let town_urban = town_sel.map_or(0.0, |x| x.1);
-        let town_px = town_sel.and_then(|(town, _)| self.town(&town, p, gsd, fw, slope, world.cfg.look.shadows, pf));
+        let town_px = town_sel.and_then(|(town, _)| self.town(&town, p, gsd, fw, slope, river_clear, world.cfg.look.shadows, pf));
         let town_cov = town_px.map_or(0.0, |x| x.2);
         let not_urban = (1.0 - smoothstep(0.0, 0.08, town_urban)) * (1.0 - town_cov);
 
@@ -710,7 +727,9 @@ impl SurfaceModel {
             // savanna / steppe scattered trees
             let savanna = smoothstep(0.18, 0.35, wet) * (1.0 - smoothstep(0.55, 0.7, wet)) * smoothstep(12.0, 20.0, temp) * 0.12;
             let groves = 0.04 * smoothstep(0.15, 0.3, wet);
-            let clear = 1.0 - 0.85 * smoothstep(0.05, 0.4, t.agri) * flat_ok * (1.0 - woodlot);
+            // farmland is cleared except on steep ground (and its woodlots): what cannot be a
+            // field there is meadow, not forest
+            let clear = 1.0 - 0.85 * smoothstep(0.05, 0.4, t.agri) * (1.0 - smoothstep(0.45, 0.7, slope)) * (1.0 - woodlot);
             let mut dens = (forest * 0.9 * clear + savanna + groves) * natural_ok * (1.0 - field_cov) * veg.tree_density;
             dens = dens.max(0.8 * riparian * veg.tree_density);
             // drainage lines carry scrub, not trees: the lines are only metres wide, so tree
@@ -719,6 +738,8 @@ impl SurfaceModel {
             let gully_scrub = 0.55 * smoothstep(0.2, 0.9, -t.gully) * smoothstep(0.2, 0.5, wet) * natural_ok * (1.0 - field_cov);
             dens *= 1.0 - smoothstep(0.9, 1.4, slope);
             dens *= 1.0 - smoothstep(0.0, 0.6, t.mountain * smoothstep(-2.0, -6.0, temp)); // tree line
+            // no trees standing in the snow: they end below the snow line
+            dens *= 1.0 - smoothstep(-1.2, -2.4, temp + 1.0 * snow_n);
             dens *= not_urban;
             // shrubs / bushes in steppe, maquis and rocky slopes (texture of natural ground)
             let shrub_clim = smoothstep(0.15, 0.3, wet) * (1.0 - smoothstep(0.6, 0.8, wet)) * smoothstep(2.0, 10.0, temp);
@@ -1065,7 +1086,8 @@ impl SurfaceModel {
         // reduced towards the mean, mimicking the variance reduction of box-filtering a mosaic.
         let fsize = if r.fh > 0.0 { r.fw.min(r.fh) } else { r.fw };
         let k = fsize / (fsize * fsize + 4.0 * gsd * gsd).sqrt();
-        let mean = pal.crop_mean * tint * (1.0 + 0.10 * pf.field_var);
+        let tropic = smoothstep(19.0, 25.0, t.temp) * smoothstep(0.5, 0.7, t.moist);
+        let mean = mixc(pal.crop_mean, srgb(78.0, 100.0, 58.0), tropic) * tint * (1.0 + 0.10 * pf.field_var);
         let fwe = fw.max(0.6 * gsd); // edge filter never sharper than ~half a pixel
         let (c, h, cov, kind) = self.field_explicit(r, t, q, p, gsd, fwe, cult, tint, pf).unwrap_or((mean, 0.0, 0.0, 0));
         let cult_mean = cult * 0.9;
@@ -1170,76 +1192,124 @@ impl SurfaceModel {
         let cluster = worley2(r.split.to_bits() ^ 0xC1C, fc, 700.0, 1.0).id;
         let u_crop = if u01k(id, 16) < 0.5 { u01k(cluster, 6) } else { u01k(id, 6) };
         let kind = crop_kind(r.season, u_crop, t.moist < 0.33 && r.style != 2);
-        let mut col = pal.crop[kind];
-        col *= 0.94 + 0.12 * u01k(id, 8);
-        col *= tint;
-        // within-field variation (soil moisture, growth, management) at several scales
-        col *= 1.0 + 0.10 * pf.field_var
-            + 0.12 * perlin3(id, p / 35.0) * band(35.0, gsd)
-            + 0.08 * perlin3(id ^ 1, p / (0.8 * r.fw));
-        // growth zones (soil, moisture): greener / yellower patches of tens of metres
-        let gz = perlin3(id ^ 0x6A0, p / 55.0) * band(55.0, gsd);
-        col = mixc(col, col * DVec3::new(1.12, 1.04, 0.82), 0.5 * smoothstep(0.0, 0.6, gz));
-        col = mixc(col, col * DVec3::new(0.86, 0.93, 0.88), 0.5 * smoothstep(0.0, 0.6, -gz));
-        // management direction: rows / tramlines along one field axis; in the headland (strip
-        // along the field edge where the tractor turns) the pattern runs parallel to the edge
-        let row_ang = if u01k(id, 9) < 0.7 { 0.0 } else { std::f64::consts::FRAC_PI_2 };
-        let headland_w = 8.0 + 10.0 * u01k(id, 11);
-        let in_headland = edge < headland_w && matches!(kind, 0..=4);
-        let row_ang = if in_headland { row_ang + std::f64::consts::FRAC_PI_2 } else { row_ang };
-        let (sa, ca) = row_ang.sin_cos();
-        let along = fx * ca + fy * sa;
+        // hot, wet climates grow other crops: rice paddies, oil-palm plantations, sugarcane and
+        // bare red laterite between plantings (not the golden cereals of temperate farmland)
+        let tropic = smoothstep(19.0, 25.0, t.temp) * smoothstep(0.5, 0.7, t.moist);
+        let mut col;
         let mut extra_h = 0.0;
-        // soil / growth texture at several scales (band-limited)
-        let tex = 0.18 * perlin3(id ^ 0x7E1, p / 7.0) * band(7.0, gsd)
-            + 0.13 * perlin3(id ^ 0x7E2, p / 2.5) * band(2.5, gsd)
-            + 0.07 * perlin3(id ^ 0x7E5, p / 0.9) * band(0.9, gsd)
-            + 0.12 * perlin3(id ^ 0x7E4, p / 22.0) * band(22.0, gsd)
-            + 0.10 * perlin3(id ^ 0x7E3, p / 90.0) * band(90.0, gsd);
-        col *= 1.0 + tex;
-        // wet hollows / bare patches inside some fields
-        if u01k(id, 12) < 0.35 {
-            let wp = perlin3(id ^ 0x5A7, p / (40.0 + 60.0 * u01k(id, 13)));
-            let m = smoothstep(0.25, 0.45, wp) * band(30.0, gsd).max(0.3);
-            col = mixc(col, col * DVec3::new(0.82, 0.86, 0.80), m);
-        }
-        if in_headland {
-            col *= 0.96 + 0.03 * u01k(id, 14);
-        }
-        match kind {
-            0 | 1 => {
-                let sp = 0.8 + 0.8 * u01k(id, 10);
-                col *= 1.0 + 0.12 * (along * std::f64::consts::TAU / sp).sin() * band(sp, gsd);
-            }
-            3 => {
-                let sp = 6.0 + 4.0 * u01k(id, 10);
-                col *= 1.0 + 0.07 * ((along / sp * std::f64::consts::TAU).sin()).signum() * band(sp, gsd);
-            }
-            4 => {
-                let sp = 0.45;
-                col *= 1.0 + 0.15 * (along * std::f64::consts::TAU / sp).sin() * band(sp, gsd);
-                col *= 1.0 - 0.15 * smoothstep(0.2, 0.6, pf.field_var2);
-            }
-            8 => {
-                // orchard: rows of small trees
-                let (sx, sy) = (5.0 + 2.0 * u01k(id, 10), 4.0);
-                let gx = (fx / sx).round() * sx;
-                let gy = (fy / sy).round() * sy;
-                let d = DVec2::new(fx - gx, fy - gy).length();
+        if u01k(id, 30) < tropic {
+            let tk = u_crop;
+            let fine = 1.0 + 0.08 * perlin3(id ^ 0x7A1, p / 6.0) * band(6.0, gsd) + 0.06 * perlin3(id ^ 0x7A2, p / 1.5) * band(1.5, gsd);
+            if tk < 0.35 {
+                // rice: young green or flooded paddies, cut into small plots by earth bunds
+                col = mixc(srgb(74.0, 106.0, 62.0), srgb(58.0, 82.0, 74.0), u01k(id, 31)) * fine;
+                let sx = 18.0 + 22.0 * u01k(id, 32);
+                let sy = sx * (1.2 + 0.8 * u01k(id, 33));
+                let (mx, my) = (fx.rem_euclid(sx), fy.rem_euclid(sy));
+                let d = mx.min(sx - mx).min(my).min(sy - my);
+                let bund = band_cov(d, 0.6, fw) * band(sx, gsd);
+                col = mixc(col, srgb(108.0, 106.0, 74.0), bund);
+                extra_h = 0.3 * bund;
+            } else if tk < 0.75 {
+                // oil palm: star-shaped crowns on a triangular grid; stands of different age
+                let age = 0.35 + 0.65 * u01k(id, 34);
+                let (sx, sy) = (9.0, 7.8);
+                let j = (fy / sy).round();
+                let off = if (j as i64).rem_euclid(2) == 0 { 0.0 } else { 0.5 * sx };
+                let i = ((fx - off) / sx).round();
+                let rel = DVec2::new(fx - off - i * sx, fy - j * sy);
+                let ang = rel.y.atan2(rel.x) + u01k(mix64(id ^ (i as i64 as u64) ^ ((j as i64 as u64) << 20)), 1) * 6.3;
+                let r_eff = 4.4 * age * (0.82 + 0.18 * (8.0 * ang).cos());
+                let d = rel.length();
                 let explicit = band(sx, gsd);
-                let cov = band_cov(d, 1.7, fw) * explicit + (1.0 - explicit) * 0.4;
-                col = mixc(col, pal.crown_decid * 1.1, cov);
-                extra_h = 4.0 * cov;
+                let crown = band_cov(d, r_eff, fw) * explicit + (1.0 - explicit) * (0.75 * age);
+                let ground = srgb(92.0, 100.0, 60.0) * fine;
+                let shade = 0.85 + 0.25 * (1.0 - (d / r_eff.max(0.1)).min(1.0));
+                col = mixc(ground, srgb(58.0, 92.0, 44.0) * shade * fine, crown);
+                extra_h = (3.0 + 9.0 * age) * crown;
+            } else if tk < 0.92 {
+                // sugarcane / banana: dense vivid green in rows
+                col = srgb(86.0, 116.0, 60.0) * fine;
+                let along = fx;
+                col *= 1.0 + 0.08 * (along * std::f64::consts::TAU / 1.5).sin() * band(1.5, gsd);
+                extra_h = 2.5;
+            } else {
+                // freshly ploughed red laterite
+                col = srgb(152.0, 90.0, 62.0) * fine;
+                col *= 1.0 + 0.1 * (fx * std::f64::consts::TAU / 0.9).sin() * band(0.9, gsd);
             }
-            _ => {}
-        }
-        // tramlines (wheel tracks every ~18-36 m) in cereals / green crops / stubble
-        if matches!(kind, 0 | 1 | 2 | 3 | 7) && !in_headland {
-            let sp = 18.0 + 18.0 * (u01k(id, 15) * 2.0).floor() / 2.0;
-            let m = along.rem_euclid(sp);
-            let tl = band_cov(m - 0.9, 0.22, fw) + band_cov(m - 2.7, 0.22, fw);
-            let vis = band(1.2, gsd).max(0.35 * band(sp, gsd));
-            col = mixc(col, col * DVec3::new(0.78, 0.76, 0.74), tl * vis);
+            col *= tint;
+        } else {
+            col = pal.crop[kind];
+            col *= 0.94 + 0.12 * u01k(id, 8);
+            col *= tint;
+            // within-field variation (soil moisture, growth, management) at several scales
+            col *= 1.0 + 0.10 * pf.field_var
+                + 0.12 * perlin3(id, p / 35.0) * band(35.0, gsd)
+                + 0.08 * perlin3(id ^ 1, p / (0.8 * r.fw));
+            // growth zones (soil, moisture): greener / yellower patches of tens of metres
+            let gz = perlin3(id ^ 0x6A0, p / 55.0) * band(55.0, gsd);
+            col = mixc(col, col * DVec3::new(1.12, 1.04, 0.82), 0.5 * smoothstep(0.0, 0.6, gz));
+            col = mixc(col, col * DVec3::new(0.86, 0.93, 0.88), 0.5 * smoothstep(0.0, 0.6, -gz));
+            // management direction: rows / tramlines along one field axis; in the headland (strip
+            // along the field edge where the tractor turns) the pattern runs parallel to the edge
+            let row_ang = if u01k(id, 9) < 0.7 { 0.0 } else { std::f64::consts::FRAC_PI_2 };
+            let headland_w = 8.0 + 10.0 * u01k(id, 11);
+            let in_headland = edge < headland_w && matches!(kind, 0..=4);
+            let row_ang = if in_headland { row_ang + std::f64::consts::FRAC_PI_2 } else { row_ang };
+            let (sa, ca) = row_ang.sin_cos();
+            let along = fx * ca + fy * sa;
+            // soil / growth texture at several scales (band-limited)
+            let tex = 0.18 * perlin3(id ^ 0x7E1, p / 7.0) * band(7.0, gsd)
+                + 0.13 * perlin3(id ^ 0x7E2, p / 2.5) * band(2.5, gsd)
+                + 0.07 * perlin3(id ^ 0x7E5, p / 0.9) * band(0.9, gsd)
+                + 0.12 * perlin3(id ^ 0x7E4, p / 22.0) * band(22.0, gsd)
+                + 0.10 * perlin3(id ^ 0x7E3, p / 90.0) * band(90.0, gsd);
+            col *= 1.0 + tex;
+            // wet hollows / bare patches inside some fields
+            if u01k(id, 12) < 0.35 {
+                let wp = perlin3(id ^ 0x5A7, p / (40.0 + 60.0 * u01k(id, 13)));
+                let m = smoothstep(0.25, 0.45, wp) * band(30.0, gsd).max(0.3);
+                col = mixc(col, col * DVec3::new(0.82, 0.86, 0.80), m);
+            }
+            if in_headland {
+                col *= 0.96 + 0.03 * u01k(id, 14);
+            }
+            match kind {
+                0 | 1 => {
+                    let sp = 0.8 + 0.8 * u01k(id, 10);
+                    col *= 1.0 + 0.12 * (along * std::f64::consts::TAU / sp).sin() * band(sp, gsd);
+                }
+                3 => {
+                    let sp = 6.0 + 4.0 * u01k(id, 10);
+                    col *= 1.0 + 0.07 * ((along / sp * std::f64::consts::TAU).sin()).signum() * band(sp, gsd);
+                }
+                4 => {
+                    let sp = 0.45;
+                    col *= 1.0 + 0.15 * (along * std::f64::consts::TAU / sp).sin() * band(sp, gsd);
+                    col *= 1.0 - 0.15 * smoothstep(0.2, 0.6, pf.field_var2);
+                }
+                8 => {
+                    // orchard: rows of small trees
+                    let (sx, sy) = (5.0 + 2.0 * u01k(id, 10), 4.0);
+                    let gx = (fx / sx).round() * sx;
+                    let gy = (fy / sy).round() * sy;
+                    let d = DVec2::new(fx - gx, fy - gy).length();
+                    let explicit = band(sx, gsd);
+                    let cov = band_cov(d, 1.7, fw) * explicit + (1.0 - explicit) * 0.4;
+                    col = mixc(col, pal.crown_decid * 1.1, cov);
+                    extra_h = 4.0 * cov;
+                }
+                _ => {}
+            }
+            // tramlines (wheel tracks every ~18-36 m) in cereals / green crops / stubble
+            if matches!(kind, 0 | 1 | 2 | 3 | 7) && !in_headland {
+                let sp = 18.0 + 18.0 * (u01k(id, 15) * 2.0).floor() / 2.0;
+                let m = along.rem_euclid(sp);
+                let tl = band_cov(m - 0.9, 0.22, fw) + band_cov(m - 2.7, 0.22, fw);
+                let vis = band(1.2, gsd).max(0.35 * band(sp, gsd));
+                col = mixc(col, col * DVec3::new(0.78, 0.76, 0.74), tl * vis);
+            }
         }
         // field borders: hedges (trees) or tracks or simply a thin margin
         let bw = r.border_w;
@@ -1276,7 +1346,8 @@ impl SurfaceModel {
     #[allow(clippy::too_many_arguments)]
     /// How built-up the town is at `p` (1 in the centre, 0 outside its irregular footprint), and
     /// the relative distance from the centre.
-    fn town_urban(&self, town: &TownInfo, p: DVec3, gsd: f64, slope: f64, pf: &PixFields) -> (f64, f64) {
+    /// `clear`: 0 where the town must not be (rivers), 1 elsewhere.
+    fn town_urban(&self, town: &TownInfo, p: DVec3, gsd: f64, slope: f64, clear: f64, pf: &PixFields) -> (f64, f64) {
         let d = p - town.center;
         let q0 = DVec2::new(d.dot(town.ex), d.dot(town.ey));
         let r = town.radius;
@@ -1288,14 +1359,15 @@ impl SurfaceModel {
         let n1 = 0.32 * perlin3(town.seed ^ 0x71, p / (0.9 * r)) + 0.18 * perlin3(town.seed ^ 0x72, p / (0.35 * r)) * band(0.35 * r, gsd)
             + 0.08 * pf.warp2;
         let rel = qa.length() / (r * (1.0 + n1)).max(1.0);
-        ((1.0 - smoothstep(0.3, 1.0, rel)) * (1.0 - smoothstep(0.45, 0.8, slope)), rel)
+        ((1.0 - smoothstep(0.3, 1.0, rel)) * (1.0 - smoothstep(0.45, 0.8, slope)) * clear, rel)
     }
 
-    fn town(&self, town: &TownInfo, p: DVec3, gsd: f64, fw: f64, slope: f64, shadows: bool, pf: &PixFields) -> Option<(DVec3, f64, f64, u8, f64, DVec3)> {
+    #[allow(clippy::too_many_arguments)]
+    fn town(&self, town: &TownInfo, p: DVec3, gsd: f64, fw: f64, slope: f64, clear: f64, shadows: bool, pf: &PixFields) -> Option<(DVec3, f64, f64, u8, f64, DVec3)> {
         let pal = &self.pal;
         let d = p - town.center;
         let q0 = DVec2::new(d.dot(town.ex), d.dot(town.ey));
-        let (urban, rel) = self.town_urban(town, p, gsd, slope, pf);
+        let (urban, rel) = self.town_urban(town, p, gsd, slope, clear, pf);
         if urban <= 0.02 {
             return None;
         }
@@ -1329,10 +1401,20 @@ impl SurfaceModel {
         let seg_here = |h: u64| smoothstep(-0.01, 0.01, urban - (0.15 + 0.12 * u01k(h, 4))) * if urban < 0.45 && u01k(h, 3) < 0.4 { 0.0 } else { 1.0 };
         let here_x = seg_here(hash2(town.seed ^ 0x57, near_x, biy));
         let here_y = seg_here(hash2(town.seed ^ 0x58, near_y, bix));
+        // a block is built on only if a street runs along at least one of its sides (houses stood
+        // in the fields of the outskirts with no street anywhere near)
+        let access = seg_here(hash2(town.seed ^ 0x57, bix, biy))
+            .max(seg_here(hash2(town.seed ^ 0x57, bix + 1, biy)))
+            .max(seg_here(hash2(town.seed ^ 0x58, biy, bix)))
+            .max(seg_here(hash2(town.seed ^ 0x58, biy + 1, bix)));
         let sw_of = |line: i64| if line.rem_euclid(4) == 0 { town.street * 1.4 } else { town.street } * 0.5;
         let (sw_x, sw_y) = (sw_of(near_x), sw_of(near_y));
         let fws = fw.max(gsd * 0.5);
         let street = f64::max(band_cov(bqx.min(bsx - bqx), sw_x, fws) * here_x, band_cov(bqy.min(bsy - bqy), sw_y, fws) * here_y);
+        // sidewalks between the carriageway and the lots (that verge was left as bare ground,
+        // unlit at night: dark lines along every street)
+        let walk_w = 0.2 * town.street + 0.5;
+        let walk = f64::max(band_cov(bqx.min(bsx - bqx), sw_x + walk_w, fws) * here_x, band_cov(bqy.min(bsy - bqy), sw_y + walk_w, fws) * here_y);
         let bh = hash2(town.seed ^ 0xB10C, bix, biy);
         let block_kind = u01k(bh, 1);
         let mut col = pal.asphalt;
@@ -1363,7 +1445,7 @@ impl SurfaceModel {
             let lx = inner.x - li * lot_w;
             let ly = inner.y - lj * (bd / rows);
             let lh = hash2(bh, li as i64, lj as i64);
-            let built = u01k(lh, 3) < urban.powf(0.7) * 1.05;
+            let built = u01k(lh, 3) < urban.powf(0.7) * 1.05 && access > 0.5;
             if built || urban > 0.65 {
                 cov_lot = 1.0;
                 let yard = mixc(mixc(pal.grass_wet, pal.soil[0], 0.3 + 0.4 * u01k(lh, 10)), pal.concrete, 0.25 * central)
@@ -1410,10 +1492,11 @@ impl SurfaceModel {
                             }
                         }
                         // porch / yard light in front of some houses
-                        if !industrial && u01k(lh, 14) < 0.45 {
+                        if !industrial && u01k(lh, 14) < 0.6 {
                             let front_y = if (lj as i64) % 2 == 0 { setb * 0.5 } else { bd / rows - setb * 0.5 };
                             let d2 = (lx - lot_w * 0.5).powi(2) + (ly - front_y).powi(2);
-                            porch = 0.22 * (-d2 / (2.0 * 3.5 * 3.5)).exp() * band(4.0, gsd);
+                            // a small bright lamp by the door, not a soft blob over the yard
+                            porch = 1.2 * (-d2 / (2.0 * 0.9 * 0.9)).exp() * band(1.8, gsd);
                         }
                     }
                 }
@@ -1440,20 +1523,21 @@ impl SurfaceModel {
                 }
             }
         }
-        let cov = cov_lot.max(street);
+        let cov = cov_lot.max(walk);
         if cov <= 0.0 {
             return None;
         }
-        col = mixc(col, pal.asphalt * (1.0 + 0.05 * pf.detail), street / cov.max(1e-6));
+        col = mixc(col, pal.concrete * 0.9, (walk - street).max(0.0) * (1.0 - cov_lot) / cov);
+        col = mixc(col, pal.asphalt * (1.0 + 0.05 * pf.detail), street / cov);
         if street > 0.5 {
             class = lc::ROAD;
         }
         height *= 1.0 - street;
 
         // ---- night lights: pools of light under street lamps, lit plazas / industrial yards
-        let lamp_sp = 26.0 + 12.0 * town.organic;
+        let lamp_sp = 18.0 + 8.0 * town.organic;
         // sodium vs LED lamps: mostly per town, varying per street
-        let led = u01k(sh, 5) < if town.roof_style < 0.55 { 0.2 } else { 0.8 };
+        let led = u01k(sh, 5) < if town.roof_style < 0.6 { 0.12 } else { 0.6 };
         let lamp_col = if led { DVec3::new(0.86, 0.9, 1.0) } else { DVec3::new(1.0, 0.58, 0.24) };
         let lamp_res = band(lamp_sp, gsd);
         let mut emission = DVec3::ZERO;
@@ -1475,8 +1559,11 @@ impl SurfaceModel {
                 let d2 = dp * dp + da * da;
                 let lh = hash2(town.seed ^ 0x1A3B ^ (axis << 40), li, k as i64);
                 if u01k(lh, 1) < 0.93 {
-                    let pool = 0.30 * (-d2 / (2.0 * 5.5 * 5.5)).exp();
-                    let core = 4.0 * (-d2 / (2.0 * 0.6 * 0.6)).exp() * band(1.2, gsd);
+                    // the pool is stretched along the street (lamps light the carriageway): a
+                    // dotted line of light; the lamp head a bright point (~2 m, visible from height)
+                    let sa = 0.28 * lamp_sp;
+                    let pool = 0.32 * (-(dp * dp) / (2.0 * 3.5 * 3.5) - (da * da) / (2.0 * sa * sa)).exp();
+                    let core = 3.0 * (-d2 / (2.0 * 1.0 * 1.0)).exp() * band(2.0, gsd);
                     emission += lamp_col * (pool + core) * (0.7 + 0.6 * u01k(lh, 2));
                 }
             }
@@ -1500,7 +1587,7 @@ impl SurfaceModel {
     }
 
     fn building_height_at(&self, town: &TownInfo, p: DVec3, gsd: f64, pf: &PixFields) -> f64 {
-        match self.town(town, p, gsd, 0.01, 0.0, false, pf) {
+        match self.town(town, p, gsd, 0.01, 0.0, 1.0, false, pf) {
             Some((_, h, cov, _, _, _)) => h * cov,
             None => 0.0,
         }

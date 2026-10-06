@@ -194,8 +194,9 @@ impl World {
             let dv = pw - q;
             let dist = dv.length();
             let floor = s.ha + (s.hb - s.ha) * u;
-            // bound of the carve extent (floodplain ≤ 9 hw, walls 2.2 m per m above the floor)
-            let reach = (s.valley * 1.5 + s.hw + 200.0).max(9.0 * s.hw + 2.2 * (h - floor + 2.0 + 0.04 * s.hw) + 50.0);
+            // bound of the carve extent (floodplain ≤ 9 hw × 1.25 edge noise, walls ≤ 6 m per m
+            // above the floor)
+            let reach = (s.valley * 1.5 + s.hw + 200.0).max(11.3 * s.hw + 6.0 * (h - floor + 2.0 + 0.04 * s.hw) + 50.0);
             if dist > reach {
                 continue;
             }

@@ -692,7 +692,10 @@ impl World {
             ..Default::default()
         };
         let mut floodplain: f64 = 0.0;
-        if mode != Mode::Relief && self.cfg.hydro.rivers && land > 0.2 {
+        // (no hard land cutoff: switching rivers off at a contour of the smooth continent field
+        // left straight cliffs along the coast; the carve fades out towards the open sea instead)
+        let land_fade = smoothstep(0.0, 0.1, land);
+        if mode != Mode::Relief && self.cfg.hydro.rivers && land > 0.0 {
             let local;
             let segs = match segs {
                 Some(s) => s,
@@ -709,25 +712,33 @@ impl World {
                 let ad = rh.d.abs();
                 let hw = rh.hw;
                 let width = 2.0 * hw;
-                let fp_w = hw + width * (1.0 + 3.0 * wn);
+                // irregular floodplain edge (a constant width drew the edge as a straight line
+                // along straight reaches)
+                let fp_w = (hw + width * (1.0 + 3.0 * wn)) * (1.0 + 0.25 * perlin3(0xF10D ^ rh.level as u64, p / (1.5 * width + 400.0)));
                 let incision = 1.0 + 0.02 * width;
                 let floor = rh.floor.max(1.0) - incision;
                 // valley profile: bed, floodplain, walls kept below ~30° (V shape); every channel
                 // carves from the uncarved height and the lowest result wins (continuous where
                 // the nearest channel changes)
-                let valley = rh.valley.max(fp_w + 2.2 * (h0 - floor));
-                if h0 > floor && ad < valley {
+                // walls ~24° in mountains, ~9° in lowlands (steep walls drew long straight scarps
+                // along the floodplains of big lowland rivers)
+                let wall_k = lerp(6.0, 2.2, mountain);
+                let valley = rh.valley.max(fp_w + wall_k * (h0 - floor));
+                // no carving of the seabed; floodplains stay above the sea (near the coast they were
+                // carved below it and flooded: straight "coastlines" along the valley walls and
+                // channels drawn into the sea) — only the channel itself forms an estuary
+                if h0 > floor && h0 > 0.0 && ad < valley {
                     let wall = smoothstep(fp_w, valley, ad);
                     let wall = wall * wall * (3.0 - 2.0 * wall);
-                    let fp = floor + 0.8 + 0.4 * micro.abs();
+                    let fp = (floor + 0.8).max(0.5) + 0.4 * micro.abs();
                     let target = if ad < hw { floor - 0.8 - 0.02 * width } else { fp };
                     let carved = h0.min(lerp(target, h0, wall));
                     // limit the carve depth (small streams only notch the terrain)
                     let carved = carved.max(h0 - lc.max_depth_m * (1.0 - 0.3 * wall));
                     // valleys narrower than a pixel fade out per pixel (no hard level cutoff)
                     let fade = if width < 0.3 * ctx.gsd { smoothstep(0.25, 0.5, rh.valley / ctx.gsd) } else { 1.0 };
-                    h = h.min(h0 + (carved - h0) * fade);
-                    floodplain = floodplain.max((1.0 - wall) * land * smoothstep(20.0, 120.0, width) * fade);
+                    h = h.min(h0 + (carved - h0) * fade * land_fade);
+                    floodplain = floodplain.max((1.0 - wall) * land_fade * smoothstep(20.0, 120.0, width) * fade);
                 }
             }
             // channel attributes from the nearest channel

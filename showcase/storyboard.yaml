@@ -85,10 +85,11 @@ shots:
 
   - id: tundra
     label: "Tundra · 55°N"
-    text: "Snow-covered tundra above the tree line"
+    text: "The tree line: boreal forest giving way to open tundra and lingering snowfields"
     seconds: 5
     scenario:
-      trajectory: { synth: { kind: line, lat: 55.0, lon: 17.6, heading_deg: 200, altitude: 600 } }
+      # open tundra west of a snowfield, towards it (forest to the west and south)
+      trajectory: { synth: { kind: line, lat: 55.5053, lon: 16.0182, heading_deg: 100, altitude: 600 } }
       render: { lighting: { time_utc: "09:30:00" } }
       cameras: [ { extrinsics: { pitch_deg: -30 } } ]
 

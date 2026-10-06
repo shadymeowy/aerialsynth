@@ -937,6 +937,16 @@ impl Renderer {
                 )
             }
         };
+        // light of the nearby lamps falling on everything around them (walls, roofs, yards, trees):
+        // the emission averaged over ~25 m as irradiance; without it the night town was black
+        // between the lamp pools, buildings only silhouettes
+        if self.settings.shading == Shading::Relit && sun_state.lights > 1e-3 {
+            let k = ((25.0 / texel).log2().ceil().max(0.0) as u8).min(z);
+            let s = 0.5f64.powi(k as i32);
+            if let Some(e) = view.sample3(z - k, gx * s, gy * s, Which::Emission) {
+                mul += e * (0.35 * sun_state.lights);
+            }
+        }
         if self.settings.shading == Shading::Relit && self.settings.water_glint && terragen::landcover::is_water(view.landcover(z, gx, gy)) {
             let sun = atmo.sun_dir;
             let hv = (v + sun).normalize();
