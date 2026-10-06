@@ -459,10 +459,19 @@ impl SurfaceModel {
             // sediment / plankton variation
             let v = pf.water;
             col *= 1.0 + 0.06 * v;
-            // surf/foam close to the ocean shore
-            if l.water_kind == water::OCEAN && depth < 1.2 {
-                let foam = (1.0 - depth / 1.2) * 0.5 * (0.5 + 0.5 * perlin3(7, p / 6.0)) * band(6.0, gsd);
-                col = mixc(col, srgb(200.0, 210.0, 210.0), foam);
+            if l.water_kind == water::OCEAN && depth < 3.0 {
+                // the sandy bottom shows through clear shallow water
+                let sh = 1.0 - smoothstep(0.0, 3.0, depth);
+                col = mixc(col, mixc(pal.ocean_shallow, pal.beach, 0.55) * 1.05, 0.75 * sh * sh);
+                // surf: thin broken lines of foam along the shore (swash at the water's edge,
+                // breakers a little further out), not a blotchy band
+                let wave = depth + 0.18 * perlin3(0x5F1, p / 40.0);
+                let broken = smoothstep(-0.25, 0.35, perlin3(0x5F2, p / 22.0) + 0.5 * perlin3(0x5F3, p / 7.0));
+                let line = |c: f64, w: f64| (-((wave - c) / w).powi(2)).exp();
+                let foam = (0.85 * line(0.06, 0.05) + 0.6 * broken * line(0.45, 0.05) + 0.4 * broken * line(1.0, 0.06))
+                    * (0.75 + 0.25 * perlin3(7, p / 3.0))
+                    * band(3.0, gsd);
+                col = mixc(col, srgb(225.0, 232.0, 230.0), foam.min(1.0));
             }
             let class = match l.water_kind {
                 water::OCEAN => lc::OCEAN,
@@ -548,10 +557,24 @@ impl SurfaceModel {
                 class = lc::SAND;
             }
         }
-        let coastal = 1.0 - smoothstep(0.0, 0.03, t.cont.abs());
-        if l.ground < 3.0 && coastal > 0.0 && slope < 0.25 {
-            let b = (1.0 - smoothstep(1.2, 3.0, l.ground + 0.8 * detail)) * coastal * (1.0 - smoothstep(0.12, 0.25, slope));
-            let bc = mixc(pal.beach, pal.wet_sand, 1.0 - smoothstep(0.0, 0.6, l.ground));
+        // land within a few metres of sea level is coastal plain (the continent field does not
+        // mark the shoreline: coasts are shaped by the relief on top of it); river floodplains
+        // near sea level (deltas) are not beaches
+        let coastal = 1.0 - smoothstep(0.3, 0.7, t.floodplain);
+        // beaches up to ~4 m above the sea (a band tens of metres wide on flat shores) with a
+        // ragged inland edge; nothing is farmed or wooded on them (fields and trees ran into the
+        // water) and fields keep back from the shore behind them
+        let mut beach = 0.0;
+        let mut shore_keep = 1.0;
+        if coastal > 0.0 {
+            shore_keep = 1.0 - coastal * (1.0 - smoothstep(4.0, 8.0, l.ground + 2.0 * patch));
+        }
+        if l.ground < 6.0 && coastal > 0.0 && slope < 0.3 {
+            let b = (1.0 - smoothstep(2.6, 4.2, l.ground + 1.0 * detail + 0.8 * patch)) * coastal * (1.0 - smoothstep(0.15, 0.3, slope));
+            beach = b;
+            // dry sand mottled by wind and footprints, darker wet sand only at the water's edge
+            let bc = pal.beach * (1.0 + 0.05 * perlin3(0xBE1, p / 9.0) * band(9.0, gsd) + 0.04 * perlin3(0xBE2, p / 2.5) * band(2.5, gsd));
+            let bc = mixc(bc, mixc(pal.beach, pal.wet_sand, 0.7), 1.0 - smoothstep(0.05, 0.3, l.ground + 0.08 * perlin3(0xBE3, p / 15.0)));
             col = mixc(col, bc, b);
             if b > 0.5 {
                 class = lc::BEACH;
@@ -573,11 +596,12 @@ impl SurfaceModel {
         let micro_relief = (0.30 * perlin3(0x9A01, p / 9.0) * band(9.0, gsd)
             + 0.14 * perlin3(0x9A02, p / 3.2) * band(3.2, gsd)
             + 0.06 * perlin3(0x9A03, p / 1.1) * band(1.1, gsd))
-            * (1.0 - 0.5 * rock);
+            * (1.0 - 0.5 * rock)
+            * (1.0 - 0.7 * beach);
         let mut height = l.ground + micro_relief;
         let mut lit: f64 = 1.0;
         let mut emission = DVec3::ZERO;
-        let natural_ok = (1.0 - rock) * (1.0 - snow) * (1.0 - t.sand);
+        let natural_ok = (1.0 - rock) * (1.0 - snow) * (1.0 - t.sand) * (1.0 - beach);
 
         // local planar frame of the land-use region
         let have_region = t.region.id != 0;
@@ -620,7 +644,7 @@ impl SurfaceModel {
                 if let Some((fcol, fh, cov, edge_kind)) = self.field(r, t, q_rot, p, gsd, fw, pf) {
                     // a field is there or not: a crisp (noisy) cutoff instead of fading fields out
                     // over gentle valley sides, which left washed, half-transparent bands
-                    let keep = natural_ok * flat_ok * (1.0 - riparian) * (1.0 - woodlot);
+                    let keep = natural_ok * flat_ok * (1.0 - riparian) * (1.0 - woodlot) * shore_keep;
                     // (constant threshold: a noisy one left specks of open ground inside fields,
                     // where trees clipped to a pixel or two became spikes)
                     let a = cov * smoothstep(0.45, 0.55, keep);
