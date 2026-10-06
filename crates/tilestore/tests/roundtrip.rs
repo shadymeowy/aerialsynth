@@ -9,6 +9,7 @@ fn tile(id: TileId, k: u8) -> TileData {
         elevation: (0..n).map(|i| i as f32 * 0.25 - 100.0 + k as f32).collect(),
         normal: (0..n * 3).map(|i| (i % 255) as i8).collect(),
         landcover: (0..n).map(|i| (i % 17) as u8).collect(),
+        emission: (0..n * 3).map(|i| (i % 7) as u8).collect(),
         elev_min: -100.0,
         elev_max: 1000.0 + k as f32,
     }

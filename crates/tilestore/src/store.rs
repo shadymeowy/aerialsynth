@@ -229,6 +229,7 @@ impl TileStore {
                 Layer::Elevation => "DSM height above the ellipsoid (m) at pixel centres",
                 Layer::Normal => "unit surface normal (east, north, up) * 127, i8",
                 Layer::Landcover => "land-cover class id (terragen::landcover)",
+                Layer::Emission => "night-time artificial light, linear radiance = 4 * (v/255)^2.2",
             })?;
             layers.insert(l, ds);
         }

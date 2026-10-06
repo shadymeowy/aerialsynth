@@ -68,6 +68,8 @@ pub struct Surface {
     /// 1 = fully sunlit, 0 = fully in cast shadow.
     pub lit: f64,
     pub is_water: bool,
+    /// Night-time artificial light (linear radiance).
+    pub emission: DVec3,
 }
 
 /// Field system of a land-use region.
@@ -417,7 +419,7 @@ impl SurfaceModel {
                 water::OCEAN => lc::OCEAN,
                 _ => lc::LAKE,
             };
-            return Surface { albedo: col, height: l.water, class, lit: 1.0, is_water: true };
+            return Surface { albedo: col, height: l.water, class, lit: 1.0, is_water: true, emission: DVec3::ZERO };
         }
 
         let slope = l.slope;
@@ -505,6 +507,7 @@ impl SurfaceModel {
 
         let mut height = l.ground;
         let mut lit: f64 = 1.0;
+        let mut emission = DVec3::ZERO;
         let natural_ok = (1.0 - rock) * (1.0 - snow) * (1.0 - t.sand);
 
         // local planar frame of the land-use region
@@ -660,7 +663,8 @@ impl SurfaceModel {
         if t.town.id != 0 && world.cfg.landuse.towns > 0.0 {
             let town = self.town_info(world, cache, t);
             if town.exists {
-                if let Some((tcol, th, cov, cls, shadow)) = self.town(&town, p, gsd, fw, slope, world.cfg.look.shadows) {
+                if let Some((tcol, th, cov, cls, shadow, em)) = self.town(&town, p, gsd, fw, slope, world.cfg.look.shadows) {
+                    emission = em;
                     col = mixc(col, tcol, cov);
                     if world.cfg.landuse.buildings_in_dsm {
                         height = lerp(height, l.ground + th, cov);
@@ -687,14 +691,14 @@ impl SurfaceModel {
                 lit = lerp(lit, 1.0, cov);
                 if cov > 0.5 {
                     if wet_r > 0.5 {
-                        return Surface { albedo: col, height, class: lc::RIVER, lit, is_water: true };
+                        return Surface { albedo: col, height, class: lc::RIVER, lit, is_water: true, emission };
                     }
                     class = lc::SAND;
                 }
             }
         }
 
-        Surface { albedo: col.max(DVec3::ZERO), height, class, lit, is_water: false }
+        Surface { albedo: col.max(DVec3::ZERO), height, class, lit, is_water: false, emission }
     }
 
     /// Tree crowns of several layers at local position `q`. Returns (colour, canopy height, coverage).
@@ -927,7 +931,7 @@ impl SurfaceModel {
     }
 
     /// Town at point p. Returns (colour, height above ground, coverage, class, shadow amount).
-    fn town(&self, town: &TownInfo, p: DVec3, gsd: f64, fw: f64, slope: f64, shadows: bool) -> Option<(DVec3, f64, f64, u8, f64)> {
+    fn town(&self, town: &TownInfo, p: DVec3, gsd: f64, fw: f64, slope: f64, shadows: bool) -> Option<(DVec3, f64, f64, u8, f64, DVec3)> {
         let pal = &self.pal;
         let d = p - town.center;
         let q0 = DVec2::new(d.dot(town.ex), d.dot(town.ey));
@@ -1040,12 +1044,39 @@ impl SurfaceModel {
             class = lc::ROAD;
         }
         height *= 1.0 - street;
-        Some((col, height, urban, class, shadow * (1.0 - street * 0.5)))
+
+        // ---- night lights: pools of light under street lamps, lit plazas / industrial yards
+        let lamp_sp = 26.0 + 12.0 * town.organic;
+        let lamp_col = if town.roof_style < 0.55 { DVec3::new(1.0, 0.58, 0.24) } else { DVec3::new(0.86, 0.9, 1.0) };
+        let lamp_res = band(lamp_sp, gsd);
+        let mut emission = DVec3::ZERO;
+        if lamp_res > 0.0 {
+            let ql = (q / lamp_sp).round() * lamp_sp;
+            let lq = ql - (ql / b).floor() * b;
+            let dsl = lq.x.min(b - lq.x).min(lq.y).min(b - lq.y);
+            let lh = hash2(town.lot.to_bits() ^ 0x1A3B, (ql.x / lamp_sp) as i64, (ql.y / lamp_sp) as i64);
+            if dsl < sw * 1.6 && u01k(lh, 1) < 0.9 {
+                let d2 = (q - ql).length_squared();
+                let pool = 0.35 * (-d2 / (2.0 * 7.0 * 7.0)).exp();
+                let core = 4.0 * (-d2 / (2.0 * 0.7 * 0.7)).exp() * band(1.5, gsd);
+                emission += lamp_col * (pool + core) * (0.7 + 0.6 * u01k(lh, 2));
+            }
+        }
+        // prefiltered mean when lamps are unresolved (town glow)
+        emission = emission * lamp_res + lamp_col * 0.07 * (1.0 - lamp_res);
+        if block_kind < 0.14 && block_kind >= 0.08 + 0.1 * (1.0 - urban) {
+            emission += lamp_col * 0.12; // lit plaza / parking
+        }
+        if block_kind > 0.93 && central < 0.4 {
+            emission += DVec3::new(0.9, 0.95, 1.0) * 0.08; // industrial yard floodlights
+        }
+        emission *= urban;
+        Some((col, height, urban, class, shadow * (1.0 - street * 0.5), emission))
     }
 
     fn building_height_at(&self, town: &TownInfo, p: DVec3, gsd: f64) -> f64 {
         match self.town(town, p, gsd, 0.01, 0.0, false) {
-            Some((_, h, cov, _, _)) => h * cov,
+            Some((_, h, cov, _, _, _)) => h * cov,
             None => 0.0,
         }
     }

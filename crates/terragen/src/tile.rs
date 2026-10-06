@@ -115,6 +115,7 @@ impl Generator {
 
         // ---------------- pass B, supersampled, on the apron grid
         struct PixB {
+            emission: DVec3,
             albedo: DVec3,
             height: f64,
             lit: f64,
@@ -129,6 +130,7 @@ impl Generator {
                 let fw = gsd / ss as f64;
                 for i in 0..na {
                     let mut acc_a = DVec3::ZERO;
+                    let mut acc_e = DVec3::ZERO;
                     let mut acc_h = 0.0;
                     let mut acc_l = 0.0;
                     let mut counts = [0u8; 32];
@@ -179,6 +181,7 @@ impl Generator {
                             let ctx = Ctx::new(lat, lon, gsd, &ell);
                             let s = self.surface.eval(&self.world, &mut caches, &ctx, &local);
                             acc_a += s.albedo;
+                            acc_e += s.emission;
                             acc_h += s.height;
                             acc_l += s.lit;
                             counts[(s.class as usize).min(31)] += 1;
@@ -186,7 +189,7 @@ impl Generator {
                     }
                     let inv = 1.0 / (ss * ss) as f64;
                     let class = counts.iter().enumerate().max_by_key(|(_, c)| **c).map(|(k, _)| k as u8).unwrap_or(0);
-                    row.push(PixB { albedo: acc_a * inv, height: acc_h * inv, lit: acc_l * inv, class });
+                    row.push(PixB { emission: acc_e * inv, albedo: acc_a * inv, height: acc_h * inv, lit: acc_l * inv, class });
                 }
                 row
             })
@@ -206,6 +209,7 @@ impl Generator {
         let mut elevation = vec![0f32; n * n];
         let mut normal = vec![0i8; n * n * 3];
         let mut landcover = vec![0u8; n * n];
+        let mut emission = vec![0u8; n * n * 3];
         let mut emin = f32::MAX;
         let mut emax = f32::MIN;
         let hb = |i: usize, j: usize| pb[j * na + i].height;
@@ -232,9 +236,10 @@ impl Generator {
                 for ch in 0..3 {
                     albedo[3 * k + ch] = (l2s(px.albedo[ch]) * 255.0).round() as u8;
                     rgb[3 * k + ch] = (l2s(c[ch]) * 255.0).round() as u8;
+                    emission[3 * k + ch] = ((px.emission[ch] / 4.0).clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0).round() as u8;
                 }
             }
         }
-        TileData { id, rgb, albedo, elevation, normal, landcover, elev_min: emin, elev_max: emax }
+        TileData { id, rgb, albedo, elevation, normal, landcover, emission, elev_min: emin, elev_max: emax }
     }
 }

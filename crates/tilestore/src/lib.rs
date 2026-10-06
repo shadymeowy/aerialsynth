@@ -13,6 +13,7 @@
 //!     elevation  f32     DSM, meters above the ellipsoid, at pixel centres
 //!     normal     i8  x3  unit normal (east, north, up) * 127
 //!     landcover  u8      class id (see terragen::landcover)
+//!     emission   u8  x3  night-time artificial light, linear radiance = 4 * (v/255)^2.2
 //! ```
 //! Rows are appended in any order, so the file can be grown lazily (generate only the tiles a
 //! trajectory needs, add more later). Tile pixels are pixel-centre registered: pixel (i, j) of
@@ -36,10 +37,12 @@ pub enum Layer {
     Elevation,
     Normal,
     Landcover,
+    /// Night-time artificial light emission, u8 x3: linear radiance = 4 * (v/255)^2.2
+    Emission,
 }
 
 impl Layer {
-    pub const ALL: [Layer; 5] = [Layer::Rgb, Layer::Albedo, Layer::Elevation, Layer::Normal, Layer::Landcover];
+    pub const ALL: [Layer; 6] = [Layer::Rgb, Layer::Albedo, Layer::Elevation, Layer::Normal, Layer::Landcover, Layer::Emission];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -48,6 +51,7 @@ impl Layer {
             Layer::Elevation => "elevation",
             Layer::Normal => "normal",
             Layer::Landcover => "landcover",
+            Layer::Emission => "emission",
         }
     }
     pub fn from_name(s: &str) -> Option<Layer> {
@@ -55,7 +59,7 @@ impl Layer {
     }
     pub fn channels(self) -> usize {
         match self {
-            Layer::Rgb | Layer::Albedo | Layer::Normal => 3,
+            Layer::Rgb | Layer::Albedo | Layer::Normal | Layer::Emission => 3,
             _ => 1,
         }
     }
@@ -80,6 +84,7 @@ pub struct TileData {
     pub elevation: Vec<f32>,
     pub normal: Vec<i8>,
     pub landcover: Vec<u8>,
+    pub emission: Vec<u8>,
     pub elev_min: f32,
     pub elev_max: f32,
 }
@@ -92,6 +97,7 @@ impl TileData {
             Layer::Elevation => !self.elevation.is_empty(),
             Layer::Normal => !self.normal.is_empty(),
             Layer::Landcover => !self.landcover.is_empty(),
+            Layer::Emission => !self.emission.is_empty(),
         }
     }
 
@@ -107,6 +113,7 @@ impl TileData {
             Layer::Elevation => cast(&self.elevation),
             Layer::Normal => cast(&self.normal),
             Layer::Landcover => &self.landcover,
+            Layer::Emission => &self.emission,
         }
     }
 
@@ -115,6 +122,7 @@ impl TileData {
             Layer::Rgb => self.rgb = b,
             Layer::Albedo => self.albedo = b,
             Layer::Landcover => self.landcover = b,
+            Layer::Emission => self.emission = b,
             Layer::Normal => self.normal = b.into_iter().map(|x| x as i8).collect(),
             Layer::Elevation => {
                 self.elevation = b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()

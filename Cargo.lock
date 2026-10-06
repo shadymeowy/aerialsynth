@@ -654,6 +654,19 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "render"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "geodesy",
+ "glam",
+ "h5",
+ "image",
+ "parking_lot",
+ "rayon",
+ "serde",
+ "serde_yaml",
+ "terragen",
+ "tilestore",
+]
 
 [[package]]
 name = "rustversion"
@@ -778,12 +791,15 @@ dependencies = [
  "clap",
  "geodesy",
  "glam",
+ "h5",
  "image",
  "indicatif",
  "rayon",
+ "render",
  "serde",
  "serde_yaml",
  "terragen",
+ "tilestore",
 ]
 
 [[package]]

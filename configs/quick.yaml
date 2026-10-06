@@ -1,0 +1,29 @@
+# Small smoke-test scenario: 10 s of flight, 5 fps, nadir camera at ~1000 m AGL.
+world:
+  seed: 1
+tiles:
+  file: out/quick/world.h5
+  max_zoom: 17
+trajectory:
+  file: out/quick/traj.csv
+  synth:
+    kind: random
+    altitude: 1000
+    speed: 50
+    duration: 10
+camera:
+  model: pinhole_radtan
+  width: 640
+  height: 512
+  fx: 457.0
+  fy: 457.0
+  cx: 319.5
+  cy: 255.5
+  k1: -0.05
+  k2: 0.01
+render:
+  supersample: 3
+output:
+  dir: out/quick/seq
+  h5: out/quick/seq.h5
+  frame_rate: 5
