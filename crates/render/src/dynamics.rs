@@ -15,7 +15,7 @@
 
 use crate::trajectory::Pose;
 use geodesy::{Ellipsoid, Geodetic};
-use glam::DQuat;
+use glam::{DMat3, DQuat, DVec3};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -287,6 +287,10 @@ impl Oscillator {
 #[derive(Clone, Copy, Debug)]
 pub struct Record {
     pub pose: Pose,
+    /// True IMU output in the body frame (FRD), averaged over the record interval:
+    /// specific force (m/s²) and angular rate w.r.t. inertial space (rad/s).
+    pub imu_f: DVec3,
+    pub imu_w: DVec3,
     /// ground velocity NED (m/s)
     pub vel_ned: [f64; 3],
     /// total wind NED (m/s)
@@ -535,6 +539,15 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
         let h = h_prof[i] + (h_prof[i + 1] - h_prof[i]) * f;
         (h, (h_prof[i + 1] - h_prof[i]) / ds_h)
     };
+    // second derivative of the altitude profile (for the vertical acceleration)
+    let alt_dd = |s: f64| -> f64 {
+        if nh < 3 {
+            return 0.0;
+        }
+        let x = (s / ds_h).clamp(1.0, (nh - 2) as f64);
+        let i = x.round() as usize;
+        (h_prof[i + 1] - 2.0 * h_prof[i] + h_prof[i - 1]) / (ds_h * ds_h)
+    };
 
     // ---- disturbance states
     let wdir = cfg.wind.direction_deg.to_radians();
@@ -562,6 +575,10 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
     let mut gimbal_rp = [att[0], att[1]];
 
     let mut out = Vec::new();
+    let mut q_prev: Option<DQuat> = None;
+    let mut imu_f_acc = DVec3::ZERO;
+    let mut imu_w_acc = DVec3::ZERO;
+    let mut imu_n = 0usize;
     let n_steps = (cfg.duration / dt).round() as usize;
     let rec_every = (1.0 / (cfg.rate * dt)).round().max(1.0) as usize;
     let tau_t = cfg.wind.length_scale / v;
@@ -601,8 +618,10 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
         // ---------------- position deviation: δ'' = -ω² δ - 2ζω (δ' - k·gust)
         let w = std::f64::consts::TAU * rc.track_hz;
         let gin = [gv[1], gv[2], gv[0]]; // cross, vertical, along
+        let mut dev_acc = [0.0f64; 3];
         for k in 0..3 {
             let acc = -w * w * dev[k] - 2.0 * rc.track_damping * w * (dev_d[k] - rc.gust_follow * gin[k]);
+            dev_acc[k] = acc;
             dev_d[k] += acc * dt;
             dev[k] += dev_d[k] * dt;
         }
@@ -641,15 +660,6 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
             vib_a[k] += bb[k].step(&mut rng, vib.broadband_hz * (0.8 + 0.2 * k as f64), vib.broadband_damping, vib.broadband_deg.to_radians(), dt);
         }
 
-        if step % rec_every != 0 {
-            // gimbal state still has to advance
-            if cfg.gimbal.stabilized {
-                let a = (dt / cfg.gimbal.tau.max(1e-3)).min(1.0);
-                gimbal_rp[0] += (att[0] - gimbal_rp[0]) * a;
-                gimbal_rp[1] += (att[1] - gimbal_rp[1]) * a;
-            }
-            continue;
-        }
         let (mut r_out, mut p_out) = (att[0], att[1]);
         if cfg.gimbal.stabilized {
             let a = (dt / cfg.gimbal.tau.max(1e-3)).min(1.0);
@@ -666,12 +676,56 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
         let (ce, cn) = (ct, -st); // right-hand normal of the track (east, north)
         let geo = to_geo(e + ce * dev[0], n + cn * dev[0]);
         let h = h_nom + dev[1];
-        let vel = [v * ct + dev_d[0] * cn, v * st + dev_d[0] * ce, -(v * dhds + dev_d[1])];
+        // along-track speed includes the along deviation rate (s_eff = s + dev[2])
+        let va = v + dev_d[2];
+        let vel = [va * ct + dev_d[0] * cn, va * st + dev_d[0] * ce, -(va * dhds + dev_d[1])];
+
+        // ---------------- IMU truth: specific force and inertial angular rate (body frame)
+        {
+            // kinematic acceleration in NED (constant ground speed along the track)
+            let a_along = dev_acc[2];
+            let a_cross = va * va * kappa + dev_acc[0];
+            let a_up = va * va * alt_dd(s_eff) + dhds * dev_acc[2] + dev_acc[1];
+            let a_ned = DVec3::new(a_along * ct - a_cross * st, a_along * st + a_cross * ct, -a_up);
+            let v_ned = DVec3::from_array(vel);
+            let (sl, cl) = geo.lat.sin_cos();
+            let rm = ell.meridian_radius(geo.lat) + h;
+            let rn = ell.prime_vertical_radius(geo.lat) + h;
+            let w_ie = DVec3::new(geodesy::EARTH_RATE * cl, 0.0, -geodesy::EARTH_RATE * sl);
+            let rho = DVec3::new(v_ned.y / rn, -v_ned.x / rm, -v_ned.y * sl / cl.max(1e-9) / rn);
+            let g_ned = DVec3::new(0.0, 0.0, geodesy::normal_gravity(geo.lat, h));
+            let f_ned = a_ned + (2.0 * w_ie + rho).cross(v_ned) - g_ned;
+            let c_bn = DMat3::from_quat(q).transpose();
+            imu_f_acc += c_bn * f_ned;
+            // body rate w.r.t. the local NED frame from consecutive attitudes, plus Earth and
+            // transport rate
+            let w_nb = match q_prev {
+                Some(qp) => {
+                    let dq = (qp.inverse() * q).normalize();
+                    let dq = if dq.w < 0.0 { -dq } else { dq };
+                    dq.to_scaled_axis() / dt
+                }
+                None => DVec3::ZERO,
+            };
+            imu_w_acc += w_nb + c_bn * (w_ie + rho);
+            imu_n += 1;
+            q_prev = Some(q);
+        }
+
+        if step % rec_every != 0 {
+            continue;
+        }
+        let inv = 1.0 / imu_n.max(1) as f64;
         out.push(Record {
             pose: Pose { t, geo: Geodetic::new(geo.lat, geo.lon, h), q_ned_body: q },
+            imu_f: imu_f_acc * inv,
+            imu_w: imu_w_acc * inv,
             vel_ned: vel,
             wind_ned: [wmean.1 + gv[0] * ct - gv[1] * st, wmean.0 + gv[0] * st + gv[1] * ct, -gv[2]],
         });
+        imu_f_acc = DVec3::ZERO;
+        imu_w_acc = DVec3::ZERO;
+        imu_n = 0;
     }
     out
 }
@@ -689,14 +743,15 @@ pub fn save_records(path: &std::path::Path, recs: &[Record], header_note: &str) 
     for l in header_note.lines() {
         writeln!(f, "# {l}")?;
     }
-    writeln!(f, "t,lat,lon,h,qw,qx,qy,qz,roll,pitch,yaw,vn,ve,vd,wind_n,wind_e,wind_d")?;
+    writeln!(f, "# f_*: true specific force, w_*: true angular rate (inertial), body FRD axes, averaged over the sample interval")?;
+    writeln!(f, "t,lat,lon,h,qw,qx,qy,qz,roll,pitch,yaw,vn,ve,vd,wind_n,wind_e,wind_d,f_x,f_y,f_z,w_x,w_y,w_z")?;
     for r in recs {
         let p = &r.pose;
         let q: DQuat = p.q_ned_body;
         let (y, pi, ro) = geodesy::quat_to_euler_zyx(q);
         writeln!(
             f,
-            "{:.5},{:.10},{:.10},{:.4},{:.9},{:.9},{:.9},{:.9},{:.4},{:.4},{:.4},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3}",
+            "{:.6},{:.12},{:.12},{:.6},{:.10},{:.10},{:.10},{:.10},{:.4},{:.4},{:.4},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.7},{:.7},{:.7},{:.9},{:.9},{:.9}",
             p.t,
             p.geo.lat.to_degrees(),
             p.geo.lon.to_degrees(),
@@ -713,7 +768,13 @@ pub fn save_records(path: &std::path::Path, recs: &[Record], header_note: &str) 
             r.vel_ned[2],
             r.wind_ned[0],
             r.wind_ned[1],
-            r.wind_ned[2]
+            r.wind_ned[2],
+            r.imu_f.x,
+            r.imu_f.y,
+            r.imu_f.z,
+            r.imu_w.x,
+            r.imu_w.y,
+            r.imu_w.z
         )?;
     }
     Ok(())
@@ -722,6 +783,52 @@ pub fn save_records(path: &std::path::Path, recs: &[Record], header_note: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Strapdown check: integrating the IMU truth with the navigation equation reproduces the
+    /// recorded velocity changes; a coordinated turn shows the expected load factor.
+    #[test]
+    fn imu_truth_is_consistent() {
+        let ell = Ellipsoid::WGS84;
+        let cfg = SynthConfig { kind: PathKind::Circle, duration: 30.0, altitude_ref: AltitudeRef::Ellipsoid, altitude: 1000.0, radius: 600.0, rate: 200.0, ..Default::default() };
+        let recs = simulate(&cfg, (39.9, 32.8), &ell, None);
+        let dtr = 1.0 / cfg.rate;
+        let mut max_err: f64 = 0.0;
+        for win in recs[400..].windows(201).step_by(200) {
+            let mut v = DVec3::from_array(win[0].vel_ned);
+            for k in 0..200 {
+                let (a, b) = (&win[k], &win[k + 1]);
+                let q = a.pose.q_ned_body.slerp(b.pose.q_ned_body, 0.5);
+                let geo = a.pose.geo;
+                let (sl, cl) = geo.lat.sin_cos();
+                let w_ie = DVec3::new(geodesy::EARTH_RATE * cl, 0.0, -geodesy::EARTH_RATE * sl);
+                let rm = ell.meridian_radius(geo.lat) + geo.h;
+                let rn = ell.prime_vertical_radius(geo.lat) + geo.h;
+                let rho = DVec3::new(v.y / rn, -v.x / rm, -v.y * sl / cl / rn);
+                let g = DVec3::new(0.0, 0.0, geodesy::normal_gravity(geo.lat, geo.h));
+                let vdot = DMat3::from_quat(q) * b.imu_f - (2.0 * w_ie + rho).cross(v) + g;
+                v += vdot * dtr;
+            }
+            let err = (v - DVec3::from_array(win[200].vel_ned)).length();
+            max_err = max_err.max(err);
+        }
+        assert!(max_err < 0.3, "velocity drift over 1 s: {max_err} m/s");
+        // steady coordinated turn: |f| ≈ sqrt(g² + (v²/r)²), mostly along body −z
+        let g0 = geodesy::normal_gravity(0.7, 1000.0);
+        let ac = cfg.speed * cfg.speed / cfg.radius;
+        let mean_f = recs[2000..4000].iter().fold(DVec3::ZERO, |a, r| a + r.imu_f) / 2000.0;
+        assert!((mean_f.length() - (g0 * g0 + ac * ac).sqrt()).abs() < 0.15, "{mean_f:?}");
+        assert!(mean_f.z < -9.0 && mean_f.y.abs() < 0.5, "{mean_f:?}");
+        // turn rate: |ω| matches the rate of change of the ground track
+        let mean_w = recs[2000..4000].iter().fold(DVec3::ZERO, |a, r| a + r.imu_w) / 2000.0;
+        // heading (not track: the crab angle into the wind changes around the circle)
+        let trk = |r: &Record| geodesy::quat_to_euler_zyx(r.pose.q_ned_body).0;
+        let mut dtrk = trk(&recs[4000]) - trk(&recs[2000]);
+        while dtrk < 0.0 {
+            dtrk += std::f64::consts::TAU;
+        }
+        let track_rate = dtrk / (2000.0 * dtr);
+        assert!((mean_w.length() - track_rate).abs() < 0.002, "{mean_w:?} vs heading rate {track_rate}");
+    }
 
     #[test]
     fn flight_is_smooth_and_holds_altitude() {

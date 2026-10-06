@@ -31,7 +31,7 @@ pub use frames::{
     aer2ecef, aer2enu, aer2geodetic, aer2ned, ecef2aer, ecef2enu, ecef2enuv, ecef2geodetic,
     ecef2ned, ecef2nedv, enu2aer, enu2ecef, enu2ecefv, enu2geodetic, geodetic2aer, geodetic2ecef,
     geodetic2enu, geodetic2ned, haversine_distance, horizon_distance, ned2aer, ned2ecef, ned2ecefv,
-    ned2geodetic, ray_ellipsoid, rot_ecef2enu, rot_ecef2ned, up_vector, Geodetic, LocalConvention,
+    ned2geodetic, normal_gravity, ray_ellipsoid, rot_ecef2enu, rot_ecef2ned, up_vector, Geodetic, LocalConvention, EARTH_RATE,
     LocalFrame,
 };
 pub use tiles::{

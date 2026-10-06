@@ -87,6 +87,22 @@ All subcommands read **one scenario YAML** (`-c`). Its sections are `world`, `ti
 
 ## Sequence output (`output.h5` and/or `output.dir`)
 
+Everything for one scenario goes into one HDF5 file, `output.h5`:
+- frames and their ground truth (below)
+- the synthetic IMU (`imu:` section)
+- the event stream (`events:` section)
+
+The per-sensor groups (frames, IMU, events) are named by `output.layout`. Its defaults are
+M3ED-like, which is what camodocal's H5 readers expect:
+
+- **Frames:** `/ovc/left/data` with `/ovc/ts`.
+- **IMU:** `/ovc/imu/{ts,accel,omega}`.
+- **Events:** `/prophesee/left/{x,y,t,p,ms_map_idx}`.
+
+Every name is configurable. Each sensor group has a `calib/` subgroup: intrinsics, distortion,
+resolution, the sensor → rig transform (rig = body FRD) and the full camera YAML. All sensor
+timestamps are µs on one clock, starting at the first frame.
+
 | dataset                                                             | type / shape                                        |
 |---------------------------------------------------------------------|-----------------------------------------------------|
 | `rgb`                                                               | u8 [N,H,W,3]                                        |
@@ -173,6 +189,15 @@ All subcommands read **one scenario YAML** (`-c`). Its sections are `world`, `ti
   - motion blur from sub-frame poses of the high-rate trajectory
   - defocus, chromatic aberration, vignetting, bloom, starburst spikes on bright lights
   - shot, read and PRNU noise, then tone curve
+- **IMU** (`imu:`):
+  - truth (specific force, inertial angular rate) computed exactly inside the flight simulator
+    (kinematics, Coriolis/transport rate, WGS84 normal gravity) and stored as trajectory columns
+  - the sensor model adds extrinsics/lever arm, misalignment, scale factor, turn-on bias, bias
+    random walk, white noise (Kalibr-style densities) and saturation
+  - error-free values and biases are stored as GT
+- **Lamp flicker** (`render.lighting.flicker`): lamps flicker at 2× mains frequency, with three
+  supply phases and a share of LED lamps. Frames integrate it over their exposure; the event
+  camera resolves it.
 - **Trajectories:**
   - arc-length spline path (line, circle, figure8, lawnmower, random, waypoints)
   - AGL terrain following, crab angle into the crosswind

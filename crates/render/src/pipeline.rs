@@ -232,7 +232,7 @@ pub fn render_sequence(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, ge
     let o = &scn.output;
     let mut png = if o.png { Some(PngWriter::new(&o.dir, w as u32, h as u32, &scn.camera, &scn.extrinsics, &yaml, o.depth, o.flow, o.landcover)?) } else { None };
     let mut h5w = match &o.h5 {
-        Some(p) => Some(H5Writer::new(p, w as u32, h as u32, n, &scn.camera, &scn.extrinsics, &yaml, o.depth, o.flow, o.landcover, &o.compression)?),
+        Some(p) => Some(H5Writer::new(p, w as u32, h as u32, n, &scn.camera, &scn.extrinsics, &yaml, o.depth, o.flow, o.landcover, &o.compression, &o.layout)?),
         None => None,
     };
     let first_cam = trajectory::interpolate(poses, times[0]).camera(&scn.extrinsics, &ell);
@@ -285,12 +285,19 @@ pub fn render_sequence(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, ge
     for (k, &t) in times.iter().enumerate() {
         let pose = trajectory::interpolate(poses, t);
         let cam = pose.camera(&scn.extrinsics, &ell);
-        let sun = scn.render.lighting.sun_at(t - poses[0].t, pose.geo.lat, pose.geo.lon);
+        let mut sun = scn.render.lighting.sun_at(t - poses[0].t, pose.geo.lat, pose.geo.lon);
+        // exposure is decided from the previous frames' metering before capturing this one
+        // (the exposure window matters for lamp flicker)
+        let ex_pre = if sensor.has_metering() { Some(sensor.exposure_for(t)) } else { None };
+        sun.exposure = ex_pre.map(|e| e.time).unwrap_or(scn.sensor.exposure.base_time);
         let frame = renderer.render(&cam, &sun);
         if !sensor.has_metering() {
             sensor.meter(&frame.radiance); // start converged
         }
-        let ex = sensor.exposure_for(t);
+        let ex = match ex_pre {
+            Some(e) => e,
+            None => sensor.exposure_for(t),
+        };
         // ---- motion blur from sub-frame poses across the exposure window
         let mb = &scn.sensor.motion_blur;
         let mut radiance = frame.radiance;
@@ -383,4 +390,20 @@ pub fn render_events(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, gen:
     let n = crate::events::simulate_events(scn, poses, cache.clone(), ell, progress)?;
     cache.flush_generated()?;
     Ok(n)
+}
+
+/// Synthesize the IMU over the sequence window and write it into `output.h5` (`/ovc/imu`).
+/// Returns the number of samples.
+pub fn write_imu(scn: &Scenario, poses: &[Pose], traj_path: &std::path::Path) -> Result<usize> {
+    let Some(h5p) = &scn.output.h5 else { bail!("imu: output.h5 must be set (the IMU is stored with the frames)") };
+    let ell = Ellipsoid::from_a_invf(scn.world.planet.a, scn.world.planet.inv_f);
+    let truth = trajectory::load_imu_truth(traj_path)?;
+    if truth.is_none() {
+        eprintln!("imu: trajectory has no IMU truth columns (f_*, w_*); deriving from poses numerically (lower fidelity)");
+    }
+    let times = frame_times(scn, poses);
+    let (t0, t1) = (times[0], *times.last().unwrap());
+    let d = crate::imu::synthesize(&scn.imu, poses, truth.as_deref(), &ell, t0, t1)?;
+    crate::imu::write_h5(h5p, &scn.imu, &scn.output.layout, &d, t0)?;
+    Ok(d.t.len())
 }

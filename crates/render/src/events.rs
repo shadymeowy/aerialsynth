@@ -16,9 +16,10 @@
 //!    (Poisson, random polarity) and leak events (slow drift of the reference level → positive
 //!    events).
 //!
-//! Output: HDF5 in the M3ED layout read by camodocal (`/prophesee/left/{x,y,t,p,ms_map_idx}`,
-//! `calib/{intrinsics,distortion_coeffs,resolution,T_to_prophesee_left}`), t in µs, p ∈ {0, 1},
-//! plus ground-truth camera poses at every render step (`/gt/...`).
+//! Output: group / dataset names from `output.layout` (defaults: M3ED-like
+//! `/prophesee/left/{x,y,t,p,ms_map_idx}` + `calib/*`, as read by camodocal), t in µs, p ∈ {0, 1},
+//! plus ground-truth event-camera poses at every render step (`/gt_events/...`). By default the
+//! events are written into the frame sequence file (`output.h5`), on the same µs clock.
 
 use crate::cache::TileCache;
 use crate::camera::{CameraConfig, CameraModel, Extrinsics};
@@ -39,10 +40,8 @@ use std::sync::Arc;
 #[serde(default, deny_unknown_fields)]
 pub struct EventConfig {
     pub enabled: bool,
-    /// Output file (M3ED layout).
-    pub h5: PathBuf,
-    /// HDF5 group of the camera (camodocal's `--left`).
-    pub group: String,
+    /// Separate output file (M3ED layout). None (default) = into `output.h5` with the frames.
+    pub h5: Option<PathBuf>,
     /// Event camera intrinsics (None = the frame camera's). Distortion is stored as
     /// `distortion_coeffs`; camodocal's M3ED reader builds a `pinhole` model from it.
     pub camera: Option<CameraConfig>,
@@ -57,10 +56,12 @@ pub struct EventConfig {
     pub contrast_sigma: f64,
     /// Refractory period after an event (bias_refr), µs.
     pub refractory_us: f64,
-    /// Photoreceptor bandwidth (bias_fo): 3 dB cutoff (Hz) at luminance 1 (sunlit white); it
-    /// scales with the photocurrent (∝ luminance), floored at `cutoff_min_hz`. Low light →
-    /// slow pixels → smeared / delayed events.
+    /// Photoreceptor bandwidth (bias_fo): 3 dB cutoff grows with the photocurrent and saturates:
+    /// fc = cutoff_hz · I / (I + cutoff_half_lum), floored at `cutoff_min_hz` (I = luminance,
+    /// 1 = sunlit white ≈ 1e5 lux, so 1e-5 ≈ 1 lux). Low light → slow pixels → smeared,
+    /// delayed events.
     pub cutoff_hz: f64,
+    pub cutoff_half_lum: f64,
     pub cutoff_min_hz: f64,
     /// High-pass (bias_hpf): the reference level relaxes towards the signal with this corner
     /// frequency (Hz), suppressing slow changes. 0 = off.
@@ -95,6 +96,9 @@ pub struct EventConfig {
     pub max_rate_hz: f64,
     /// Supersampling of the internal renders (anti-aliasing reduces spurious events).
     pub supersample: u32,
+    /// When artificial lights are on and flicker is enabled, render at least this many times per
+    /// flicker period (resolves the 100/120 Hz lamp modulation).
+    pub flicker_steps_per_period: f64,
     pub seed: u64,
 }
 
@@ -102,8 +106,7 @@ impl Default for EventConfig {
     fn default() -> Self {
         EventConfig {
             enabled: false,
-            h5: PathBuf::from("out/seq_events.h5"),
-            group: "/prophesee/left".into(),
+            h5: None,
             camera: None,
             extrinsics: None,
             contrast_pos: 0.25,
@@ -111,6 +114,7 @@ impl Default for EventConfig {
             contrast_sigma: 0.03,
             refractory_us: 100.0,
             cutoff_hz: 3000.0,
+            cutoff_half_lum: 2e-5,
             cutoff_min_hz: 0.5,
             hpf_hz: 0.0,
             log_eps: 1e-3,
@@ -128,6 +132,7 @@ impl Default for EventConfig {
             min_rate_hz: 100.0,
             max_rate_hz: 5000.0,
             supersample: 2,
+            flicker_steps_per_period: 12.0,
             seed: 11,
         }
     }
@@ -244,7 +249,7 @@ impl EventSensor {
         for k in 0..self.w * self.h {
             // photoreceptor low-pass: cutoff ∝ photocurrent (luminance)
             let lum = ((l[k].exp() - eps) / c.gain as f32).max(0.0) as f64;
-            let fc = (c.cutoff_hz * lum).max(c.cutoff_min_hz);
+            let fc = (c.cutoff_hz * lum / (lum + c.cutoff_half_lum)).max(c.cutoff_min_hz);
             let alpha = (1.0 - (-std::f64::consts::TAU * fc * dt).exp()) as f32;
             let lp0 = self.lp[k];
             let lp1 = lp0 + alpha * (l[k] - lp0);
@@ -342,6 +347,7 @@ pub struct EventWriter {
     p: h5::Dataset,
     n: usize,
     group: String,
+    ms_map_name: String,
     /// index of the first event at or after each millisecond
     ms_map: Vec<u64>,
     t0_us: i64,
@@ -349,36 +355,38 @@ pub struct EventWriter {
 }
 
 impl EventWriter {
-    pub fn new(cfg: &EventConfig, cam: &CameraConfig, ext: &Extrinsics, scenario_yaml: &str) -> Result<Self> {
-        if let Some(p) = cfg.h5.parent() {
+    /// Open `path` (appending to an existing sequence file, replacing a previous event group) or
+    /// create it.
+    pub fn new(path: &std::path::Path, cfg: &EventConfig, layout: &crate::scenario::Layout, cam: &CameraConfig, ext: &Extrinsics, scenario_yaml: &str) -> Result<Self> {
+        if let Some(p) = path.parent() {
             if !p.as_os_str().is_empty() {
                 std::fs::create_dir_all(p)?;
             }
         }
-        let file = h5::File::create(&cfg.h5)?;
-        file.set_attr_str("format", "terrain-events (M3ED layout)")?;
-        file.set_attr_str("scenario", scenario_yaml)?;
-        let g = file.ensure_group(cfg.group.trim_start_matches('/'))?;
+        let file = if path.exists() && cfg.h5.is_none() {
+            h5::File::open_rw(path)?
+        } else {
+            let f = h5::File::create(path)?;
+            f.set_attr_str("format", "terrain-events (M3ED layout)")?;
+            f.set_attr_str("scenario", scenario_yaml)?;
+            f
+        };
+        let gname = crate::scenario::h5path(&layout.events_group);
+        if file.exists(gname) {
+            file.delete(gname)?;
+        }
+        if file.exists("gt_events") {
+            file.delete("gt_events")?;
+        }
+        let g = file.ensure_group(gname)?;
         let chunk = 1 << 16;
-        let x = g.new_dataset::<u16>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).shuffle(true).deflate(4).create("x")?;
-        let y = g.new_dataset::<u16>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).shuffle(true).deflate(4).create("y")?;
-        let t = g.new_dataset::<i64>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).shuffle(true).deflate(4).create("t")?;
-        let p = g.new_dataset::<i8>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).deflate(4).create("p")?;
-        // calibration in M3ED form (+ the full camodocal camera description)
-        let c = g.ensure_group("calib")?;
-        if cam.intrinsics.len() == 4 {
-            c.new_dataset::<f64>().shape(&[4]).create("intrinsics")?.write_all(&cam.intrinsics)?;
-        }
-        if !cam.distortion.is_empty() {
-            c.new_dataset::<f64>().shape(&[cam.distortion.len()]).create("distortion_coeffs")?.write_all(&cam.distortion)?;
-        }
-        c.new_dataset::<i64>().shape(&[2]).create("resolution")?.write_all(&[cam.width as i64, cam.height as i64])?;
-        let ident = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
-        c.new_dataset::<f64>().shape(&[4, 4]).create("T_to_prophesee_left")?.write_all(&ident)?;
-        c.set_attr_str("camera_model", &cam.model)?;
-        c.set_attr_str("camera_yaml", &serde_yaml::to_string(cam)?)?;
-        c.set_attr_str("extrinsics_yaml", &serde_yaml::to_string(ext)?)?;
-        Ok(EventWriter { file, x, y, t, p, n: 0, group: cfg.group.clone(), ms_map: vec![], t0_us: 0, gt: vec![] })
+        let x = g.new_dataset::<u16>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).shuffle(true).deflate(4).create(&layout.events_x)?;
+        let y = g.new_dataset::<u16>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).shuffle(true).deflate(4).create(&layout.events_y)?;
+        let t = g.new_dataset::<i64>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).shuffle(true).deflate(4).create(&layout.events_t)?;
+        let p = g.new_dataset::<i8>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).deflate(4).create(&layout.events_p)?;
+        // event camera → rig (rig = body FRD, shared with the frame camera and the IMU)
+        crate::output::write_sensor_calib(&g, layout, cam, crate::imu::t_body_sensor(ext.r_body_cam(), ext.t_body_cam()))?;
+        Ok(EventWriter { file, x, y, t, p, n: 0, group: layout.events_group.clone(), ms_map_name: layout.events_ms_map.clone(), ms_map: vec![], t0_us: 0, gt: vec![] })
     }
 
     pub fn set_t0(&mut self, t0_s: f64) {
@@ -420,10 +428,10 @@ impl EventWriter {
         // close the ms map one past the end (camodocal reads map[a]..map[b])
         self.ms_map.push(self.n as u64);
         let g = self.file.group(self.group.trim_start_matches('/'))?;
-        g.new_dataset::<u64>().shape(&[self.ms_map.len()]).create("ms_map_idx")?.write_all(&self.ms_map)?;
+        g.new_dataset::<u64>().shape(&[self.ms_map.len()]).create(&self.ms_map_name)?.write_all(&self.ms_map)?;
         g.set_attr("t0_us", self.t0_us)?;
         let n = self.gt.len();
-        let gt = self.file.ensure_group("gt")?;
+        let gt = self.file.ensure_group("gt_events")?;
         gt.new_dataset::<f64>().shape(&[n]).create("t")?.write_all(&self.gt.iter().map(|g| g.0).collect::<Vec<_>>())?;
         gt.new_dataset::<f64>().shape(&[n, 3]).create("cam_position_ecef")?.write_all(&self.gt.iter().flat_map(|g| g.1.to_array()).collect::<Vec<_>>())?;
         gt.new_dataset::<f64>().shape(&[n, 4]).create("cam_q_ecef")?.write_all(&self.gt.iter().flat_map(|g| [g.2.w, g.2.x, g.2.y, g.2.z]).collect::<Vec<_>>())?;
@@ -449,7 +457,12 @@ pub fn simulate_events(scn: &Scenario, poses: &[Pose], cache: Arc<TileCache>, el
     rs.max_zoom = rs.max_zoom.min(scn.tiles.max_zoom);
     let renderer = Renderer::new(model.clone(), rs, ell, cache);
     let mut sensor = EventSensor::new(ec.clone(), w, h);
-    let mut writer = EventWriter::new(ec, &cam_cfg, &ext, &scn.to_yaml())?;
+    let path = match (&ec.h5, &scn.output.h5) {
+        (Some(p), _) => p.clone(),
+        (None, Some(p)) => p.clone(),
+        (None, None) => bail!("events: set output.h5 (events go into the sequence file) or events.h5"),
+    };
+    let mut writer = EventWriter::new(&path, ec, &scn.output.layout, &cam_cfg, &ext, &scn.to_yaml())?;
 
     let tr0 = poses[0].t;
     let t_start = tr0 + scn.output.start;
@@ -486,6 +499,10 @@ pub fn simulate_events(scn: &Scenario, poses: &[Pose], cache: Arc<TileCache>, el
         let rate = if maxd > 1e-9 { maxd / (probe - t).max(1e-9) } else { 0.0 }; // px/s
         dt = if rate > 0.0 { ec.max_px_per_step / rate } else { 1.0 / ec.min_rate_hz };
         dt = dt.clamp(1.0 / ec.max_rate_hz, 1.0 / ec.min_rate_hz);
+        let sun_now = sun_at(t, &pose);
+        if sun_now.lights > 0.01 && sun_now.flicker.enabled && ec.flicker_steps_per_period > 0.0 {
+            dt = dt.min(1.0 / (2.0 * sun_now.flicker.mains_hz * ec.flicker_steps_per_period)).max(1.0 / ec.max_rate_hz);
+        }
         if t >= t_end {
             break;
         }
@@ -576,7 +593,7 @@ mod noise_tests {
             }
             f64::MAX
         };
-        let (tb, td) = (first(0.5), first(0.005));
+        let (tb, td) = (first(0.5), first(2e-7));
         assert!(tb < 2e-3 && td > 10.0 * tb, "bright {tb} dark {td}");
     }
 }

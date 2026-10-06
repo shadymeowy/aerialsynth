@@ -51,6 +51,28 @@ fn q4(q: DQuat) -> [f64; 4] {
     [q.w, q.x, q.y, q.z]
 }
 
+/// Per-sensor calibration under `<sensor group>/<layout.calib_group>`: intrinsics (4, when the
+/// model has them), distortion, resolution, sensor → rig transform (row-major 4x4), and the full
+/// camera description (camodocal YAML schema) as attributes.
+pub fn write_sensor_calib(g: &h5::Group, layout: &crate::scenario::Layout, cam: &CameraConfig, t_rig: [f64; 16]) -> Result<()> {
+    if g.exists(&layout.calib_group) {
+        g.delete(&layout.calib_group)?;
+    }
+    let c = g.ensure_group(&layout.calib_group)?;
+    if cam.intrinsics.len() == 4 {
+        c.new_dataset::<f64>().shape(&[4]).create(&layout.calib_intrinsics)?.write_all(&cam.intrinsics)?;
+    }
+    if !cam.distortion.is_empty() {
+        c.new_dataset::<f64>().shape(&[cam.distortion.len()]).create(&layout.calib_distortion)?.write_all(&cam.distortion)?;
+    }
+    c.new_dataset::<i64>().shape(&[2]).create(&layout.calib_resolution)?.write_all(&[cam.width as i64, cam.height as i64])?;
+    c.new_dataset::<f64>().shape(&[4, 4]).create(&layout.calib_transform)?.write_all(&t_rig)?;
+    c.set_attr_str("camera_model", &cam.model)?;
+    c.set_attr_str("camera_yaml", &serde_yaml::to_string(cam)?)?;
+    c.set_attr_str("transform_convention", "row-major 4x4: sensor frame → rig frame (rig = body FRD)")?;
+    Ok(())
+}
+
 /// Round f32 values to `keep` mantissa bits (round-to-nearest; inf/nan untouched). Relative
 /// error ≤ 2^-(keep+1); the zeroed low bits make shuffle+deflate far more effective.
 pub fn round_mantissa(v: &mut [f32], keep: u8) {
@@ -194,6 +216,9 @@ pub struct H5Writer {
     depth: Option<h5::Dataset>,
     flow: Option<(h5::Dataset, h5::Dataset)>,
     landcover: Option<h5::Dataset>,
+    /// per-sensor frame view (layout.frames_group / frames_data)
+    gray: Option<h5::Dataset>,
+    layout: crate::scenario::Layout,
     t: Vec<f64>,
     poses: Vec<PoseRecord>,
     expo: Vec<[f64; 5]>,
@@ -201,7 +226,7 @@ pub struct H5Writer {
 
 impl H5Writer {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(path: &Path, w: u32, h: u32, n: usize, cam: &CameraConfig, ext: &Extrinsics, scenario_yaml: &str, depth: bool, flow: bool, landcover: bool, comp: &crate::scenario::Compression) -> Result<Self> {
+    pub fn new(path: &Path, w: u32, h: u32, n: usize, cam: &CameraConfig, ext: &Extrinsics, scenario_yaml: &str, depth: bool, flow: bool, landcover: bool, comp: &crate::scenario::Compression, layout: &crate::scenario::Layout) -> Result<Self> {
         let lvl = comp.level.min(9);
         if let Some(p) = path.parent() {
             if !p.as_os_str().is_empty() {
@@ -263,7 +288,20 @@ impl H5Writer {
             g.set_attr_array("q_body_cam", &q4(DQuat::from_mat3(&ext.r_body_cam())))?;
             g.set_attr_array("t_body_cam", &ext.translation)?;
         }
-        Ok(H5Writer { file, w, h, n, rgb, depth, flow, landcover, t: vec![], poses: vec![], expo: vec![] })
+        let gray = if layout.enabled {
+            use crate::scenario::h5path;
+            let g = file.ensure_group(h5path(&layout.frames_group))?;
+            let ds = if layout.frames_gray {
+                g.new_dataset::<u8>().shape(&[n, h, w]).chunk(&[1, h, w]).deflate(lvl).create(&layout.frames_data)?
+            } else {
+                g.new_dataset::<u8>().shape(&[n, h, w, 3]).chunk(&[1, h, w, 3]).deflate(lvl).create(&layout.frames_data)?
+            };
+            write_sensor_calib(&g, layout, cam, crate::imu::t_body_sensor(ext.r_body_cam(), ext.t_body_cam()))?;
+            Some(ds)
+        } else {
+            None
+        };
+        Ok(H5Writer { file, w, h, n, rgb, depth, flow, landcover, gray, layout: layout.clone(), t: vec![], poses: vec![], expo: vec![] })
     }
 
     pub fn write(&mut self, f: &FrameRecord) -> Result<()> {
@@ -279,6 +317,14 @@ impl H5Writer {
         }
         if let Some(l) = &self.landcover {
             l.write_slice(f.landcover, &[k, 0, 0], &[1, h, w])?;
+        }
+        if let Some(g) = &self.gray {
+            if self.layout.frames_gray {
+                let gray: Vec<u8> = f.rgb.chunks_exact(3).map(|c| (0.299 * c[0] as f64 + 0.587 * c[1] as f64 + 0.114 * c[2] as f64).round() as u8).collect();
+                g.write_slice(&gray, &[k, 0, 0], &[1, h, w])?;
+            } else {
+                g.write_slice(f.rgb, &[k, 0, 0, 0], &[1, h, w, 3])?;
+            }
         }
         self.t.push(f.t);
         self.poses.push(f.pose);
@@ -298,6 +344,16 @@ impl H5Writer {
             Ok(())
         };
         put("t", 1, self.t.clone())?;
+        if self.gray.is_some() {
+            let t0 = self.t.first().copied().unwrap_or(0.0);
+            let ts: Vec<i64> = self.t.iter().map(|t| ((t - t0) * 1e6).round() as i64).collect();
+            let ds = f.new_dataset::<i64>().shape(&[n]).create(crate::scenario::h5path(&self.layout.frames_ts))?;
+            if n > 0 {
+                ds.write_all(&ts)?;
+            }
+            f.set_attr("t0", t0)?;
+            f.set_attr_str("time_base", "per-sensor view (output.layout): µs since t0 (trajectory time of the first frame); /t and /pose use trajectory time in seconds")?;
+        }
         let p = &self.poses;
         put("pose/cam_position_ecef", 3, p.iter().flat_map(|p| p.cam_ecef.to_array()).collect())?;
         put("pose/cam_q_ecef", 4, p.iter().flat_map(|p| q4(p.q_ecef_cam)).collect())?;

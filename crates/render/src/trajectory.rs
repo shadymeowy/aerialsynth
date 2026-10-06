@@ -180,6 +180,32 @@ pub fn interpolate(poses: &[Pose], t: f64) -> Pose {
     }
 }
 
+/// True IMU samples carried by a trajectory CSV (columns `f_x..f_z, w_x..w_z`, body FRD), as
+/// written by `terrain traj`.
+#[derive(Clone, Copy, Debug)]
+pub struct ImuTruth {
+    pub t: f64,
+    pub f: DVec3,
+    pub w: DVec3,
+}
+
+/// Load IMU truth columns if the trajectory has them.
+pub fn load_imu_truth(path: &Path) -> Result<Option<Vec<ImuTruth>>> {
+    let text = std::fs::read_to_string(path)?;
+    let (h, rows, _) = parse_csv(&text)?;
+    let col = |n: &str| h.iter().position(|c| c == n);
+    let (Some(t), Some(fx), Some(fy), Some(fz), Some(wx), Some(wy), Some(wz)) =
+        (col("t"), col("f_x"), col("f_y"), col("f_z"), col("w_x"), col("w_y"), col("w_z"))
+    else {
+        return Ok(None);
+    };
+    Ok(Some(
+        rows.iter()
+            .map(|r| ImuTruth { t: r[t], f: DVec3::new(r[fx], r[fy], r[fz]), w: DVec3::new(r[wx], r[wy], r[wz]) })
+            .collect(),
+    ))
+}
+
 pub fn save(path: &Path, poses: &[Pose]) -> Result<()> {
     if let Some(p) = path.parent() {
         if !p.as_os_str().is_empty() {

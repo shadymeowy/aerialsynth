@@ -1,0 +1,306 @@
+//! Synthetic IMU from the trajectory.
+//!
+//! Truth: `terrain traj` records the exact specific force and inertial angular rate of the body
+//! (computed inside the flight simulator from the analytic kinematics + Coriolis / transport
+//! rate − WGS84 normal gravity, integrated at 1 kHz). For trajectories without those columns
+//! the truth is derived numerically from the poses (lower fidelity).
+//!
+//! Output names come from `output.layout` (defaults: M3ED-like `/ovc/imu/{ts,accel,omega}`).
+//!
+//! Sensor model per axis (gyro and accelerometer alike):
+//!     y = sat( (I + M) (1 + s) x_true + b + n ),   b_{k+1} = b_k + σ_bw √Δt ξ,   n ~ σ_n √f_s ξ
+//! with misalignment M (small random skew), scale factor error s, turn-on bias b_0, bias random
+//! walk σ_bw and white noise density σ_n (Kalibr naming), and saturation.
+//! The IMU frame is given by `extrinsics` relative to the body (FRD); a lever arm adds
+//! ω̇ × r + ω × (ω × r) to the specific force.
+
+use crate::trajectory::{self, ImuTruth, Pose};
+use anyhow::{bail, Result};
+use geodesy::Ellipsoid;
+use glam::{DMat3, DQuat, DVec3};
+use h5::Attrs;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+
+/// Noise / error parameters of one sensor triad. When given in YAML, all fields are required
+/// (gyro and accel have different defaults); omit the block to keep the defaults.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImuNoise {
+    /// White noise density (gyro rad/s/√Hz, accel m/s²/√Hz).
+    pub noise_density: f64,
+    /// Bias random walk (gyro rad/s²/√Hz, accel m/s³/√Hz).
+    pub random_walk: f64,
+    /// Turn-on bias σ (rad/s or m/s²), drawn once per run.
+    pub bias_init: f64,
+    /// Scale factor error σ (relative) and axis misalignment σ (rad).
+    pub scale_sigma: f64,
+    pub misalignment_sigma: f64,
+    /// Measurement range (rad/s or m/s²); 0 = unlimited.
+    pub saturation: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ImuExtrinsics {
+    /// Rotation IMU → body as quaternion [w, x, y, z] (IMU axes expressed in the body FRD frame).
+    pub q_body_imu: [f64; 4],
+    /// IMU position in the body frame (m).
+    pub translation: [f64; 3],
+}
+
+impl Default for ImuExtrinsics {
+    fn default() -> Self {
+        ImuExtrinsics { q_body_imu: [1.0, 0.0, 0.0, 0.0], translation: [0.0; 3] }
+    }
+}
+
+impl ImuExtrinsics {
+    pub fn r_body_imu(&self) -> DMat3 {
+        let [w, x, y, z] = self.q_body_imu;
+        DMat3::from_quat(DQuat::from_xyzw(x, y, z, w).normalize())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ImuConfig {
+    pub enabled: bool,
+    pub rate_hz: f64,
+    pub extrinsics: ImuExtrinsics,
+    pub gyro: ImuNoise,
+    pub accel: ImuNoise,
+    pub seed: u64,
+}
+
+impl Default for ImuConfig {
+    fn default() -> Self {
+        ImuConfig {
+            enabled: true,
+            rate_hz: 200.0,
+            extrinsics: ImuExtrinsics::default(),
+            // typical tactical/consumer MEMS (EuRoC ADIS16448-like)
+            gyro: ImuNoise { noise_density: 1.7e-4, random_walk: 1.9e-5, bias_init: 2e-3, scale_sigma: 1e-3, misalignment_sigma: 5e-4, saturation: 8.7 },
+            accel: ImuNoise { noise_density: 2.0e-3, random_walk: 3.0e-3, bias_init: 0.03, scale_sigma: 1e-3, misalignment_sigma: 5e-4, saturation: 160.0 },
+            seed: 5,
+        }
+    }
+}
+
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+    fn gauss(&mut self) -> f64 {
+        let u1 = ((self.next() >> 11) as f64 / (1u64 << 53) as f64).max(1e-300);
+        let u2 = (self.next() >> 11) as f64 / (1u64 << 53) as f64;
+        (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+    }
+    fn gvec(&mut self) -> DVec3 {
+        DVec3::new(self.gauss(), self.gauss(), self.gauss())
+    }
+}
+
+/// One synthesized IMU stream (IMU frame).
+pub struct ImuData {
+    pub t: Vec<f64>,
+    pub accel: Vec<DVec3>,
+    pub omega: Vec<DVec3>,
+    pub gt_accel: Vec<DVec3>,
+    pub gt_omega: Vec<DVec3>,
+    pub bias_accel: Vec<DVec3>,
+    pub bias_gyro: Vec<DVec3>,
+    pub from_truth_columns: bool,
+}
+
+/// Numerical truth from poses (fallback when the trajectory has no IMU columns).
+fn numeric_truth(poses: &[Pose], ell: &Ellipsoid, t: f64, h: f64) -> (DVec3, DVec3) {
+    let p = |tt: f64| trajectory::interpolate(poses, tt);
+    let (a, b, c) = (p(t - h), p(t), p(t + h));
+    let (pa, pb, pc) = (a.ecef(ell), b.ecef(ell), c.ecef(ell));
+    let v = (pc - pa) / (2.0 * h);
+    let acc = (pc - 2.0 * pb + pa) / (h * h);
+    let r_ne = geodesy::rot_ecef2ned(b.geo.lat, b.geo.lon);
+    let w_ie_e = DVec3::new(0.0, 0.0, geodesy::EARTH_RATE);
+    // specific force in ECEF: a + 2 Ω×v − g_normal (normal gravity includes the centrifugal term)
+    let g_e = r_ne.transpose() * DVec3::new(0.0, 0.0, geodesy::normal_gravity(b.geo.lat, b.geo.h));
+    let f_e = acc + 2.0 * w_ie_e.cross(v) - g_e;
+    let r_eb = b.r_ecef_body();
+    let f_b = r_eb.transpose() * f_e;
+    // body rate from consecutive attitudes (ECEF-referenced → already inertial apart from Ω)
+    let (ra, rc) = (DQuat::from_mat3(&a.r_ecef_body()), DQuat::from_mat3(&c.r_ecef_body()));
+    let dq = (ra.inverse() * rc).normalize();
+    let dq = if dq.w < 0.0 { -dq } else { dq };
+    let w_eb = dq.to_scaled_axis() / (2.0 * h);
+    (f_b, w_eb + r_eb.transpose() * w_ie_e)
+}
+
+/// Synthesize the IMU over [t0, t1] (trajectory time).
+pub fn synthesize(cfg: &ImuConfig, poses: &[Pose], truth: Option<&[ImuTruth]>, ell: &Ellipsoid, t0: f64, t1: f64) -> Result<ImuData> {
+    if cfg.rate_hz <= 0.0 {
+        bail!("imu.rate_hz must be > 0");
+    }
+    let dt = 1.0 / cfg.rate_hz;
+    let n = ((t1 - t0) / dt).floor() as usize + 1;
+    let r_bi = cfg.extrinsics.r_body_imu();
+    let lever = DVec3::from_array(cfg.extrinsics.translation);
+    let mut rng = Rng(cfg.seed ^ 0x1A0);
+    let skew = |v: DVec3| DMat3::from_cols(DVec3::new(0.0, v.z, -v.y), DVec3::new(-v.z, 0.0, v.x), DVec3::new(v.y, -v.x, 0.0));
+    let mis_g = DMat3::IDENTITY + skew(rng.gvec() * cfg.gyro.misalignment_sigma);
+    let mis_a = DMat3::IDENTITY + skew(rng.gvec() * cfg.accel.misalignment_sigma);
+    let scale_g = DVec3::ONE + rng.gvec() * cfg.gyro.scale_sigma;
+    let scale_a = DVec3::ONE + rng.gvec() * cfg.accel.scale_sigma;
+    let mut bg = rng.gvec() * cfg.gyro.bias_init;
+    let mut ba = rng.gvec() * cfg.accel.bias_init;
+
+    // truth in the body frame at each IMU sample: average of the truth records in (t-dt, t]
+    let body_truth = |t: f64| -> (DVec3, DVec3) {
+        match truth {
+            Some(tr) if !tr.is_empty() => {
+                let i1 = tr.partition_point(|s| s.t <= t + 1e-9);
+                let i0 = tr.partition_point(|s| s.t <= t - dt + 1e-9);
+                if i1 > i0 {
+                    let k = (i1 - i0) as f64;
+                    let f = tr[i0..i1].iter().fold(DVec3::ZERO, |a, s| a + s.f) / k;
+                    let w = tr[i0..i1].iter().fold(DVec3::ZERO, |a, s| a + s.w) / k;
+                    (f, w)
+                } else {
+                    // IMU faster than the truth record: interpolate
+                    let j = i1.clamp(1, tr.len() - 1);
+                    let (a, b) = (&tr[j - 1], &tr[j]);
+                    let u = ((t - a.t) / (b.t - a.t).max(1e-12)).clamp(0.0, 1.0);
+                    (a.f.lerp(b.f, u), a.w.lerp(b.w, u))
+                }
+            }
+            _ => numeric_truth(poses, ell, t, (2.0 * dt).max(0.02)),
+        }
+    };
+    let mut d = ImuData {
+        t: Vec::with_capacity(n),
+        accel: Vec::with_capacity(n),
+        omega: Vec::with_capacity(n),
+        gt_accel: Vec::with_capacity(n),
+        gt_omega: Vec::with_capacity(n),
+        bias_accel: Vec::with_capacity(n),
+        bias_gyro: Vec::with_capacity(n),
+        from_truth_columns: truth.is_some_and(|t| !t.is_empty()),
+    };
+    let mut w_prev: Option<DVec3> = None;
+    let sat = |v: DVec3, s: f64| if s > 0.0 { v.clamp(DVec3::splat(-s), DVec3::splat(s)) } else { v };
+    for k in 0..n {
+        let t = t0 + k as f64 * dt;
+        let (f_b, w_b) = body_truth(t);
+        // lever arm (body frame): f_imu = f + ω̇ × r + ω × (ω × r)
+        let wd = w_prev.map(|wp| (w_b - wp) / dt).unwrap_or(DVec3::ZERO);
+        w_prev = Some(w_b);
+        let f_l = f_b + wd.cross(lever) + w_b.cross(w_b.cross(lever));
+        // into the IMU frame
+        let f_i = r_bi.transpose() * f_l;
+        let w_i = r_bi.transpose() * w_b;
+        // sensor errors
+        bg += rng.gvec() * (cfg.gyro.random_walk * dt.sqrt());
+        ba += rng.gvec() * (cfg.accel.random_walk * dt.sqrt());
+        let ng = rng.gvec() * (cfg.gyro.noise_density / dt.sqrt());
+        let na = rng.gvec() * (cfg.accel.noise_density / dt.sqrt());
+        let wm = sat(mis_g * (w_i * scale_g) + bg + ng, cfg.gyro.saturation);
+        let am = sat(mis_a * (f_i * scale_a) + ba + na, cfg.accel.saturation);
+        d.t.push(t);
+        d.accel.push(am);
+        d.omega.push(wm);
+        d.gt_accel.push(f_i);
+        d.gt_omega.push(w_i);
+        d.bias_accel.push(ba);
+        d.bias_gyro.push(bg);
+    }
+    Ok(d)
+}
+
+/// Rigid transform sensor → body (row-major 4x4) for the M3ED `T_to_prophesee_left` datasets;
+/// in our files the common rig frame is the body (FRD).
+pub fn t_body_sensor(r: DMat3, t: DVec3) -> [f64; 16] {
+    let c = r.to_cols_array_2d(); // columns
+    [c[0][0], c[1][0], c[2][0], t.x, c[0][1], c[1][1], c[2][1], t.y, c[0][2], c[1][2], c[2][2], t.z, 0.0, 0.0, 0.0, 1.0]
+}
+
+/// Write `/ovc/imu` (M3ED / camodocal layout) into an existing HDF5 file. Times are µs relative to
+/// `t0` (the sequence start), the same clock as frames and events.
+pub fn write_h5(path: &Path, cfg: &ImuConfig, layout: &crate::scenario::Layout, d: &ImuData, t0: f64) -> Result<()> {
+    let file = h5::File::open_rw(path)?;
+    let gname = crate::scenario::h5path(&layout.imu_group);
+    if file.exists(gname) {
+        file.delete(gname)?;
+    }
+    let g = file.ensure_group(gname)?;
+    let n = d.t.len();
+    let ts: Vec<i64> = d.t.iter().map(|t| ((t - t0) * 1e6).round() as i64).collect();
+    g.new_dataset::<i64>().shape(&[n]).create(&layout.imu_ts)?.write_all(&ts)?;
+    let put = |name: &str, v: &[DVec3]| -> Result<()> {
+        let flat: Vec<f64> = v.iter().flat_map(|x| x.to_array()).collect();
+        g.new_dataset::<f64>().shape(&[n, 3]).chunk(&[n.clamp(1, 4096), 3]).deflate(4).create(name)?.write_all(&flat)?;
+        Ok(())
+    };
+    put(&layout.imu_accel, &d.accel)?;
+    put(&layout.imu_gyro, &d.omega)?;
+    put("gt_accel", &d.gt_accel)?;
+    put("gt_omega", &d.gt_omega)?;
+    put("gt_bias_accel", &d.bias_accel)?;
+    put("gt_bias_gyro", &d.bias_gyro)?;
+    let c = g.ensure_group(&layout.calib_group)?;
+    let t = t_body_sensor(cfg.extrinsics.r_body_imu(), DVec3::from_array(cfg.extrinsics.translation));
+    c.new_dataset::<f64>().shape(&[4, 4]).create(&layout.calib_transform)?.write_all(&t)?;
+    g.set_attr("update_rate", cfg.rate_hz)?;
+    g.set_attr("gyroscope_noise_density", cfg.gyro.noise_density)?;
+    g.set_attr("gyroscope_random_walk", cfg.gyro.random_walk)?;
+    g.set_attr("accelerometer_noise_density", cfg.accel.noise_density)?;
+    g.set_attr("accelerometer_random_walk", cfg.accel.random_walk)?;
+    g.set_attr_str("config", &serde_yaml::to_string(cfg)?)?;
+    g.set_attr_str(
+        "conventions",
+        "timestamps: µs since the sequence start (same clock as the frame / event groups); accel: specific force (m/s²), gyro: angular rate w.r.t. inertial space (rad/s), both in the IMU frame; gt_* = error-free values; calib transform = IMU→rig (rig = body FRD)",
+    )?;
+    g.set_attr("truth_from_simulator", d.from_truth_columns as i32)?;
+    file.flush()?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dynamics::{simulate, AltitudeRef, SynthConfig};
+
+    #[test]
+    fn imu_noise_statistics_and_level_flight() {
+        let ell = Ellipsoid::WGS84;
+        let sc = SynthConfig { kind: crate::dynamics::PathKind::Line, duration: 60.0, altitude_ref: AltitudeRef::Ellipsoid, altitude: 1000.0, ..Default::default() };
+        let mut sc = sc;
+        sc.wind.turbulence = 0.0;
+        sc.wind.gust_rate_per_min = 0.0;
+        sc.vibration.harmonic_deg = 0.0;
+        sc.vibration.broadband_deg = 0.0;
+        let recs = simulate(&sc, (39.9, 32.8), &ell, None);
+        let poses: Vec<Pose> = recs.iter().map(|r| r.pose).collect();
+        let truth: Vec<ImuTruth> = recs.iter().map(|r| ImuTruth { t: r.pose.t, f: r.imu_f, w: r.imu_w }).collect();
+        let cfg = ImuConfig::default();
+        let d = synthesize(&cfg, &poses, Some(&truth), &ell, 1.0, 59.0).unwrap();
+        // level unaccelerated flight: |f| ≈ g, gyro ≈ Earth rate
+        let g0 = geodesy::normal_gravity(39.9f64.to_radians(), 1000.0);
+        let mf = d.gt_accel[100..].iter().fold(DVec3::ZERO, |a, v| a + *v) / (d.t.len() - 100) as f64;
+        assert!((mf.length() - g0).abs() < 0.01, "{mf:?}");
+        let mw = d.gt_omega[100..].iter().fold(DVec3::ZERO, |a, v| a + *v) / (d.t.len() - 100) as f64;
+        assert!((mw.length() - geodesy::EARTH_RATE).abs() < 3e-5, "{mw:?}");
+        // white-noise level: std of (measured - truth - bias) ≈ density * sqrt(rate)
+        let res: Vec<f64> = (0..d.t.len()).map(|k| (d.omega[k] - d.bias_gyro[k] - d.gt_omega[k]).x).collect();
+        let sd = (res.iter().map(|x| x * x).sum::<f64>() / res.len() as f64).sqrt();
+        let want = cfg.gyro.noise_density * cfg.rate_hz.sqrt();
+        assert!((sd / want - 1.0).abs() < 0.2, "{sd} vs {want}");
+        // the numeric fallback agrees with the simulator truth on smooth motion
+        let dn = synthesize(&cfg, &poses, None, &ell, 5.0, 10.0).unwrap();
+        let k = dn.t.len() / 2;
+        assert!((dn.gt_accel[k] - d.gt_accel[(4.0 * cfg.rate_hz) as usize + k]).length() < 0.2);
+    }
+}

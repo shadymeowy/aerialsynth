@@ -226,6 +226,10 @@ fn do_render(s: &Scenario) -> Result<()> {
         b.set_position(done as u64);
     })?;
     b.finish();
+    if s.imu.enabled && s.output.h5.is_some() {
+        let n = pipeline::write_imu(s, &poses, &s.trajectory.file)?;
+        eprintln!("imu: {n} samples at {} Hz → {}{}", s.imu.rate_hz, s.output.h5.as_ref().unwrap().display(), s.output.layout.imu_group);
+    }
     eprintln!(
         "rendered in {:.1}s → {}{}",
         t0.elapsed().as_secs_f64(),
@@ -258,7 +262,8 @@ fn do_events(s: &Scenario) -> Result<()> {
         b.set_position((1000.0 * done / total.max(1e-9)) as u64);
     })?;
     b.finish();
-    eprintln!("simulated {n} events in {:.1}s → {}", t0.elapsed().as_secs_f64(), s.events.h5.display());
+    let dst = s.events.h5.clone().or(s.output.h5.clone()).unwrap_or_default();
+    eprintln!("simulated {n} events in {:.1}s → {}{}", t0.elapsed().as_secs_f64(), dst.display(), s.output.layout.events_group);
     Ok(())
 }
 

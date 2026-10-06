@@ -6,6 +6,7 @@ pub mod cache;
 pub mod camera;
 pub mod dynamics;
 pub mod events;
+pub mod imu;
 pub mod lighting;
 pub mod lod;
 pub mod output;

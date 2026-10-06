@@ -884,7 +884,16 @@ impl Renderer {
                 ins += e * (DVec3::ONE - t) * (sun_state.lights * sun_state.light_pollution * 6.0);
             }
         }
+        // lamp flicker: one supply phase per ~40 m cell (global zoom-17 grid of 32 px)
+        let flicker = if sun_state.lights > 1e-3 && sun_state.flicker.enabled {
+            let s17 = 2f64.powi(17 - z as i32);
+            let cell = ((gx * s17 / 32.0).floor() as i64 as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ ((gy * s17 / 32.0).floor() as i64 as u64);
+            sun_state.flicker.factor(cell, sun_state.time, sun_state.exposure)
+        } else {
+            1.0
+        };
         PixShade {
+            flicker,
             z,
             range,
             lam,
@@ -939,6 +948,7 @@ impl Renderer {
             }
         }
         let (c0, e0) = if wsum > 0.0 { (col / wsum, emis / wsum) } else { (DVec3::splat(0.2), DVec3::ZERO) };
+        let e0 = if lights_on { e0 * ps.flicker } else { e0 };
         c0 * ps.mul + ps.add + e0 * ps.emis
     }
 }
@@ -954,6 +964,8 @@ struct PixShade {
     mul: DVec3,
     add: DVec3,
     emis: DVec3,
+    /// lamp flicker factor of the pixel's lamp cell
+    flicker: f64,
 }
 
 /// Rasterize one triangle into a band of the G-buffer (rows [y0, y0+rows)).

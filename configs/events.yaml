@@ -1,5 +1,6 @@
 # Event camera simulation (ESIM-style) over the quick world: `terrain events -c configs/events.yaml`
-# Output: out/events/events.h5 in the M3ED layout read by camodocal (/prophesee/left/{x,y,t,p,ms_map_idx}).
+# Everything (frames, GT, IMU, events) goes into output.h5; group names come from output.layout
+# (defaults are M3ED-like, as camodocal reads them).
 world: { seed: 1 }
 tiles: { file: out/quick/world.h5, max_zoom: 17, lazy: true }
 trajectory: { file: out/quick/traj.csv }
@@ -9,10 +10,10 @@ camera:                    # frame camera (also used by the event camera unless 
   height: 480
   intrinsics: [420.0, 420.0, 319.5, 239.5]
   distortion: [-0.05, 0.01, 0.0, 0.0]
-output: { dir: out/events/seq, h5: out/events/seq.h5, frame_rate: 10, end: 2.0 }
+output: { dir: out/events/seq, png: false, h5: out/events/seq.h5, frame_rate: 10, end: 0.5 }
+imu: { enabled: true, rate_hz: 200 }
 events:
   enabled: true
-  h5: out/events/events.h5
   contrast_pos: 0.25
   contrast_neg: 0.25
   contrast_sigma: 0.03

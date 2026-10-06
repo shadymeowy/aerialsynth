@@ -53,6 +53,52 @@ pub struct LightingConfig {
     /// Glow of artificial light scattered in the haze above towns.
     pub light_pollution: f64,
     pub stars: bool,
+    /// Flicker of mains-powered artificial lights.
+    pub flicker: FlickerConfig,
+}
+
+/// Artificial lights flicker at twice the mains frequency. Lamps are spread over the three
+/// supply phases (0°, 120°, 240° per ~40 m cell); a fraction are LED with a well-filtered
+/// driver (little flicker). Frames integrate the modulation over their exposure, the event
+/// camera sees it instantaneously.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct FlickerConfig {
+    pub enabled: bool,
+    /// Mains frequency (50 or 60 Hz); light flickers at 2x.
+    pub mains_hz: f64,
+    /// Modulation depth of conventional (discharge) lamps, 0..1.
+    pub depth: f64,
+    /// Fraction of lamp cells with LED drivers and their (small) depth.
+    pub led_fraction: f64,
+    pub led_depth: f64,
+}
+
+impl Default for FlickerConfig {
+    fn default() -> Self {
+        FlickerConfig { enabled: true, mains_hz: 50.0, depth: 0.6, led_fraction: 0.4, led_depth: 0.05 }
+    }
+}
+
+impl FlickerConfig {
+    /// Mean-preserving light modulation of the lamp cell `cell` averaged over the exposure
+    /// window [t - T/2, t + T/2] (T = 0: instantaneous).
+    pub fn factor(&self, cell: u64, t: f64, exposure: f64) -> f64 {
+        if !self.enabled {
+            return 1.0;
+        }
+        let mut h = cell ^ 0xF11C;
+        h = (h ^ (h >> 33)).wrapping_mul(0xff51_afd7_ed55_8ccd);
+        h ^= h >> 33;
+        let u = (h >> 11) as f64 / (1u64 << 53) as f64;
+        let led = u < self.led_fraction;
+        let d = if led { self.led_depth } else { self.depth };
+        let phase = (h % 3) as f64 * std::f64::consts::TAU / 3.0 + 0.2 * ((h >> 8) % 7) as f64 / 7.0;
+        let f = 2.0 * self.mains_hz;
+        let x = std::f64::consts::PI * f * exposure;
+        let sinc = if x.abs() < 1e-9 { 1.0 } else { x.sin() / x };
+        1.0 + d * sinc * (std::f64::consts::TAU * f * t + phase).cos()
+    }
 }
 
 impl Default for LightingConfig {
@@ -75,6 +121,7 @@ impl Default for LightingConfig {
             night_sky: 1e-6,
             light_pollution: 1.0,
             stars: true,
+            flicker: FlickerConfig::default(),
         }
     }
 }
@@ -174,6 +221,10 @@ pub struct SunState {
     pub moon_phase: f64,
     pub stars: bool,
     pub light_pollution: f64,
+    /// Time (s, trajectory time) and exposure duration (s) of the render, for lamp flicker.
+    pub time: f64,
+    pub exposure: f64,
+    pub flicker: FlickerConfig,
 }
 
 impl LightingConfig {
@@ -223,6 +274,9 @@ impl LightingConfig {
             moon_phase,
             stars: self.stars,
             light_pollution: self.light_pollution,
+            time: t,
+            exposure: 0.0,
+            flicker: self.flicker,
         }
     }
 }

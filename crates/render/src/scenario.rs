@@ -9,7 +9,8 @@
 //! render:     { supersample: 3, shading: relit, lighting: {...}, ... }
 //! sensor:     { exposure: {...}, motion_blur: {...}, noise: {...}, ... }
 //! output:     { dir: out/seq, frame_rate: 10, png: true, h5: out/seq.h5, ... }
-//! events:     { enabled: false, h5: out/seq_events.h5, contrast_pos: 0.25, ... }
+//! events:     { enabled: false, contrast_pos: 0.25, ... }   # written into output.h5
+//! imu:        { enabled: true, rate_hz: 200, extrinsics: {...}, gyro: {...}, accel: {...} }
 //! ```
 //! Relative paths are relative to the current working directory.
 
@@ -34,6 +35,8 @@ pub struct Scenario {
     pub output: OutputConfig,
     /// Event camera simulation (`terrain events`, or `run` when enabled).
     pub events: crate::events::EventConfig,
+    /// Synthetic IMU (written with the frames into `output.h5`).
+    pub imu: crate::imu::ImuConfig,
 }
 
 impl Default for Scenario {
@@ -48,6 +51,7 @@ impl Default for Scenario {
             sensor: SensorSettings::default(),
             output: OutputConfig::default(),
             events: crate::events::EventConfig::default(),
+            imu: crate::imu::ImuConfig::default(),
         }
     }
 }
@@ -124,6 +128,76 @@ pub struct OutputConfig {
     pub flow: bool,
     pub landcover: bool,
     pub compression: Compression,
+    /// Group / dataset names of the per-sensor view in `output.h5` (frames, IMU, events).
+    pub layout: Layout,
+}
+
+/// Names of the per-sensor groups and datasets written into `output.h5`. The defaults follow
+/// the M3ED layout (what camodocal's H5 readers expect), but nothing is assumed: every path and
+/// name can be changed here.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Layout {
+    /// Write the per-sensor view at all.
+    pub enabled: bool,
+    /// Frame camera group; images at `<frames_group>/<frames_data>`, timestamps (µs) at
+    /// `frames_ts`, calibration under `<frames_group>/<calib_group>`.
+    pub frames_group: String,
+    pub frames_data: String,
+    pub frames_ts: String,
+    /// Images as grayscale u8 [N,H,W] (true) or RGB u8 [N,H,W,3].
+    pub frames_gray: bool,
+    /// IMU group and dataset names.
+    pub imu_group: String,
+    pub imu_ts: String,
+    pub imu_accel: String,
+    pub imu_gyro: String,
+    /// Event camera group and dataset names (x, y, t, p, per-ms index).
+    pub events_group: String,
+    pub events_x: String,
+    pub events_y: String,
+    pub events_t: String,
+    pub events_p: String,
+    pub events_ms_map: String,
+    /// Per-sensor calibration: group name (relative to the sensor group) and dataset names.
+    pub calib_group: String,
+    pub calib_intrinsics: String,
+    pub calib_distortion: String,
+    pub calib_resolution: String,
+    /// 4x4 row-major sensor → rig transform (rig = body FRD frame).
+    pub calib_transform: String,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Layout {
+            enabled: true,
+            frames_group: "/ovc/left".into(),
+            frames_data: "data".into(),
+            frames_ts: "/ovc/ts".into(),
+            frames_gray: true,
+            imu_group: "/ovc/imu".into(),
+            imu_ts: "ts".into(),
+            imu_accel: "accel".into(),
+            imu_gyro: "omega".into(),
+            events_group: "/prophesee/left".into(),
+            events_x: "x".into(),
+            events_y: "y".into(),
+            events_t: "t".into(),
+            events_p: "p".into(),
+            events_ms_map: "ms_map_idx".into(),
+            calib_group: "calib".into(),
+            calib_intrinsics: "intrinsics".into(),
+            calib_distortion: "distortion_coeffs".into(),
+            calib_resolution: "resolution".into(),
+            calib_transform: "T_to_prophesee_left".into(),
+        }
+    }
+}
+
+/// HDF5 path without the leading slash (our wrapper resolves paths from the root).
+pub fn h5path(p: &str) -> &str {
+    p.trim_start_matches('/')
 }
 
 /// HDF5 compression of the sequence file (shuffle + deflate, i.e. h5py `compression="gzip",
@@ -159,6 +233,7 @@ impl Default for OutputConfig {
             flow: true,
             landcover: true,
             compression: Compression::default(),
+            layout: Layout::default(),
         }
     }
 }

@@ -30,9 +30,10 @@ Per pixel, the processing chain is the following. Prophesee bias names are in br
 
 1. **Photoreceptor input:** `L = ln(gain · lum + eps)`. `eps` acts as dark current: it limits
    contrast in the dark and makes shot noise dominate there.
-2. **Photoreceptor bandwidth** (`bias_fo`): a first-order low-pass on `L`. Its 3 dB cutoff is
-   `cutoff_hz · lum`, floored at `cutoff_min_hz`, i.e. proportional to the photocurrent. In low
-   light the pixels become slow, so events are delayed and smeared.
+2. **Photoreceptor bandwidth** (`bias_fo`): a first-order low-pass on `L` whose 3 dB cutoff
+   grows with photocurrent and saturates: `cutoff_hz · I/(I + cutoff_half_lum)`, floored at
+   `cutoff_min_hz` (with 1e-5 ≈ 1 lux). It is ~kHz under street lights and slow under starlight,
+   so events in the dark are delayed and smeared.
 3. **High-pass** (`bias_hpf`): the reference level relaxes towards the signal (`hpf_hz`),
    suppressing slow illumination changes.
 4. **Change detection** (`bias_diff_on` / `bias_diff_off`): ON/OFF thresholds `contrast_pos` and
@@ -66,14 +67,15 @@ python scripts/view_events.py out/events/events.h5 view.png --window-ms 5
 Everything is set in the scenario `events:` section, including an optional separate event
 `camera` (camodocal schema) and `extrinsics`.
 
-Output (`events.h5`, M3ED layout):
+Output: into `output.h5` by default (`events.h5` gives a separate file), with group and dataset
+names from `output.layout`. The defaults are:
 
 - `/prophesee/left/{x,y,t,p}`: `t` in µs relative to `/prophesee/left.attrs.t0_us`; `p` is 1 for
   ON and 0 for OFF.
 - `/prophesee/left/ms_map_idx`: index of the first event of every ms, plus one closing entry.
 - `/prophesee/left/calib/{intrinsics, distortion_coeffs, resolution, T_to_prophesee_left}`,
   plus the full camodocal camera YAML in an attribute.
-- `/gt/{t, cam_position_ecef, cam_q_ecef}`: the camera pose at every internal render step.
+- `/gt_events/{t, cam_position_ecef, cam_q_ecef}`: the camera pose at every internal render step.
   Poses at any other time come from the trajectory file.
 
 Performance on 8 cores (VGA, supersample 2, `max_px_per_step` 0.5, ~1000 m AGL flight with
@@ -83,12 +85,17 @@ trade fidelity for speed:
 - **`max_px_per_step`:** step size limit; larger is faster and less exact.
 - **`supersample`:** 1 is faster but adds aliasing events.
 
+## Lamp flicker
+
+`render.lighting.flicker` makes artificial lights flicker at twice the mains frequency (default
+50 Hz mains), with three supply phases and a fraction of LED lamps that barely flicker. When
+lights are on, the event simulation renders at least `flicker_steps_per_period` times per
+flicker period. At night this produces the periodic ON/OFF bursts at lamps that real event
+cameras show (activity spectrum peaks at 100/200/300 Hz). It costs ~2.4k renders/s of simulated
+time.
+
 ## Possible next steps
 
-- **Light flicker:** street lamps modulated at 100/120 Hz produce characteristic periodic event
-  bursts at night.
 - **Stereo events:** a second event camera via an extra `events.camera` / `extrinsics` pair
   (camodocal's reader expects `left`/`right` groups for stereo).
-- **Synthetic IMU** (`/imu` group) from the trajectory's acceleration and angular rate, with
-  noise and bias random walks. This is useful for event-VIO and is already read by camodocal.
 - **Fast modes B/C** for long sequences.

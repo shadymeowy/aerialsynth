@@ -1095,3 +1095,30 @@ pub(crate) mod tests {
         assert!((d - 357_099.425_930_650_3).abs() < 1e-6);
     }
 }
+
+/// Earth rotation rate (rad/s, WGS84).
+pub const EARTH_RATE: f64 = 7.292115e-5;
+
+/// WGS84 normal gravity magnitude (m/s²) at geodetic latitude `lat` (rad) and height `h` (m):
+/// Somigliana's closed formula on the ellipsoid plus the second-order free-air correction.
+/// Points along the ellipsoid normal (down); includes the centrifugal term.
+pub fn normal_gravity(lat: f64, h: f64) -> f64 {
+    let s2 = lat.sin().powi(2);
+    let g0 = 9.780_325_335_9 * (1.0 + 0.001_931_852_652_41 * s2) / (1.0 - 0.006_694_379_990_13 * s2).sqrt();
+    let a = 6_378_137.0;
+    let f = 1.0 / 298.257_223_563;
+    let m = 0.003_449_786_003_08;
+    g0 * (1.0 - 2.0 / a * (1.0 + f + m - 2.0 * f * s2) * h + 3.0 * h * h / (a * a))
+}
+
+#[cfg(test)]
+mod gravity_tests {
+    #[test]
+    fn normal_gravity_values() {
+        // equator 9.7803, pole 9.8322, 45° ≈ 9.8062; −3.086e-6 /m free air
+        assert!((super::normal_gravity(0.0, 0.0) - 9.780_325).abs() < 1e-5);
+        assert!((super::normal_gravity(std::f64::consts::FRAC_PI_2, 0.0) - 9.832_185).abs() < 1e-5);
+        let d = super::normal_gravity(0.7, 1000.0) - super::normal_gravity(0.7, 0.0);
+        assert!((d + 3.086e-3).abs() < 2e-5, "{d}");
+    }
+}
