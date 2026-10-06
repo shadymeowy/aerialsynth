@@ -8,18 +8,12 @@ tiles:
   file: out/dataset/world.h5
   max_zoom: 18
   plan_every: 2          # plan with every 2nd frame (views overlap heavily)
-camera:
-  model: pinhole_radtan
+camera:                  # camodocal schema (pinhole | pinhole_full | kannala_brandt | mei | scaramuzza)
+  model: pinhole
   width: 752
   height: 480
-  fx: 420.0
-  fy: 420.0
-  cx: 375.5
-  cy: 239.5
-  k1: -0.12
-  k2: 0.02
-  p1: 0.0003
-  p2: -0.0002
+  intrinsics: [420.0, 420.0, 375.5, 239.5]
+  distortion: [-0.12, 0.02, 0.0003, -0.0002]
 extrinsics:
   mount: forward
   pitch_deg: -40         # look 40° below the nose

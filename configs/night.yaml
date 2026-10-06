@@ -5,7 +5,7 @@ tiles: { file: out/night/world.h5, max_zoom: 17, lazy: true }
 trajectory:
   file: out/night/traj.csv
   synth: { kind: line, altitude: 1200, speed: 50, duration: 2, heading_deg: 20, lat: 40.03, lon: 32.90 }
-camera: { model: pinhole_radtan, width: 640, height: 480, fx: 400, fy: 400, cx: 319.5, cy: 239.5 }
+camera: { model: pinhole, width: 640, height: 480, intrinsics: [400, 400, 319.5, 239.5], distortion: [0, 0, 0, 0] }
 extrinsics: { mount: forward, pitch_deg: -22 }
 render:
   lighting: { mode: clock, date: "2026-03-19", time_utc: "21:30:00" }

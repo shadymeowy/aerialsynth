@@ -4,6 +4,6 @@ tiles: { file: out/cruise/world.h5, max_zoom: 16, lazy: true }
 trajectory:
   file: out/cruise/traj.csv
   synth: { kind: line, altitude: 10000, altitude_ref: ellipsoid, speed: 230, duration: 4 }
-camera: { model: pinhole_radtan, width: 640, height: 480, fx: 320, fy: 320, cx: 319.5, cy: 239.5 }
+camera: { model: pinhole, width: 640, height: 480, intrinsics: [320, 320, 319.5, 239.5], distortion: [0, 0, 0, 0] }
 extrinsics: { mount: nadir, pitch_deg: 25 }
 output: { dir: out/cruise/seq, h5: null, frame_rate: 1, max_frames: 2 }

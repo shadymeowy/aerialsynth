@@ -25,52 +25,18 @@ ap = argparse.ArgumentParser(); ap.add_argument("seq"); ap.add_argument("--frame
 a = ap.parse_args()
 f = h5py.File(a.seq, "r")
 rgb = f["rgb"]; flow = f["flow"]; valid = f["flow_valid"]; depth = f["depth"]
-K = np.array(f["camera"].attrs["K"]).reshape(3, 3)
-cam_attrs = f["camera"].attrs
-fisheye = "dist_kb" in cam_attrs
-dist = np.array(cam_attrs["dist_kb"] if fisheye else cam_attrs["dist_radtan"])
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from cammodels import Camera
+cam = Camera.from_attrs(f["camera"].attrs)
 pos = f["pose/cam_position_ecef"][:]; q = f["pose/cam_q_ecef"][:]
 n = rgb.shape[0]
 frames = [int(x) for x in a.frames.split(",")] if a.frames else list(range(0, n - 1, max(1, (n - 1) // 6)))
 H, W = rgb.shape[1:3]
 yy, xx = np.mgrid[0:H, 0:W].astype(np.float64)
+rays = cam.unproject(xx, yy)  # unit rays (camera frame)
+print(f"camera model: {cam.model}")
 
-def kb_rd(th):
-    k1, k2, k3, k4 = dist
-    t2 = th * th
-    return th * (1 + t2 * (k1 + t2 * (k2 + t2 * (k3 + t2 * k4))))
-
-def undistort(u, v):
-    """pixel -> normalized ray (x/z, y/z) for radtan, or unit-sphere based (sinθ/cosθ) for KB"""
-    xd = (u - K[0, 2]) / K[0, 0]; yd = (v - K[1, 2]) / K[1, 1]
-    if fisheye:
-        rd = np.hypot(xd, yd); th = rd.copy()
-        for _ in range(30):
-            e = 1e-7
-            df = (kb_rd(th + e) - kb_rd(th - e)) / (2 * e)
-            th = th - (kb_rd(th) - rd) / df
-        s = np.where(rd > 1e-12, np.tan(th) / np.maximum(rd, 1e-12), 1.0)
-        return xd * s, yd * s
-    x, y = xd.copy(), yd.copy()
-    k1, k2, p1, p2, k3 = dist
-    for _ in range(20):
-        r2 = x * x + y * y; rad = 1 + r2 * (k1 + r2 * (k2 + r2 * k3))
-        dx = 2 * p1 * x * y + p2 * (r2 + 2 * x * x); dy = p1 * (r2 + 2 * y * y) + 2 * p2 * x * y
-        x = (xd - dx) / rad; y = (yd - dy) / rad
-    return x, y
-
-def project(Pc):
-    if fisheye:
-        r = np.hypot(Pc[..., 0], Pc[..., 1]); th = np.arctan2(r, Pc[..., 2]); rd = kb_rd(th)
-        s = np.where(r > 1e-12, rd / np.maximum(r, 1e-12), 0.0)
-        return K[0, 0] * Pc[..., 0] * s + K[0, 2], K[1, 1] * Pc[..., 1] * s + K[1, 2]
-    x = Pc[..., 0] / Pc[..., 2]; y = Pc[..., 1] / Pc[..., 2]
-    k1, k2, p1, p2, k3 = dist
-    r2 = x * x + y * y; rad = 1 + r2 * (k1 + r2 * (k2 + r2 * k3))
-    xd = x * rad + 2 * p1 * x * y + p2 * (r2 + 2 * x * x); yd = y * rad + p1 * (r2 + 2 * y * y) + 2 * p2 * x * y
-    return K[0, 0] * xd + K[0, 2], K[1, 1] * yd + K[1, 2]
-
-xn, yn = undistort(xx, yy)
 for k in frames:
     I0 = rgb[k].astype(np.float64); I1 = rgb[k + 1].astype(np.float64)
     fl = flow[k]; v = valid[k] > 0
@@ -79,11 +45,13 @@ for k in frames:
     base = np.abs(I1 - I0).mean(axis=2)
     # flow from depth + poses
     d = depth[k]
-    Pc = np.stack([xn * d, yn * d, d], axis=-1)
-    R0 = quat_to_R(q[k]); R1 = quat_to_R(q[k + 1])
-    Pw = Pc @ R0.T + pos[k]
-    Pc1 = (Pw - pos[k + 1]) @ R1
-    u1, v1 = project(Pc1)
+    with np.errstate(all="ignore"):
+        Pc = rays * (d / rays[..., 2])[..., None]          # z-depth → point on the pixel ray
+        R0 = quat_to_R(q[k]); R1 = quat_to_R(q[k + 1])
+        Pw = Pc @ R0.T + pos[k]
+        Pc1 = (Pw - pos[k + 1]) @ R1
+        u1, v1 = cam.project(Pc1)
     fe = np.hypot(u1 - xx - fl[..., 0], v1 - yy - fl[..., 1])
+    v = v & np.isfinite(fe)
     print(f"frame {k:4d}: valid {v.mean()*100:5.1f}%  photometric |I0 - warp(I1)| = {err[v].mean():5.2f} (no warp {base[v].mean():5.2f}) DN;"
           f" flow vs depth+pose reprojection: median {np.median(fe[v]):.2e} px, max {fe[v].max():.2e} px; mean |flow| {np.hypot(fl[...,0], fl[...,1])[v].mean():.2f} px")

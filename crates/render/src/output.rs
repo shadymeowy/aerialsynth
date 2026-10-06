@@ -242,23 +242,24 @@ impl H5Writer {
         } else {
             None
         };
-        if let CameraConfig::PinholeRadtan { fx, fy, cx, cy, k1, k2, p1, p2, k3, .. } = *cam {
+        // camera intrinsics in camodocal's schema (model, intrinsics, distortion, xi, ...)
+        {
             let g = file.ensure_group("camera")?;
-            g.set_attr_array("K", &[fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0])?;
-            g.set_attr_array("dist_radtan", &[k1, k2, p1, p2, k3])?;
+            g.set_attr_str("model", &cam.model)?;
             g.set_attr("width", w as i32)?;
             g.set_attr("height", h as i32)?;
-            let r = ext.r_body_cam();
-            let q = DQuat::from_mat3(&r);
-            g.set_attr_array("q_body_cam", &q4(q))?;
-            g.set_attr_array("t_body_cam", &ext.translation)?;
-        }
-        if let CameraConfig::KannalaBrandt { fx, fy, cx, cy, k1, k2, k3, k4, .. } = *cam {
-            let g = file.ensure_group("camera")?;
-            g.set_attr_array("K", &[fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0])?;
-            g.set_attr_array("dist_kb", &[k1, k2, k3, k4])?;
-            g.set_attr("width", w as i32)?;
-            g.set_attr("height", h as i32)?;
+            for (k, v) in [("intrinsics", &cam.intrinsics), ("distortion", &cam.distortion), ("inv_poly", &cam.inv_poly), ("affine", &cam.affine), ("center", &cam.center)] {
+                if !v.is_empty() {
+                    g.set_attr_array(k, v)?;
+                }
+            }
+            g.set_attr("xi", cam.xi)?;
+            g.set_attr("max_fov_deg", cam.max_fov_deg)?;
+            g.set_attr_str("yaml", &serde_yaml::to_string(cam)?)?;
+            if cam.intrinsics.len() == 4 {
+                let i = &cam.intrinsics;
+                g.set_attr_array("K", &[i[0], 0.0, i[2], 0.0, i[1], i[3], 0.0, 0.0, 1.0])?;
+            }
             g.set_attr_array("q_body_cam", &q4(DQuat::from_mat3(&ext.r_body_cam())))?;
             g.set_attr_array("t_body_cam", &ext.translation)?;
         }

@@ -191,7 +191,7 @@ fn compute_flow(points: &[Option<DVec3>], w: usize, h: usize, cam_b: &CamPose, d
             let (u, v) = (px.x.round(), px.y.round());
             if u >= 0.0 && v >= 0.0 && (u as usize) < w && (v as usize) < h {
                 let d = depth_b[v as usize * w + u as usize] as f64;
-                if (pc.z - d).abs() < 0.02 * pc.z + 0.5 {
+                if (pc.z - d).abs() < 0.02 * pc.z.abs() + 0.5 {
                     vr[x] = 1;
                 }
             }

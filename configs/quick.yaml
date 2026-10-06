@@ -12,15 +12,11 @@ trajectory:
     speed: 50
     duration: 10
 camera:
-  model: pinhole_radtan
+  model: pinhole
   width: 640
   height: 512
-  fx: 457.0
-  fy: 457.0
-  cx: 319.5
-  cy: 255.5
-  k1: -0.05
-  k2: 0.01
+  intrinsics: [457.0, 457.0, 319.5, 255.5]
+  distortion: [-0.05, 0.01, 0.0, 0.0]
 render:
   supersample: 3
 output:

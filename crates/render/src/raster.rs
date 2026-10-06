@@ -446,7 +446,7 @@ impl Renderer {
 
         // ---------------- build meshes
         let rt = cam.r_ecef_cam.transpose();
-        let half_lim = (ms.max_half_angle() * 1.35 + 0.05).min(PI * 0.5 - 1e-3);
+        let half_lim = (ms.max_half_angle() * 1.35 + 0.05).min(PI - 0.03);
         let cos_lim = half_lim.cos();
         let focal = ms.focal_px();
         let e2 = self.ell.e2();
@@ -490,7 +490,8 @@ impl Renderer {
                     let p = DVec3::new((nrad + hgt) * c * co, (nrad + hgt) * c * so, (nrad * (1.0 - e2) + hgt) * s);
                     let pc = rt * (p - cam.pos);
                     let mut v = Vert {
-                        z: pc.z,
+                        // range (not z): valid for wide-angle models beyond 90°
+                        z: pc.length(),
                         u: (x0 + i as u32 * stride) as f32,
                         v: (y0 + j as u32 * stride) as f32,
                         ..Default::default()
@@ -684,12 +685,12 @@ impl Renderer {
                             continue;
                         }
                         let u = &units[g.unit as usize];
-                        let range = (ray * (g.z as f64 / ray.z)).length();
+                        let range = g.z as f64;
                         let z = u.data.z;
                         let gx = u.data.x as f64 * 256.0 + g.u as f64;
                         let gy = u.data.y as f64 * 256.0 + g.v as f64;
                         if sx == cs && sy == cs {
-                            dep[ox] = g.z;
+                            dep[ox] = (range * ray.z) as f32; // z-depth along the optical axis
                             pts[ox] = Some(cam.pos + dir_w * range);
                             lcs[ox] = view.landcover(z, gx, gy);
                         }
