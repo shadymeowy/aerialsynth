@@ -68,7 +68,7 @@ fn open_attr(loc: hid_t, name: &str) -> Result<(Handle, Handle, usize)> {
         let s = Handle::check(sys::h5a::H5Aget_space(a.id()), "H5Aget_space", ctx)?;
         let n = sys::h5s::H5Sget_simple_extent_npoints(s.id());
         if n < 0 {
-            return Err(crate::raw::hdf5_error("H5Sget_simple_extent_npoints", ctx()));
+            return Err(crate::raw::hdf5_error("H5Sget_simple_extent_npoints", ctx));
         }
         Ok((a, s, n as usize))
     }

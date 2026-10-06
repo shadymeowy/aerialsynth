@@ -60,7 +60,7 @@ impl Handle {
     /// carries the HDF5 error stack. Caller must hold the lock.
     pub(crate) fn check(id: hid_t, op: &str, target: impl FnOnce() -> String) -> Result<Handle> {
         if id < 0 {
-            Err(hdf5_error(op, target()))
+            Err(hdf5_error(op, target))
         } else {
             Ok(Handle(id))
         }
@@ -94,7 +94,7 @@ impl Drop for Handle {
 /// Caller must hold the lock.
 pub(crate) fn check(ret: herr_t, op: &str, target: impl FnOnce() -> String) -> Result<herr_t> {
     if ret < 0 {
-        Err(hdf5_error(op, target()))
+        Err(hdf5_error(op, target))
     } else {
         Ok(ret)
     }
@@ -182,9 +182,11 @@ pub(crate) fn error_stack() -> String {
     }
 }
 
-pub(crate) fn hdf5_error(op: &str, target: String) -> Error {
+/// Build an error from the current HDF5 error stack. The stack is captured before `target`
+/// runs: describing the target calls HDF5 API functions, which clear the stack on entry.
+pub(crate) fn hdf5_error(op: &str, target: impl FnOnce() -> String) -> Error {
     let stack = error_stack();
-    Error::Hdf5 { op: op.to_string(), target, stack }
+    Error::Hdf5 { op: op.to_string(), target: target(), stack }
 }
 
 /// Convert a Rust string to a C string, rejecting interior NULs.

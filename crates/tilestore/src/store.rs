@@ -137,7 +137,8 @@ impl TileStore {
             let idx: Vec<i32> = if n > 0 { idx_ds.read_slice(&[0, 0], &[n, 2])? } else { vec![] };
             let rng: Vec<f32> = if n > 0 { range_ds.read_slice(&[0, 0], &[n, 2])? } else { vec![] };
             let rows: Vec<(u32, u32)> = idx.chunks_exact(2).map(|c| (c[0] as u32, c[1] as u32)).collect();
-            let index = rows.iter().enumerate().map(|(i, r)| (*r, i)).collect();
+            // rows with a negative index were never completed (interrupted write): skip them
+            let index = idx.chunks_exact(2).enumerate().filter(|(_, c)| c[0] >= 0 && c[1] >= 0).map(|(i, c)| ((c[0] as u32, c[1] as u32), i)).collect();
             let ranges = rng.chunks_exact(2).map(|c| (c[0], c[1])).collect();
             let mut lds = HashMap::new();
             for l in &meta.layers {
@@ -203,6 +204,7 @@ impl TileStore {
             .max_shape(&[None, Some(2)])
             .chunk(&[1024, 2])
             .deflate(4)
+            .fill_value(-1) // rows never written (interrupted write) are recognisable
             .create("index")?;
         let range_ds = g
             .new_dataset::<f32>()
@@ -242,6 +244,20 @@ impl TileStore {
             bail!("tile store {} opened read-only", self.path.display());
         }
         let layers = self.meta.layers.clone();
+        // every tile must be valid and carry all of the store's layers at full size (a short
+        // buffer would be stored as a corrupt chunk; a missing layer would leave an unallocated
+        // chunk that fails every later read of that tile)
+        for t in tiles {
+            if !t.id.is_valid() {
+                bail!("invalid tile id {:?}", t.id);
+            }
+            for &l in &layers {
+                let n = t.layer_bytes(l).len();
+                if n != l.tile_bytes() {
+                    bail!("tile {:?}: layer {} has {n} bytes, expected {}", t.id, l.name(), l.tile_bytes());
+                }
+            }
+        }
         let encoded: Vec<Vec<(Layer, Vec<u8>)>> = tiles
             .par_iter()
             .map(|t| {
@@ -266,6 +282,7 @@ impl TileStore {
             let level = lv.get_mut(&z).unwrap();
             let mut rows = Vec::with_capacity(idxs.len());
             let n0 = level.rows.len();
+            let ranges0: Vec<(f32, f32)> = level.ranges.clone();
             for &i in &idxs {
                 let id = tiles[i].id;
                 let key = (id.x, id.y);
@@ -283,28 +300,39 @@ impl TileStore {
                 rows.push(row);
             }
             let n = level.rows.len();
-            if n > n0 {
-                for (&l, ds) in &level.layers {
-                    ds.resize(&layer_shape(l, n))?;
+            let res = (|| -> Result<()> {
+                if n > n0 {
+                    for (&l, ds) in &level.layers {
+                        ds.resize(&layer_shape(l, n))?;
+                    }
+                    level.idx_ds.resize(&[n, 2])?;
+                    level.range_ds.resize(&[n, 2])?;
                 }
-                level.idx_ds.resize(&[n, 2])?;
-                level.range_ds.resize(&[n, 2])?;
-            }
-            for (k, &i) in idxs.iter().enumerate() {
-                let row = rows[k];
-                for (l, bytes) in &encoded[i] {
-                    let ds = &level.layers[l];
-                    let off = if l.channels() > 1 { vec![row, 0, 0, 0] } else { vec![row, 0, 0] };
-                    ds.write_chunk_raw(&off, 0, bytes)?;
+                // index / ranges first: a row whose chunks are missing after an interrupted write
+                // then fails loudly instead of aliasing tile (z, 0, 0)
+                let lo = rows.iter().copied().min().unwrap_or(0);
+                let idx: Vec<i32> = level.rows[lo..n].iter().flat_map(|&(x, y)| [x as i32, y as i32]).collect();
+                let rng: Vec<f32> = level.ranges[lo..n].iter().flat_map(|&(a, b)| [a, b]).collect();
+                level.idx_ds.write_slice(&idx, &[lo, 0], &[n - lo, 2])?;
+                level.range_ds.write_slice(&rng, &[lo, 0], &[n - lo, 2])?;
+                for (k, &i) in idxs.iter().enumerate() {
+                    let row = rows[k];
+                    for (l, bytes) in &encoded[i] {
+                        let ds = &level.layers[l];
+                        let off = if l.channels() > 1 { vec![row, 0, 0, 0] } else { vec![row, 0, 0] };
+                        ds.write_chunk_raw(&off, 0, bytes)?;
+                    }
                 }
+                Ok(())
+            })();
+            if let Err(e) = res {
+                // roll back the in-memory view of this level (new rows are dropped)
+                for key in level.rows.drain(n0..) {
+                    level.index.remove(&key);
+                }
+                level.ranges = ranges0;
+                return Err(e);
             }
-            // rewrite the touched part of the index / ranges
-            let lo = rows.iter().copied().min().unwrap_or(0);
-            let hi = n;
-            let idx: Vec<i32> = level.rows[lo..hi].iter().flat_map(|&(x, y)| [x as i32, y as i32]).collect();
-            let rng: Vec<f32> = level.ranges[lo..hi].iter().flat_map(|&(a, b)| [a, b]).collect();
-            level.idx_ds.write_slice(&idx, &[lo, 0], &[hi - lo, 2])?;
-            level.range_ds.write_slice(&rng, &[lo, 0], &[hi - lo, 2])?;
         }
         Ok(())
     }
@@ -334,6 +362,8 @@ impl TileStore {
                             let v: Vec<f32> = ds.read_slice(&off, &count)?;
                             v.iter().flat_map(|f| f.to_le_bytes()).collect()
                         }
+                        // i8 normals must be read as i8 (an i8 → u8 conversion clips negatives)
+                        Layer::Normal => ds.read_slice::<i8>(&off, &count)?.into_iter().map(|v| v as u8).collect(),
                         _ => ds.read_slice::<u8>(&off, &count)?,
                     };
                     out.push((l, data, false));

@@ -287,7 +287,7 @@ impl Dataset {
             let t = Handle::check(sys::h5d::H5Dget_type(self.id()), "H5Dget_type", || self.ctx())?;
             let n = sys::h5t::H5Tget_size(t.id());
             if n == 0 {
-                return Err(crate::raw::hdf5_error("H5Tget_size", self.ctx()));
+                return Err(crate::raw::hdf5_error("H5Tget_size", || self.ctx()));
             }
             Ok(n)
         }

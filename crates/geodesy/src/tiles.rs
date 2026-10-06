@@ -273,12 +273,23 @@ pub fn tiles_in_bounds(b: &LatLonBounds, z: u8) -> Vec<TileId> {
     let ys = range(latlon_to_uv(lat_max, 0.0).y, latlon_to_uv(lat_min, 0.0).y);
 
     let u = |lon: f64| latlon_to_uv(0.0, lon.clamp(-PI, PI)).x;
-    let mut xs: Vec<u64> = Vec::new();
-    if b.lon_min <= b.lon_max {
-        xs.extend(range(u(b.lon_min), u(b.lon_max)));
+    // longitudes outside [-π, π] are wrapped (a box from 179.9° to 180.1° crosses the
+    // antimeridian); a span of 2π or more is the whole world
+    let wrap = |l: f64| (l + PI).rem_euclid(TAU) - PI;
+    let (lon_min, lon_max) = if b.lon_min <= b.lon_max && b.lon_max - b.lon_min >= TAU {
+        (-PI, PI)
+    } else if b.lon_min <= b.lon_max && b.lon_min >= -PI && b.lon_max <= PI {
+        (b.lon_min, b.lon_max)
     } else {
-        xs.extend(range(u(b.lon_min), 1.0));
-        for x in range(0.0, u(b.lon_max)) {
+        let hi = wrap(b.lon_max);
+        (wrap(b.lon_min), if hi == -PI { PI } else { hi })
+    };
+    let mut xs: Vec<u64> = Vec::new();
+    if lon_min <= lon_max {
+        xs.extend(range(u(lon_min), u(lon_max)));
+    } else {
+        xs.extend(range(u(lon_min), 1.0));
+        for x in range(0.0, u(lon_max)) {
             if !xs.contains(&x) {
                 xs.push(x);
             }
@@ -592,5 +603,15 @@ mod tests {
                 assert!(tb.lon_max > b.lon_min && tb.lon_min < b.lon_max);
             }
         }
+    }
+
+    #[test]
+    fn tiles_in_bounds_wraps_longitudes() {
+        let b = |a: f64, c: f64| LatLonBounds { lat_min: 0.1, lat_max: 0.2, lon_min: a.to_radians(), lon_max: c.to_radians() };
+        let xs = |v: Vec<TileId>| { let mut x: Vec<u32> = v.iter().map(|t| t.x).collect(); x.sort(); x.dedup(); x };
+        assert_eq!(xs(tiles_in_bounds(&b(179.9, 180.1), 8)), vec![0, 255]);
+        assert_eq!(xs(tiles_in_bounds(&b(-180.1, -179.9), 8)), vec![0, 255]);
+        assert_eq!(xs(tiles_in_bounds(&b(-200.0, 200.0), 3)).len(), 8);
+        assert_eq!(xs(tiles_in_bounds(&b(10.0, 20.0), 8)), xs(tiles_in_bounds(&b(370.0, 380.0), 8)));
     }
 }

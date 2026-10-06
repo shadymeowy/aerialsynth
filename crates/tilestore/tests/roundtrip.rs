@@ -48,3 +48,22 @@ fn write_reopen_append_read() {
     assert!(s.read_tile(TileId::new(4, 0, 0), &Layer::ALL).unwrap().is_none());
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn rejects_invalid_tiles() {
+    let dir = std::env::temp_dir().join(format!("tilestore-invalid-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let s = TileStore::create(dir.join("t.h5"), StoreMeta::default()).unwrap();
+    // short layer buffer, missing layer, out-of-range tile id
+    let mut short = tile(TileId::new(3, 1, 1), 1);
+    short.elevation.truncate(10);
+    assert!(s.write_tiles(&[short]).is_err());
+    let mut missing = tile(TileId::new(3, 1, 1), 1);
+    missing.rgb.clear();
+    assert!(s.write_tiles(&[missing]).is_err());
+    assert!(s.write_tiles(&[tile(TileId::new(2, 100, 100), 1)]).is_err());
+    // nothing was stored, and valid writes still work
+    assert_eq!(s.len(), 0);
+    s.write_tiles(&[tile(TileId::new(3, 1, 1), 1)]).unwrap();
+    assert!(s.read_tile(TileId::new(3, 1, 1), &Layer::ALL).unwrap().is_some());
+}

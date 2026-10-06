@@ -103,6 +103,8 @@ fn errors_carry_stack_and_context() {
     let f = File::create(tmp("errors.h5")).unwrap();
     let e = f.dataset("nope/deeper").unwrap_err().to_string();
     assert!(e.contains("H5Dopen2") && e.contains("nope/deeper") && e.contains("errors.h5"), "{e}");
+    // the stack is captured before the target is described (which would clear it)
+    assert!(!e.contains("empty HDF5 error stack"), "{e}");
     let d = f.new_dataset::<u8>().shape(&[4, 4]).create("d").unwrap();
     assert!(matches!(d.read_slice::<u8>(&[3, 0], &[2, 1]), Err(Error::InvalidArgument(_))));
     assert!(matches!(d.write_slice(&[1u8; 3], &[0, 0], &[2, 2]), Err(Error::InvalidArgument(_))));
@@ -110,6 +112,7 @@ fn errors_carry_stack_and_context() {
     // Not resizable.
     let e = d.resize(&[8, 4]).unwrap_err().to_string();
     assert!(e.contains("H5Dset_extent"), "{e}");
+    assert!(!e.contains("empty HDF5 error stack"), "{e}");
     // Requires chunk.
     assert!(f.new_dataset::<u8>().shape(&[0]).max_shape(&[None]).create("x").is_err());
     assert!(f.new_dataset::<u8>().create("noshape").is_err());
