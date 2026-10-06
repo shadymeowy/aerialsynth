@@ -41,7 +41,8 @@ pub struct LightingConfig {
     pub shadows: bool,
     pub lights: LightsMode,
     pub lights_on_below_deg: f64,
-    /// Radiance scale of artificial lights.
+    /// Radiance scale of artificial lights (the emission layer is ~0..4; street lighting is
+    /// ~1e-4..1e-3 of daylight, lamp cores much brighter).
     pub lights_intensity: f64,
 }
 
@@ -59,7 +60,7 @@ impl Default for LightingConfig {
             shadows: true,
             lights: LightsMode::Auto,
             lights_on_below_deg: 1.0,
-            lights_intensity: 1.0,
+            lights_intensity: 0.012,
         }
     }
 }
@@ -167,7 +168,9 @@ impl LightingConfig {
         // relative air mass (Kasten–Young) → direct transmittance
         let am = if eld > -1.0 { 1.0 / ((eld.max(0.0) * std::f64::consts::PI / 180.0).sin() + 0.50572 * (eld.max(0.0) + 6.07995).powf(-1.6364)) } else { 40.0 };
         let direct = if eld > -0.8 { (0.9f64).powf(am.min(40.0)) / 0.9 * smooth(-0.8, 1.0, eld) } else { 0.0 } * self.sun_intensity;
-        let sky = (0.03 + 0.97 * smooth(-6.0, 12.0, eld)) * smooth(-18.0, -6.0, eld).max(0.002) * self.sky_intensity;
+        // twilight: sky light falls ~3 orders of magnitude from sunset to the end of civil
+        // twilight, then to a starlight / airglow floor (~3e-5 of daylight)
+        let sky = ((0.03 + 0.97 * smooth(-6.0, 12.0, eld)) * smooth(-14.0, -1.0, eld).powi(3)).max(3e-5) * self.sky_intensity;
         let lights = match self.lights {
             LightsMode::On => 1.0,
             LightsMode::Off => 0.0,

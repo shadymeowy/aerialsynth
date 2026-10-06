@@ -1,0 +1,11 @@
+# Forward-looking camera tilted 35° down at ~2500 m AGL, clock-driven sun near sunset.
+world: { seed: 1 }
+tiles: { file: out/night/world.h5, max_zoom: 17, lazy: true }
+trajectory:
+  file: out/night/traj.csv
+  synth: { kind: line, altitude: 2500, speed: 70, duration: 4, heading_deg: 250 }
+camera: { model: pinhole_radtan, width: 640, height: 480, fx: 400, fy: 400, cx: 319.5, cy: 239.5 }
+extrinsics: { mount: forward, pitch_deg: -35 }
+render:
+  lighting: { mode: clock, date: "2026-06-21", time_utc: "19:30:00" }
+output: { dir: out/night/seq, h5: null, frame_rate: 2, max_frames: 1 }

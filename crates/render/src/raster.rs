@@ -118,12 +118,75 @@ struct GSample {
     v: f32,
 }
 
+/// Small fast hasher for tile ids (FxHash-style multiply/rotate).
+#[derive(Default, Clone, Copy)]
+pub struct FxHasher(u64);
+impl std::hash::Hasher for FxHasher {
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.0 = (self.0.rotate_left(5) ^ *b as u64).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+        }
+    }
+    #[inline]
+    fn write_u8(&mut self, i: u8) {
+        self.0 = (self.0.rotate_left(5) ^ i as u64).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+    #[inline]
+    fn write_u32(&mut self, i: u32) {
+        self.0 = (self.0.rotate_left(5) ^ i as u64).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+type FxBuild = std::hash::BuildHasherDefault<FxHasher>;
+
 /// Frame-local view of the tiles needed for shading.
 struct TileView {
-    tiles: HashMap<TileId, Arc<TileData>>,
+    tiles: HashMap<TileId, Arc<TileData>, FxBuild>,
+    /// max elevation over 16x16-pixel blocks of each tile (shadow-ray empty-space skipping)
+    blockmax: HashMap<TileId, Box<[f32; 256]>, FxBuild>,
 }
 
 impl TileView {
+    fn new(tiles: HashMap<TileId, Arc<TileData>, FxBuild>, with_blockmax: bool) -> Self {
+        let blockmax = if with_blockmax {
+            tiles
+                .par_iter()
+                .filter(|(_, t)| !t.elevation.is_empty())
+                .map(|(id, t)| {
+                    let mut b = Box::new([f32::MIN; 256]);
+                    for j in 0..256 {
+                        for i in 0..256 {
+                            let k = (j / 16) * 16 + i / 16;
+                            b[k] = b[k].max(t.elevation[j * 256 + i]);
+                        }
+                    }
+                    (*id, b)
+                })
+                .collect()
+        } else {
+            HashMap::default()
+        };
+        TileView { tiles, blockmax }
+    }
+
+    /// Max elevation of the 16x16 block containing global pixel (gx, gy) at zoom z, if known.
+    #[inline]
+    fn block_max(&self, z: u8, gx: f64, gy: f64) -> Option<f32> {
+        let n = 1i64 << z;
+        let (px, py) = (gx.floor() as i64, gy.floor() as i64);
+        let ty = py.div_euclid(256);
+        if ty < 0 || ty >= n {
+            return None;
+        }
+        let tx = px.div_euclid(256).rem_euclid(n);
+        let b = self.blockmax.get(&TileId::new(z, tx as u32, ty as u32))?;
+        Some(b[((py.rem_euclid(256) / 16) * 16 + px.rem_euclid(256) / 16) as usize])
+    }
+
     fn get(&self, id: TileId) -> Option<&Arc<TileData>> {
         self.tiles.get(&id)
     }
@@ -342,7 +405,10 @@ impl Renderer {
         let ss = self.settings.supersample.max(1) as usize;
         let ms = &self.model_ss;
         let (w, h) = (ms.width() as usize, ms.height() as usize);
+        let prof = std::env::var_os("RENDER_PROFILE").is_some();
+        let t0 = std::time::Instant::now();
         let units = self.select_units(cam);
+        let t_sel = t0.elapsed().as_secs_f64();
 
         // ---------------- gather tiles: unit data, neighbours, ancestors for mip levels
         let mut need: Vec<TileId> = Vec::new();
@@ -373,7 +439,9 @@ impl Renderer {
         need.sort_unstable();
         need.dedup();
         self.cache.prefetch(&need);
-        let view = TileView { tiles: need.iter().filter_map(|id| self.cache.get(*id).map(|t| (*id, t))).collect() };
+        let shadows_needed = self.settings.shading == Shading::Relit && self.settings.lighting.shadows && sun_state.direct > 1e-4;
+        let view = TileView::new(need.iter().filter_map(|id| self.cache.get(*id).map(|t| (*id, t))).collect(), shadows_needed);
+        let t_fetch = t0.elapsed().as_secs_f64();
 
         // ---------------- build meshes
         let rt = cam.r_ecef_cam.transpose();
@@ -515,6 +583,7 @@ impl Renderer {
             })
             .collect();
 
+        let t_mesh = t0.elapsed().as_secs_f64();
         // ---------------- rasterize (parallel over horizontal bands)
         let band_h = 16usize;
         let mut gbuf = vec![GSample { z: f32::INFINITY, unit: NO_UNIT, u: 0.0, v: 0.0 }; w * h];
@@ -554,6 +623,7 @@ impl Renderer {
             }
         });
 
+        let t_raster = t0.elapsed().as_secs_f64();
         // ---------------- shading
         let ow = self.model.width() as usize;
         let oh = self.model.height() as usize;
@@ -576,53 +646,57 @@ impl Renderer {
                 let mut pts = vec![None; ow];
                 let mut lcs = vec![255u8; ow];
                 for ox in 0..ow {
-                    // cast shadow evaluated once per output pixel (at the central sub-sample)
-                    let shadow = if do_shadow {
-                        let x = ox * ss + cs;
-                        let y = oy * ss + cs;
-                        let g = gbuf[y * w + x];
-                        if g.unit == NO_UNIT {
-                            1.0
-                        } else {
-                            let u = &units[g.unit as usize];
-                            let gx = u.data.x as f64 * 256.0 + g.u as f64;
-                            let gy = u.data.y as f64 * 256.0 + g.v as f64;
-                            self.sun_visibility(&view, u.data.z, gx, gy, sun_state)
-                        }
-                    } else {
-                        1.0
-                    };
-                    let mut acc = DVec3::ZERO;
+                    // Per-pixel shading context from the central sub-sample (or the first terrain
+                    // sub-sample): footprint / LOD, lighting incl. cast shadow, atmosphere. The
+                    // other sub-samples only fetch texture, unless they lie at a clearly different
+                    // depth (silhouettes), in which case they get their own context.
+                    let mut order: [(usize, usize); 25] = [(0, 0); 25];
+                    let mut no = 0;
+                    order[no] = (cs, cs);
+                    no += 1;
                     for sy in 0..ss {
                         for sx in 0..ss {
-                            let x = ox * ss + sx;
-                            let y = oy * ss + sy;
-                            let g = gbuf[y * w + x];
-                            let ray = self.rays[y * w + x];
-                            let ray = DVec3::new(ray[0] as f64, ray[1] as f64, ray[2] as f64);
-                            let dir_w = cam.r_ecef_cam * ray;
-                            let is_c = sx == cs && sy == cs;
-                            if g.unit == NO_UNIT {
-                                acc += atmo.sky(dir_w, cam_up);
+                            if (sx, sy) != (cs, cs) && no < 25 {
+                                order[no] = (sx, sy);
+                                no += 1;
+                            }
+                        }
+                    }
+                    let mut ctx: Option<PixShade> = None;
+                    let mut acc = DVec3::ZERO;
+                    for &(sx, sy) in &order[..no] {
+                        let x = ox * ss + sx;
+                        let y = oy * ss + sy;
+                        let g = gbuf[y * w + x];
+                        let ray = self.rays[y * w + x];
+                        let ray = DVec3::new(ray[0] as f64, ray[1] as f64, ray[2] as f64);
+                        let dir_w = cam.r_ecef_cam * ray;
+                        if g.unit == NO_UNIT {
+                            acc += atmo.sky(dir_w, cam_up);
+                            continue;
+                        }
+                        let u = &units[g.unit as usize];
+                        let range = (ray * (g.z as f64 / ray.z)).length();
+                        let z = u.data.z;
+                        let gx = u.data.x as f64 * 256.0 + g.u as f64;
+                        let gy = u.data.y as f64 * 256.0 + g.v as f64;
+                        if sx == cs && sy == cs {
+                            dep[ox] = g.z;
+                            pts[ox] = Some(cam.pos + dir_w * range);
+                            lcs[ox] = view.landcover(z, gx, gy);
+                        }
+                        let reuse = matches!(&ctx, Some(c) if (range - c.range).abs() < 0.03 * c.range);
+                        if !reuse {
+                            let shadow = if do_shadow { self.sun_visibility(&view, z, gx, gy, sun_state) } else { 1.0 };
+                            let pc = self.pixel_shade(&view, &atmo, sun_state, z, gx, gy, range, dir_w, alpha, cam.pos, cam_geo.h, shadow);
+                            if ctx.is_none() {
+                                ctx = Some(pc);
+                            } else {
+                                acc += self.texture(&view, &pc, z, gx, gy);
                                 continue;
                             }
-                            let u = &units[g.unit as usize];
-                            let zc = g.z as f64;
-                            let pcam = ray * (zc / ray.z);
-                            let range = pcam.length();
-                            let z = u.data.z;
-                            let gx = u.data.x as f64 * 256.0 + g.u as f64;
-                            let gy = u.data.y as f64 * 256.0 + g.v as f64;
-                            let lat = lat_of(gy, z);
-                            let lon = lon_of(gx, z);
-                            let p_w = cam.pos + dir_w * range;
-                            if is_c {
-                                dep[ox] = g.z;
-                                pts[ox] = Some(p_w);
-                                lcs[ox] = view.landcover(z, gx, gy);
-                            }
-                            acc += self.shade(&view, &atmo, sun_state, z, gx, gy, lat, lon, range, dir_w, alpha, p_w, cam_geo.h, shadow);
                         }
+                        acc += self.texture(&view, ctx.as_ref().unwrap(), z, gx, gy);
                     }
                     let c = acc / (ss * ss) as f64;
                     for ch in 0..3 {
@@ -632,6 +706,20 @@ impl Renderer {
                 (rad, dep, pts, lcs)
             })
             .collect();
+        if prof {
+            let ntri: usize = meshes.iter().map(|m| 2 * (m.nx - 1) * (m.ny - 1)).sum();
+            eprintln!(
+                "render: {} units, {} tiles, {} tris | select {:.3}s fetch {:.3}s mesh {:.3}s raster {:.3}s shade {:.3}s",
+                units.len(),
+                view.tiles.len(),
+                ntri,
+                t_sel,
+                t_fetch - t_sel,
+                t_mesh - t_fetch,
+                t_raster - t_mesh,
+                t0.elapsed().as_secs_f64() - t_raster
+            );
+        }
         let mut out = FrameOut {
             width: ow as u32,
             height: oh as u32,
@@ -665,7 +753,33 @@ impl Renderer {
         let mut dist = 0.0;
         let mut step = 1.0; // texels of the current level
         let bias = 0.4 * texel + 0.3;
-        for i in 0..96 {
+        let mut i = 0;
+        while i < 160 {
+            i += 1;
+            // empty-space skipping: if the ray is above the current block's max, jump to the
+            // block exit (blocks are 16x16 texels of the current level)
+            let ray_here = h0 + bias + dist * tan_e - dist * dist / (2.0 * r_earth);
+            if let Some(bm) = view.block_max(zl, px.x, px.y) {
+                if ray_here > bm as f64 + 0.01 {
+                    let fx = px.x.rem_euclid(16.0);
+                    let fy = px.y.rem_euclid(16.0);
+                    let tx = if dir.x > 1e-9 { (16.0 - fx) / dir.x } else if dir.x < -1e-9 { fx / -dir.x } else { f64::MAX };
+                    let ty = if dir.y > 1e-9 { (16.0 - fy) / dir.y } else if dir.y < -1e-9 { fy / -dir.y } else { f64::MAX };
+                    let adv = tx.min(ty) + 0.05;
+                    px += dir * adv;
+                    dist += adv * texel;
+                    if dist > 40_000.0 || ray_here > 9000.0 {
+                        break;
+                    }
+                    // far from the start, continue on a coarser level
+                    if dist > 64.0 * texel && zl > 0 {
+                        zl -= 1;
+                        px *= 0.5;
+                        texel *= 2.0;
+                    }
+                    continue;
+                }
+            }
             px += dir * step;
             dist += step * texel;
             let ray_h = h0 + bias + dist * tan_e - dist * dist / (2.0 * r_earth);
@@ -677,7 +791,7 @@ impl Renderer {
                     return 0.0;
                 }
             }
-            // every 12 steps move one level coarser (double the step length)
+            // every 12 fine steps move one level coarser (double the step length)
             if i % 12 == 11 && zl > 0 {
                 zl -= 1;
                 px *= 0.5;
@@ -692,27 +806,83 @@ impl Renderer {
         1.0
     }
 
+    /// Shading context of one pixel: texture footprint and the affine colour transform
+    /// `radiance = tex * mul + add + emission * emis` (lighting and atmosphere folded in).
     #[allow(clippy::too_many_arguments)]
-    fn shade(&self, view: &TileView, atmo: &Atmosphere, sun_state: &SunState, z: u8, gx: f64, gy: f64, lat: f64, lon: f64, range: f64, dir_w: DVec3, alpha: f64, p_w: DVec3, h_cam: f64, shadow: f64) -> DVec3 {
-        let r_enu = geodesy::rot_ecef2enu(lat, lon);
-        let up = DVec3::new(lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin());
-        let v_enu = r_enu * (-dir_w);
+    fn pixel_shade(&self, view: &TileView, atmo: &Atmosphere, sun_state: &SunState, z: u8, gx: f64, gy: f64, range: f64, dir_w: DVec3, alpha: f64, cam_pos: DVec3, h_cam: f64, shadow: f64) -> PixShade {
+        let lat = lat_of(gy, z);
+        let lon = lon_of(gx, z);
+        let (sl, cl) = lat.sin_cos();
+        let (so, co) = lon.sin_cos();
+        let up = DVec3::new(cl * co, cl * so, sl);
+        let east = DVec3::new(-so, co, 0.0);
+        let north = DVec3::new(-sl * co, -sl * so, cl);
+        let v = -dir_w;
+        let v_enu = DVec3::new(v.dot(east), v.dot(north), v.dot(up));
         // footprint: minor axis = range * pixel angle, major stretched by the grazing angle
         let cos_inc = v_enu.z.max(0.03);
-        let texel = gsd_ew(lat, z, 256, &self.ell);
+        let e2 = self.ell.e2();
+        let nrad = self.ell.a / (1.0 - e2 * sl * sl).sqrt();
+        let texel = 2.0 * PI * nrad * cl / (256.0 * (1u64 << z) as f64);
         let minor = range * alpha;
         let major = minor / cos_inc;
-        let lam = (minor / texel).log2().max(0.0);
+        let lam = (minor / texel).log2();
         let aniso = (major / minor).clamp(1.0, self.settings.max_aniso as f64);
-        let taps = aniso.ceil() as usize;
-        // anisotropy direction in texel space (x east, y south)
         let hdir = DVec2::new(v_enu.x, -v_enu.y);
         let hdir = if hdir.length_squared() > 1e-12 { hdir.normalize() } else { DVec2::X };
+        let sky_amb = DVec3::new(0.80, 0.90, 1.10) * 0.32 * sun_state.sky;
+        let (mut mul, mut add) = match self.settings.shading {
+            Shading::Satellite => {
+                // baked lighting; dimmed by the current daylight
+                let day = (0.75 * sun_state.direct + 0.25 * sun_state.sky).min(1.0);
+                (DVec3::splat(day), DVec3::ZERO)
+            }
+            Shading::Relit => {
+                let n_enu = view.sample3(z, gx, gy, Which::Normal).unwrap_or(DVec3::Z);
+                let n = (east * n_enu.x + north * n_enu.y + up * n_enu.z).normalize();
+                let ndl = n.dot(atmo.sun_dir).max(0.0);
+                (atmo.sun_color() * (ndl * 1.25 * shadow) + sky_amb * (0.6 + 0.4 * n.dot(up)), DVec3::ZERO)
+            }
+        };
+        if self.settings.shading == Shading::Relit && self.settings.water_glint && terragen::landcover::is_water(view.landcover(z, gx, gy)) {
+            let sun = atmo.sun_dir;
+            let hv = (v + sun).normalize();
+            let nh = up.dot(hv).max(0.0);
+            let fres = 0.02 + 0.98 * (1.0 - v.dot(up).max(0.0)).powi(5);
+            let sky_c = atmo.sky((dir_w - up * 2.0 * dir_w.dot(up)).normalize(), up);
+            mul *= 1.0 - fres;
+            add += sky_c * fres + atmo.sun_color() * (shadow * 1.5 * nh.powf(300.0));
+        }
+        // height of the point above the ellipsoid (closed form given its geodetic latitude)
+        let p_w = cam_pos - v * range;
+        let h_pt = if cl.abs() > 0.1 { (p_w.x * p_w.x + p_w.y * p_w.y).sqrt() / cl - nrad } else { p_w.z.abs() / sl.abs() - nrad * (1.0 - e2) };
+        let (t, ins) = atmo.transmittance(h_cam, h_pt, range, dir_w);
+        PixShade {
+            z,
+            range,
+            lam,
+            aniso,
+            hdir,
+            major_texels: major / texel,
+            mul: mul * t,
+            add: add * t + ins,
+            emis: t * sun_state.lights,
+        }
+    }
+
+    /// Filtered texture fetch (trilinear across pyramid levels, anisotropic taps) for a sample
+    /// of zoom `z` at global pixel coords (gx, gy), with the pixel's shading context.
+    fn texture(&self, view: &TileView, ps: &PixShade, z: u8, gx: f64, gy: f64) -> DVec3 {
         let which = match self.settings.shading {
             Shading::Satellite => Which::Rgb,
             Shading::Relit => Which::Albedo,
         };
-        let lights_on = sun_state.lights > 1e-3;
+        // footprint relative to this sample's data zoom
+        let dz = z as f64 - ps.z as f64;
+        let lam = (ps.lam + dz).max(0.0);
+        let major_texels = ps.major_texels * 2f64.powf(dz);
+        let taps = ps.aniso.ceil() as usize;
+        let lights_on = ps.emis.max_element() > 1e-9;
         let l0 = lam.floor();
         let t = lam - l0;
         let mut col = DVec3::ZERO;
@@ -725,11 +895,10 @@ impl Renderer {
             let k = (lvl as u8).min(z);
             let zl = z - k;
             let s = 0.5f64.powi(k as i32);
-            // major-axis extent in texels of this level
-            let ext = (major / (texel / s)).min(64.0);
+            let ext = (major_texels * s).min(64.0);
             for i in 0..taps {
                 let o = if taps > 1 { (i as f64 + 0.5) / taps as f64 - 0.5 } else { 0.0 };
-                let off = hdir * (o * ext);
+                let off = ps.hdir * (o * ext);
                 let (sx, sy) = (gx * s + off.x, gy * s + off.y);
                 if let Some(c) = view.sample3(zl, sx, sy, which) {
                     col += c * wl;
@@ -743,35 +912,21 @@ impl Renderer {
             }
         }
         let (c0, e0) = if wsum > 0.0 { (col / wsum, emis / wsum) } else { (DVec3::splat(0.2), DVec3::ZERO) };
-        let sky_amb = DVec3::new(0.80, 0.90, 1.10) * 0.32 * sun_state.sky;
-        let c = match self.settings.shading {
-            Shading::Satellite => {
-                // baked lighting; dimmed by the current daylight
-                let day = (0.75 * sun_state.direct + 0.25 * sun_state.sky).min(1.0);
-                c0 * day
-            }
-            Shading::Relit => {
-                let n_enu = view.sample3(z, gx, gy, Which::Normal).unwrap_or(DVec3::Z);
-                let n = (r_enu.transpose() * n_enu).normalize();
-                let sun = atmo.sun_dir;
-                let ndl = n.dot(sun).max(0.0);
-                let mut lit = c0 * (atmo.sun_color() * (ndl * 1.25 * shadow) + sky_amb * (0.6 + 0.4 * n.dot(up)));
-                let lc = view.landcover(z, gx, gy);
-                if self.settings.water_glint && terragen::landcover::is_water(lc) {
-                    let v = -dir_w;
-                    let hv = (v + sun).normalize();
-                    let nh = up.dot(hv).max(0.0);
-                    let fres = 0.02 + 0.98 * (1.0 - v.dot(up).max(0.0)).powi(5);
-                    let sky_c = atmo.sky((dir_w - up * 2.0 * dir_w.dot(up)).normalize(), up);
-                    lit = lit * (1.0 - fres) + sky_c * fres + atmo.sun_color() * (shadow * 1.5 * nh.powf(300.0));
-                }
-                lit
-            }
-        };
-        let c = c + e0 * sun_state.lights;
-        let h_pt = geodesy::ecef2geodetic(p_w, &self.ell).h;
-        atmo.apply(c, h_cam, h_pt, range, dir_w)
+        c0 * ps.mul + ps.add + e0 * ps.emis
     }
+}
+
+/// Per-pixel shading context (see `Renderer::pixel_shade`).
+struct PixShade {
+    z: u8,
+    range: f64,
+    lam: f64,
+    aniso: f64,
+    hdir: DVec2,
+    major_texels: f64,
+    mul: DVec3,
+    add: DVec3,
+    emis: DVec3,
 }
 
 /// Rasterize one triangle into a band of the G-buffer (rows [y0, y0+rows)).

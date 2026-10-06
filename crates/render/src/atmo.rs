@@ -47,7 +47,7 @@ impl Atmosphere {
         let dusk = DVec3::new(1.0, 0.62 - 0.1 * low, 0.40);
         let horizon_day = DVec3::new(0.62, 0.72, 0.85);
         let horizon = (horizon_day * (1.0 - 0.6 * low) + dusk * (0.6 * low)) * sky;
-        let night = DVec3::new(0.004, 0.006, 0.012);
+        let night = DVec3::new(0.4, 0.6, 1.2) * 1e-5;
         Atmosphere {
             beta_m,
             rayleigh_col: DVec3::new(0.30, 0.48, 0.85) * (0.7 * sky) + sun_col * 0.15 * DVec3::new(0.3, 0.45, 0.8) + night,
@@ -82,10 +82,11 @@ impl Atmosphere {
         (DVec3::new(BETA_R[0], BETA_R[1], BETA_R[2]) * fr, self.beta_m * fm)
     }
 
-    /// Apply aerial perspective to a surface colour seen over distance `d`.
-    pub fn apply(&self, col: DVec3, h_cam: f64, h_pt: f64, d: f64, view: DVec3) -> DVec3 {
+    /// Transmittance and in-scattered radiance along a view segment of length `d` between heights
+    /// `h_cam` and `h_pt` (aerial perspective: `colour * T + inscatter`).
+    pub fn transmittance(&self, h_cam: f64, h_pt: f64, d: f64, view: DVec3) -> (DVec3, DVec3) {
         if !self.p.enabled {
-            return col;
+            return (DVec3::ONE, DVec3::ZERO);
         }
         let (tr, tm) = self.optical_depth(h_cam, h_pt, d);
         let tau = tr + DVec3::splat(tm);
@@ -96,7 +97,13 @@ impl Atmosphere {
         let wr = tr.x + tr.y + tr.z;
         let wm = 3.0 * tm;
         let mix = (self.rayleigh_col * wr + self.mie_col * mie_phase * wm) / (wr + wm).max(1e-12);
-        col * t + mix * (DVec3::ONE - t) * self.p.inscatter
+        (t, mix * (DVec3::ONE - t) * self.p.inscatter)
+    }
+
+    /// Apply aerial perspective to a surface colour seen over distance `d`.
+    pub fn apply(&self, col: DVec3, h_cam: f64, h_pt: f64, d: f64, view: DVec3) -> DVec3 {
+        let (t, ins) = self.transmittance(h_cam, h_pt, d, view);
+        col * t + ins
     }
 
     /// Sky radiance for a view direction (`up`: local up at the camera).

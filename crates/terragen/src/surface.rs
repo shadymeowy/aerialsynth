@@ -72,6 +72,24 @@ pub struct Surface {
     pub emission: DVec3,
 }
 
+/// Smooth noise fields evaluated once per pixel and shared by its sub-samples.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PixFields {
+    pub detail: f64,
+    pub patch: f64,
+    pub land: f64,
+    pub strata: f64,
+    pub strata2: f64,
+    pub snow: f64,
+    pub forest: f64,
+    pub stand: f64,
+    pub field_var: f64,
+    pub field_var2: f64,
+    pub field_var3: f64,
+    pub warp2: f64,
+    pub water: f64,
+}
+
 /// Field system of a land-use region.
 #[derive(Clone, Copy, Debug)]
 pub struct RegionInfo {
@@ -306,6 +324,25 @@ impl SurfaceModel {
         }
     }
 
+    /// Per-pixel smooth fields (band-limited at the pixel GSD).
+    pub fn pixel_fields(&self, p: DVec3, gsd: f64) -> PixFields {
+        PixFields {
+            detail: self.detail.eval(p, gsd),
+            patch: self.patch.eval(p, gsd),
+            land: self.land_n.eval(p, gsd) * self.land_n.norm() * 1.8,
+            strata: self.strata.eval(p, gsd),
+            strata2: self.strata.eval(p * 1.7, gsd),
+            snow: self.snow_n.eval(p, gsd),
+            forest: self.forest.eval(p, gsd) * self.forest.norm() * 1.8,
+            stand: self.patch.eval(p * 0.3, gsd) + 0.5 * perlin3(0x57A, p / 1200.0),
+            field_var: self.field_var.eval(p, gsd),
+            field_var2: self.field_var.eval(p * 1.7, gsd),
+            field_var3: self.field_var.eval(p * 3.0, gsd),
+            warp2: self.warp2.eval(p, gsd),
+            water: self.patch.eval(p * 0.37, gsd),
+        }
+    }
+
     fn region_info(&self, world: &World, cache: &mut Caches, t: &Terrain) -> RegionInfo {
         if let Some(r) = cache.regions.get(&t.region.id) {
             return *r;
@@ -393,7 +430,7 @@ impl SurfaceModel {
     }
 
     /// Evaluate the surface at one sub-sample.
-    pub fn eval(&self, world: &World, cache: &mut Caches, ctx: &Ctx, l: &Local) -> Surface {
+    pub fn eval(&self, world: &World, cache: &mut Caches, ctx: &Ctx, l: &Local, pf: &PixFields) -> Surface {
         let pal = &self.pal;
         let t = l.t;
         let p = ctx.p;
@@ -408,7 +445,7 @@ impl SurfaceModel {
                 _ => mixc(mixc(pal.river, pal.ocean_shallow, 0.25), pal.lake_deep, smoothstep(0.0, 5.0, depth)),
             };
             // sediment / plankton variation
-            let v = self.patch.eval(p * 0.37, gsd);
+            let v = pf.water;
             col *= 1.0 + 0.12 * v;
             // surf/foam close to the ocean shore
             if l.water_kind == water::OCEAN && depth < 1.2 {
@@ -425,8 +462,8 @@ impl SurfaceModel {
         let slope = l.slope;
         let st = &t.style;
         // ------------------------------------------------------------- natural ground
-        let detail = self.detail.eval(p, gsd); // ~[-0.7, 0.7]
-        let patch = self.patch.eval(p, gsd);
+        let detail = pf.detail; // ~[-0.7, 0.7]
+        let patch = pf.patch;
         let wet = t.moist;
         let temp = t.temp;
         let soil_i = st[0] * 3.0;
@@ -436,7 +473,7 @@ impl SurfaceModel {
         let grass = mixc(pal.grass_cold, grass_green, smoothstep(-2.0, 8.0, temp));
         // hue drift per region so neighbouring areas differ
         let grass = grass * DVec3::new(1.0 + 0.10 * (st[1] - 0.5), 1.0 + 0.06 * (st[3] - 0.5), 1.0 - 0.08 * (st[1] - 0.5));
-        let land_n = self.land_n.eval(p, gsd) * self.land_n.norm() * 1.8;
+        let land_n = pf.land;
         let cover = smoothstep(0.08, 0.45, wet + 0.25 * patch + 0.2 * land_n) * smoothstep(-9.0, -1.0, temp);
         let mut col = mixc(soil, grass, cover) * (1.0 + 0.16 * land_n);
         let mut class = if cover > 0.5 { lc::GRASS } else { lc::BARE };
@@ -459,14 +496,14 @@ impl SurfaceModel {
         let resolve = 1.0 - smoothstep(8.0, 80.0, gsd);
         let exp_slope = 0.12 + 0.75 * t.rock_expect;
         let slope_eff = lerp(exp_slope, slope.max(exp_slope * 0.6), resolve);
-        let rock_n = 0.6 * patch + 0.4 * self.strata.eval(p * 1.7, gsd);
+        let rock_n = 0.6 * patch + 0.4 * pf.strata2;
         let rock = smoothstep(0.55, 0.85, slope_eff + 0.25 * detail + 0.25 * rock_n + 0.2 * (t.rock_expect - 0.4))
             * (1.0 - 0.5 * smoothstep(0.3, 0.8, cover) * (1.0 - t.mountain));
         if rock > 0.0 {
             let ri = st[2] * 2.0;
             let j = (ri.floor() as usize).min(1);
             let mut rc = mixc(pal.rock[j], pal.rock[j + 1], ri - j as f64);
-            let strata = (l.ground / (6.0 + 10.0 * st[3]) + 3.0 * self.strata.eval(p, gsd)).sin();
+            let strata = (l.ground / (6.0 + 10.0 * st[3]) + 3.0 * pf.strata).sin();
             rc *= 1.0 + 0.12 * strata * band(8.0, gsd) + 0.25 * detail;
             col = mixc(col, rc, rock);
             if rock > 0.5 {
@@ -496,7 +533,7 @@ impl SurfaceModel {
         }
 
         // ------------------------------------------------------------- snow
-        let snow_n = self.snow_n.eval(p, gsd);
+        let snow_n = pf.snow;
         let snow = smoothstep(-1.0, -5.0, temp + 4.0 * snow_n) * (1.0 - 0.75 * smoothstep(0.9, 1.6, slope));
         if snow > 0.0 {
             col = mixc(col, pal.snow * (1.0 + 0.03 * detail), snow);
@@ -533,7 +570,7 @@ impl SurfaceModel {
         let mut field_cov = 0.0;
         if let Some(r) = &region {
             if t.agri > 0.02 && natural_ok * flat_ok > 0.3 && world.cfg.landuse.agriculture > 0.0 {
-                if let Some((fcol, fh, cov, edge_kind)) = self.field(r, t, q_rot, p, gsd, fw) {
+                if let Some((fcol, fh, cov, edge_kind)) = self.field(r, t, q_rot, p, gsd, fw, pf) {
                     let a = cov * natural_ok * flat_ok * (1.0 - riparian);
                     col = mixc(col, fcol, a);
                     height += fh * a;
@@ -549,7 +586,7 @@ impl SurfaceModel {
         let veg = &world.cfg.vegetation;
         if veg.tree_density > 0.0 && natural_ok > 0.05 {
             let base_cover = smoothstep(0.3, 0.68, wet) * smoothstep(-6.0, 2.0, temp) * veg.tree_density;
-            let fpat = self.forest.eval(p, gsd) * self.forest.norm() * 1.8; // ~[-1,1]
+            let fpat = pf.forest; // ~[-1,1]
             let fpu = 0.5 + 0.5 * fpat;
             // forests where the patch field is below the cover fraction (crisp but noisy edges)
             let edge = 0.03 + 0.6 * band(30.0, gsd).min(1.0) * 0.0;
@@ -582,7 +619,7 @@ impl SurfaceModel {
                 let (mut tc, th, tcov) = self.trees(&layers, q_loc, gsd, fw, p);
                 if tcov > 0.0 {
                     // forest stands of different age / species composition
-                    let stand = self.patch.eval(p * 0.3, gsd) + 0.5 * perlin3(0x57A, p / 1200.0);
+                    let stand = pf.stand;
                     tc *= DVec3::new(1.0 + 0.10 * stand, 1.0 + 0.14 * stand, 1.0 + 0.05 * stand);
                     col = mixc(col, tc, tcov);
                     if veg.trees_in_dsm {
@@ -663,7 +700,7 @@ impl SurfaceModel {
         if t.town.id != 0 && world.cfg.landuse.towns > 0.0 {
             let town = self.town_info(world, cache, t);
             if town.exists {
-                if let Some((tcol, th, cov, cls, shadow, em)) = self.town(&town, p, gsd, fw, slope, world.cfg.look.shadows) {
+                if let Some((tcol, th, cov, cls, shadow, em)) = self.town(&town, p, gsd, fw, slope, world.cfg.look.shadows, pf) {
                     emission = em;
                     col = mixc(col, tcol, cov);
                     if world.cfg.landuse.buildings_in_dsm {
@@ -777,7 +814,8 @@ impl SurfaceModel {
 
     /// Agricultural field at rotated local coords. Returns (colour, extra height, coverage, kind)
     /// where kind 0 = crop, 1 = hedge, 2 = track.
-    fn field(&self, r: &RegionInfo, t: &Terrain, q: DVec2, p: DVec3, gsd: f64, fw: f64) -> Option<(DVec3, f64, f64, u8)> {
+    #[allow(clippy::too_many_arguments)]
+    fn field(&self, r: &RegionInfo, t: &Terrain, q: DVec2, p: DVec3, gsd: f64, fw: f64, pf: &PixFields) -> Option<(DVec3, f64, f64, u8)> {
         let pal = &self.pal;
         let cult = smoothstep(0.02, 0.45, t.agri);
         let tint = DVec3::new(1.0 + 0.08 * (r.palette - 0.5), 1.0, 1.0 - 0.06 * (r.palette - 0.5));
@@ -785,9 +823,9 @@ impl SurfaceModel {
         // reduced towards the mean, mimicking the variance reduction of box-filtering a mosaic.
         let fsize = if r.fh > 0.0 { r.fw.min(r.fh) } else { r.fw };
         let k = fsize / (fsize * fsize + 4.0 * gsd * gsd).sqrt();
-        let mean = pal.crop_mean * tint * (1.0 + 0.10 * self.field_var.eval(p, gsd));
+        let mean = pal.crop_mean * tint * (1.0 + 0.10 * pf.field_var);
         let fwe = fw.max(0.6 * gsd); // edge filter never sharper than ~half a pixel
-        let (c, h, cov, kind) = self.field_explicit(r, t, q, p, gsd, fwe, cult, tint).unwrap_or((mean, 0.0, 0.0, 0));
+        let (c, h, cov, kind) = self.field_explicit(r, t, q, p, gsd, fwe, cult, tint, pf).unwrap_or((mean, 0.0, 0.0, 0));
         let cult_mean = cult * 0.9;
         let cov_m = lerp(cult_mean, cov, k);
         if cov_m <= 0.0 {
@@ -804,7 +842,7 @@ impl SurfaceModel {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn field_explicit(&self, r: &RegionInfo, t: &Terrain, q: DVec2, p: DVec3, gsd: f64, fw: f64, cult: f64, tint: DVec3) -> Option<(DVec3, f64, f64, u8)> {
+    fn field_explicit(&self, r: &RegionInfo, t: &Terrain, q: DVec2, p: DVec3, gsd: f64, fw: f64, cult: f64, tint: DVec3, pf: &PixFields) -> Option<(DVec3, f64, f64, u8)> {
         let pal = &self.pal;
         // field id, within-field coords (along, across), distance to boundary
         let (id, fx, fy, edge, inside, fc) = match r.style {
@@ -864,7 +902,7 @@ impl SurfaceModel {
         col *= 0.92 + 0.16 * u01k(id, 8);
         col *= tint;
         // within-field variation (soil moisture, growth, management) at several scales
-        col *= 1.0 + 0.10 * self.field_var.eval(p, gsd)
+        col *= 1.0 + 0.10 * pf.field_var
             + 0.07 * perlin3(id, p / 35.0) * band(35.0, gsd)
             + 0.08 * perlin3(id ^ 1, p / (0.8 * r.fw));
         let row_ang = if u01k(id, 9) < 0.7 { 0.0 } else { std::f64::consts::FRAC_PI_2 };
@@ -890,7 +928,7 @@ impl SurfaceModel {
             4 => {
                 let sp = 0.45;
                 col *= 1.0 + 0.15 * (along * std::f64::consts::TAU / sp).sin() * band(sp, gsd);
-                col *= 1.0 - 0.15 * smoothstep(0.2, 0.6, self.field_var.eval(p * 1.7, gsd));
+                col *= 1.0 - 0.15 * smoothstep(0.2, 0.6, pf.field_var2);
             }
             8 => {
                 // orchard: rows of small trees
@@ -912,7 +950,7 @@ impl SurfaceModel {
         if bcov > 0.0 {
             let hb = mix64(id ^ 0xED6E);
             if u01k(hb, 1) < r.hedge {
-                let hc = pal.crown_decid * (0.8 + 0.3 * self.field_var.eval(p * 3.0, gsd));
+                let hc = pal.crown_decid * (0.8 + 0.3 * pf.field_var3);
                 col = mixc(col, hc, bcov);
                 extra_h = lerp(extra_h, 4.0 + 3.0 * u01k(hb, 2), bcov);
                 if bcov > 0.5 {
@@ -931,7 +969,8 @@ impl SurfaceModel {
     }
 
     /// Town at point p. Returns (colour, height above ground, coverage, class, shadow amount).
-    fn town(&self, town: &TownInfo, p: DVec3, gsd: f64, fw: f64, slope: f64, shadows: bool) -> Option<(DVec3, f64, f64, u8, f64, DVec3)> {
+    #[allow(clippy::too_many_arguments)]
+    fn town(&self, town: &TownInfo, p: DVec3, gsd: f64, fw: f64, slope: f64, shadows: bool, pf: &PixFields) -> Option<(DVec3, f64, f64, u8, f64, DVec3)> {
         let pal = &self.pal;
         let d = p - town.center;
         let q0 = DVec2::new(d.dot(town.ex), d.dot(town.ey));
@@ -939,7 +978,7 @@ impl SurfaceModel {
         if dist > town.radius * 1.6 {
             return None;
         }
-        let edge_n = self.warp2.eval(p, gsd);
+        let edge_n = pf.warp2;
         let urban = 1.0 - smoothstep(0.45, 1.0, dist / (town.radius * (1.0 + 0.45 * edge_n)));
         let urban = urban * (1.0 - smoothstep(0.2, 0.4, slope));
         if urban <= 0.0 {
@@ -970,7 +1009,7 @@ impl SurfaceModel {
         let buildings_resolved = band(town.lot, gsd);
         if block_kind < 0.08 + 0.1 * (1.0 - urban) {
             // park / green
-            col = pal.grass_wet * (1.0 + 0.15 * self.detail.eval(p, gsd));
+            col = pal.grass_wet * (1.0 + 0.15 * pf.detail);
             class = lc::GRASS;
         } else if block_kind < 0.14 {
             col = pal.concrete * 0.85; // parking / plaza
@@ -982,7 +1021,7 @@ impl SurfaceModel {
             let lx = inner.x - li * lot_w;
             let ly = inner.y - lj * (bsz / rows);
             let lh = hash2(bh, li as i64, lj as i64);
-            let yard = mixc(pal.grass_wet, pal.soil[0], 0.4) * (1.0 + 0.2 * self.detail.eval(p, gsd));
+            let yard = mixc(pal.grass_wet, pal.soil[0], 0.4) * (1.0 + 0.2 * pf.detail);
             col = yard;
             // building footprint inside the lot
             let setb = if industrial { 6.0 } else { 2.0 + 3.0 * u01k(lh, 1) };
@@ -1031,7 +1070,7 @@ impl SurfaceModel {
                     let dist_s = k as f64 * 3.5;
                     let need = dist_s * self.sun_tan;
                     let sp = p + town.sun * dist_s;
-                    let hh = self.building_height_at(town, sp, gsd);
+                    let hh = self.building_height_at(town, sp, gsd, pf);
                     if hh > need {
                         shadow = 0.75 * buildings_resolved;
                         break;
@@ -1039,7 +1078,7 @@ impl SurfaceModel {
                 }
             }
         }
-        col = mixc(col, pal.asphalt * (1.0 + 0.05 * self.detail.eval(p, gsd)), street);
+        col = mixc(col, pal.asphalt * (1.0 + 0.05 * pf.detail), street);
         if street > 0.5 {
             class = lc::ROAD;
         }
@@ -1074,8 +1113,8 @@ impl SurfaceModel {
         Some((col, height, urban, class, shadow * (1.0 - street * 0.5), emission))
     }
 
-    fn building_height_at(&self, town: &TownInfo, p: DVec3, gsd: f64) -> f64 {
-        match self.town(town, p, gsd, 0.01, 0.0, false) {
+    fn building_height_at(&self, town: &TownInfo, p: DVec3, gsd: f64, pf: &PixFields) -> f64 {
+        match self.town(town, p, gsd, 0.01, 0.0, false, pf) {
             Some((_, h, cov, _, _, _)) => h * cov,
             None => 0.0,
         }

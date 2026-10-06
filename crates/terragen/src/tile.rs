@@ -3,7 +3,7 @@
 
 use crate::config::Config;
 use crate::surface::{l2s, Caches, Local, SurfaceModel};
-use crate::world::{water, Ctx, Terrain, World};
+use crate::world::{water, Ctx, Macro, Terrain, World};
 use geodesy::tiles::{gsd_ew, pixel_to_latlon, TileId};
 use glam::{DVec2, DVec3};
 use rayon::prelude::*;
@@ -55,7 +55,8 @@ impl Generator {
             fw: gsd,
         };
         let mut caches = Caches::default();
-        let s = self.surface.eval(&self.world, &mut caches, &ctx, &local);
+        let pf = self.surface.pixel_fields(ctx.p, gsd);
+        let s = self.surface.eval(&self.world, &mut caches, &ctx, &local, &pf);
         (t, s.height, s.class)
     }
 
@@ -69,6 +70,43 @@ impl Generator {
         let ox = id.x as f64 * n as f64;
         let oy = id.y as f64 * n as f64;
 
+        let prof = std::env::var_os("TERRAGEN_PROFILE").is_some();
+        let t_start = std::time::Instant::now();
+        // ---------------- macro fields: on a coarse grid aligned to global multiples of 16 px
+        // (shared by neighbouring tiles → seamless), or exactly at low zooms where the grid would
+        // be too coarse for the macro wavelengths.
+        let (lat_c, _) = pixel_to_latlon(DVec2::new(ox + 128.0, oy + 128.0), z, n as u32);
+        let use_grid = 16.0 * gsd_ew(lat_c, z, n as u32, &ell) <= 2000.0;
+        const G: f64 = 16.0;
+        let gk0x = (ox / G) as i64 - 1;
+        let gk0y = (oy / G) as i64 - 1;
+        let ng = (n as f64 / G) as usize + 3;
+        let macro_grid: Vec<Macro> = if use_grid {
+            (0..ng * ng)
+                .into_par_iter()
+                .map(|k| {
+                    let gx = (gk0x + (k % ng) as i64) as f64 * G;
+                    let gy = (gk0y + (k / ng) as i64) as f64 * G;
+                    let (lat, lon) = pixel_to_latlon(DVec2::new(gx, gy), z, n as u32);
+                    let gsd = gsd_ew(lat, z, n as u32, &ell);
+                    self.world.macro_at(Ctx::new(lat, lon, gsd, &ell).p, gsd)
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+        let macro_at = |px: f64, py: f64, ctx: &Ctx| -> Macro {
+            if !use_grid {
+                return self.world.macro_at(ctx.p, ctx.gsd);
+            }
+            let u = px / G - gk0x as f64;
+            let v = py / G - gk0y as f64;
+            let (i0, j0) = ((u.floor() as usize).min(ng - 2), (v.floor() as usize).min(ng - 2));
+            let (fx, fy) = (u - i0 as f64, v - j0 as f64);
+            let g = |i: usize, j: usize| &macro_grid[j * ng + i];
+            Macro::bilerp(g(i0, j0), g(i0 + 1, j0), g(i0, j0 + 1), g(i0 + 1, j0 + 1), fx, fy)
+        };
+
         // ---------------- pass A on pixel centres incl. 1px apron
         let rows_a: Vec<Vec<Terrain>> = (0..na)
             .into_par_iter()
@@ -81,7 +119,8 @@ impl Generator {
                     let px = ox + i as f64 - 1.0 + 0.5;
                     let (lat, lon) = pixel_to_latlon(DVec2::new(px, py), z, n as u32);
                     let ctx = Ctx::new(lat, lon, gsd, &ell);
-                    row.push(self.world.terrain(&ctx));
+                    let m = macro_at(px, py, &ctx);
+                    row.push(self.world.terrain_with(&ctx, &m));
                 }
                 row
             })
@@ -113,6 +152,7 @@ impl Generator {
             })
             .collect();
 
+        let t_a = t_start.elapsed().as_secs_f64();
         // ---------------- pass B, supersampled, on the apron grid
         struct PixB {
             emission: DVec3,
@@ -129,6 +169,12 @@ impl Generator {
                 let gsd = row_gsd[j];
                 let fw = gsd / ss as f64;
                 for i in 0..na {
+                    let pf = {
+                        let px = ox + i as f64 - 1.0 + 0.5;
+                        let py = oy + j as f64 - 1.0 + 0.5;
+                        let (lat, lon) = pixel_to_latlon(DVec2::new(px, py), z, n as u32);
+                        self.surface.pixel_fields(Ctx::new(lat, lon, gsd, &ell).p, gsd)
+                    };
                     let mut acc_a = DVec3::ZERO;
                     let mut acc_e = DVec3::ZERO;
                     let mut acc_h = 0.0;
@@ -179,7 +225,7 @@ impl Generator {
                             let py = oy + j as f64 - 1.0 + 0.5 + fyo;
                             let (lat, lon) = pixel_to_latlon(DVec2::new(px, py), z, n as u32);
                             let ctx = Ctx::new(lat, lon, gsd, &ell);
-                            let s = self.surface.eval(&self.world, &mut caches, &ctx, &local);
+                            let s = self.surface.eval(&self.world, &mut caches, &ctx, &local, &pf);
                             acc_a += s.albedo;
                             acc_e += s.emission;
                             acc_h += s.height;
@@ -196,6 +242,9 @@ impl Generator {
             .collect();
         let pb: Vec<PixB> = rows_b.into_iter().flatten().collect();
 
+        if prof {
+            eprintln!("tile {id}: pass A {:.3}s, pass B {:.3}s", t_a, t_start.elapsed().as_secs_f64() - t_a);
+        }
         // ---------------- outputs
         let look = &self.world.cfg.look;
         let az = look.sun_azimuth_deg.to_radians();
