@@ -5,8 +5,8 @@ world:
   seed: 1
 tiles:
   file: out/showcase/world.h5
-  max_zoom: 17
-  margin: 1            # one neighbour ring is plenty for rendering
+  max_zoom: 18         # 0.45 m texels; low-altitude shots raise it to 19
+  margin: 0            # rendering needs no neighbour rings
   plan_every: 5        # 25 fps frames overlap heavily
 trajectory:
   synth:
@@ -20,8 +20,10 @@ render:
     date: "2026-06-21"
     time_utc: "08:30:00"   # ≈ 10:40 local solar time at 33°E
     time_scale: 1.0
+    sky_intensity: 0.55    # less flat sky fill: shapes read from the sun, not the ambient
   atmosphere:
-    visibility_km: 70
+    visibility_km: 40
+    inscatter: 1.0
 cameras:
   - path: /cam0
     intrinsics:
@@ -33,11 +35,11 @@ cameras:
     frame_rate: 25
     rgb:
       sensor:
-        exposure: { mode: auto, tau: 0.4, target: 0.17 }
+        exposure: { mode: auto, tau: 0.4, target: 0.13 }
         motion_blur: { enabled: true, max_samples: 24 }
         optics: { defocus_px: 0.25, chromatic_aberration_px: 0.3, vignette: 0.25, bloom: 0.06 }
         noise: { enabled: true, read: 0.08, shot: 0.1 }
-        tone: { curve: filmic, saturation: 1.08 }
+        tone: { curve: filmic, saturation: 0.92 }
 output:
   start: 1.0           # let the flight dynamics settle
   compression: { level: 1 }

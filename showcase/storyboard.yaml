@@ -72,6 +72,51 @@ shots:
       render: { lighting: { time_utc: "05:40:00" } }
       cameras: [ { extrinsics: { pitch_deg: -60 } } ]
 
+  - id: boreal
+    label: "Boreal forest · 53°N"
+    text: "The climate model sets the biome: dark conifer forest in the cold north"
+    seconds: 5.5
+    scenario:
+      trajectory: { synth: { kind: line, lat: 53.0, lon: -16.42, heading_deg: 60, altitude: 550 } }
+      render: { lighting: { time_utc: "10:30:00" } }
+      cameras: [ { extrinsics: { pitch_deg: -38 } } ]
+
+  - id: tundra
+    label: "Tundra · 55°N"
+    text: "Snow-covered tundra above the tree line"
+    seconds: 5
+    scenario:
+      trajectory: { synth: { kind: line, lat: 55.0, lon: 17.6, heading_deg: 200, altitude: 600 } }
+      render: { lighting: { time_utc: "09:30:00" } }
+      cameras: [ { extrinsics: { pitch_deg: -30 } } ]
+
+  - id: dunes
+    label: "Sand sea · 15°N"
+    text: "Deserts with oriented dune fields, oases and highways"
+    seconds: 6
+    scenario:
+      trajectory: { synth: { kind: line, lat: 15.0, lon: -111.38, heading_deg: 120, altitude: 500, speed: 60 } }
+      render: { lighting: { time_utc: "22:40:00" } }    # mid-afternoon local: dune shadows
+      cameras: [ { extrinsics: { pitch_deg: -38 } } ]
+
+  - id: pivots
+    label: "Irrigated desert · 23°S"
+    text: "Centre-pivot irrigation where farming meets a dry climate"
+    seconds: 5.5
+    scenario:
+      trajectory: { synth: { kind: line, lat: -23.0, lon: 78.08, heading_deg: 30, altitude: 1400, speed: 60 } }
+      render: { lighting: { time_utc: "05:00:00" } }
+      cameras: [ { extrinsics: { mount: nadir, pitch_deg: 0 } } ]
+
+  - id: tropics
+    label: "Tropics · lakes and farmland"
+    text: "Near the equator: lakes, farmland and dense forest blocks"
+    seconds: 5.5
+    scenario:
+      trajectory: { synth: { kind: line, lat: 3.5, lon: -103.42, heading_deg: 30, altitude: 900, speed: 60 } }
+      render: { lighting: { time_utc: "15:30:00" } }
+      cameras: [ { extrinsics: { pitch_deg: -45 } } ]
+
   - id: golden
     label: "Golden hour"
     text: "A real solar ephemeris: date, time and place set the light"
@@ -131,6 +176,7 @@ shots:
     seconds: 5
     scenario:
       trajectory: { synth: { kind: line, lat: 39.902, lon: 32.785, heading_deg: 75, altitude: 120, speed: 55 } }
+      tiles: { max_zoom: 19 }
       cameras: [ { extrinsics: { pitch_deg: -35 } } ]
 
   - id: bank
@@ -164,6 +210,7 @@ shots:
           altitude: 220
           speed: 60
           vibration: { harmonic_deg: 0.35, harmonic_hz: 24, broadband_deg: 0.3 }
+      tiles: { max_zoom: 19 }
       render: { lighting: { time_utc: "17:00:00" } }
       cameras: [ { extrinsics: { pitch_deg: -40 }, rgb: { sensor: { exposure: { max_time: 0.03, target: 0.19 }, motion_blur: { max_samples: 48 } } } } ]
 

@@ -950,12 +950,14 @@ impl Renderer {
         let p_w = cam_pos - v * range;
         let h_pt = if cl.abs() > 0.1 { (p_w.x * p_w.x + p_w.y * p_w.y).sqrt() / cl - nrad } else { p_w.z.abs() / sl.abs() - nrad * (1.0 - e2) };
         let (t, mut ins) = atmo.transmittance(h_cam, h_pt, range, dir_w);
-        // light pollution: artificial light (averaged over ~0.5 km) scattered by the haze
+        // light pollution: artificial light scattered by the haze. Averaged over ~1.5 km so it is
+        // a broad glow dome, not a halo painted in the shape of each lit area (which a ~0.5 km
+        // average and a strong gain produced: glowing ellipses on the ground around towns)
         if sun_state.lights > 1e-3 && sun_state.light_pollution > 0.0 {
-            let k = ((400.0 / texel).log2().ceil().max(0.0) as u8).min(z);
+            let k = ((1500.0 / texel).log2().ceil().max(0.0) as u8).min(z);
             let s = 0.5f64.powi(k as i32);
             if let Some(e) = view.sample3(z - k, gx * s, gy * s, Which::Emission) {
-                ins += e * (DVec3::ONE - t) * (sun_state.lights * sun_state.light_pollution * 6.0);
+                ins += e * (DVec3::ONE - t) * (sun_state.lights * sun_state.light_pollution * 1.5);
             }
         }
         // lamp flicker: one supply phase per ~40 m cell (global zoom-17 grid of 32 px)

@@ -656,6 +656,8 @@ def main():
             scn = shot_scenario(base, s, story["video"], a.stills)
         else:
             scn = render_shot(base, s, story["video"], a.stills, a.force)
+            if a.stills:
+                export_stills(s, scn)  # PNGs per shot as soon as it is done, for feedback
         done.append((s, scn))
     if a.stills:
         stills_sheet(base, story, done, os.path.join(OUT, "stills.png"))
