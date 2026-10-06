@@ -379,11 +379,22 @@ impl PathSpline {
             let f = (s - self.s[n - 2]) / l;
             return (a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f);
         }
+        // cubic Hermite between the dense samples (tangents from the neighbours): C1, so the
+        // turn is spread along the path instead of concentrated at polyline vertices (which
+        // made the positions disagree with the IMU's v²κ by spikes of up to 15 m/s²)
         let i = self.s.partition_point(|v| *v <= s).clamp(1, n - 1);
         let (a, b) = (self.pts[i - 1], self.pts[i]);
         let l = (self.s[i] - self.s[i - 1]).max(1e-9);
-        let f = ((s - self.s[i - 1]) / l).clamp(0.0, 1.0);
-        (a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f)
+        let u = ((s - self.s[i - 1]) / l).clamp(0.0, 1.0);
+        let tangent = |k: usize| {
+            let (k0, k1) = (k.saturating_sub(1), (k + 1).min(n - 1));
+            let d = (self.s[k1] - self.s[k0]).max(1e-9);
+            ((self.pts[k1].0 - self.pts[k0].0) / d, (self.pts[k1].1 - self.pts[k0].1) / d)
+        };
+        let (ta, tb) = (tangent(i - 1), tangent(i));
+        let (u2, u3) = (u * u, u * u * u);
+        let (h00, h10, h01, h11) = (2.0 * u3 - 3.0 * u2 + 1.0, u3 - 2.0 * u2 + u, -2.0 * u3 + 3.0 * u2, u3 - u2);
+        (h00 * a.0 + h10 * l * ta.0 + h01 * b.0 + h11 * l * tb.0, h00 * a.1 + h10 * l * ta.1 + h01 * b.1 + h11 * l * tb.1)
     }
 
     /// Track angle (rad, clockwise from north) and signed curvature (1/m, + = right turn).
@@ -550,15 +561,6 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
         let h = h_prof[i] + (h_prof[i + 1] - h_prof[i]) * f;
         (h, (h_prof[i + 1] - h_prof[i]) / ds_h)
     };
-    // second derivative of the altitude profile (for the vertical acceleration)
-    let alt_dd = |s: f64| -> f64 {
-        if nh < 3 {
-            return 0.0;
-        }
-        let x = (s / ds_h).clamp(1.0, (nh - 2) as f64);
-        let i = x.round() as usize;
-        (h_prof[i + 1] - 2.0 * h_prof[i] + h_prof[i - 1]) / (ds_h * ds_h)
-    };
 
     // ---- disturbance states
     let wdir = cfg.wind.direction_deg.to_radians();
@@ -586,12 +588,8 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
     let mut gimbal_rp = [att[0], att[1]];
 
     let mut out = Vec::new();
-    let mut q_prev: Option<DQuat> = None;
-    let mut conv_prev: Option<f64> = None;
-    let mut imu_f_acc = DVec3::ZERO;
-    let mut imu_w_acc = DVec3::ZERO;
-    let mut imu_n = 0usize;
-    let mut imu_wn = 0usize;
+    let mut steps: Vec<(DVec3, f64, f64, f64, DQuat)> = Vec::new();
+    let mut rec_steps: Vec<usize> = Vec::new();
     let n_steps = (cfg.duration / dt).round() as usize;
     let rec_every = (1.0 / (cfg.rate * dt)).round().max(1.0) as usize;
     let tau_t = cfg.wind.length_scale / v;
@@ -631,17 +629,15 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
         // ---------------- position deviation: δ'' = -ω² δ - 2ζω (δ' - k·gust)
         let w = std::f64::consts::TAU * rc.track_hz;
         let gin = [gv[1], gv[2], gv[0]]; // cross, vertical, along
-        let mut dev_acc = [0.0f64; 3];
         for k in 0..3 {
             let acc = -w * w * dev[k] - 2.0 * rc.track_damping * w * (dev_d[k] - rc.gust_follow * gin[k]);
-            dev_acc[k] = acc;
             dev_d[k] += acc * dt;
             dev[k] += dev_d[k] * dt;
         }
 
         // ---------------- nominal kinematics at the (deviated) arc length
         let s_eff = s + dev[2];
-        let (track, kappa) = path.track(s_eff, 15.0);
+        let (track, kappa) = path.track(s_eff, 3.0);
         let (h_nom, dhds) = alt_at(s_eff);
         let bank_cmd = (v * v * kappa / g).atan().clamp(-max_bank, max_bank);
         let gamma = (dhds + dev_d[1] / v).atan();
@@ -657,8 +653,6 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
             let d = geodesy::geodetic2ned(Geodetic::new(g1.lat, g1.lon, 0.0), Geodetic::new(g0.lat, g0.lon, 0.0), ell);
             (d.y.atan2(d.x) - track + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
         };
-        let conv_rate = conv_prev.map(|c| (conv - c) / dt).unwrap_or(0.0);
-        conv_prev = Some(conv);
         let track = track + conv;
         // heading: crab into the crosswind (air velocity = ground velocity - wind)
         let (st, ct) = track.sin_cos();
@@ -714,57 +708,74 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
         let va = v + dev_d[2];
         let vel = [va * ct + dev_d[0] * cn, va * st + dev_d[0] * ce, -(va * dhds + dev_d[1])];
 
-        // ---------------- IMU truth: specific force and inertial angular rate (body frame)
-        {
-            // kinematic acceleration in NED (constant ground speed along the track)
-            let a_along = dev_acc[2];
-            let a_cross = va * va * kappa + dev_acc[0];
-            let a_up = va * va * alt_dd(s_eff) + dhds * dev_acc[2] + dev_acc[1];
-            // (+ the turn of the local frame against the plane: d/dt of the rotated components)
-            let a_ned = DVec3::new(a_along * ct - a_cross * st - conv_rate * vel[1], a_along * st + a_cross * ct + conv_rate * vel[0], -a_up);
-            let v_ned = DVec3::from_array(vel);
-            let (sl, cl) = geo.lat.sin_cos();
-            let rm = ell.meridian_radius(geo.lat) + h;
-            let rn = ell.prime_vertical_radius(geo.lat) + h;
-            let w_ie = DVec3::new(geodesy::EARTH_RATE * cl, 0.0, -geodesy::EARTH_RATE * sl);
-            let rho = DVec3::new(v_ned.y / rn, -v_ned.x / rm, -v_ned.y * sl / cl.max(1e-9) / rn);
-            let g_ned = DVec3::new(0.0, 0.0, geodesy::normal_gravity(geo.lat, h));
-            let f_ned = a_ned + (2.0 * w_ie + rho).cross(v_ned) - g_ned;
-            let c_bn = DMat3::from_quat(q).transpose();
-            imu_f_acc += c_bn * f_ned;
-            // body rate w.r.t. the local NED frame from consecutive attitudes, plus Earth and
-            // transport rate
-            // (no rate before the first attitude: the first record copies the second's)
-            if let Some(qp) = q_prev {
-                let dq = (qp.inverse() * q).normalize();
-                let dq = if dq.w < 0.0 { -dq } else { dq };
-                imu_w_acc += dq.to_scaled_axis() / dt + c_bn * (w_ie + rho);
-                imu_wn += 1;
-            }
-            imu_n += 1;
-            q_prev = Some(q);
-        }
+        // per-step state for the IMU truth (computed from the actual positions after the loop)
+        steps.push((geodesy::geodetic2ecef(Geodetic::new(geo.lat, geo.lon, h), ell), geo.lat, geo.lon, h, q));
 
         if step % rec_every != 0 {
             continue;
         }
-        let inv = 1.0 / imu_n.max(1) as f64;
+        rec_steps.push(steps.len() - 1);
         out.push(Record {
             pose: Pose { t, geo: Geodetic::new(geo.lat, geo.lon, h), q_ned_body: q },
-            imu_f: imu_f_acc * inv,
-            imu_w: if imu_wn > 0 { imu_w_acc / imu_wn as f64 } else { DVec3::NAN },
+            imu_f: DVec3::ZERO,
+            imu_w: DVec3::ZERO,
             vel_ned: vel,
             wind_ned: [wmean.1 + gv[0] * ct - gv[1] * st, wmean.0 + gv[0] * st + gv[1] * ct, -gv[2]],
         });
-        imu_f_acc = DVec3::ZERO;
-        imu_w_acc = DVec3::ZERO;
-        imu_n = 0;
-        imu_wn = 0;
     }
-    if out.len() > 1 && out[0].imu_w.is_nan() {
-        out[0].imu_w = out[1].imu_w;
-    }
+    imu_truth(&steps, &rec_steps, dt, &mut out);
     out
+}
+
+/// IMU truth from the simulated 1 kHz states, consistent with the recorded poses by
+/// construction: specific force from the second difference of the ECEF position + Coriolis −
+/// WGS84 normal gravity, angular rate from the ECEF attitude difference + Earth rate; both as
+/// means over each integration step, averaged over the steps of each record interval.
+fn imu_truth(steps: &[(DVec3, f64, f64, f64, DQuat)], rec_steps: &[usize], dt: f64, out: &mut [Record]) {
+    let n = steps.len();
+    if n < 3 {
+        return;
+    }
+    let om = DVec3::new(0.0, 0.0, geodesy::EARTH_RATE);
+    let r_eb = |i: usize| {
+        let (_, lat, lon, _, q) = steps[i];
+        geodesy::rot_ecef2ned(lat, lon).transpose() * DMat3::from_quat(q)
+    };
+    // instantaneous specific force (body frame) at the interior steps
+    let mut f_inst = vec![DVec3::ZERO; n];
+    for i in 1..n - 1 {
+        let (p0, p1, p2) = (steps[i - 1].0, steps[i].0, steps[i + 1].0);
+        let a = (p2 - 2.0 * p1 + p0) / (dt * dt);
+        let v = (p2 - p0) / (2.0 * dt);
+        let (_, lat, lon, h, _) = steps[i];
+        let g = geodesy::up_vector(lat, lon) * -geodesy::normal_gravity(lat, h);
+        f_inst[i] = r_eb(i).transpose() * (a + 2.0 * om.cross(v) - g);
+    }
+    f_inst[0] = f_inst[1];
+    f_inst[n - 1] = f_inst[n - 2];
+    // step-interval means (i-1, i]
+    let mut f_int = vec![DVec3::ZERO; n];
+    let mut w_int = vec![DVec3::ZERO; n];
+    let mut r_prev = r_eb(0);
+    for i in 1..n {
+        let r = r_eb(i);
+        f_int[i] = 0.5 * (f_inst[i - 1] + f_inst[i]);
+        let dq = DQuat::from_mat3(&(r_prev.transpose() * r)).normalize();
+        let dq = if dq.w < 0.0 { -dq } else { dq };
+        w_int[i] = dq.to_scaled_axis() / dt + r.transpose() * om;
+        r_prev = r;
+    }
+    f_int[0] = f_int[1];
+    w_int[0] = w_int[1];
+    // records: mean over the steps since the previous record (the first record: its own step)
+    let mut prev = 0usize;
+    for (rec, &j) in out.iter_mut().zip(rec_steps) {
+        let lo = if j == 0 { 0 } else { prev + 1 };
+        let k = (j + 1 - lo) as f64;
+        rec.imu_f = f_int[lo..=j].iter().fold(DVec3::ZERO, |a, v| a + *v) / k;
+        rec.imu_w = w_int[lo..=j].iter().fold(DVec3::ZERO, |a, v| a + *v) / k;
+        prev = j;
+    }
 }
 
 /// Save records as a trajectory CSV (standard columns + diagnostics).
@@ -788,7 +799,7 @@ pub fn save_records(path: &std::path::Path, recs: &[Record], header_note: &str) 
         let (y, pi, ro) = geodesy::quat_to_euler_zyx(q);
         writeln!(
             f,
-            "{:.6},{:.12},{:.12},{:.6},{:.10},{:.10},{:.10},{:.10},{:.4},{:.4},{:.4},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.7},{:.7},{:.7},{:.9},{:.9},{:.9}",
+            "{:.6},{:.14},{:.14},{:.9},{:.12},{:.12},{:.12},{:.12},{:.4},{:.4},{:.4},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.7},{:.7},{:.7},{:.9},{:.9},{:.9}",
             p.t,
             p.geo.lat.to_degrees(),
             p.geo.lon.to_degrees(),

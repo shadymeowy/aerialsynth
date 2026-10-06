@@ -185,10 +185,15 @@ impl Truth<'_> {
                 let (fa, wa) = Self::integral(tr, cum_f, cum_w, a);
                 let (fb, wb) = Self::integral(tr, cum_f, cum_w, b);
                 // instantaneous rate: records interpolated at their interval centres
+                // instantaneous rate: Catmull-Rom through the records at their interval centres
+                // (linear interpolation cost ~3.5% of the lever term at engine vibration rates)
                 let w_at = |t: f64| {
-                    let j = centre.partition_point(|&c| c < t).clamp(1, tr.len() - 1);
+                    let n = tr.len();
+                    let j = centre.partition_point(|&c| c < t).clamp(1, n - 1);
                     let u = ((t - centre[j - 1]) / (centre[j] - centre[j - 1]).max(1e-12)).clamp(0.0, 1.0);
-                    tr[j - 1].w.lerp(tr[j].w, u)
+                    let (p0, p1, p2, p3) = (tr[j.saturating_sub(2)].w, tr[j - 1].w, tr[j].w, tr[(j + 1).min(n - 1)].w);
+                    let (u2, u3) = (u * u, u * u * u);
+                    0.5 * (2.0 * p1 + (p2 - p0) * u + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * u2 + (3.0 * p1 - p0 - 3.0 * p2 + p3) * u3)
                 };
                 ((fb - fa) / (b - a), (wb - wa) / (b - a), w_at(a), w_at(b))
             }

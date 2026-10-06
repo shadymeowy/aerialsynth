@@ -1,0 +1,13 @@
+# IMU validation (no cameras): 1 kHz flight record and body poses, 200 Hz IMU with a lever arm
+# and a rotated mount.   terrain traj -c configs/imu_check.yaml && terrain render -c configs/imu_check.yaml
+#                         python scripts/check_imu.py out/imu_check/seq.h5
+world: { seed: 1 }
+tiles: { file: out/imu_check/world.h5, lazy: true }
+trajectory:
+  file: out/imu_check/traj.csv
+  synth: { kind: figure8, altitude: 800, speed: 45, duration: 20, rate: 1000, radius: 700 }
+imu:
+  path: /imu
+  rate_hz: 200
+  extrinsics: { q_body_imu: [0.7071068, 0, 0, 0.7071068], translation: [0.1, -0.05, 0.05] }
+output: { file: out/imu_check/seq.h5, pose: { path: /pose, rate_hz: 1000 } }
