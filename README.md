@@ -1,6 +1,7 @@
-# terrain — procedural XYZ terrain tiles + onboard camera simulator
+# aerialsynth — procedural XYZ terrain tiles + onboard camera simulator
 
-Rust toolchain for aerial visual odometry research. It covers five stages:
+Rust toolchain for aerial visual odometry research (command-line tool: `terrain`). It covers
+five stages:
 
 1. **Plan:** list the Web-Mercator XYZ tiles a trajectory needs.
 2. **Generate:** produce those tiles procedurally (deterministic, lazily, at any zoom) into one
@@ -16,6 +17,7 @@ cargo build --release
 ./target/release/terrain config > my.yaml             # full default scenario, every option documented by name
 ./target/release/terrain run -c configs/quick.yaml    # traj → plan → gen → render
 python scripts/check_gt.py out/quick/seq.h5           # validate every camera's GT
+python scripts/check_imu.py out/quick/seq.h5          # IMU vs /pose, noise statistics
 python scripts/view_seq.py out/quick/seq.h5 view.png  # rgb | depth | flow | validity | landcover
 ```
 
@@ -157,9 +159,16 @@ attribute `t0` holds it in trajectory seconds).
   `float_keep_bits`, an optional lossy rounding of depth/flow mantissas. 16 bits gives a max
   relative error of 7.6e-6 and shrinks depth/flow by ~35–40%. Flow is exactly recomputable from
   depth + poses (`scripts/check_gt.py`), so omitting `flow` roughly halves the file.
-- **Validation:** `scripts/check_gt.py` checks every camera: flow against depth reprojected with
-  the poses (agrees to ~1e-5 px), photometric warping (~2 DN: sensor noise plus motion blur),
-  and camera poses against `/pose` ∘ `T_body_cam`.
+- **Validation:**
+  - `scripts/check_gt.py` checks every camera: flow against depth reprojected with the poses
+    (agrees to ~1e-5 px), photometric warping (~2 DN: sensor noise plus motion blur), and
+    camera poses against `/pose` ∘ `T_body_cam`.
+  - `scripts/check_imu.py` rebuilds the IMU truth from `/pose` independently (needs `/pose`
+    finer than the IMU, e.g. `configs/imu_check.yaml`: agrees to 1e-4 m/s² and 3e-10 rad/s
+    without lever arm; with a lever arm under 84 Hz engine vibration to the simulation step's
+    discretization, ~5% of the lever term at 1 ms, 0.2% at 0.2 ms) and checks white noise and
+    bias walk against the configured densities.
+  - `scripts/check_events.py` checks the event format invariants and prints rate statistics.
 
 ## What is simulated
 
@@ -224,8 +233,11 @@ attribute `t0` holds it in trajectory seconds).
   - defocus, chromatic aberration, vignetting, bloom, starburst spikes on bright lights
   - shot, read and PRNU noise, then tone curve
 - **IMU** (`imu:`):
-  - truth (specific force, inertial angular rate) computed exactly inside the flight simulator
-    (kinematics, Coriolis/transport rate, WGS84 normal gravity) and stored as trajectory columns
+  - truth (specific force, inertial angular rate) computed inside the flight simulator from its
+    1 kHz positions and attitudes (second difference + Coriolis − WGS84 normal gravity; attitude
+    difference + Earth rate), so it is consistent with the poses by construction, and stored
+    as trajectory columns
+  - each IMU sample is the mean over its window [t − dt/2, t + dt/2] (no delay)
   - the sensor model adds extrinsics/lever arm, misalignment, scale factor, turn-on bias, bias
     random walk, white noise (Kalibr-style densities) and saturation
   - error-free values and biases are stored as GT
@@ -234,7 +246,8 @@ attribute `t0` holds it in trajectory seconds).
   camera resolves it (the renderer returns the flicker as cos / sin images, so flicker steps
   need no extra renders).
 - **Trajectories:**
-  - arc-length spline path (line, circle, figure8, lawnmower, random, waypoints)
+  - arc-length spline path (line, circle, figure8, lawnmower, random, waypoints), C1 between
+    its dense samples
   - AGL terrain following, crab angle into the crosswind
   - the path is laid out in the tangent plane at its origin; heading, velocity and IMU truth are
     expressed in the local NED frame along it (meridian convergence included)
@@ -250,10 +263,10 @@ crates/h5         safe wrapper over hdf5-sys (hdf5-metno-sys 0.12, HDF5 2.2.0 bu
 crates/tilestore  HDF5 tile pyramid (layout above), parallel codec
 crates/terragen   procedural terrain generator
 crates/render     camera, trajectories/dynamics, LOD, rasterizer, lighting, sensor, writers, pipeline
-crates/cli        `terrain` binary
-scripts/          contact.py (generator contact sheets), check_gt.py + cammodels.py (GT validation, all camera models), seqio.py, view_seq.py, view_events.py
+crates/cli        `terrain` binary (the aerialsynth CLI)
+scripts/          contact.py (generator contact sheets), check_gt.py + cammodels.py (camera GT, all models), check_imu.py, check_events.py, seqio.py, view_seq.py, view_events.py
 docs/events.md    event camera modality: options, sensor model, format
-configs/          example scenarios (quick, dataset, fisheye, events, oblique_sunset, night, night_moon, cruise)
+configs/          example scenarios (quick, dataset, fisheye, events, oblique_sunset, night, night_moon, cruise, imu_check)
 ```
 
 ## Performance (8 cores)

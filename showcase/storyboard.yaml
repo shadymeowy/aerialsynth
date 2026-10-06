@@ -1,0 +1,259 @@
+# Showcase storyboard. Every shot is rendered by `terrain` from base.yaml + its `scenario`
+# overrides (deep merge) and composed by make_showcase.py.
+#
+#   label:    small caption, bottom left          text: feature description, bottom right
+#   seconds:  shown duration (shots cross-fade by `video.crossfade` seconds)
+#   layout:   single (default) | grid (2x2 of four cameras) | modalities | map
+#   speedup:  time-lapse factor for the flight (frames are rendered every speedup/fps seconds)
+#
+# Times are UTC; local solar time here (33°E) is UTC + 2h12.
+
+video:
+  width: 1280
+  height: 720
+  fps: 25
+  crossfade: 0.6
+  title: "aerialsynth"
+  subtitle: "A procedural planet for aerial vision"
+  tagline: "Every frame below is rendered from generated tiles — no imagery, no elevation data."
+
+shots:
+  - id: farmland
+    label: "Morning · farmland"
+    text: "A whole planet, generated procedurally on the WGS84 ellipsoid"
+    seconds: 6
+    scenario:
+      trajectory: { synth: { kind: line, lat: 39.905, lon: 32.775, heading_deg: 65, altitude: 420 } }
+      cameras: [ { extrinsics: { pitch_deg: -24 } } ]
+
+  - id: river
+    label: "River valley"
+    text: "Rivers drain downhill through carved valleys and floodplains"
+    seconds: 5.5
+    scenario:
+      trajectory: { synth: { kind: line, lat: 39.89, lon: 36.57, heading_deg: 60, altitude: 380 } }
+      render: { lighting: { time_utc: "07:10:00" } }
+
+  - id: mountains
+    label: "Snow-capped mountains"
+    text: "Ridged mountains, erosion gullies and a climate-driven snow line"
+    seconds: 6
+    scenario:
+      trajectory: { synth: { kind: line, lat: 39.17, lon: 33.70, heading_deg: 80, altitude: 900, speed: 70 } }
+      render: { lighting: { time_utc: "11:40:00" } }
+      cameras: [ { extrinsics: { pitch_deg: -10 } } ]
+
+  - id: town
+    label: "Town and fields"
+    text: "Street grids, buildings, field systems and farm tracks"
+    seconds: 6
+    scenario:
+      trajectory: { synth: { kind: circle, lat: 39.93, lon: 32.80, heading_deg: 0, radius: 900, altitude: 550 } }
+      cameras: [ { extrinsics: { pitch_deg: -32, yaw_deg: 25 } } ]
+
+  - id: coast
+    label: "Coastline"
+    text: "Shallows, surf and sun glint on open water"
+    seconds: 5.5
+    scenario:
+      trajectory: { synth: { kind: line, lat: 40.25, lon: 36.88, heading_deg: 15, altitude: 350 } }
+      render: { lighting: { time_utc: "05:20:00" } }
+      cameras: [ { extrinsics: { pitch_deg: -14, yaw_deg: 55 } } ]
+
+  - id: forest
+    label: "Forest and meanders"
+    text: "Individual tree crowns with cast shadows, meandering rivers"
+    seconds: 5.5
+    scenario:
+      trajectory: { synth: { kind: line, lat: 41.585, lon: 32.975, heading_deg: 100, altitude: 450 } }
+      cameras: [ { extrinsics: { pitch_deg: -35 } } ]
+
+  - id: golden
+    label: "Golden hour"
+    text: "A real solar ephemeris: date, time and place set the light"
+    seconds: 6
+    scenario:
+      trajectory: { synth: { kind: line, lat: 39.25, lon: 33.95, heading_deg: 285, altitude: 700 } }
+      render: { lighting: { time_utc: "16:48:00" } }
+      cameras: [ { extrinsics: { pitch_deg: -12 } } ]
+
+  - id: dusk
+    label: "Day to night · time-lapse"
+    text: "A continuous day cycle: twilight, and the lamps switching on"
+    seconds: 7
+    scenario:
+      trajectory: { synth: { kind: line, lat: 39.89, lon: 32.74, heading_deg: 75, altitude: 700, speed: 40 } }
+      render: { lighting: { time_utc: "16:55:00", time_scale: 420 } }
+      cameras: [ { extrinsics: { pitch_deg: -18 }, rgb: { sensor: { exposure: { max_time: 0.04, max_gain: 128, tau: 0.25 } } } } ]
+
+  - id: night
+    label: "Night · towns"
+    text: "Street lamps, porch lights, glowing haze and a starry sky"
+    seconds: 6
+    scenario:
+      trajectory: { synth: { kind: line, lat: 39.86, lon: 32.70, heading_deg: 40, altitude: 900, speed: 60 } }
+      render: { lighting: { date: "2026-03-19", time_utc: "21:30:00" } }
+      cameras: [ { extrinsics: { pitch_deg: -12 }, rgb: { sensor: { exposure: { max_time: 0.04, max_gain: 200 } } } } ]
+
+  - id: moon
+    label: "Full moon"
+    text: "Moonlight and the lunar disc from the true lunar position and phase"
+    seconds: 6
+    scenario:
+      trajectory: { synth: { kind: line, lat: 40.03, lon: 32.90, heading_deg: 20, altitude: 1200 } }
+      render: { lighting: { date: "2026-03-03", time_utc: "21:00:00" } }
+      cameras: [ { extrinsics: { pitch_deg: -8 }, rgb: { sensor: { exposure: { max_time: 0.05, max_gain: 256 } } } } ]
+
+  - id: cruise
+    label: "High altitude · 10 km"
+    text: "From cruise altitude, with Earth curvature and aerial perspective …"
+    seconds: 6
+    scenario:
+      trajectory: { synth: { kind: line, lat: 39.6, lon: 33.6, heading_deg: 250, altitude: 10000, altitude_ref: ellipsoid, speed: 230 } }
+      tiles: { max_zoom: 15 }
+      cameras: [ { intrinsics: { intrinsics: [640.0, 640.0, 639.5, 359.5] }, extrinsics: { pitch_deg: -22 } } ]
+
+  - id: low
+    label: "Low altitude · 60 m"
+    text: "… down to treetop level, in the same consistent world"
+    seconds: 5
+    scenario:
+      trajectory: { synth: { kind: line, lat: 39.915, lon: 32.76, heading_deg: 100, altitude: 60, speed: 55 } }
+      cameras: [ { extrinsics: { pitch_deg: -9 } } ]
+
+  - id: bank
+    label: "Steep turns"
+    text: "Flight dynamics: banked turns, pitch, wind gusts and turbulence"
+    seconds: 7
+    scenario:
+      trajectory:
+        synth:
+          kind: figure8
+          lat: 39.95
+          lon: 32.83
+          heading_deg: 30
+          radius: 230
+          altitude: 380
+          response: { max_bank_deg: 60 }
+          wind: { speed: 9, turbulence: 1.6, gust_rate_per_min: 6, gust_amplitude: 5 }
+      cameras: [ { extrinsics: { pitch_deg: -8 } } ]
+
+  - id: shake
+    label: "Engine vibration · motion blur"
+    text: "Vibration and exposure time produce physically based motion blur"
+    seconds: 5.5
+    scenario:
+      trajectory:
+        synth:
+          kind: line
+          lat: 39.92
+          lon: 32.70
+          heading_deg: 120
+          altitude: 110
+          speed: 60
+          vibration: { harmonic_deg: 0.35, harmonic_hz: 24, broadband_deg: 0.3 }
+      render: { lighting: { time_utc: "17:00:00" } }
+      cameras: [ { extrinsics: { pitch_deg: -14 }, rgb: { sensor: { exposure: { max_time: 0.03, target: 0.19 }, motion_blur: { max_samples: 48 } } } } ]
+
+  - id: fisheye
+    label: "Fisheye · 200°"
+    text: "Kannala–Brandt fisheye: wider than a hemisphere"
+    seconds: 5.5
+    scenario:
+      trajectory: { synth: { kind: circle, lat: 39.93, lon: 32.80, heading_deg: 90, radius: 700, altitude: 450 } }
+      cameras:
+        - intrinsics: { model: kannala_brandt, width: 720, height: 720, intrinsics: [205.0, 205.0, 359.5, 359.5], distortion: [0.0, 0.0, 0.0, 0.0], max_fov_deg: 200 }
+          extrinsics: { mount: nadir, pitch_deg: 35 }
+
+  - id: models
+    layout: grid
+    label: "Camera models"
+    text: "camodocal's camera models, from the same pose"
+    seconds: 6
+    panels: ["Pinhole · 70°", "Pinhole · strong radial distortion", "Kannala–Brandt · 190°", "Mei omnidirectional · 200°"]
+    scenario:
+      trajectory: { synth: { kind: line, lat: 39.905, lon: 32.79, heading_deg: 50, altitude: 300 } }
+      cameras:
+        - path: /pinhole
+          intrinsics: { model: pinhole, width: 640, height: 360, intrinsics: [457.0, 457.0, 319.5, 179.5] }
+          extrinsics: { mount: forward, pitch_deg: -30 }
+          rgb: {}
+        - path: /barrel
+          intrinsics: { model: pinhole, width: 640, height: 360, intrinsics: [300.0, 300.0, 319.5, 179.5], distortion: [-0.32, 0.09, 0.0, 0.0] }
+          extrinsics: { mount: forward, pitch_deg: -30 }
+          rgb: {}
+        - path: /kb
+          intrinsics: { model: kannala_brandt, width: 640, height: 360, intrinsics: [125.0, 125.0, 319.5, 179.5], distortion: [0.0, 0.0, 0.0, 0.0], max_fov_deg: 190 }
+          extrinsics: { mount: forward, pitch_deg: -30 }
+          rgb: {}
+        - path: /mei
+          intrinsics: { model: mei, width: 640, height: 360, intrinsics: [230.0, 230.0, 319.5, 179.5], xi: 1.3, distortion: [0.0, 0.0, 0.0, 0.0], max_fov_deg: 200 }
+          extrinsics: { mount: forward, pitch_deg: -30 }
+          rgb: {}
+
+  - id: rig
+    layout: grid
+    label: "Multi-camera rig"
+    text: "Any number of cameras, each with its own intrinsics and mounting"
+    seconds: 7
+    panels: ["Nadir", "Forward", "Left oblique", "Right oblique"]
+    scenario:
+      trajectory: { synth: { kind: random, lat: 39.92, lon: 32.78, heading_deg: 60, radius: 900, altitude: 420 } }
+      cameras:
+        - path: /nadir
+          intrinsics: { model: pinhole, width: 640, height: 360, intrinsics: [457.0, 457.0, 319.5, 179.5] }
+          extrinsics: { mount: nadir }
+          rgb: {}
+        - path: /forward
+          intrinsics: { model: pinhole, width: 640, height: 360, intrinsics: [457.0, 457.0, 319.5, 179.5] }
+          extrinsics: { mount: forward, pitch_deg: -15 }
+          rgb: {}
+        - path: /left
+          intrinsics: { model: pinhole, width: 640, height: 360, intrinsics: [457.0, 457.0, 319.5, 179.5] }
+          extrinsics: { mount: forward, yaw_deg: -90, pitch_deg: -35 }
+          rgb: {}
+        - path: /right
+          intrinsics: { model: pinhole, width: 640, height: 360, intrinsics: [457.0, 457.0, 319.5, 179.5] }
+          extrinsics: { mount: forward, yaw_deg: 90, pitch_deg: -35 }
+          rgb: {}
+
+  - id: modalities
+    layout: modalities
+    label: "Ground truth"
+    text: "Every pixel comes with depth, optical flow and events — plus IMU and poses"
+    seconds: 8
+    scenario:
+      trajectory: { synth: { kind: line, lat: 39.93, lon: 32.775, heading_deg: 70, altitude: 260, speed: 55 } }
+      cameras:
+        - path: /cam0
+          intrinsics: { model: pinhole, width: 640, height: 360, intrinsics: [457.0, 457.0, 319.5, 179.5] }
+          extrinsics: { mount: forward, pitch_deg: -40 }
+          rgb: {}
+          depth: {}
+          flow: {}
+          events: { supersample: 2 }
+      imu: { path: /imu }
+
+  - id: map
+    layout: map
+    label: "Tiles on demand"
+    text: "Each flight plans its XYZ tiles: only what the camera sees is generated, at the right zoom"
+    seconds: 10
+    speedup: 8
+    map_zoom: 14
+    scenario:
+      trajectory: { synth: { kind: random, lat: 39.90, lon: 32.79, heading_deg: 40, radius: 1600, altitude: 450, speed: 60 } }
+      cameras:
+        - path: /cam0
+          intrinsics: { model: pinhole, width: 864, height: 486, intrinsics: [617.0, 617.0, 431.5, 242.5] }
+          extrinsics: { mount: forward, pitch_deg: -28 }
+          rgb: {}
+          depth: {}
+
+outro:
+  lines:
+    - "Procedural, deterministic, lazily generated XYZ tiles"
+    - "Any camera model · any number of cameras"
+    - "RGB · depth · optical flow · events · IMU · poses"
+    - "Day cycle · moon · lights · weather-driven flight"
+  footer: "aerialsynth · github.com/shadymeowy/aerialsynth · Rust · HDF5 · reproducible from one YAML"

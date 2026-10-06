@@ -1,0 +1,43 @@
+# Base scenario of every showcase shot. Each shot in storyboard.yaml overrides parts of it
+# (deep merge: mappings merge, everything else replaces). One world (seed 1) and one tile store
+# are shared by all shots, so the places in the video belong to one consistent planet.
+world:
+  seed: 1
+tiles:
+  file: out/showcase/world.h5
+  max_zoom: 17
+  margin: 1            # one neighbour ring is plenty for rendering
+  plan_every: 5        # 25 fps frames overlap heavily
+trajectory:
+  synth:
+    rate: 400          # high-rate record: sub-frame poses for motion blur and vibration
+    speed: 50
+render:
+  supersample: 3
+  shading: relit
+  lighting:
+    mode: clock
+    date: "2026-06-21"
+    time_utc: "08:30:00"   # ≈ 10:40 local solar time at 33°E
+    time_scale: 1.0
+  atmosphere:
+    visibility_km: 70
+cameras:
+  - path: /cam0
+    intrinsics:
+      model: pinhole
+      width: 1280
+      height: 720
+      intrinsics: [914.0, 914.0, 639.5, 359.5]   # 70° horizontal FOV
+    extrinsics: { mount: forward, pitch_deg: -25 }
+    frame_rate: 25
+    rgb:
+      sensor:
+        exposure: { mode: auto, tau: 0.4, target: 0.17 }
+        motion_blur: { enabled: true, max_samples: 24 }
+        optics: { defocus_px: 0.25, chromatic_aberration_px: 0.3, vignette: 0.25, bloom: 0.06 }
+        noise: { enabled: true, read: 0.08, shot: 0.1 }
+        tone: { curve: filmic, saturation: 1.08 }
+output:
+  start: 1.0           # let the flight dynamics settle
+  compression: { level: 1 }

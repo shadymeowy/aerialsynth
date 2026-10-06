@@ -1,0 +1,653 @@
+#!/usr/bin/env python3
+"""Render and compose the terrain showcase video.
+
+    python showcase/make_showcase.py                  # render every shot, compose out/showcase/showcase.mp4
+    python showcase/make_showcase.py --only coast     # (re)render one shot
+    python showcase/make_showcase.py --compose-only   # compose from already rendered shots
+    python showcase/make_showcase.py --stills         # quick framing check: 3 small frames per shot
+
+Shots are described in storyboard.yaml (scenario overrides on base.yaml). Each shot is rendered
+by `terrain run` into out/showcase/<id>/ (scenario.yaml, traj.csv, seq.h5); a shot is re-rendered
+only when its resolved scenario changed. Composition (captions, cross-fades, 2x2 panels, the
+tile map) is done here and piped into ffmpeg (H.264). Needs: numpy, h5py, pyyaml, pillow,
+matplotlib (colour maps), ffmpeg, and the release build of `terrain` (cargo build --release).
+"""
+import argparse, copy, hashlib, math, os, subprocess, sys, time
+import numpy as np, h5py, yaml
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+OUT = os.path.join(ROOT, "out", "showcase")
+TERRAIN = os.path.join(ROOT, "target", "release", "terrain")
+FONT_LIGHT = os.path.join(HERE, "fonts", "NotoSans-Light.ttf")
+FONT_MEDIUM = os.path.join(HERE, "fonts", "NotoSans-Medium.ttf")
+
+
+# ----------------------------------------------------------------------------- scenarios
+def deep_merge(a, b):
+    """b over a: mappings merge recursively, anything else replaces."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        out = copy.deepcopy(a)
+        for k, v in b.items():
+            out[k] = deep_merge(a[k], v) if k in a else copy.deepcopy(v)
+        return out
+    return copy.deepcopy(b)
+
+
+def shot_scenario(base, shot, video, stills=False):
+    """Resolved terrain scenario of a shot."""
+    over = copy.deepcopy(shot.get("scenario", {}))
+    cams_over = over.pop("cameras", [{}])
+    scn = deep_merge(base, over)
+    # cameras: every camera of the shot is merged onto the base camera (sensor look etc.)
+    template = base["cameras"][0]
+    scn["cameras"] = [deep_merge(template, c) for c in cams_over]
+    fps = video["fps"]
+    speedup = shot.get("speedup", 1)
+    span = (shot["seconds"] + video["crossfade"]) * speedup      # flight time shown
+    start = scn["output"]["start"]
+    sid = shot["id"]
+    d = os.path.join(OUT, sid)
+    scn["trajectory"]["file"] = os.path.join(d, "traj.csv")
+    scn["trajectory"]["synth"]["duration"] = start + span + 1.0
+    scn["output"]["file"] = os.path.join(d, "seq.h5")
+    scn["output"]["end"] = start + span
+    for c in scn["cameras"]:
+        c["frame_rate"] = fps / speedup
+    if stills:
+        # framing check: 3 frames, half resolution, no supersampling, no events
+        scn["output"]["file"] = os.path.join(d, "stills.h5")
+        scn["render"]["supersample"] = 1
+        for c in scn["cameras"]:
+            c["frame_rate"] = 3.0 / span
+            c.pop("events", None)
+            if "rgb" in c:
+                c["rgb"] = deep_merge(c["rgb"], {"supersample": 1})
+            i = c["intrinsics"]
+            if i.get("model", "pinhole") in ("pinhole", "kannala_brandt", "mei", "pinhole_full"):
+                i["width"], i["height"] = i["width"] // 2, i["height"] // 2
+                f = i["intrinsics"]
+                i["intrinsics"] = [f[0] / 2, f[1] / 2, (f[2] + 0.5) / 2 - 0.5, (f[3] + 0.5) / 2 - 0.5]
+    return scn
+
+
+def render_shot(base, shot, video, stills=False, force=False):
+    sid = shot["id"]
+    d = os.path.join(OUT, sid)
+    os.makedirs(d, exist_ok=True)
+    scn = shot_scenario(base, shot, video, stills)
+    text = yaml.safe_dump(scn, sort_keys=False)
+    tag = "stills" if stills else "scenario"
+    path = os.path.join(d, f"{tag}.yaml")
+    stamp = os.path.join(d, f"{tag}.done")
+    digest = hashlib.sha1(text.encode()).hexdigest()
+    if not force and os.path.exists(stamp) and open(stamp).read() == digest and os.path.exists(scn["output"]["file"]):
+        print(f"[{sid}] up to date")
+        return scn
+    with open(path, "w") as f:
+        f.write(text)
+    traj = scn["trajectory"]["file"]
+    if os.path.exists(traj):
+        os.remove(traj)  # the flight belongs to the scenario
+    t0 = time.time()
+    print(f"[{sid}] rendering ({tag}) …", flush=True)
+    log = open(os.path.join(d, f"{tag}.log"), "w")
+    r = subprocess.run([TERRAIN, "run", "-c", path], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT)
+    if r.returncode != 0:
+        raise SystemExit(f"[{sid}] terrain failed, see {log.name}")
+    with open(stamp, "w") as f:
+        f.write(digest)
+    print(f"[{sid}] done in {time.time() - t0:.0f} s", flush=True)
+    return scn
+
+
+# ----------------------------------------------------------------------------- drawing
+class Fonts:
+    def __init__(self):
+        self.cache = {}
+
+    def get(self, which, size):
+        key = (which, size)
+        if key not in self.cache:
+            self.cache[key] = ImageFont.truetype(FONT_MEDIUM if which == "medium" else FONT_LIGHT, size)
+        return self.cache[key]
+
+
+FONTS = Fonts()
+
+
+def text_layer(size, items):
+    """RGBA overlay with soft-shadowed text. items: (xy, text, font, alpha, anchor)."""
+    layer = Image.new("RGBA", size, (0, 0, 0, 0))
+    shadow = Image.new("RGBA", size, (0, 0, 0, 0))
+    ds, dl = ImageDraw.Draw(shadow), ImageDraw.Draw(layer)
+    for xy, txt, font, alpha, anchor in items:
+        if alpha <= 0:
+            continue
+        ds.text((xy[0] + 1, xy[1] + 2), txt, font=font, fill=(0, 0, 0, int(200 * alpha)), anchor=anchor)
+        dl.text(xy, txt, font=font, fill=(255, 255, 255, int(235 * alpha)), anchor=anchor)
+    shadow = shadow.filter(ImageFilter.GaussianBlur(3))
+    return Image.alpha_composite(shadow, layer)
+
+
+def bottom_band(w, h, height=110, strength=0.55):
+    """Vertical gradient that darkens the bottom of the frame for legible captions."""
+    a = np.zeros((h, w), np.float32)
+    y = np.arange(height, dtype=np.float32) / height
+    a[h - height:, :] = (strength * y ** 1.6)[:, None]
+    return a[..., None]
+
+
+def ease(x):
+    x = min(max(x, 0.0), 1.0)
+    return x * x * (3 - 2 * x)
+
+
+def caption(frame, label, text, t, dur, w, h, band):
+    """Label bottom-left, description bottom-right; fade in/out."""
+    a = ease((t - 0.35) / 0.45) * ease((dur - t - 0.15) / 0.45)
+    if a <= 0 or (not label and not text):
+        return frame
+    f = frame.astype(np.float32) * (1 - band * a)
+    img = Image.fromarray(np.clip(f, 0, 255).astype(np.uint8)).convert("RGBA")
+    m = 36
+    items = [((m, h - m), label, FONTS.get("medium", 24), a, "ls"), ((w - m, h - m), text, FONTS.get("light", 22), a * 0.95, "rs")]
+    img = Image.alpha_composite(img, text_layer(img.size, items))
+    return np.asarray(img.convert("RGB"))
+
+
+def panel_label(img, txt, xy=(14, 12), size=18):
+    """Small label at the top-left of a panel (PIL image, in place)."""
+    lay = text_layer(img.size, [(xy, txt, FONTS.get("medium", size), 1.0, "la")])
+    return Image.alpha_composite(img.convert("RGBA"), lay).convert("RGB")
+
+
+# ----------------------------------------------------------------------------- visualisations
+def flow_wheel():
+    """Middlebury colour wheel (Baker et al.), as in flowlib / flow_vis."""
+    RY, YG, GC, CB, BM, MR = 15, 6, 4, 11, 13, 6
+    cols = []
+    for n, (a, b) in zip([RY, YG, GC, CB, BM, MR], [((255, 0, 0), (255, 255, 0)), ((255, 255, 0), (0, 255, 0)), ((0, 255, 0), (0, 255, 255)),
+                                                    ((0, 255, 255), (0, 0, 255)), ((0, 0, 255), (255, 0, 255)), ((255, 0, 255), (255, 0, 0))]):
+        for i in range(n):
+            cols.append([a[k] + (b[k] - a[k]) * i / n for k in range(3)])
+    return np.array(cols) / 255.0
+
+
+WHEEL = flow_wheel()
+
+
+def flow_to_rgb(flow, rad_max):
+    u, v = flow[..., 0], flow[..., 1]
+    rad = np.sqrt(u * u + v * v) / max(rad_max, 1e-6)
+    ang = np.arctan2(-v, -u) / np.pi
+    fk = (ang + 1) / 2 * (len(WHEEL) - 1)
+    k0 = np.floor(fk).astype(int)
+    k1 = (k0 + 1) % len(WHEEL)
+    f = (fk - k0)[..., None]
+    col = (1 - f) * WHEEL[k0] + f * WHEEL[k1]
+    r = np.clip(rad, 0, 1)[..., None]
+    col = 1 - r * (1 - col)
+    return (np.clip(col, 0, 1) * 255).astype(np.uint8)
+
+
+def depth_to_rgb(depth, cmap):
+    """Normalised to [0, max depth of the frame] and colour mapped; sky black."""
+    fin = np.isfinite(depth) & (depth > 0)
+    out = np.zeros(depth.shape + (3,), np.uint8)
+    if fin.any():
+        dmax = depth[fin].max()
+        c = cmap(np.clip(depth / dmax, 0, 1))[..., :3]
+        out[fin] = (c[fin] * 255).astype(np.uint8)
+        return out, dmax
+    return out, 0.0
+
+
+def events_to_rgb(ev, t_us, window_us, w, h, ptr):
+    """Events in (t - window, t]: ON red, OFF blue on white."""
+    x, y, t, p = ev
+    i1 = np.searchsorted(t, t_us, "right")
+    i0 = np.searchsorted(t, t_us - window_us, "right")
+    img = np.full((h, w, 3), 255, np.uint8)
+    xs, ys, ps = x[i0:i1], y[i0:i1], p[i0:i1]
+    on = ps > 0
+    img[ys[~on], xs[~on]] = (40, 80, 220)
+    img[ys[on], xs[on]] = (225, 45, 45)
+    return img, i1 - i0
+
+
+def ecef2lla(p):
+    a, f = 6378137.0, 1 / 298.257223563
+    b = a * (1 - f)
+    e2, ep2 = f * (2 - f), (a * a - b * b) / (b * b)
+    x, y, z = p[..., 0], p[..., 1], p[..., 2]
+    r = np.hypot(x, y)
+    th = np.arctan2(z * a, r * b)
+    lat = np.arctan2(z + ep2 * b * np.sin(th) ** 3, r - e2 * a * np.cos(th) ** 3)
+    lon = np.arctan2(y, x)
+    n = a / np.sqrt(1 - e2 * np.sin(lat) ** 2)
+    return np.degrees(lat), np.degrees(lon), r / np.cos(lat) - n
+
+
+def merc_px(lat, lon, z):
+    """Global Web-Mercator pixel coordinates at zoom z."""
+    n = 256 * 2 ** z
+    x = (np.asarray(lon) + 180) / 360 * n
+    la = np.radians(np.asarray(lat))
+    y = (1 - np.log(np.tan(la) + 1 / np.cos(la)) / np.pi) / 2 * n
+    return x, y
+
+
+def quat_to_R(q):
+    w, x, y, z = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
+    return np.stack([np.stack([1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)], -1),
+                     np.stack([2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)], -1),
+                     np.stack([2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)], -1)], -2)
+
+
+# ----------------------------------------------------------------------------- shot frames
+def cam_frames(f, path):
+    g = f[path]
+    return g, g["rgb"].shape[0]
+
+
+def fit(img, w, h):
+    """Letterbox / pillarbox an image into w x h."""
+    ih, iw = img.shape[:2]
+    if (iw, ih) == (w, h):
+        return img
+    s = min(w / iw, h / ih)
+    im = Image.fromarray(img).resize((max(1, round(iw * s)), max(1, round(ih * s))), Image.LANCZOS)
+    out = Image.new("RGB", (w, h))
+    out.paste(im, ((w - im.width) // 2, (h - im.height) // 2))
+    return np.asarray(out)
+
+
+def single_frames(shot, f, video):
+    g, n = cam_frames(f, shot.get("camera", "/cam0"))
+    W, H = video["width"], video["height"]
+    for k in range(n):
+        yield fit(g["rgb"][k], W, H)
+
+
+def grid_frames(shot, f, video, scn):
+    W, H = video["width"], video["height"]
+    paths = [c["path"] for c in scn["cameras"]]
+    n = min(f[p]["rgb"].shape[0] for p in paths)
+    labels = shot.get("panels", paths)
+    for k in range(n):
+        canvas = Image.new("RGB", (W, H))
+        for i, p in enumerate(paths[:4]):
+            im = Image.fromarray(fit(f[p]["rgb"][k], W // 2, H // 2))
+            im = panel_label(im, labels[i])
+            canvas.paste(im, ((i % 2) * W // 2, (i // 2) * H // 2))
+        d = ImageDraw.Draw(canvas)
+        d.line([(W // 2, 0), (W // 2, H)], fill=(0, 0, 0), width=2)
+        d.line([(0, H // 2), (W, H // 2)], fill=(0, 0, 0), width=2)
+        yield np.asarray(canvas)
+
+
+def modality_frames(shot, f, video):
+    import matplotlib
+    cmap = matplotlib.colormaps["turbo"]
+    W, H = video["width"], video["height"]
+    g = f["/cam0"]
+    n = g["rgb"].shape[0]
+    w, h = g["rgb"].shape[2], g["rgb"].shape[1]
+    ts = g["t"][:]
+    ev = g["events"]
+    evs = (ev["x"][:], ev["y"][:], ev["t"][:], ev["p"][:])
+    # flow scale: robust maximum over the shot (stable colours)
+    fl = g["flow"]
+    rad_max = np.percentile(np.hypot(fl[n // 2][..., 0], fl[n // 2][..., 1]), 99)
+    for k in range(n):
+        rgb = g["rgb"][k]
+        dep, dmax = depth_to_rgb(g["depth"][k], cmap)
+        fk = fl[min(k, n - 2)]
+        flo = flow_to_rgb(fk, rad_max)
+        evi, ne = events_to_rgb(evs, ts[k], 10_000, w, h, None)
+        tiles = [(rgb, "RGB"), (dep, f"Depth · 0 – {dmax / 1000:.1f} km" if dmax >= 1000 else f"Depth · 0 – {dmax:.0f} m"),
+                 (flo, "Optical flow"), (evi, "Events · 10 ms · ON red / OFF blue")]
+        canvas = Image.new("RGB", (W, H))
+        for i, (im, lab) in enumerate(tiles):
+            pim = panel_label(Image.fromarray(fit(im, W // 2, H // 2)), lab)
+            canvas.paste(pim, ((i % 2) * W // 2, (i // 2) * H // 2))
+        d = ImageDraw.Draw(canvas)
+        d.line([(W // 2, 0), (W // 2, H)], fill=(0, 0, 0), width=2)
+        d.line([(0, H // 2), (W, H // 2)], fill=(0, 0, 0), width=2)
+        yield np.asarray(canvas)
+
+
+def read_tile_mosaic(store, z, x0, y0, x1, y1):
+    """RGB mosaic of tiles [x0, x1] x [y0, y1] at zoom z from the tile store (missing: grey)."""
+    nx, ny = x1 - x0 + 1, y1 - y0 + 1
+    img = np.full((ny * 256, nx * 256, 3), 60, np.uint8)
+    with h5py.File(store, "r") as s:
+        lv = s[f"levels/{z}"]
+        idx = lv["index"][:]
+        rows = {(int(a), int(b)): i for i, (a, b) in enumerate(idx)}
+        for ty in range(y0, y1 + 1):
+            for tx in range(x0, x1 + 1):
+                r = rows.get((tx, ty))
+                if r is not None:
+                    img[(ty - y0) * 256:(ty - y0 + 1) * 256, (tx - x0) * 256:(tx - x0 + 1) * 256] = lv["rgb"][r]
+    return img
+
+
+def map_frames(shot, f, video, scn):
+    """Camera view + 2D tile map with the whole flight, the current position, the camera footprint
+    and the tiles planned for the flight (outlines coloured by zoom); altitude profile below."""
+    import matplotlib
+    W, H = video["width"], video["height"]
+    z = shot.get("map_zoom", 14)
+    d = os.path.join(OUT, shot["id"])
+    g = f["/cam0"]
+    n = g["rgb"].shape[0]
+    P = f["/pose"]
+    lla = P["lla"][:]
+    tp = P["t"][:]
+    # map extent: the flight + margin, in tiles
+    gx, gy = merc_px(lla[:, 0], lla[:, 1], z)
+    pad = 300
+    x0, x1 = int((gx.min() - pad) // 256), int((gx.max() + pad) // 256)
+    y0, y1 = int((gy.min() - pad) // 256), int((gy.max() + pad) // 256)
+    store = scn["tiles"]["file"]
+    need = [f"{z}/{x}/{y}" for y in range(y0, y1 + 1) for x in range(x0, x1 + 1)]
+    lst = os.path.join(d, "map_tiles.txt")
+    with open(lst, "w") as fh:
+        fh.write("\n".join(need) + "\n")
+    scen = os.path.join(d, "scenario.yaml")
+    subprocess.run([TERRAIN, "gen", "-c", scen, "--tiles", lst], cwd=ROOT, check=True, capture_output=True)
+    plan_file = os.path.join(d, "plan.txt")
+    subprocess.run([TERRAIN, "plan", "-c", scen, "-o", plan_file], cwd=ROOT, check=True, capture_output=True)
+    plan = [tuple(map(int, l.split("/"))) for l in open(plan_file) if l.strip()]
+    mosaic = read_tile_mosaic(store, z, x0, y0, x1, y1)
+    ox, oy = x0 * 256, y0 * 256
+    # map panel geometry
+    cam_w, cam_h = g["rgb"].shape[2], g["rgb"].shape[1]
+    mp = H - 2 * 40 - 120 - 16                     # map side
+    mx, my = W - mp - 40, 40
+    s = mp / max(mosaic.shape[0], mosaic.shape[1])
+    base = Image.fromarray(mosaic).resize((round(mosaic.shape[1] * s), round(mosaic.shape[0] * s)), Image.LANCZOS)
+    base = Image.fromarray((np.asarray(base).astype(np.float32) * 0.85).astype(np.uint8)).convert("RGBA")
+    # planned tile outlines, coloured by zoom
+    over = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    od = ImageDraw.Draw(over)
+    zs = sorted({t[0] for t in plan if t[0] >= z - 2})
+    cm = matplotlib.colormaps["plasma"]
+    for (tz, tx, ty) in plan:
+        if tz < z - 2:
+            continue
+        k = 2 ** (tz - z)
+        ax, ay = (tx * 256 / k - ox) * s, (ty * 256 / k - oy) * s
+        size = 256 / k * s
+        if ax + size < 0 or ay + size < 0 or ax > base.width or ay > base.height:
+            continue
+        c = cm(0.15 + 0.75 * zs.index(tz) / max(1, len(zs) - 1))
+        od.rectangle([ax, ay, ax + size, ay + size], outline=tuple(int(255 * v) for v in c[:3]) + (150,), width=1)
+    base = Image.alpha_composite(base, over)
+    tx_, ty_ = (gx - ox) * s, (gy - oy) * s
+    alt = lla[:, 2]
+    # camera footprint from the depth of the image border
+    Rq = quat_to_R(g["pose/q_ecef_cam"][:])
+    cpos = g["pose/position_ecef"][:]
+    calib = yaml.safe_load(g["calib"].attrs["camera_yaml"])
+    fx, fy, cx, cy = calib["intrinsics"]
+    border = [(u, 0) for u in np.linspace(0, cam_w - 1, 24)] + [(cam_w - 1, v) for v in np.linspace(0, cam_h - 1, 14)] + \
+             [(u, cam_h - 1) for u in np.linspace(cam_w - 1, 0, 24)] + [(0, v) for v in np.linspace(cam_h - 1, 0, 14)]
+    ts = g["t"][:]
+    for k in range(n):
+        canvas = Image.new("RGB", (W, H), (18, 20, 24))
+        cam = Image.fromarray(g["rgb"][k])
+        cs = (W - mp - 40 * 3) / cam_w
+        cam = cam.resize((round(cam_w * cs), round(cam_h * cs)), Image.LANCZOS)
+        canvas.paste(cam, (40, 40))
+        m = base.copy()
+        md = ImageDraw.Draw(m)
+        md.line(list(zip(tx_, ty_)), fill=(255, 255, 255, 110), width=2)
+        j = min(np.searchsorted(tp, ts[k]), len(tp) - 1)
+        md.line(list(zip(tx_[:j + 1], ty_[:j + 1])), fill=(255, 210, 60, 255), width=3)
+        # footprint
+        dep = g["depth"][k]
+        pts = []
+        for (u, v) in border:
+            zz = dep[int(round(v)), int(round(u))]
+            if np.isfinite(zz) and zz > 0:
+                pc = np.array([(u - cx) / fx * zz, (v - cy) / fy * zz, zz])
+                pts.append(Rq[k] @ pc + cpos[k])
+        if len(pts) > 3:
+            la, lo, _ = ecef2lla(np.array(pts))
+            fx_, fy_ = merc_px(la, lo, z)
+            poly = list(zip((fx_ - ox) * s, (fy_ - oy) * s))
+            fp = Image.new("RGBA", m.size, (0, 0, 0, 0))
+            ImageDraw.Draw(fp).polygon(poly, fill=(80, 200, 255, 60), outline=(80, 200, 255, 220))
+            m = Image.alpha_composite(m, fp)
+            md = ImageDraw.Draw(m)
+        px, py = tx_[j], ty_[j]
+        md.ellipse([px - 6, py - 6, px + 6, py + 6], fill=(255, 210, 60, 255), outline=(0, 0, 0, 255), width=2)
+        m = m.convert("RGB")
+        m = panel_label(m, f"XYZ tiles · z{z} mosaic · planned LOD tiles z{zs[0]}–z{zs[-1]}", size=15)
+        canvas.paste(m, (mx, my))
+        # altitude profile
+        ap_y, ap_h = my + mp + 16, 120
+        ad = ImageDraw.Draw(canvas)
+        ad.rectangle([mx, ap_y, mx + mp, ap_y + ap_h], fill=(28, 31, 36))
+        tt = (tp - tp[0]) / max(tp[-1] - tp[0], 1)
+        lo_, hi_ = alt.min() - 20, alt.max() + 20
+        prof = [(mx + 8 + (mp - 16) * a, ap_y + ap_h - 10 - (ap_h - 34) * (h_ - lo_) / (hi_ - lo_)) for a, h_ in zip(tt[::20], alt[::20])]
+        ad.line(prof, fill=(150, 160, 175), width=2)
+        ad.ellipse([prof[min(j // 20, len(prof) - 1)][0] - 4, prof[min(j // 20, len(prof) - 1)][1] - 4,
+                    prof[min(j // 20, len(prof) - 1)][0] + 4, prof[min(j // 20, len(prof) - 1)][1] + 4], fill=(255, 210, 60))
+        canvas = panel_label(canvas, f"Altitude above the ellipsoid · {alt[j]:.0f} m", xy=(mx + 10, ap_y + 6), size=14)
+        canvas = panel_label(canvas, f"Flight time {(ts[k] - ts[0]) * 1e-6:5.1f} s  (×{shot.get('speedup', 1)})", xy=(50, 50 + cam.height - 30), size=16)
+        yield np.asarray(canvas)
+
+
+# ----------------------------------------------------------------------------- cards
+def collage_sources(shots_scn, video):
+    """One striking frame per shot (the middle one of its first camera) for the title collage."""
+    ims = []
+    for shot, scn in shots_scn:
+        if shot.get("layout") in ("modalities", "map"):
+            continue
+        with h5py.File(scn["output"]["file"], "r") as f:
+            rgb = f[scn["cameras"][0]["path"]]["rgb"]
+            ims.append(rgb[rgb.shape[0] // 2])
+    return ims
+
+
+def title_frames(video, seconds, sources):
+    """Title over a drifting, tilted collage of frames from the whole video: tiles fade in one by
+    one, the collage slowly zooms and pans, blurred and darkened under the title."""
+    W, H, fps = video["width"], video["height"], video["fps"]
+    tw, th, gap = 384, 216, 10
+    cols, rows = 6, 5
+    big = Image.new("RGB", (cols * (tw + gap), rows * (th + gap)), (8, 9, 11))
+    rng = np.random.default_rng(7)
+    order = rng.permutation(cols * rows)
+    def cover(src, w, h):
+        """Crop to the w:h aspect (centre), then resize."""
+        ih, iw = src.shape[:2]
+        if iw / ih > w / h:
+            cw = int(ih * w / h)
+            src = src[:, (iw - cw) // 2:(iw - cw) // 2 + cw]
+        else:
+            chh = int(iw * h / w)
+            src = src[(ih - chh) // 2:(ih - chh) // 2 + chh]
+        return Image.fromarray(np.ascontiguousarray(src)).resize((w, h), Image.LANCZOS)
+
+    cells = [cover(sources[(c * 7) % len(sources)], tw, th) for c in range(cols * rows)]
+    n = int(seconds * fps)
+    yy, xx = np.mgrid[0:H, 0:W]
+    vign = 1 - 0.55 * (((xx - W / 2) / (W / 2)) ** 2 + ((yy - H / 2) / (H / 2)) ** 2) ** 1.2
+    vign = np.clip(vign, 0.25, 1)[..., None]
+    for k in range(n):
+        t = k / fps
+        frame = Image.new("RGB", big.size, (8, 9, 11))
+        for c, im in enumerate(cells):
+            a = ease((t - 0.08 * order[c] / 3) / 0.6)
+            if a <= 0:
+                continue
+            x, y = (c % cols) * (tw + gap), (c // cols) * (th + gap)
+            frame.paste(Image.blend(Image.new("RGB", im.size, (8, 9, 11)), im, a), (x, y))
+        # slow zoom + pan, slight tilt
+        z = 1.18 - 0.10 * ease(t / seconds)
+        rot = frame.rotate(-7, resample=Image.BICUBIC, expand=False, fillcolor=(8, 9, 11))
+        cw, ch = W * z * 1.05, H * z * 1.05
+        cx = rot.width / 2 + 60 * (t / seconds - 0.5)
+        cy = rot.height / 2 - 25 * (t / seconds - 0.5)
+        crop = rot.crop((int(cx - cw / 2), int(cy - ch / 2), int(cx + cw / 2), int(cy + ch / 2))).resize((W, H), Image.BICUBIC)
+        blur = 5.0 - 2.5 * ease((t - 1.2) / 2.0)
+        crop = crop.filter(ImageFilter.GaussianBlur(blur))
+        f = np.asarray(crop).astype(np.float32) * 0.5 * vign
+        img = Image.fromarray(np.clip(f, 0, 255).astype(np.uint8)).convert("RGBA")
+        a1, a2, a3 = ease((t - 0.6) / 0.9), ease((t - 1.3) / 0.8), ease((t - 2.0) / 0.8)
+        items = [((W // 2, H // 2 - 34), video["title"], FONTS.get("light", 104), a1, "ms"),
+                 ((W // 2, H // 2 + 20), video["subtitle"], FONTS.get("light", 32), a2, "ms"),
+                 ((W // 2, H // 2 + 70), video["tagline"], FONTS.get("light", 20), a3 * 0.85, "ms")]
+        img = Image.alpha_composite(img, text_layer(img.size, items))
+        yield np.asarray(img.convert("RGB"))
+
+
+def outro_frames(video, outro, seconds=6.0):
+    W, H, fps = video["width"], video["height"], video["fps"]
+    lines = outro["lines"]
+    for k in range(int(seconds * fps)):
+        t = k / fps
+        img = Image.new("RGBA", (W, H), (10, 11, 14, 255))
+        items = []
+        y0 = H // 2 - 30 * len(lines)
+        for i, l in enumerate(lines):
+            items.append(((W // 2, y0 + 56 * i), l, FONTS.get("light", 30), ease((t - 0.3 - 0.45 * i) / 0.6), "ms"))
+        items.append(((W // 2, H - 70), outro["footer"], FONTS.get("medium", 20), ease((t - 0.4 - 0.45 * len(lines)) / 0.6) * 0.8, "ms"))
+        img = Image.alpha_composite(img, text_layer(img.size, items))
+        yield np.asarray(img.convert("RGB"))
+
+
+# ----------------------------------------------------------------------------- composition
+def shot_stream(shot, scn, video):
+    f = h5py.File(scn["output"]["file"], "r")
+    lay = shot.get("layout", "single")
+    if lay == "grid":
+        gen = grid_frames(shot, f, video, scn)
+    elif lay == "modalities":
+        gen = modality_frames(shot, f, video)
+    elif lay == "map":
+        gen = map_frames(shot, f, video, scn)
+    else:
+        gen = single_frames(shot, f, video)
+    return gen
+
+
+def compose(base, story, out_mp4, shots_scn, preview_seconds=None):
+    video = story["video"]
+    W, H, fps = video["width"], video["height"], video["fps"]
+    xf = int(round(video["crossfade"] * fps))
+    band = bottom_band(W, H)
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(fps), "-i", "-",
+           "-c:v", "libx264", "-preset", "slow", "-crf", "16", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_mp4]
+    ff = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    written = 0
+
+    def emit(fr):
+        nonlocal written
+        ff.stdin.write(np.ascontiguousarray(fr, dtype=np.uint8).tobytes())
+        written += 1
+
+    tail = []  # last frames of the previous segment, for the cross-fade
+
+    def segment(frames):
+        nonlocal tail
+        frames = list(frames)
+        for i, fr in enumerate(frames):
+            if i < len(tail):
+                a = ease((i + 1) / (len(tail) + 1))
+                fr = (tail[i].astype(np.float32) * (1 - a) + fr.astype(np.float32) * a).astype(np.uint8)
+            if i < len(frames) - xf:
+                emit(fr)
+        tail = frames[-xf:] if len(frames) > xf else []
+
+    # title over a collage of the whole video
+    segment(title_frames(video, 5.0 + xf / fps, collage_sources(shots_scn, video)))
+    for shot, scn in shots_scn:
+        dur = shot["seconds"] + video["crossfade"]
+        frames = []
+        for k, fr in enumerate(shot_stream(shot, scn, video)):
+            if k >= int(round(dur * fps)):
+                break
+            frames.append(caption(fr, shot["label"], shot["text"], k / fps, dur, W, H, band))
+        print(f"composed {shot['id']}: {len(frames)} frames", flush=True)
+        segment(frames)
+    segment(outro_frames(video, story["outro"], 6.0))
+    for fr in tail:
+        emit(fr)
+    ff.stdin.close()
+    ff.wait()
+    print(f"wrote {out_mp4}: {written} frames, {written / fps:.1f} s")
+
+
+def stills_sheet(base, story, shots_scn, path):
+    rows = []
+    for shot, scn in shots_scn:
+        f = h5py.File(scn["output"]["file"], "r")
+        ims = []
+        for c in scn["cameras"][:4]:
+            rgb = f[c["path"]]["rgb"]
+            for k in range(min(3, rgb.shape[0])):
+                ims.append(fit(rgb[k], 320, 180))
+            if shot.get("layout") not in ("grid",):
+                break
+        row = Image.new("RGB", (320 * max(3, len(ims)) + 220, 180), (20, 20, 20))
+        for i, im in enumerate(ims):
+            row.paste(Image.fromarray(im), (220 + 320 * i, 0))
+        ImageDraw.Draw(row).text((10, 80), shot["id"], font=FONTS.get("medium", 22), fill=(255, 255, 255))
+        rows.append(row)
+    W = max(r.width for r in rows)
+    sheet = Image.new("RGB", (W, 180 * len(rows)))
+    for i, r in enumerate(rows):
+        sheet.paste(r, (0, 180 * i))
+    sheet.save(path)
+    print("wrote", path)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--only", nargs="*", help="render only these shot ids")
+    ap.add_argument("--compose-only", action="store_true")
+    ap.add_argument("--stills", action="store_true", help="framing check (3 small frames per shot) → out/showcase/stills.png")
+    ap.add_argument("--force", action="store_true", help="re-render even if up to date")
+    ap.add_argument("--title-preview", action="store_true", help="save a few title-card frames (from the stills) → out/showcase/title_*.png")
+    ap.add_argument("--out", default=os.path.join(OUT, "showcase.mp4"))
+    a = ap.parse_args()
+    if not os.path.exists(TERRAIN):
+        raise SystemExit("build terrain first: cargo build --release")
+    base = yaml.safe_load(open(os.path.join(HERE, "base.yaml")))
+    story = yaml.safe_load(open(os.path.join(HERE, "storyboard.yaml")))
+    shots = story["shots"]
+    if a.only:
+        shots = [s for s in shots if s["id"] in a.only]
+    os.makedirs(OUT, exist_ok=True)
+    if a.title_preview:
+        scns = [(s, shot_scenario(base, s, story["video"], True)) for s in shots]
+        scns = [(s, c) for s, c in scns if os.path.exists(c["output"]["file"])]
+        fr = list(title_frames(story["video"], 5.0, collage_sources(scns, story["video"])))
+        for t in (0.6, 1.6, 3.0, 4.8):
+            Image.fromarray(fr[int(t * story["video"]["fps"])]).save(os.path.join(OUT, f"title_{t:.1f}.png"))
+        print("wrote title previews")
+        return
+    done = []
+    for s in shots:
+        if a.compose_only:
+            scn = shot_scenario(base, s, story["video"], a.stills)
+        else:
+            scn = render_shot(base, s, story["video"], a.stills, a.force)
+        done.append((s, scn))
+    if a.stills:
+        stills_sheet(base, story, done, os.path.join(OUT, "stills.png"))
+    elif not a.only or a.compose_only:
+        compose(base, story, a.out, done)
+
+
+if __name__ == "__main__":
+    main()
