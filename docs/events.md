@@ -105,6 +105,4 @@ time.
 
 ## Possible next steps
 
-- **Shared renders:** two event cameras with the same intrinsics and mounting could share the
-  internal renders (today each camera is simulated on its own).
 - **Fast modes B/C** for long sequences.
