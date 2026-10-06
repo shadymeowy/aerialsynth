@@ -185,11 +185,7 @@ pub fn open_or_create_store(scn: &Scenario, gen: &Generator) -> Result<TileStore
         seed: gen.config().seed,
         layers: Layer::ALL.to_vec(),
     };
-    let s = TileStore::open_or_create(&scn.tiles.file, meta)?;
-    if !s.meta().generator_config.is_empty() && s.meta().seed != gen.config().seed {
-        eprintln!("warning: tile store seed {} differs from scenario seed {}", s.meta().seed, gen.config().seed);
-    }
-    Ok(s)
+    Ok(TileStore::open_or_create(&scn.tiles.file, meta)?)
 }
 
 /// Tile cache with the layers the shading mode needs (~40% less memory per cached tile), lazily

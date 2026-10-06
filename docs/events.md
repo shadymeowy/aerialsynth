@@ -92,6 +92,11 @@ Output, in the sequence file:
 - `<camera>/calib/`: intrinsics, distortion, resolution and `T_body_cam`; the event camera's pose
   at any time is the `/pose` body pose composed with `T_body_cam`.
 
+The depth / flow of an event camera come from a separate geometry-only render at its
+`frame_rate` (no shading, one sample per pixel centre). The sensor noise (threshold mismatch,
+hot pixels, background activity) is seeded from `seed` mixed with the camera path, so two event
+cameras with the same settings get independent noise.
+
 Performance on 8 cores (VGA, supersample 2, `max_px_per_step` 0.5, ~1000 m AGL flight with
 engine vibration): about 100 s of compute per simulated second, at ~520 renders/s; the
 `terrain events` summary prints renders, sensor steps and their times. The sensor model runs

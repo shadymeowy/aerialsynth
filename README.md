@@ -207,7 +207,8 @@ attribute `t0` holds it in trajectory seconds).
   - quadtree LOD by projected texel size, with skirts against cracks
   - f64 transforms and an exact per-vertex camera model (incl. distortion)
 - **Shading:**
-  - supersampling (an odd factor gives an exact GT sample)
+  - supersampling; cameras with depth / flow / land cover need an odd factor (the GT sample is
+    the central sub-sample, which is the pixel centre only for odd factors)
   - trilinear plus anisotropic pyramid texture filtering
 - **Lighting:**
   - `relit` (albedo + normals + DSM ray-marched cast shadows) or `satellite` (baked imagery)
@@ -230,12 +231,14 @@ attribute `t0` holds it in trajectory seconds).
   - error-free values and biases are stored as GT
 - **Lamp flicker** (`render.lighting.flicker`): lamps flicker at 2× mains frequency, with three
   supply phases and a share of LED lamps. Frames integrate it over their exposure; the event
-  camera resolves it.
+  camera resolves it (the renderer returns the flicker as cos / sin images, so flicker steps
+  need no extra renders).
 - **Trajectories:**
   - arc-length spline path (line, circle, figure8, lawnmower, random, waypoints)
   - AGL terrain following, crab angle into the crosswind
   - Dryden-like turbulence and 1-cosine gusts acting on position/attitude through small ODEs
-  - engine-harmonic and broadband vibration, optional stabilized gimbal
+  - engine-harmonic and band-limited broadband vibration
+  - optional stabilized gimbal (the whole sensor platform: `/pose` is then the gimbal frame)
 
 ## Workspace layout
 
@@ -260,6 +263,9 @@ configs/          example scenarios (quick, dataset, fisheye, events, oblique_su
 
 `--lazy` rendering generates exactly the tiles each view needs.
 
+Event simulation renders every step that moves the image by `max_px_per_step` (~100 s of
+compute per simulated second at VGA with engine vibration); see `docs/events.md`.
+
 ## Tests
 
 ```
@@ -267,14 +273,15 @@ cargo test --release
 ```
 
 - **Geodesy:** checked against pymap3d.
-- **h5:** round trips, raw chunks, concurrency.
-- **Tile store:** round-trip test.
+- **h5:** round trips, raw chunks, concurrency, error stacks.
+- **Tile store:** round trip, rejection of invalid tiles.
 - **Camera models and trajectories:** includes NED/ECEF CSV formats.
 - **LOD and dynamics.**
 - **Sensor:** auto-exposure ODE.
 - **Scenario:** omitted modalities are off, overlapping HDF5 groups are rejected.
 - **Events:** moving edge, background activity, low-light bandwidth.
-- **IMU:** noise statistics, level-flight truth.
+- **IMU:** noise statistics, level-flight truth, lever arm and sample timing against the
+  1 kHz simulator truth.
 - **Solar position.**
 - **Generator invariants:** determinism, seamless tile borders, parent ≈ mean of its children.
 
