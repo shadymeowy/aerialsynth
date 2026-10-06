@@ -568,7 +568,7 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
     let _ = psi0;
 
     let vib = &cfg.vibration;
-    let mut harm_phase = [rng.uniform() * 6.28, rng.uniform() * 6.28, rng.uniform() * 6.28];
+    let mut harm_phase = [rng.uniform() * std::f64::consts::TAU, rng.uniform() * std::f64::consts::TAU, rng.uniform() * std::f64::consts::TAU];
     let harm_amp = [rng.uniform() * 0.5 + 0.75, rng.uniform() * 0.5 + 0.75, rng.uniform() * 0.5 + 0.25];
     let mut harm_f_jit = GaussMarkov::default();
     let mut bb = [Oscillator::default(); 3];

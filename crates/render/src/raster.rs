@@ -373,6 +373,9 @@ pub struct Renderer {
     pub settings: RenderSettings,
     pub ell: Ellipsoid,
     pub cache: Arc<TileCache>,
+    /// Skip shading: only depth, 3D points and land cover (radiance stays zero). Used for
+    /// cameras that produce geometry ground truth but no images.
+    pub geometry_only: bool,
     /// unit rays of the supersampled grid (camera frame)
     rays: Vec<[f32; 3]>,
 }
@@ -390,7 +393,7 @@ impl Renderer {
                 [r.x as f32, r.y as f32, r.z as f32]
             })
             .collect();
-        Renderer { model, model_ss, settings, ell, cache, rays }
+        Renderer { model, model_ss, settings, ell, cache, geometry_only: false, rays }
     }
 
     pub fn select_units(&self, cam: &CamPose) -> Vec<Unit> {
@@ -443,7 +446,7 @@ impl Renderer {
         need.sort_unstable();
         need.dedup();
         self.cache.prefetch(&need);
-        let shadows_needed = self.settings.shading == Shading::Relit && self.settings.lighting.shadows && sun_state.direct > 1e-4;
+        let shadows_needed = !self.geometry_only && self.settings.shading == Shading::Relit && self.settings.lighting.shadows && sun_state.direct > 1e-4;
         let view = TileView::new(need.iter().filter_map(|id| self.cache.get(*id).map(|t| (*id, t))).collect(), shadows_needed);
         let t_fetch = t0.elapsed().as_secs_f64();
 
@@ -655,6 +658,19 @@ impl Renderer {
                 let mut pts = vec![None; ow];
                 let mut lcs = vec![255u8; ow];
                 for ox in 0..ow {
+                    if self.geometry_only {
+                        let k = (oy * ss + cs) * w + ox * ss + cs;
+                        let (g, ray) = (gbuf[k], self.rays[k]);
+                        if g.unit != NO_UNIT && ray != [0.0; 3] {
+                            let ray = DVec3::new(ray[0] as f64, ray[1] as f64, ray[2] as f64);
+                            let u = &units[g.unit as usize];
+                            let range = g.z as f64;
+                            dep[ox] = (range * ray.z) as f32;
+                            pts[ox] = Some(cam.pos + cam.r_ecef_cam * ray * range);
+                            lcs[ox] = view.landcover(u.data.z, u.data.x as f64 * 256.0 + g.u as f64, u.data.y as f64 * 256.0 + g.v as f64);
+                        }
+                        continue;
+                    }
                     // Per-pixel shading context from the central sub-sample (or the first terrain
                     // sub-sample): footprint / LOD, lighting incl. cast shadow, atmosphere. The
                     // other sub-samples only fetch texture, unless they lie at a clearly different

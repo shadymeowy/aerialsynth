@@ -11,15 +11,22 @@ trajectory:
     altitude: 1000
     speed: 50
     duration: 10
-camera:
-  model: pinhole
-  width: 640
-  height: 512
-  intrinsics: [457.0, 457.0, 319.5, 255.5]
-  distortion: [-0.05, 0.01, 0.0, 0.0]
 render:
   supersample: 3
+cameras:
+  - path: /cam0
+    intrinsics:
+      model: pinhole
+      width: 640
+      height: 512
+      intrinsics: [457.0, 457.0, 319.5, 255.5]
+      distortion: [-0.05, 0.01, 0.0, 0.0]
+    frame_rate: 5
+    rgb: {}
+    depth: {}
+    flow: {}
+    landcover: {}
+imu: {}
 output:
-  dir: out/quick/seq
-  h5: out/quick/seq.h5
-  frame_rate: 5
+  file: out/quick/seq.h5
+  png_dir: out/quick/png

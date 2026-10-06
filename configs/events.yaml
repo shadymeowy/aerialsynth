@@ -1,22 +1,29 @@
-# Event camera simulation (ESIM-style) over the quick world: `terrain events -c configs/events.yaml`
-# Everything (frames, GT, IMU, events) goes into output.h5; group names come from output.layout
-# (defaults are M3ED-like, as camodocal reads them).
+# Multi-camera rig with an event camera, over the quick world (0.5 s):
+#   terrain run -c configs/events.yaml      (render: poses, IMU, frames; then events)
+# /cam0: frame camera (rgb + depth + flow). /dvs: event camera that also carries depth and
+# flow ground truth at 20 Hz on its own intrinsics / mounting.
 world: { seed: 1 }
 tiles: { file: out/quick/world.h5, max_zoom: 17, lazy: true }
 trajectory: { file: out/quick/traj.csv }
-camera:                    # frame camera (also used by the event camera unless events.camera is set)
-  model: pinhole
-  width: 640
-  height: 480
-  intrinsics: [420.0, 420.0, 319.5, 239.5]
-  distortion: [-0.05, 0.01, 0.0, 0.0]
-output: { dir: out/events/seq, png: false, h5: out/events/seq.h5, frame_rate: 10, end: 0.5 }
-imu: { enabled: true, rate_hz: 200 }
-events:
-  enabled: true
-  contrast_pos: 0.25
-  contrast_neg: 0.25
-  contrast_sigma: 0.03
-  refractory_us: 100
-  max_px_per_step: 0.5
-  supersample: 2
+cameras:
+  - path: /cam0
+    intrinsics: { model: pinhole, width: 640, height: 480, intrinsics: [420.0, 420.0, 319.5, 239.5], distortion: [-0.05, 0.01, 0.0, 0.0] }
+    frame_rate: 10
+    rgb: {}
+    depth: {}
+    flow: {}
+  - path: /dvs
+    intrinsics: { model: pinhole, width: 640, height: 480, intrinsics: [400.0, 400.0, 319.5, 239.5] }
+    extrinsics: { mount: nadir, translation: [0.0, 0.08, 0.0] }   # 8 cm right of cam0
+    frame_rate: 20         # rate of this camera's depth / flow
+    depth: {}
+    flow: {}
+    events:
+      contrast_pos: 0.25
+      contrast_neg: 0.25
+      contrast_sigma: 0.03
+      refractory_us: 100
+      max_px_per_step: 0.5
+      supersample: 2
+imu: { path: /imu, rate_hz: 200 }
+output: { file: out/events/seq.h5, end: 0.5 }

@@ -1,42 +1,52 @@
-//! One scenario YAML drives every subcommand. All sections are optional (defaults apply).
+//! One scenario YAML drives every subcommand:
 //!
 //! ```yaml
-//! world:      { seed: 7, ... }          # terragen::Config — procedural terrain
+//! world:      { seed: 7, ... }                  # terragen::Config — procedural terrain
 //! tiles:      { file: out/world.h5, max_zoom: 18, ... }
-//! camera:     { model: pinhole_radtan, width: 640, height: 512, fx: ..., ... }
-//! extrinsics: { mount: nadir, pitch_deg: 0, ... }
 //! trajectory: { file: out/traj.csv, synth: { kind: random, ... } }
-//! render:     { supersample: 3, shading: relit, lighting: {...}, ... }
-//! sensor:     { exposure: {...}, motion_blur: {...}, noise: {...}, ... }
-//! output:     { dir: out/seq, frame_rate: 10, png: true, h5: out/seq.h5, ... }
-//! events:     { enabled: false, contrast_pos: 0.25, ... }   # written into output.h5
-//! imu:        { enabled: true, rate_hz: 200, extrinsics: {...}, gyro: {...}, accel: {...} }
+//! render:     { supersample: 3, shading: relit, lighting: {...}, atmosphere: {...} }
+//! cameras:                                      # any number of cameras
+//!   - path: /cam0                               # HDF5 group of this camera
+//!     intrinsics: { model: pinhole, width: 640, height: 480, intrinsics: [...], distortion: [...] }
+//!     extrinsics: { mount: forward, pitch_deg: -30, translation: [0.4, 0, 0.1] }
+//!     frame_rate: 10
+//!     rgb: {}                                   # modalities: omitted = not produced
+//!     depth: {}
+//!     flow: {}
+//!     landcover: {}
+//!     events: {}
+//! imu: { path: /imu, rate_hz: 200, ... }        # omitted = no IMU
+//! output: { file: out/seq.h5, pose: { path: /pose, rate_hz: 200 }, ... }
 //! ```
-//! Relative paths are relative to the current working directory.
+//! Everything goes into one HDF5 file (layout in `output.rs`). Only group paths are
+//! configurable; dataset names inside a group are fixed. Relative file paths are relative to
+//! the current working directory.
 
 use crate::camera::{CameraConfig, Extrinsics};
+use crate::dynamics::SynthConfig;
+use crate::events::EventConfig;
+use crate::imu::ImuConfig;
 use crate::raster::RenderSettings;
 use crate::sensor::SensorSettings;
-use crate::dynamics::SynthConfig;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// Container defaults fill `world`, `tiles`, `trajectory`, `render` and `output`; `cameras`
+/// and `imu` are empty when omitted (the defaults below only serve as the `terrain config`
+/// template).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Scenario {
     pub world: terragen::Config,
     pub tiles: TilesConfig,
-    pub camera: CameraConfig,
-    pub extrinsics: Extrinsics,
     pub trajectory: TrajectoryConfig,
     pub render: RenderSettings,
-    pub sensor: SensorSettings,
+    #[serde(default)]
+    pub cameras: Vec<CameraSpec>,
+    #[serde(default)]
+    pub imu: Option<ImuConfig>,
     pub output: OutputConfig,
-    /// Event camera simulation (`terrain events`, or `run` when enabled).
-    pub events: crate::events::EventConfig,
-    /// Synthetic IMU (written with the frames into `output.h5`).
-    pub imu: crate::imu::ImuConfig,
 }
 
 impl Default for Scenario {
@@ -44,17 +54,120 @@ impl Default for Scenario {
         Scenario {
             world: terragen::Config::default(),
             tiles: TilesConfig::default(),
-            camera: CameraConfig::pinhole_hfov(640, 512, 70.0),
-            extrinsics: Extrinsics::default(),
             trajectory: TrajectoryConfig::default(),
             render: RenderSettings::default(),
-            sensor: SensorSettings::default(),
+            cameras: vec![CameraSpec::example()],
+            imu: Some(ImuConfig::default()),
             output: OutputConfig::default(),
-            events: crate::events::EventConfig::default(),
-            imu: crate::imu::ImuConfig::default(),
         }
     }
 }
+
+/// A camera: intrinsics, mounting on the body, HDF5 group, and the modalities it produces.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CameraSpec {
+    /// HDF5 group; calibration and every modality of this camera are written under it.
+    pub path: String,
+    /// Camera model in camodocal's schema (pinhole | pinhole_full | kannala_brandt | mei | scaramuzza).
+    pub intrinsics: CameraConfig,
+    /// Mounting on the body (FRD).
+    #[serde(default)]
+    pub extrinsics: Extrinsics,
+    /// Rate (Hz) of the frame modalities (rgb, depth, flow, landcover).
+    #[serde(default = "default_frame_rate")]
+    pub frame_rate: f64,
+    /// Delay (s) of this camera's first frame after the sequence start.
+    #[serde(default)]
+    pub time_offset: f64,
+    #[serde(default)]
+    pub rgb: Option<RgbModality>,
+    #[serde(default)]
+    pub depth: Option<DepthModality>,
+    #[serde(default)]
+    pub flow: Option<FlowModality>,
+    #[serde(default)]
+    pub landcover: Option<LandcoverModality>,
+    #[serde(default)]
+    pub events: Option<EventConfig>,
+}
+
+fn default_frame_rate() -> f64 {
+    10.0
+}
+
+impl CameraSpec {
+    pub fn example() -> Self {
+        CameraSpec {
+            path: "/cam0".into(),
+            intrinsics: CameraConfig::pinhole_hfov(640, 512, 70.0),
+            extrinsics: Extrinsics::default(),
+            frame_rate: 10.0,
+            time_offset: 0.0,
+            rgb: Some(RgbModality::default()),
+            depth: Some(DepthModality::default()),
+            flow: Some(FlowModality {}),
+            landcover: None,
+            events: None,
+        }
+    }
+
+    /// Does this camera produce frames (rgb, depth, flow or landcover)?
+    pub fn has_frames(&self) -> bool {
+        self.rgb.is_some() || self.depth.is_some() || self.flow.is_some() || self.landcover.is_some()
+    }
+
+    /// File-name friendly version of the path ("/ovc/left" → "ovc_left").
+    pub fn slug(&self) -> String {
+        let s: String = self.path.trim_matches('/').chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+        if s.is_empty() { "camera".into() } else { s }
+    }
+}
+
+/// HDF5 path without the leading slash (the h5 wrapper resolves paths from the root).
+pub fn h5path(p: &str) -> &str {
+    p.trim_start_matches('/')
+}
+
+/// Developed camera images: `rgb` u8 [N,H,W,3] (or [N,H,W] when `gray`) + `exposure`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RgbModality {
+    /// Store luma (Rec. 601) instead of RGB.
+    pub gray: bool,
+    /// Supersampling override for this camera (default: render.supersample).
+    pub supersample: Option<u32>,
+    /// Sensor model: auto exposure, motion blur, optics, noise, tone curve.
+    pub sensor: SensorSettings,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DepthKind {
+    /// z along the optical axis (OpenCV convention; negative beyond 90° on wide-angle models)
+    #[default]
+    Z,
+    /// distance along the pixel ray
+    Range,
+}
+
+/// `depth` f32 [N,H,W] in metres, +inf = sky.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DepthModality {
+    pub kind: DepthKind,
+}
+
+/// `flow` f32 [N,H,W,2]: forward flow to the next frame of the same camera (dx, dy) in px, and
+/// `flow_valid` u8 [N,H,W] (target visible). The last frame has zero, invalid flow.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FlowModality {}
+
+/// `landcover` u8 [N,H,W] class ids (255 = sky).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LandcoverModality {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -69,7 +182,7 @@ pub struct TilesConfig {
     pub plan_texel_px: f64,
     /// Neighbour tiles added around every planned tile (per zoom).
     pub margin: u32,
-    /// Plan with every n-th rendered frame.
+    /// Plan with every n-th frame of each camera.
     pub plan_every: usize,
     /// Generate tiles missing from the store while rendering (and write them back).
     pub lazy: bool,
@@ -107,109 +220,60 @@ impl Default for TrajectoryConfig {
     }
 }
 
+/// Body ground truth, written once for all sensors (camera pose = body pose ∘ T_body_cam).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PoseOutput {
+    pub path: String,
+    pub rate_hz: f64,
+}
+
+impl Default for PoseOutput {
+    fn default() -> Self {
+        PoseOutput { path: "/pose".into(), rate_hz: 200.0 }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct OutputConfig {
-    /// Directory for PNG/NPY outputs.
-    pub dir: PathBuf,
-    /// Camera frame rate (Hz); frames are rendered at t0 + k / frame_rate.
-    pub frame_rate: f64,
-    /// Time window (s, relative to the trajectory start); end = None renders to the end.
+    /// The sequence file (all cameras, IMU, body ground truth).
+    pub file: PathBuf,
+    /// Optional PNG / NPY export per camera (`<png_dir>/<camera>/rgb/000000.png`, ...).
+    pub png_dir: Option<PathBuf>,
+    /// Time window (s, relative to the trajectory start); end = None runs to the end.
     pub start: f64,
     pub end: Option<f64>,
-    /// Max number of frames (None = all).
+    /// Max frames per camera (None = all).
     pub max_frames: Option<usize>,
-    pub png: bool,
-    /// HDF5 dataset with images + GT (None = not written).
-    pub h5: Option<PathBuf>,
-    pub depth: bool,
-    /// Forward optical flow. Note: flow is exactly recomputable from depth + poses
-    /// (scripts/check_gt.py does so); disable it to save ~half of the file size.
-    pub flow: bool,
-    pub landcover: bool,
+    pub pose: PoseOutput,
     pub compression: Compression,
-    /// Group / dataset names of the per-sensor view in `output.h5` (frames, IMU, events).
-    pub layout: Layout,
 }
 
-/// Names of the per-sensor groups and datasets written into `output.h5`. The defaults follow
-/// the M3ED layout (what camodocal's H5 readers expect), but nothing is assumed: every path and
-/// name can be changed here.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Layout {
-    /// Write the per-sensor view at all.
-    pub enabled: bool,
-    /// Frame camera group; images at `<frames_group>/<frames_data>`, timestamps (µs) at
-    /// `frames_ts`, calibration under `<frames_group>/<calib_group>`.
-    pub frames_group: String,
-    pub frames_data: String,
-    pub frames_ts: String,
-    /// Images as grayscale u8 [N,H,W] (true) or RGB u8 [N,H,W,3].
-    pub frames_gray: bool,
-    /// IMU group and dataset names.
-    pub imu_group: String,
-    pub imu_ts: String,
-    pub imu_accel: String,
-    pub imu_gyro: String,
-    /// Event camera group and dataset names (x, y, t, p, per-ms index).
-    pub events_group: String,
-    pub events_x: String,
-    pub events_y: String,
-    pub events_t: String,
-    pub events_p: String,
-    pub events_ms_map: String,
-    /// Per-sensor calibration: group name (relative to the sensor group) and dataset names.
-    pub calib_group: String,
-    pub calib_intrinsics: String,
-    pub calib_distortion: String,
-    pub calib_resolution: String,
-    /// 4x4 row-major sensor → rig transform (rig = body FRD frame).
-    pub calib_transform: String,
-}
-
-impl Default for Layout {
+impl Default for OutputConfig {
     fn default() -> Self {
-        Layout {
-            enabled: true,
-            frames_group: "/ovc/left".into(),
-            frames_data: "data".into(),
-            frames_ts: "/ovc/ts".into(),
-            frames_gray: true,
-            imu_group: "/ovc/imu".into(),
-            imu_ts: "ts".into(),
-            imu_accel: "accel".into(),
-            imu_gyro: "omega".into(),
-            events_group: "/prophesee/left".into(),
-            events_x: "x".into(),
-            events_y: "y".into(),
-            events_t: "t".into(),
-            events_p: "p".into(),
-            events_ms_map: "ms_map_idx".into(),
-            calib_group: "calib".into(),
-            calib_intrinsics: "intrinsics".into(),
-            calib_distortion: "distortion_coeffs".into(),
-            calib_resolution: "resolution".into(),
-            calib_transform: "T_to_prophesee_left".into(),
+        OutputConfig {
+            file: PathBuf::from("out/seq.h5"),
+            png_dir: None,
+            start: 0.0,
+            end: None,
+            max_frames: None,
+            pose: PoseOutput::default(),
+            compression: Compression::default(),
         }
     }
 }
 
-/// HDF5 path without the leading slash (our wrapper resolves paths from the root).
-pub fn h5path(p: &str) -> &str {
-    p.trim_start_matches('/')
-}
-
-/// HDF5 compression of the sequence file (shuffle + deflate, i.e. h5py `compression="gzip",
-/// shuffle=True`), with optional lossy mantissa rounding of the float GT (depth, flow).
+/// HDF5 compression (shuffle + deflate, i.e. h5py `compression="gzip", shuffle=True`), with
+/// optional lossy mantissa rounding of the float ground truth (depth, flow).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Compression {
     /// deflate level 0..9
     pub level: u8,
     /// Keep this many of the 23 f32 mantissa bits in depth / flow (None = lossless).
-    /// 16 bits: max relative error 7.6e-6 (7.6 mm at 1 km, 1e-4 px on 10 px of flow), files
-    /// ~35-40% smaller; 12 bits: 1.2e-4, ~55% smaller. Applied to the NPY outputs as well.
+    /// 16 bits: max relative error 7.6e-6 (7.6 mm at 1 km), ~35-40% smaller float datasets;
+    /// 12 bits: 1.2e-4, ~55% smaller. Applied to the NPY export as well.
     pub float_keep_bits: Option<u8>,
 }
 
@@ -219,40 +283,75 @@ impl Default for Compression {
     }
 }
 
-impl Default for OutputConfig {
-    fn default() -> Self {
-        OutputConfig {
-            dir: PathBuf::from("out/seq"),
-            frame_rate: 10.0,
-            start: 0.0,
-            end: None,
-            max_frames: None,
-            png: true,
-            h5: Some(PathBuf::from("out/seq.h5")),
-            depth: true,
-            flow: true,
-            landcover: true,
-            compression: Compression::default(),
-            layout: Layout::default(),
-        }
-    }
-}
-
 impl Scenario {
     pub fn load(path: &Path) -> Result<Self> {
         let s = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        if s.trim().is_empty() {
-            return Ok(Scenario::default());
-        }
-        serde_yaml::from_str(&s).with_context(|| format!("parsing {}", path.display()))
+        let scn: Scenario = if s.trim().is_empty() { Scenario::default() } else { serde_yaml::from_str(&s).with_context(|| format!("parsing {}", path.display()))? };
+        scn.validate().with_context(|| format!("checking {}", path.display()))?;
+        Ok(scn)
     }
+
     pub fn load_or_default(path: Option<&Path>) -> Result<Self> {
         match path {
             Some(p) => Self::load(p),
             None => Ok(Scenario::default()),
         }
     }
+
     pub fn to_yaml(&self) -> String {
         serde_yaml::to_string(self).unwrap_or_default()
+    }
+
+    /// Paths must be absolute and must not collide; models must build.
+    pub fn validate(&self) -> Result<()> {
+        let mut groups: Vec<(&str, String)> = vec![("output.pose", self.output.pose.path.clone())];
+        if let Some(imu) = &self.imu {
+            groups.push(("imu", imu.path.clone()));
+        }
+        for c in &self.cameras {
+            groups.push(("camera", c.path.clone()));
+            if c.has_frames() && c.frame_rate <= 0.0 {
+                bail!("camera {}: frame_rate must be > 0", c.path);
+            }
+            c.intrinsics.build().with_context(|| format!("camera {}", c.path))?;
+        }
+        for (i, (what, p)) in groups.iter().enumerate() {
+            if !p.starts_with('/') || p.len() < 2 {
+                bail!("{what} path '{p}' must be an absolute HDF5 group such as /cam0");
+            }
+            for (_, q) in &groups[..i] {
+                let (a, b) = (p.trim_end_matches('/'), q.trim_end_matches('/'));
+                if a == b || a.starts_with(&format!("{b}/")) || b.starts_with(&format!("{a}/")) {
+                    bail!("HDF5 groups '{p}' and '{q}' overlap");
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn omitted_modalities_are_off() {
+        let s: Scenario = serde_yaml::from_str(
+            "cameras:\n  - path: /ev\n    intrinsics: { model: pinhole, width: 64, height: 48, intrinsics: [50, 50, 32, 24] }\n    events: {}\n    flow: {}\n",
+        )
+        .unwrap();
+        s.validate().unwrap();
+        let c = &s.cameras[0];
+        assert!(c.events.is_some() && c.flow.is_some());
+        assert!(c.rgb.is_none() && c.depth.is_none() && c.landcover.is_none());
+        assert!(s.imu.is_none());
+        assert!(serde_yaml::from_str::<Scenario>("{}").unwrap().cameras.is_empty());
+    }
+
+    #[test]
+    fn overlapping_groups_are_rejected() {
+        let mut s = Scenario::default();
+        s.cameras.push(CameraSpec { path: "/cam0/sub".into(), ..CameraSpec::example() });
+        assert!(s.validate().is_err());
     }
 }

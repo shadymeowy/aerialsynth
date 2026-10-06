@@ -1,8 +1,9 @@
 """Camera models of camodocal's calib/camera.cpp (camodocal formulas), vectorized with numpy.
 
-Independent re-implementation used to validate rendered ground truth. `Camera.from_attrs` reads
-the `camera` group attributes of a sequence HDF5 (model, intrinsics, distortion, xi,
-max_fov_deg, inv_poly, affine, center). project(P[...,3]) -> (u, v); unproject(u, v) -> unit rays.
+Independent re-implementation used to validate rendered ground truth. `Camera.from_calib` reads
+a camera's `calib` group of a sequence HDF5 (its `camera_yaml` attribute, camodocal schema:
+model, intrinsics, distortion, xi, max_fov_deg, inv_poly, affine, center).
+project(P[...,3]) -> (u, v); unproject(u, v) -> unit rays.
 """
 import numpy as np
 
@@ -44,12 +45,17 @@ class Camera:
         self.center = np.asarray(center, float)
 
     @classmethod
-    def from_attrs(cls, a):
-        g = lambda k, d=(): np.array(a[k]) if k in a else np.array(d)
-        model = a["model"]
-        model = model.decode() if isinstance(model, bytes) else str(model)
-        return cls(model, g("intrinsics"), g("distortion"), float(a.get("xi", 0.0)), float(a.get("max_fov_deg", 0.0)),
-                   g("inv_poly"), g("affine"), g("center"))
+    def from_dict(cls, c):
+        d = c.get("distortion") or [0.0] * (8 if c["model"] == "pinhole_full" else 4)  # omitted = none
+        return cls(c["model"], c.get("intrinsics", ()), d, c.get("xi", 0.0), c.get("max_fov_deg", 0.0),
+                   c.get("inv_poly", ()), c.get("affine", ()), c.get("center", ()))
+
+    @classmethod
+    def from_calib(cls, calib):
+        """`calib` = an h5py group `<camera>/calib`."""
+        import yaml
+        y = calib.attrs["camera_yaml"]
+        return cls.from_dict(yaml.safe_load(y.decode() if isinstance(y, bytes) else y))
 
     # ---------------------------------------------------------------- forward
     def project(self, P):

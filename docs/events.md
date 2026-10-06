@@ -7,10 +7,8 @@ changed by a contrast threshold `C` since that pixel's last event. Polarity `p` 
 brighter and OFF for darker. Timestamps have µs resolution, and data rates run from ~0.1 to
 tens of Mev/s.
 
-Datasets store events as parallel arrays:
-
-- **M3ED / DSEC:** `x, y (u16), t (µs, i64), p (0/1)` plus an `ms_map_idx` index.
-- **camodocal:** reads the same layout through `io/h5_source.cpp`.
+Datasets (M3ED, DSEC, ...) store events as parallel arrays `x, y (u16), t (µs, i64), p (0/1)`
+plus a per-millisecond index; we use the same data types.
 
 ## Options considered
 
@@ -59,24 +57,35 @@ Unit tests (`cargo test -p render events`):
 
 ## Using it
 
+Any camera becomes an event camera by giving it an `events` subsection (all fields optional,
+see `terrain config`). It keeps its own intrinsics and extrinsics, and can carry `depth` and
+`flow` ground truth at its `frame_rate` as well:
+
+```yaml
+cameras:
+  - path: /dvs
+    intrinsics: { model: pinhole, width: 640, height: 480, intrinsics: [400, 400, 319.5, 239.5] }
+    extrinsics: { mount: nadir, translation: [0, 0.08, 0] }
+    frame_rate: 20
+    depth: {}
+    flow: {}
+    events: { contrast_pos: 0.25, contrast_neg: 0.25, supersample: 2 }
 ```
-terrain events -c configs/events.yaml        # or `run` with events.enabled: true
-python scripts/view_events.py out/events/events.h5 view.png --window-ms 5
+
+```
+terrain run -c configs/events.yaml           # render (poses, IMU, frames), then events
+terrain events -c configs/events.yaml        # (re)simulate only the events into the existing file
+python scripts/view_events.py out/events/seq.h5 view.png --camera /dvs --window-ms 5
 ```
 
-Everything is set in the scenario `events:` section, including an optional separate event
-`camera` (camodocal schema) and `extrinsics`.
+Output, in the sequence file:
 
-Output: into `output.h5` by default (`events.h5` gives a separate file), with group and dataset
-names from `output.layout`. The defaults are:
-
-- `/prophesee/left/{x,y,t,p}`: `t` in µs relative to `/prophesee/left.attrs.t0_us`; `p` is 1 for
-  ON and 0 for OFF.
-- `/prophesee/left/ms_map_idx`: index of the first event of every ms, plus one closing entry.
-- `/prophesee/left/calib/{intrinsics, distortion_coeffs, resolution, T_to_prophesee_left}`,
-  plus the full camodocal camera YAML in an attribute.
-- `/gt_events/{t, cam_position_ecef, cam_q_ecef}`: the camera pose at every internal render step.
-  Poses at any other time come from the trajectory file.
+- `<camera>/events/{x, y, t, p}`: `t` in µs since the sequence start (the clock shared with
+  frames, IMU and `/pose`); `p` is 1 for ON and 0 for OFF.
+- `<camera>/events/ms_index`: index of the first event of every ms, plus one closing entry, so
+  the events of ms `m` are `[ms_index[m], ms_index[m+1])`.
+- `<camera>/calib/`: intrinsics, distortion, resolution and `T_body_cam`; the event camera's pose
+  at any time is the `/pose` body pose composed with `T_body_cam`.
 
 Performance on 8 cores (VGA, supersample 2, `max_px_per_step` 0.5, ~1000 m AGL flight with
 vibration): about 60 s of compute per simulated second, at ~300 internal renders/s. Two knobs
@@ -96,6 +105,6 @@ time.
 
 ## Possible next steps
 
-- **Stereo events:** a second event camera via an extra `events.camera` / `extrinsics` pair
-  (camodocal's reader expects `left`/`right` groups for stereo).
+- **Shared renders:** two event cameras with the same intrinsics and mounting could share the
+  internal renders (today each camera is simulated on its own).
 - **Fast modes B/C** for long sequences.

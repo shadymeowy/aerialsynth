@@ -114,16 +114,23 @@ impl CameraConfig {
         }
         let (w, h) = (self.width, self.height);
         let i = &self.intrinsics;
-        let d = &self.distortion;
+        // omitted distortion = none
+        let dist = |n: usize| -> Result<Vec<f64>> {
+            if self.distortion.is_empty() {
+                return Ok(vec![0.0; n]);
+            }
+            need(&self.distortion, n, "distortion")?;
+            Ok(self.distortion.clone())
+        };
         Ok(match self.model.as_str() {
             "pinhole" => {
                 need(i, 4, "intrinsics")?;
-                need(d, 4, "distortion")?;
+                let d = dist(4)?;
                 Arc::new(Cam::new(Pinhole { fx: i[0], fy: i[1], cx: i[2], cy: i[3], k1: d[0], k2: d[1], p1: d[2], p2: d[3] }, w, h))
             }
             "pinhole_full" => {
                 need(i, 4, "intrinsics")?;
-                need(d, 8, "distortion")?;
+                let d = dist(8)?;
                 Arc::new(Cam::new(
                     PinholeFull { fx: i[0], fy: i[1], cx: i[2], cy: i[3], k1: d[0], k2: d[1], p1: d[2], p2: d[3], k3: d[4], k4: d[5], k5: d[6], k6: d[7] },
                     w,
@@ -132,7 +139,7 @@ impl CameraConfig {
             }
             "kannala_brandt" => {
                 need(i, 4, "intrinsics")?;
-                need(d, 4, "distortion")?;
+                let d = dist(4)?;
                 let max_theta = if self.max_fov_deg > 0.0 { self.max_fov_deg * PI / 360.0 } else { PI };
                 Arc::new(Cam::new(
                     KannalaBrandt { mu: i[0], mv: i[1], u0: i[2], v0: i[3], k2: d[0], k3: d[1], k4: d[2], k5: d[3], max_theta, max_fov_deg: self.max_fov_deg },
@@ -142,7 +149,7 @@ impl CameraConfig {
             }
             "mei" => {
                 need(i, 4, "intrinsics")?;
-                need(d, 4, "distortion")?;
+                let d = dist(4)?;
                 Arc::new(Cam::new(Mei { gamma1: i[0], gamma2: i[1], u0: i[2], v0: i[3], xi: self.xi, k1: d[0], k2: d[1], p1: d[2], p2: d[3] }, w, h))
             }
             "scaramuzza" => {
@@ -689,27 +696,6 @@ impl Extrinsics {
     }
     pub fn t_body_cam(&self) -> DVec3 {
         DVec3::from_array(self.translation)
-    }
-}
-
-/// Camera rig description (YAML).
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct RigConfig {
-    pub camera: CameraConfig,
-    #[serde(default)]
-    pub extrinsics: Extrinsics,
-}
-
-impl Default for RigConfig {
-    fn default() -> Self {
-        RigConfig { camera: CameraConfig::pinhole_hfov(640, 512, 70.0), extrinsics: Extrinsics::default() }
-    }
-}
-
-impl RigConfig {
-    pub fn from_file(path: &std::path::Path) -> Result<Self> {
-        Ok(serde_yaml::from_str(&std::fs::read_to_string(path)?)?)
     }
 }
 

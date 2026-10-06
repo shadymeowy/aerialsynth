@@ -98,14 +98,13 @@ fn load_poses(s: &Scenario) -> Result<Vec<render::Pose>> {
 
 fn plan_tiles(s: &Scenario, gen: &Generator) -> Result<BTreeSet<TileId>> {
     let poses = load_poses(s)?;
-    let model = s.camera.build()?;
     let t0 = std::time::Instant::now();
-    let set = pipeline::plan(s, &poses, Some(gen), model.as_ref());
+    let set = pipeline::plan(s, &poses, Some(gen))?;
     let mut per_zoom = std::collections::BTreeMap::new();
     for t in &set {
         *per_zoom.entry(t.z).or_insert(0usize) += 1;
     }
-    eprintln!("planned {} tiles in {:.2}s: {:?}", set.len(), t0.elapsed().as_secs_f64(), per_zoom);
+    eprintln!("planned {} tiles for {} camera(s) in {:.2}s: {:?}", set.len(), s.cameras.len(), t0.elapsed().as_secs_f64(), per_zoom);
     Ok(set)
 }
 
@@ -210,32 +209,40 @@ pub struct RenderArgs {
     pub lazy: bool,
 }
 
-fn do_render(s: &Scenario) -> Result<()> {
-    let poses = load_poses(s)?;
-    let gen = Arc::new(Generator::new(s.world.clone()));
+fn open_store(s: &Scenario, gen: &Generator) -> Result<Arc<TileStore>> {
     let store = if s.tiles.lazy {
-        pipeline::open_or_create_store(s, &gen)?
+        pipeline::open_or_create_store(s, gen)?
     } else {
         TileStore::open(&s.tiles.file).with_context(|| "opening tile store (run `terrain gen` first, or use --lazy)")?
     };
-    let store = Arc::new(store);
+    Ok(Arc::new(store))
+}
+
+fn do_render(s: &Scenario) -> Result<()> {
+    if s.cameras.is_empty() && s.imu.is_none() {
+        bail!("nothing to render: the scenario has no `cameras` and no `imu`");
+    }
+    let poses = load_poses(s)?;
+    let gen = Arc::new(Generator::new(s.world.clone()));
+    let store = open_store(s, &gen)?;
     let b = bar(0, "render");
+    b.set_style(ProgressStyle::with_template("render {msg:12} {bar:40} {pos}/{len} [{elapsed_precise} < {eta_precise}] {per_sec}").unwrap());
     let t0 = std::time::Instant::now();
-    pipeline::render_sequence(s, &poses, store, Some(gen), &|done, total| {
+    let rep = pipeline::render_sequence(s, &poses, store, Some(gen), &|cam, done, total| {
+        b.set_message(cam.to_string());
         b.set_length(total as u64);
         b.set_position(done as u64);
     })?;
     b.finish();
-    if s.imu.enabled && s.output.h5.is_some() {
-        let n = pipeline::write_imu(s, &poses, &s.trajectory.file)?;
-        eprintln!("imu: {n} samples at {} Hz → {}{}", s.imu.rate_hz, s.output.h5.as_ref().unwrap().display(), s.output.layout.imu_group);
+    let out = s.output.file.display();
+    eprintln!("rendered in {:.1}s → {out}", t0.elapsed().as_secs_f64());
+    eprintln!("  {}: {} body poses at {} Hz", s.output.pose.path, rep.pose_samples, s.output.pose.rate_hz);
+    if let (Some(imu), Some(n)) = (&s.imu, rep.imu_samples) {
+        eprintln!("  {}: {n} IMU samples at {} Hz", imu.path, imu.rate_hz);
     }
-    eprintln!(
-        "rendered in {:.1}s → {}{}",
-        t0.elapsed().as_secs_f64(),
-        if s.output.png { s.output.dir.display().to_string() } else { String::new() },
-        s.output.h5.as_ref().map(|p| format!(" + {}", p.display())).unwrap_or_default()
-    );
+    for (cam, n) in &rep.frames {
+        eprintln!("  {cam}: {n} frames");
+    }
     Ok(())
 }
 
@@ -248,22 +255,24 @@ pub fn render(a: RenderArgs) -> Result<()> {
 }
 
 fn do_events(s: &Scenario) -> Result<()> {
+    if !s.cameras.iter().any(|c| c.events.is_some()) {
+        bail!("no camera has an `events` modality");
+    }
     let poses = load_poses(s)?;
     let gen = Arc::new(Generator::new(s.world.clone()));
-    let store = if s.tiles.lazy {
-        pipeline::open_or_create_store(s, &gen)?
-    } else {
-        TileStore::open(&s.tiles.file).with_context(|| "opening tile store (run `terrain gen` first, or use --lazy)")?
-    };
+    let store = open_store(s, &gen)?;
     let b = ProgressBar::new(1000);
-    b.set_style(ProgressStyle::with_template("events {bar:40} {percent}% [{elapsed_precise} < {eta_precise}]").unwrap());
+    b.set_style(ProgressStyle::with_template("events {msg:12} {bar:40} {percent}% [{elapsed_precise} < {eta_precise}]").unwrap());
     let t0 = std::time::Instant::now();
-    let n = pipeline::render_events(s, &poses, Arc::new(store), Some(gen), &|done, total| {
+    let res = pipeline::render_events(s, &poses, store, Some(gen), &|cam, done, total| {
+        b.set_message(cam.to_string());
         b.set_position((1000.0 * done / total.max(1e-9)) as u64);
     })?;
     b.finish();
-    let dst = s.events.h5.clone().or(s.output.h5.clone()).unwrap_or_default();
-    eprintln!("simulated {n} events in {:.1}s → {}{}", t0.elapsed().as_secs_f64(), dst.display(), s.output.layout.events_group);
+    eprintln!("simulated events in {:.1}s → {}", t0.elapsed().as_secs_f64(), s.output.file.display());
+    for (cam, n) in &res {
+        eprintln!("  {cam}/events: {n} events");
+    }
     Ok(())
 }
 
@@ -294,7 +303,7 @@ pub fn run(a: RunArgs) -> Result<()> {
     gen_tiles(&s, &gen, tiles.into_iter().collect(), false)?;
     drop(gen);
     do_render(&s)?;
-    if s.events.enabled {
+    if s.cameras.iter().any(|c| c.events.is_some()) {
         do_events(&s)?;
     }
     Ok(())
@@ -326,12 +335,17 @@ pub fn info(a: InfoArgs) -> Result<()> {
     let f = h5::File::open(&a.file)?;
     use h5::Attrs;
     println!("{} (format {:?})", a.file.display(), f.attr_str("format").unwrap_or_default());
-    for name in f.member_names()? {
-        if let Ok(ds) = f.dataset(&name) {
-            println!("  {name}: {:?}", ds.shape()?);
-        } else {
-            println!("  {name}/");
+    fn walk(g: &h5::Group, prefix: &str, depth: usize) -> Result<()> {
+        for name in g.member_names()? {
+            let path = format!("{prefix}/{name}");
+            if let Ok(ds) = g.dataset(&name) {
+                println!("{}{path}: {:?}", "  ".repeat(depth), ds.shape()?);
+            } else {
+                println!("{}{path}/", "  ".repeat(depth));
+                walk(&g.group(&name)?, &path, depth + 1)?;
+            }
         }
+        Ok(())
     }
-    Ok(())
+    walk(&f, "", 1)
 }

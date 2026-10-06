@@ -5,7 +5,8 @@
 //! rate − WGS84 normal gravity, integrated at 1 kHz). For trajectories without those columns
 //! the truth is derived numerically from the poses (lower fidelity).
 //!
-//! Output names come from `output.layout` (defaults: M3ED-like `/ovc/imu/{ts,accel,omega}`).
+//! Output: `<imu.path>/{t, accel, gyro, gt_accel, gt_gyro, gt_bias_accel, gt_bias_gyro}` and
+//! `calib/T_body_imu`, on the sequence clock (i64 µs since the sequence start).
 //!
 //! Sensor model per axis (gyro and accelerometer alike):
 //!     y = sat( (I + M) (1 + s) x_true + b + n ),   b_{k+1} = b_k + σ_bw √Δt ξ,   n ~ σ_n √f_s ξ
@@ -20,7 +21,6 @@ use geodesy::Ellipsoid;
 use glam::{DMat3, DQuat, DVec3};
 use h5::Attrs;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 
 /// Noise / error parameters of one sensor triad. When given in YAML, all fields are required
 /// (gyro and accel have different defaults); omit the block to keep the defaults.
@@ -65,7 +65,8 @@ impl ImuExtrinsics {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ImuConfig {
-    pub enabled: bool,
+    /// HDF5 group of the IMU.
+    pub path: String,
     pub rate_hz: f64,
     pub extrinsics: ImuExtrinsics,
     pub gyro: ImuNoise,
@@ -76,7 +77,7 @@ pub struct ImuConfig {
 impl Default for ImuConfig {
     fn default() -> Self {
         ImuConfig {
-            enabled: true,
+            path: "/imu".into(),
             rate_hz: 200.0,
             extrinsics: ImuExtrinsics::default(),
             // typical tactical/consumer MEMS (EuRoC ADIS16448-like)
@@ -220,51 +221,39 @@ pub fn synthesize(cfg: &ImuConfig, poses: &[Pose], truth: Option<&[ImuTruth]>, e
     Ok(d)
 }
 
-/// Rigid transform sensor → body (row-major 4x4) for the M3ED `T_to_prophesee_left` datasets;
-/// in our files the common rig frame is the body (FRD).
-pub fn t_body_sensor(r: DMat3, t: DVec3) -> [f64; 16] {
-    let c = r.to_cols_array_2d(); // columns
-    [c[0][0], c[1][0], c[2][0], t.x, c[0][1], c[1][1], c[2][1], t.y, c[0][2], c[1][2], c[2][2], t.z, 0.0, 0.0, 0.0, 1.0]
-}
-
-/// Write `/ovc/imu` (M3ED / camodocal layout) into an existing HDF5 file. Times are µs relative to
-/// `t0` (the sequence start), the same clock as frames and events.
-pub fn write_h5(path: &Path, cfg: &ImuConfig, layout: &crate::scenario::Layout, d: &ImuData, t0: f64) -> Result<()> {
-    let file = h5::File::open_rw(path)?;
-    let gname = crate::scenario::h5path(&layout.imu_group);
-    if file.exists(gname) {
-        file.delete(gname)?;
-    }
-    let g = file.ensure_group(gname)?;
+/// Write the IMU group into the sequence file. `t0` = trajectory time of the sequence start.
+pub fn write_h5(f: &h5::File, cfg: &ImuConfig, d: &ImuData, t0: f64) -> Result<()> {
+    use crate::output::{fresh_group, to_us, transform_4x4};
+    let g = fresh_group(f, &cfg.path)?;
     let n = d.t.len();
-    let ts: Vec<i64> = d.t.iter().map(|t| ((t - t0) * 1e6).round() as i64).collect();
-    g.new_dataset::<i64>().shape(&[n]).create(&layout.imu_ts)?.write_all(&ts)?;
+    let ts: Vec<i64> = d.t.iter().map(|t| to_us(*t, t0)).collect();
+    g.new_dataset::<i64>().shape(&[n]).create("t")?.write_all(&ts)?;
     let put = |name: &str, v: &[DVec3]| -> Result<()> {
         let flat: Vec<f64> = v.iter().flat_map(|x| x.to_array()).collect();
         g.new_dataset::<f64>().shape(&[n, 3]).chunk(&[n.clamp(1, 4096), 3]).deflate(4).create(name)?.write_all(&flat)?;
         Ok(())
     };
-    put(&layout.imu_accel, &d.accel)?;
-    put(&layout.imu_gyro, &d.omega)?;
+    put("accel", &d.accel)?;
+    put("gyro", &d.omega)?;
     put("gt_accel", &d.gt_accel)?;
-    put("gt_omega", &d.gt_omega)?;
+    put("gt_gyro", &d.gt_omega)?;
     put("gt_bias_accel", &d.bias_accel)?;
     put("gt_bias_gyro", &d.bias_gyro)?;
-    let c = g.ensure_group(&layout.calib_group)?;
-    let t = t_body_sensor(cfg.extrinsics.r_body_imu(), DVec3::from_array(cfg.extrinsics.translation));
-    c.new_dataset::<f64>().shape(&[4, 4]).create(&layout.calib_transform)?.write_all(&t)?;
-    g.set_attr("update_rate", cfg.rate_hz)?;
-    g.set_attr("gyroscope_noise_density", cfg.gyro.noise_density)?;
-    g.set_attr("gyroscope_random_walk", cfg.gyro.random_walk)?;
-    g.set_attr("accelerometer_noise_density", cfg.accel.noise_density)?;
-    g.set_attr("accelerometer_random_walk", cfg.accel.random_walk)?;
-    g.set_attr_str("config", &serde_yaml::to_string(cfg)?)?;
+    let c = g.ensure_group("calib")?;
+    let t = transform_4x4(cfg.extrinsics.r_body_imu(), DVec3::from_array(cfg.extrinsics.translation));
+    c.new_dataset::<f64>().shape(&[4, 4]).create("T_body_imu")?.write_all(&t)?;
+    c.set_attr("rate_hz", cfg.rate_hz)?;
+    c.set_attr("gyroscope_noise_density", cfg.gyro.noise_density)?;
+    c.set_attr("gyroscope_random_walk", cfg.gyro.random_walk)?;
+    c.set_attr("accelerometer_noise_density", cfg.accel.noise_density)?;
+    c.set_attr("accelerometer_random_walk", cfg.accel.random_walk)?;
+    c.set_attr_str("imu_yaml", &serde_yaml::to_string(cfg)?)?;
     g.set_attr_str(
         "conventions",
-        "timestamps: µs since the sequence start (same clock as the frame / event groups); accel: specific force (m/s²), gyro: angular rate w.r.t. inertial space (rad/s), both in the IMU frame; gt_* = error-free values; calib transform = IMU→rig (rig = body FRD)",
+        "t: i64 µs since the sequence start; accel: specific force (m/s²), gyro: angular rate w.r.t. inertial space (rad/s), both in the IMU frame; \
+         gt_* = error-free values and the true biases; calib/T_body_imu = row-major 4x4 IMU → body (FRD)",
     )?;
     g.set_attr("truth_from_simulator", d.from_truth_columns as i32)?;
-    file.flush()?;
     Ok(())
 }
 

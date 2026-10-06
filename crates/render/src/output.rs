@@ -1,76 +1,60 @@
-//! Dataset writers: PNG/NPY directory and a single HDF5 file.
+//! Sequence file writer. One HDF5 file per sequence; group paths come from the scenario,
+//! dataset names are fixed:
 //!
-//! Per frame k (all at the mid-exposure pose):
-//! * `rgb`         u8  [H,W,3]  developed camera image
-//! * `depth`       f32 [H,W]    z-depth along the optical axis (m), +inf = sky
-//! * `flow`        f32 [H,W,2]  forward optical flow k → k+1 (px, (dx, dy)); last frame = 0
-//! * `flow_valid`  u8  [H,W]    1 where the flow target is visible in frame k+1
-//! * `landcover`   u8  [H,W]    class id (255 = sky)
-//! Pose conventions: camera frame OpenCV (x right, y down, z forward); `q_*` are [w, x, y, z]
-//! Hamilton quaternions rotating camera-frame vectors into the named frame.
+//! ```text
+//! /                       attrs: format, scenario (YAML), conventions, t0 (trajectory time, s)
+//! <output.pose.path>/     body ground truth at output.pose.rate_hz
+//!     t                   i64 [M]     µs since the sequence start
+//!     position_ecef       f64 [M,3]   m
+//!     q_ecef_body         f64 [M,4]   [w,x,y,z], body (FRD) → ECEF
+//!     lla                 f64 [M,3]   lat°, lon°, h (m above the ellipsoid)
+//!     q_ned_body          f64 [M,4]   body → local NED
+//!     position_ned0       f64 [M,3]   in the NED frame at the first pose (attr ned0_origin_lla)
+//!     q_ned0_body         f64 [M,4]
+//!     sun_azimuth_deg, sun_elevation_deg, lights   f64 [M]   scene lighting
+//! <camera.path>/
+//!     calib/              intrinsics [4] (4-parameter models), distortion_coeffs, resolution
+//!                         i64 [2] = (W, H), T_body_cam f64 [4,4] row-major camera → body;
+//!                         attrs model, camera_yaml (full camodocal camera description)
+//!     t                   i64 [N]     frame timestamps (µs since the sequence start)
+//!     pose/               camera pose at the frame times: position_ecef [N,3], q_ecef_cam [N,4]
+//!     rgb                 u8  [N,H,W,3] (or [N,H,W] gray)     ← rgb
+//!     exposure            f64 [N,3]   exposure time (s), gain, EV  ← rgb
+//!     depth               f32 [N,H,W] m, +inf = sky           ← depth
+//!     flow                f32 [N,H,W,2] to the next frame (px) ← flow
+//!     flow_valid          u8  [N,H,W]
+//!     landcover           u8  [N,H,W] (255 = sky)              ← landcover
+//!     events/             x, y u16, t i64 µs, p i8 (1 = ON), ms_index u64  ← events (events.rs)
+//! <imu.path>/             t, accel, gyro, gt_*, calib/T_body_imu  (imu.rs)
+//! ```
+//! Frames are stamped at mid-exposure. Camera frame: OpenCV (x right, y down, z forward).
 
-use crate::camera::{CameraConfig, Extrinsics};
+use crate::camera::CameraConfig;
+use crate::scenario::{h5path, Compression, DepthKind, Scenario};
+use crate::trajectory::{CamPose, Pose};
 use anyhow::Result;
-use glam::{DQuat, DVec3};
+use geodesy::Ellipsoid;
+use glam::{DMat3, DQuat, DVec3};
 use h5::Attrs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// Everything written for one frame.
-pub struct FrameRecord<'a> {
-    pub index: usize,
-    pub t: f64,
-    pub rgb: &'a [u8],
-    pub depth: &'a [f32],
-    pub flow: &'a [f32],
-    pub flow_valid: &'a [u8],
-    pub landcover: &'a [u8],
-    pub pose: PoseRecord,
-    pub exposure_time: f64,
-    pub gain: f64,
-    pub ev: f64,
-    pub sun_elevation: f64,
-    pub sun_azimuth: f64,
-}
+pub const FORMAT: &str = "terrain-sequence";
+pub const FORMAT_VERSION: i32 = 2;
 
-#[derive(Clone, Copy, Debug)]
-pub struct PoseRecord {
-    pub cam_ecef: DVec3,
-    pub q_ecef_cam: DQuat,
-    /// camera position (lat deg, lon deg, h m)
-    pub cam_lla: [f64; 3],
-    /// camera position in the local NED frame of the first camera position
-    pub cam_ned0: DVec3,
-    pub q_ned0_cam: DQuat,
-    /// body attitude (body → local NED at the body)
-    pub q_ned_body: DQuat,
-    pub body_lla: [f64; 3],
-}
-
-fn q4(q: DQuat) -> [f64; 4] {
+pub fn q4(q: DQuat) -> [f64; 4] {
     [q.w, q.x, q.y, q.z]
 }
 
-/// Per-sensor calibration under `<sensor group>/<layout.calib_group>`: intrinsics (4, when the
-/// model has them), distortion, resolution, sensor → rig transform (row-major 4x4), and the full
-/// camera description (camodocal YAML schema) as attributes.
-pub fn write_sensor_calib(g: &h5::Group, layout: &crate::scenario::Layout, cam: &CameraConfig, t_rig: [f64; 16]) -> Result<()> {
-    if g.exists(&layout.calib_group) {
-        g.delete(&layout.calib_group)?;
-    }
-    let c = g.ensure_group(&layout.calib_group)?;
-    if cam.intrinsics.len() == 4 {
-        c.new_dataset::<f64>().shape(&[4]).create(&layout.calib_intrinsics)?.write_all(&cam.intrinsics)?;
-    }
-    if !cam.distortion.is_empty() {
-        c.new_dataset::<f64>().shape(&[cam.distortion.len()]).create(&layout.calib_distortion)?.write_all(&cam.distortion)?;
-    }
-    c.new_dataset::<i64>().shape(&[2]).create(&layout.calib_resolution)?.write_all(&[cam.width as i64, cam.height as i64])?;
-    c.new_dataset::<f64>().shape(&[4, 4]).create(&layout.calib_transform)?.write_all(&t_rig)?;
-    c.set_attr_str("camera_model", &cam.model)?;
-    c.set_attr_str("camera_yaml", &serde_yaml::to_string(cam)?)?;
-    c.set_attr_str("transform_convention", "row-major 4x4: sensor frame → rig frame (rig = body FRD)")?;
-    Ok(())
+/// Sequence clock: µs since `t0` (trajectory time of the sequence start).
+pub fn to_us(t: f64, t0: f64) -> i64 {
+    ((t - t0) * 1e6).round() as i64
+}
+
+/// Rigid transform (rotation `r`, translation `t`) as a row-major 4x4.
+pub fn transform_4x4(r: DMat3, t: DVec3) -> [f64; 16] {
+    let c = r.to_cols_array_2d();
+    [c[0][0], c[1][0], c[2][0], t.x, c[0][1], c[1][1], c[2][1], t.y, c[0][2], c[1][2], c[2][2], t.z, 0.0, 0.0, 0.0, 1.0]
 }
 
 /// Round f32 values to `keep` mantissa bits (round-to-nearest; inf/nan untouched). Relative
@@ -86,6 +70,232 @@ pub fn round_mantissa(v: &mut [f32], keep: u8) {
         if x.is_finite() {
             *x = f32::from_bits((x.to_bits().wrapping_add(half)) & mask);
         }
+    }
+}
+
+fn ensure_parent(path: &Path) -> Result<()> {
+    if let Some(p) = path.parent() {
+        if !p.as_os_str().is_empty() {
+            std::fs::create_dir_all(p)?;
+        }
+    }
+    Ok(())
+}
+
+/// Create (truncate) the sequence file and write the root attributes.
+pub fn create_file(scn: &Scenario, t0: f64) -> Result<h5::File> {
+    let path = &scn.output.file;
+    ensure_parent(path)?;
+    let f = h5::File::create(path)?;
+    f.set_attr_str("format", FORMAT)?;
+    f.set_attr("format_version", FORMAT_VERSION)?;
+    f.set_attr_str("scenario", &scn.to_yaml())?;
+    f.set_attr("t0", t0)?;
+    f.set_attr("float_keep_bits", scn.output.compression.float_keep_bits.map(|b| b as i32).unwrap_or(23))?;
+    f.set_attr_str(
+        "conventions",
+        "t: i64 µs since the sequence start (root attr t0 = trajectory time in s); frames stamped at mid-exposure; \
+         camera frame OpenCV (x right, y down, z forward), body frame FRD; q_a_b = [w,x,y,z] rotating b-frame vectors into a; \
+         T_body_x = row-major 4x4 mapping x-frame points into the body frame; depth in m (+inf = sky); \
+         flow[k] = forward flow from frame k to k+1 of the same camera in px (dx, dy); events p: 1 = ON, 0 = OFF",
+    )?;
+    Ok(f)
+}
+
+/// Open an existing sequence file for adding to it (events).
+pub fn open_file(path: &Path) -> Result<h5::File> {
+    let f = h5::File::open_rw(path)?;
+    if f.attr_str("format").unwrap_or_default() != FORMAT {
+        anyhow::bail!("{} is not a terrain sequence file (run `terrain render` first)", path.display());
+    }
+    Ok(f)
+}
+
+/// Replace `path` by an empty group.
+pub fn fresh_group(f: &h5::File, path: &str) -> Result<h5::Group> {
+    let p = h5path(path);
+    if f.exists(p) {
+        f.delete(p)?;
+    }
+    Ok(f.ensure_group(p)?)
+}
+
+/// `calib/` of a camera group.
+pub fn write_camera_calib(g: &h5::Group, cam: &CameraConfig, t_body_cam: [f64; 16]) -> Result<()> {
+    if g.exists("calib") {
+        g.delete("calib")?;
+    }
+    let c = g.ensure_group("calib")?;
+    if cam.intrinsics.len() == 4 {
+        c.new_dataset::<f64>().shape(&[4]).create("intrinsics")?.write_all(&cam.intrinsics)?;
+    }
+    if !cam.distortion.is_empty() {
+        c.new_dataset::<f64>().shape(&[cam.distortion.len()]).create("distortion_coeffs")?.write_all(&cam.distortion)?;
+    }
+    c.new_dataset::<i64>().shape(&[2]).create("resolution")?.write_all(&[cam.width as i64, cam.height as i64])?;
+    c.new_dataset::<f64>().shape(&[4, 4]).create("T_body_cam")?.write_all(&t_body_cam)?;
+    c.set_attr_str("model", &cam.model)?;
+    c.set_attr_str("camera_yaml", &serde_yaml::to_string(cam)?)?;
+    Ok(())
+}
+
+fn put_f64(g: &h5::Group, name: &str, cols: usize, data: &[f64]) -> Result<()> {
+    let n = data.len().checked_div(cols).unwrap_or(data.len());
+    let shape: Vec<usize> = if cols == 0 { vec![n] } else { vec![n, cols] };
+    let ds = g.new_dataset::<f64>().shape(&shape).create(name)?;
+    if n > 0 {
+        ds.write_all(data)?;
+    }
+    Ok(())
+}
+
+fn put_i64(g: &h5::Group, name: &str, data: &[i64]) -> Result<()> {
+    let ds = g.new_dataset::<i64>().shape(&[data.len()]).create(name)?;
+    if !data.is_empty() {
+        ds.write_all(data)?;
+    }
+    Ok(())
+}
+
+/// One body ground-truth sample.
+pub struct BodySample {
+    pub t: f64,
+    pub pose: Pose,
+    pub sun: crate::lighting::SunState,
+}
+
+/// The body ground-truth group.
+pub fn write_body_pose(f: &h5::File, path: &str, t0: f64, s: &[BodySample], ell: &Ellipsoid) -> Result<()> {
+    let g = fresh_group(f, path)?;
+    let ecef: Vec<DVec3> = s.iter().map(|b| b.pose.ecef(ell)).collect();
+    let ned0 = s.first().map(|b| geodesy::LocalFrame::new(b.pose.geo, geodesy::LocalConvention::Ned, *ell));
+    put_i64(&g, "t", &s.iter().map(|b| to_us(b.t, t0)).collect::<Vec<_>>())?;
+    put_f64(&g, "position_ecef", 3, &ecef.iter().flat_map(|p| p.to_array()).collect::<Vec<_>>())?;
+    put_f64(&g, "q_ecef_body", 4, &s.iter().flat_map(|b| q4(DQuat::from_mat3(&b.pose.r_ecef_body()).normalize())).collect::<Vec<_>>())?;
+    put_f64(&g, "lla", 3, &s.iter().flat_map(|b| [b.pose.geo.lat.to_degrees(), b.pose.geo.lon.to_degrees(), b.pose.geo.h]).collect::<Vec<_>>())?;
+    put_f64(&g, "q_ned_body", 4, &s.iter().flat_map(|b| q4(b.pose.q_ned_body)).collect::<Vec<_>>())?;
+    if let Some(ned0) = &ned0 {
+        let r0 = geodesy::rot_ecef2ned(ned0.origin.lat, ned0.origin.lon);
+        put_f64(&g, "position_ned0", 3, &ecef.iter().flat_map(|p| geodesy::ecef2ned(*p, ned0.origin, ell).to_array()).collect::<Vec<_>>())?;
+        put_f64(&g, "q_ned0_body", 4, &s.iter().flat_map(|b| q4(DQuat::from_mat3(&(r0 * b.pose.r_ecef_body())).normalize())).collect::<Vec<_>>())?;
+        g.set_attr_array("ned0_origin_lla", &[ned0.origin.lat.to_degrees(), ned0.origin.lon.to_degrees(), ned0.origin.h])?;
+    }
+    put_f64(&g, "sun_azimuth_deg", 0, &s.iter().map(|b| b.sun.azimuth.to_degrees()).collect::<Vec<_>>())?;
+    put_f64(&g, "sun_elevation_deg", 0, &s.iter().map(|b| b.sun.elevation.to_degrees()).collect::<Vec<_>>())?;
+    put_f64(&g, "lights", 0, &s.iter().map(|b| b.sun.lights).collect::<Vec<_>>())?;
+    Ok(())
+}
+
+/// Everything produced for one frame of one camera (absent modalities are `None`).
+pub struct Frame<'a> {
+    pub index: usize,
+    pub t: f64,
+    pub cam: CamPose,
+    /// developed RGB (always RGB; converted to gray by the writer when configured)
+    pub rgb: Option<&'a [u8]>,
+    /// exposure time (s), gain, EV
+    pub exposure: Option<[f64; 3]>,
+    pub depth: Option<&'a [f32]>,
+    pub flow: Option<(&'a [f32], &'a [u8])>,
+    pub landcover: Option<&'a [u8]>,
+}
+
+fn luma(rgb: &[u8]) -> Vec<u8> {
+    rgb.chunks_exact(3).map(|c| (0.299 * c[0] as f64 + 0.587 * c[1] as f64 + 0.114 * c[2] as f64).round() as u8).collect()
+}
+
+/// Writer of one camera group (datasets sized for `n` frames up front, chunk = one frame).
+pub struct CameraWriter {
+    group: h5::Group,
+    w: usize,
+    h: usize,
+    gray: bool,
+    rgb: Option<h5::Dataset>,
+    depth: Option<h5::Dataset>,
+    flow: Option<(h5::Dataset, h5::Dataset)>,
+    landcover: Option<h5::Dataset>,
+    t0: f64,
+    t: Vec<i64>,
+    pos: Vec<f64>,
+    q: Vec<f64>,
+    exposure: Vec<f64>,
+}
+
+impl CameraWriter {
+    /// Creates `<spec.path>` with its calibration and the frame datasets of its modalities.
+    pub fn new(f: &h5::File, spec: &crate::scenario::CameraSpec, n: usize, comp: &Compression, t0: f64) -> Result<Self> {
+        let cam = &spec.intrinsics;
+        let (w, h) = (cam.width as usize, cam.height as usize);
+        let lvl = comp.level.min(9);
+        let g = fresh_group(f, &spec.path)?;
+        write_camera_calib(&g, cam, transform_4x4(spec.extrinsics.r_body_cam(), spec.extrinsics.t_body_cam()))?;
+        let gray = spec.rgb.as_ref().is_some_and(|r| r.gray);
+        let rgb = match &spec.rgb {
+            Some(_) if gray => Some(g.new_dataset::<u8>().shape(&[n, h, w]).chunk(&[1, h, w]).deflate(lvl).create("rgb")?),
+            Some(_) => Some(g.new_dataset::<u8>().shape(&[n, h, w, 3]).chunk(&[1, h, w, 3]).shuffle(true).deflate(lvl).create("rgb")?),
+            None => None,
+        };
+        let depth = match &spec.depth {
+            Some(d) => {
+                let ds = g.new_dataset::<f32>().shape(&[n, h, w]).chunk(&[1, h, w]).shuffle(true).deflate(lvl).create("depth")?;
+                ds.set_attr_str("kind", if d.kind == DepthKind::Range { "range" } else { "z" })?;
+                Some(ds)
+            }
+            None => None,
+        };
+        let flow = match &spec.flow {
+            Some(_) => Some((
+                g.new_dataset::<f32>().shape(&[n, h, w, 2]).chunk(&[1, h, w, 2]).shuffle(true).deflate(lvl).create("flow")?,
+                g.new_dataset::<u8>().shape(&[n, h, w]).chunk(&[1, h, w]).deflate(lvl).create("flow_valid")?,
+            )),
+            None => None,
+        };
+        let landcover = match &spec.landcover {
+            Some(_) => Some(g.new_dataset::<u8>().shape(&[n, h, w]).chunk(&[1, h, w]).deflate(lvl).create("landcover")?),
+            None => None,
+        };
+        Ok(CameraWriter { group: g, w, h, gray, rgb, depth, flow, landcover, t0, t: vec![], pos: vec![], q: vec![], exposure: vec![] })
+    }
+
+    pub fn write(&mut self, fr: &Frame) -> Result<()> {
+        let (k, w, h) = (fr.index, self.w, self.h);
+        if let (Some(ds), Some(rgb)) = (&self.rgb, fr.rgb) {
+            if self.gray {
+                ds.write_slice(&luma(rgb), &[k, 0, 0], &[1, h, w])?;
+            } else {
+                ds.write_slice(rgb, &[k, 0, 0, 0], &[1, h, w, 3])?;
+            }
+        }
+        if let (Some(ds), Some(d)) = (&self.depth, fr.depth) {
+            ds.write_slice(d, &[k, 0, 0], &[1, h, w])?;
+        }
+        if let (Some((fl, fv)), Some((flow, valid))) = (&self.flow, fr.flow) {
+            fl.write_slice(flow, &[k, 0, 0, 0], &[1, h, w, 2])?;
+            fv.write_slice(valid, &[k, 0, 0], &[1, h, w])?;
+        }
+        if let (Some(ds), Some(l)) = (&self.landcover, fr.landcover) {
+            ds.write_slice(l, &[k, 0, 0], &[1, h, w])?;
+        }
+        self.t.push(to_us(fr.t, self.t0));
+        self.pos.extend(fr.cam.pos.to_array());
+        self.q.extend(q4(fr.cam.q_ecef_cam()));
+        if let Some(e) = fr.exposure {
+            self.exposure.extend(e);
+        }
+        Ok(())
+    }
+
+    /// Writes the per-frame vectors; returns the number of frames.
+    pub fn finish(self) -> Result<usize> {
+        let g = &self.group;
+        put_i64(g, "t", &self.t)?;
+        let p = g.ensure_group("pose")?;
+        put_f64(&p, "position_ecef", 3, &self.pos)?;
+        put_f64(&p, "q_ecef_cam", 4, &self.q)?;
+        if self.rgb.is_some() {
+            put_f64(g, "exposure", 3, &self.exposure)?;
+        }
+        Ok(self.t.len())
     }
 }
 
@@ -109,272 +319,76 @@ fn write_npy_f32(path: &Path, shape: &[usize], data: &[f32]) -> Result<()> {
     Ok(())
 }
 
+/// Optional per-camera PNG / NPY export: `<dir>/{rgb,depth,flow,flow_valid,landcover}/NNNNNN.*`,
+/// `camera.yaml` and `frames.csv` (t µs, camera pose in ECEF, exposure).
 pub struct PngWriter {
     dir: PathBuf,
     w: u32,
     h: u32,
-    poses: std::io::BufWriter<std::fs::File>,
-    depth: bool,
-    flow: bool,
-    landcover: bool,
+    gray: bool,
+    t0: f64,
+    csv: std::io::BufWriter<std::fs::File>,
 }
 
 impl PngWriter {
-    pub fn new(dir: &Path, w: u32, h: u32, cam: &CameraConfig, ext: &Extrinsics, scenario_yaml: &str, depth: bool, flow: bool, landcover: bool) -> Result<Self> {
-        std::fs::create_dir_all(dir.join("rgb"))?;
-        if depth {
-            std::fs::create_dir_all(dir.join("depth"))?;
+    pub fn new(dir: &Path, spec: &crate::scenario::CameraSpec, t0: f64) -> Result<Self> {
+        for (on, sub) in [(spec.rgb.is_some(), "rgb"), (spec.depth.is_some(), "depth"), (spec.flow.is_some(), "flow"), (spec.flow.is_some(), "flow_valid"), (spec.landcover.is_some(), "landcover")] {
+            if on {
+                std::fs::create_dir_all(dir.join(sub))?;
+            }
         }
-        if flow {
-            std::fs::create_dir_all(dir.join("flow"))?;
-            std::fs::create_dir_all(dir.join("flow_valid"))?;
-        }
-        if landcover {
-            std::fs::create_dir_all(dir.join("landcover"))?;
-        }
-        #[derive(serde::Serialize)]
-        struct Rig<'a> {
-            camera: &'a CameraConfig,
-            extrinsics: &'a Extrinsics,
-        }
-        std::fs::write(dir.join("camera.yaml"), serde_yaml::to_string(&Rig { camera: cam, extrinsics: ext })?)?;
-        std::fs::write(dir.join("scenario.yaml"), scenario_yaml)?;
-        let mut poses = std::io::BufWriter::new(std::fs::File::create(dir.join("poses.csv"))?);
-        writeln!(poses, "# camera frame OpenCV; q_ecef_cam / q_ned0_cam rotate camera vectors into ECEF / NED(first camera position); q_ned_body body(FRD)->local NED")?;
-        writeln!(
-            poses,
-            "frame,t,x_ecef,y_ecef,z_ecef,qw_ecef_cam,qx_ecef_cam,qy_ecef_cam,qz_ecef_cam,lat,lon,h,n0,e0,d0,qw_ned0_cam,qx_ned0_cam,qy_ned0_cam,qz_ned0_cam,qw_ned_body,qx_ned_body,qy_ned_body,qz_ned_body,exposure_time,gain,ev,sun_az_deg,sun_el_deg"
-        )?;
-        Ok(PngWriter { dir: dir.to_path_buf(), w, h, poses, depth, flow, landcover })
+        std::fs::write(dir.join("camera.yaml"), serde_yaml::to_string(spec)?)?;
+        let mut csv = std::io::BufWriter::new(std::fs::File::create(dir.join("frames.csv"))?);
+        writeln!(csv, "frame,t_us,x_ecef,y_ecef,z_ecef,qw_ecef_cam,qx_ecef_cam,qy_ecef_cam,qz_ecef_cam,exposure_time,gain,ev")?;
+        let gray = spec.rgb.as_ref().is_some_and(|r| r.gray);
+        Ok(PngWriter { dir: dir.to_path_buf(), w: spec.intrinsics.width, h: spec.intrinsics.height, gray, t0, csv })
     }
 
-    pub fn write(&mut self, f: &FrameRecord) -> Result<()> {
-        let name = format!("{:06}", f.index);
-        image::save_buffer(self.dir.join("rgb").join(format!("{name}.png")), f.rgb, self.w, self.h, image::ExtendedColorType::Rgb8)?;
+    pub fn write(&mut self, fr: &Frame) -> Result<()> {
+        let name = format!("{:06}", fr.index);
         let (w, h) = (self.w as usize, self.h as usize);
-        if self.depth {
-            write_npy_f32(&self.dir.join("depth").join(format!("{name}.npy")), &[h, w], f.depth)?;
+        if let Some(rgb) = fr.rgb {
+            let p = self.dir.join("rgb").join(format!("{name}.png"));
+            if self.gray {
+                image::save_buffer(p, &luma(rgb), self.w, self.h, image::ExtendedColorType::L8)?;
+            } else {
+                image::save_buffer(p, rgb, self.w, self.h, image::ExtendedColorType::Rgb8)?;
+            }
         }
-        if self.flow {
-            write_npy_f32(&self.dir.join("flow").join(format!("{name}.npy")), &[h, w, 2], f.flow)?;
-            let v: Vec<u8> = f.flow_valid.iter().map(|v| v * 255).collect();
+        if let Some(d) = fr.depth {
+            write_npy_f32(&self.dir.join("depth").join(format!("{name}.npy")), &[h, w], d)?;
+        }
+        if let Some((flow, valid)) = fr.flow {
+            write_npy_f32(&self.dir.join("flow").join(format!("{name}.npy")), &[h, w, 2], flow)?;
+            let v: Vec<u8> = valid.iter().map(|v| v * 255).collect();
             image::save_buffer(self.dir.join("flow_valid").join(format!("{name}.png")), &v, self.w, self.h, image::ExtendedColorType::L8)?;
         }
-        if self.landcover {
-            image::save_buffer(self.dir.join("landcover").join(format!("{name}.png")), f.landcover, self.w, self.h, image::ExtendedColorType::L8)?;
+        if let Some(l) = fr.landcover {
+            image::save_buffer(self.dir.join("landcover").join(format!("{name}.png")), l, self.w, self.h, image::ExtendedColorType::L8)?;
         }
-        let p = &f.pose;
-        let (a, b, c) = (q4(p.q_ecef_cam), q4(p.q_ned0_cam), q4(p.q_ned_body));
+        let (p, q) = (fr.cam.pos, q4(fr.cam.q_ecef_cam()));
+        let e = fr.exposure.unwrap_or([f64::NAN; 3]);
         writeln!(
-            self.poses,
-            "{},{:.6},{:.4},{:.4},{:.4},{:.9},{:.9},{:.9},{:.9},{:.10},{:.10},{:.4},{:.4},{:.4},{:.4},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.7},{:.4},{:.4},{:.3},{:.3}",
-            f.index,
-            f.t,
-            p.cam_ecef.x,
-            p.cam_ecef.y,
-            p.cam_ecef.z,
-            a[0],
-            a[1],
-            a[2],
-            a[3],
-            p.cam_lla[0],
-            p.cam_lla[1],
-            p.cam_lla[2],
-            p.cam_ned0.x,
-            p.cam_ned0.y,
-            p.cam_ned0.z,
-            b[0],
-            b[1],
-            b[2],
-            b[3],
-            c[0],
-            c[1],
-            c[2],
-            c[3],
-            f.exposure_time,
-            f.gain,
-            f.ev,
-            f.sun_azimuth.to_degrees(),
-            f.sun_elevation.to_degrees()
+            self.csv,
+            "{},{},{:.4},{:.4},{:.4},{:.9},{:.9},{:.9},{:.9},{:.7},{:.4},{:.4}",
+            fr.index,
+            to_us(fr.t, self.t0),
+            p.x,
+            p.y,
+            p.z,
+            q[0],
+            q[1],
+            q[2],
+            q[3],
+            e[0],
+            e[1],
+            e[2]
         )?;
         Ok(())
     }
 
     pub fn finish(mut self) -> Result<()> {
-        self.poses.flush()?;
-        Ok(())
-    }
-}
-
-/// HDF5 sequence writer (datasets sized for `n` frames up front, chunk = one frame).
-pub struct H5Writer {
-    file: h5::File,
-    w: usize,
-    h: usize,
-    n: usize,
-    rgb: h5::Dataset,
-    depth: Option<h5::Dataset>,
-    flow: Option<(h5::Dataset, h5::Dataset)>,
-    landcover: Option<h5::Dataset>,
-    /// per-sensor frame view (layout.frames_group / frames_data)
-    gray: Option<h5::Dataset>,
-    layout: crate::scenario::Layout,
-    t: Vec<f64>,
-    poses: Vec<PoseRecord>,
-    expo: Vec<[f64; 5]>,
-}
-
-impl H5Writer {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(path: &Path, w: u32, h: u32, n: usize, cam: &CameraConfig, ext: &Extrinsics, scenario_yaml: &str, depth: bool, flow: bool, landcover: bool, comp: &crate::scenario::Compression, layout: &crate::scenario::Layout) -> Result<Self> {
-        let lvl = comp.level.min(9);
-        if let Some(p) = path.parent() {
-            if !p.as_os_str().is_empty() {
-                std::fs::create_dir_all(p)?;
-            }
-        }
-        let (w, h) = (w as usize, h as usize);
-        let file = h5::File::create(path)?;
-        file.set_attr_str("format", "terrain-sequence")?;
-        file.set_attr("format_version", 1i32)?;
-        file.set_attr_str("scenario", scenario_yaml)?;
-        file.set_attr("float_keep_bits", comp.float_keep_bits.map(|b| b as i32).unwrap_or(23))?;
-        file.set_attr_str("camera", &serde_yaml::to_string(cam)?)?;
-        file.set_attr_str("extrinsics", &serde_yaml::to_string(ext)?)?;
-        file.set_attr_str(
-            "conventions",
-            "camera frame OpenCV (x right, y down, z forward); pixel centres at integer coords; \
-             q_* = [w,x,y,z] rotating camera (or body FRD) vectors into the named frame; \
-             ned0 = local NED at the first camera position; depth = z along the optical axis (m), inf = sky; \
-             flow[k] = forward flow from frame k to k+1 in px (dx, dy); poses at mid-exposure",
-        )?;
-        let rgb = file.new_dataset::<u8>().shape(&[n, h, w, 3]).chunk(&[1, h, w, 3]).shuffle(true).deflate(lvl).create("rgb")?;
-        let depth = if depth {
-            Some(file.new_dataset::<f32>().shape(&[n, h, w]).chunk(&[1, h, w]).shuffle(true).deflate(lvl).create("depth")?)
-        } else {
-            None
-        };
-        let flow = if flow {
-            Some((
-                file.new_dataset::<f32>().shape(&[n, h, w, 2]).chunk(&[1, h, w, 2]).shuffle(true).deflate(lvl).create("flow")?,
-                file.new_dataset::<u8>().shape(&[n, h, w]).chunk(&[1, h, w]).deflate(lvl).create("flow_valid")?,
-            ))
-        } else {
-            None
-        };
-        let landcover = if landcover {
-            Some(file.new_dataset::<u8>().shape(&[n, h, w]).chunk(&[1, h, w]).deflate(lvl).create("landcover")?)
-        } else {
-            None
-        };
-        // camera intrinsics in camodocal's schema (model, intrinsics, distortion, xi, ...)
-        {
-            let g = file.ensure_group("camera")?;
-            g.set_attr_str("model", &cam.model)?;
-            g.set_attr("width", w as i32)?;
-            g.set_attr("height", h as i32)?;
-            for (k, v) in [("intrinsics", &cam.intrinsics), ("distortion", &cam.distortion), ("inv_poly", &cam.inv_poly), ("affine", &cam.affine), ("center", &cam.center)] {
-                if !v.is_empty() {
-                    g.set_attr_array(k, v)?;
-                }
-            }
-            g.set_attr("xi", cam.xi)?;
-            g.set_attr("max_fov_deg", cam.max_fov_deg)?;
-            g.set_attr_str("yaml", &serde_yaml::to_string(cam)?)?;
-            if cam.intrinsics.len() == 4 {
-                let i = &cam.intrinsics;
-                g.set_attr_array("K", &[i[0], 0.0, i[2], 0.0, i[1], i[3], 0.0, 0.0, 1.0])?;
-            }
-            g.set_attr_array("q_body_cam", &q4(DQuat::from_mat3(&ext.r_body_cam())))?;
-            g.set_attr_array("t_body_cam", &ext.translation)?;
-        }
-        let gray = if layout.enabled {
-            use crate::scenario::h5path;
-            let g = file.ensure_group(h5path(&layout.frames_group))?;
-            let ds = if layout.frames_gray {
-                g.new_dataset::<u8>().shape(&[n, h, w]).chunk(&[1, h, w]).deflate(lvl).create(&layout.frames_data)?
-            } else {
-                g.new_dataset::<u8>().shape(&[n, h, w, 3]).chunk(&[1, h, w, 3]).deflate(lvl).create(&layout.frames_data)?
-            };
-            write_sensor_calib(&g, layout, cam, crate::imu::t_body_sensor(ext.r_body_cam(), ext.t_body_cam()))?;
-            Some(ds)
-        } else {
-            None
-        };
-        Ok(H5Writer { file, w, h, n, rgb, depth, flow, landcover, gray, layout: layout.clone(), t: vec![], poses: vec![], expo: vec![] })
-    }
-
-    pub fn write(&mut self, f: &FrameRecord) -> Result<()> {
-        let k = f.index;
-        let (w, h) = (self.w, self.h);
-        self.rgb.write_slice(f.rgb, &[k, 0, 0, 0], &[1, h, w, 3])?;
-        if let Some(d) = &self.depth {
-            d.write_slice(f.depth, &[k, 0, 0], &[1, h, w])?;
-        }
-        if let Some((fl, fv)) = &self.flow {
-            fl.write_slice(f.flow, &[k, 0, 0, 0], &[1, h, w, 2])?;
-            fv.write_slice(f.flow_valid, &[k, 0, 0], &[1, h, w])?;
-        }
-        if let Some(l) = &self.landcover {
-            l.write_slice(f.landcover, &[k, 0, 0], &[1, h, w])?;
-        }
-        if let Some(g) = &self.gray {
-            if self.layout.frames_gray {
-                let gray: Vec<u8> = f.rgb.chunks_exact(3).map(|c| (0.299 * c[0] as f64 + 0.587 * c[1] as f64 + 0.114 * c[2] as f64).round() as u8).collect();
-                g.write_slice(&gray, &[k, 0, 0], &[1, h, w])?;
-            } else {
-                g.write_slice(f.rgb, &[k, 0, 0, 0], &[1, h, w, 3])?;
-            }
-        }
-        self.t.push(f.t);
-        self.poses.push(f.pose);
-        self.expo.push([f.exposure_time, f.gain, f.ev, f.sun_azimuth.to_degrees(), f.sun_elevation.to_degrees()]);
-        Ok(())
-    }
-
-    pub fn finish(self) -> Result<()> {
-        let n = self.t.len();
-        let f = &self.file;
-        let put = |name: &str, cols: usize, data: Vec<f64>| -> Result<()> {
-            let shape: Vec<usize> = if cols == 1 { vec![n] } else { vec![n, cols] };
-            let ds = f.new_dataset::<f64>().shape(&shape).create(name)?;
-            if n > 0 {
-                ds.write_all(&data)?;
-            }
-            Ok(())
-        };
-        put("t", 1, self.t.clone())?;
-        if self.gray.is_some() {
-            let t0 = self.t.first().copied().unwrap_or(0.0);
-            let ts: Vec<i64> = self.t.iter().map(|t| ((t - t0) * 1e6).round() as i64).collect();
-            let ds = f.new_dataset::<i64>().shape(&[n]).create(crate::scenario::h5path(&self.layout.frames_ts))?;
-            if n > 0 {
-                ds.write_all(&ts)?;
-            }
-            f.set_attr("t0", t0)?;
-            f.set_attr_str("time_base", "per-sensor view (output.layout): µs since t0 (trajectory time of the first frame); /t and /pose use trajectory time in seconds")?;
-        }
-        let p = &self.poses;
-        put("pose/cam_position_ecef", 3, p.iter().flat_map(|p| p.cam_ecef.to_array()).collect())?;
-        put("pose/cam_q_ecef", 4, p.iter().flat_map(|p| q4(p.q_ecef_cam)).collect())?;
-        put("pose/cam_lla", 3, p.iter().flat_map(|p| p.cam_lla).collect())?;
-        put("pose/cam_position_ned0", 3, p.iter().flat_map(|p| p.cam_ned0.to_array()).collect())?;
-        put("pose/cam_q_ned0", 4, p.iter().flat_map(|p| q4(p.q_ned0_cam)).collect())?;
-        put("pose/body_q_ned", 4, p.iter().flat_map(|p| q4(p.q_ned_body)).collect())?;
-        put("pose/body_lla", 3, p.iter().flat_map(|p| p.body_lla).collect())?;
-        put("exposure/time", 1, self.expo.iter().map(|e| e[0]).collect())?;
-        put("exposure/gain", 1, self.expo.iter().map(|e| e[1]).collect())?;
-        put("exposure/ev", 1, self.expo.iter().map(|e| e[2]).collect())?;
-        put("sun/azimuth_deg", 1, self.expo.iter().map(|e| e[3]).collect())?;
-        put("sun/elevation_deg", 1, self.expo.iter().map(|e| e[4]).collect())?;
-        if let Some(p0) = p.first() {
-            let g = f.group("pose")?;
-            g.set_attr_array("ned0_origin_lla", &p0.cam_lla)?;
-        }
-        if n < self.n {
-            f.set_attr("frames_written", n as i32)?;
-        }
-        f.flush()?;
+        self.csv.flush()?;
         Ok(())
     }
 }

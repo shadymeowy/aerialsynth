@@ -16,38 +16,27 @@
 //!    (Poisson, random polarity) and leak events (slow drift of the reference level → positive
 //!    events).
 //!
-//! Output: group / dataset names from `output.layout` (defaults: M3ED-like
-//! `/prophesee/left/{x,y,t,p,ms_map_idx}` + `calib/*`, as read by camodocal), t in µs, p ∈ {0, 1},
-//! plus ground-truth event-camera poses at every render step (`/gt_events/...`). By default the
-//! events are written into the frame sequence file (`output.h5`), on the same µs clock.
+//! Output: `<camera.path>/events/{x, y, t, p, ms_index}` in the sequence file. `t` is i64 µs on
+//! the sequence clock (shared with frames, IMU and poses), `p` is 1 for ON and 0 for OFF, and
+//! `ms_index[m]` is the index of the first event at or after m ms (plus one closing entry).
+//! The event camera's pose at any time is the body pose (`/pose`) ∘ `calib/T_body_cam`.
 
 use crate::cache::TileCache;
-use crate::camera::{CameraConfig, CameraModel, Extrinsics};
+use crate::camera::CameraModel;
 use crate::lighting::SunState;
 use crate::raster::{RenderSettings, Renderer};
-use crate::scenario::Scenario;
-use crate::trajectory::{self, CamPose, Pose};
+use crate::scenario::{CameraSpec, Scenario};
+use crate::trajectory::{self, Pose};
 use anyhow::{bail, Result};
 use geodesy::Ellipsoid;
-use glam::{DQuat, DVec3};
 use h5::Attrs;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Event camera knobs. Names in parentheses are the corresponding Prophesee biases.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct EventConfig {
-    pub enabled: bool,
-    /// Separate output file (M3ED layout). None (default) = into `output.h5` with the frames.
-    pub h5: Option<PathBuf>,
-    /// Event camera intrinsics (None = the frame camera's). Distortion is stored as
-    /// `distortion_coeffs`; camodocal's M3ED reader builds a `pinhole` model from it.
-    pub camera: Option<CameraConfig>,
-    /// Event camera mounting (None = the frame camera's extrinsics).
-    pub extrinsics: Option<Extrinsics>,
-
     // ---- pixel front-end
     /// Log-intensity contrast thresholds ON / OFF (bias_diff_on / bias_diff_off).
     pub contrast_pos: f64,
@@ -105,10 +94,6 @@ pub struct EventConfig {
 impl Default for EventConfig {
     fn default() -> Self {
         EventConfig {
-            enabled: false,
-            h5: None,
-            camera: None,
-            extrinsics: None,
             contrast_pos: 0.25,
             contrast_neg: 0.25,
             contrast_sigma: 0.03,
@@ -338,70 +323,45 @@ impl EventSensor {
     }
 }
 
-/// Streaming writer for the M3ED event layout.
+/// Streaming writer of `<camera>/events`.
 pub struct EventWriter {
-    file: h5::File,
+    group: h5::Group,
     x: h5::Dataset,
     y: h5::Dataset,
     t: h5::Dataset,
     p: h5::Dataset,
     n: usize,
-    group: String,
-    ms_map_name: String,
     /// index of the first event at or after each millisecond
-    ms_map: Vec<u64>,
+    ms_index: Vec<u64>,
     t0_us: i64,
-    gt: Vec<(f64, DVec3, DQuat)>,
 }
 
 impl EventWriter {
-    /// Open `path` (appending to an existing sequence file, replacing a previous event group) or
-    /// create it.
-    pub fn new(path: &std::path::Path, cfg: &EventConfig, layout: &crate::scenario::Layout, cam: &CameraConfig, ext: &Extrinsics, scenario_yaml: &str) -> Result<Self> {
-        if let Some(p) = path.parent() {
-            if !p.as_os_str().is_empty() {
-                std::fs::create_dir_all(p)?;
-            }
+    /// Replaces `events` in the camera group `g`. `t0` = trajectory time of the sequence start.
+    pub fn new(g: &h5::Group, t0: f64, level: u8) -> Result<Self> {
+        if g.exists("events") {
+            g.delete("events")?;
         }
-        let file = if path.exists() && cfg.h5.is_none() {
-            h5::File::open_rw(path)?
-        } else {
-            let f = h5::File::create(path)?;
-            f.set_attr_str("format", "terrain-events (M3ED layout)")?;
-            f.set_attr_str("scenario", scenario_yaml)?;
-            f
-        };
-        let gname = crate::scenario::h5path(&layout.events_group);
-        if file.exists(gname) {
-            file.delete(gname)?;
-        }
-        if file.exists("gt_events") {
-            file.delete("gt_events")?;
-        }
-        let g = file.ensure_group(gname)?;
+        let g = g.ensure_group("events")?;
         let chunk = 1 << 16;
-        let x = g.new_dataset::<u16>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).shuffle(true).deflate(4).create(&layout.events_x)?;
-        let y = g.new_dataset::<u16>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).shuffle(true).deflate(4).create(&layout.events_y)?;
-        let t = g.new_dataset::<i64>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).shuffle(true).deflate(4).create(&layout.events_t)?;
-        let p = g.new_dataset::<i8>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).deflate(4).create(&layout.events_p)?;
-        // event camera → rig (rig = body FRD, shared with the frame camera and the IMU)
-        crate::output::write_sensor_calib(&g, layout, cam, crate::imu::t_body_sensor(ext.r_body_cam(), ext.t_body_cam()))?;
-        Ok(EventWriter { file, x, y, t, p, n: 0, group: layout.events_group.clone(), ms_map_name: layout.events_ms_map.clone(), ms_map: vec![], t0_us: 0, gt: vec![] })
+        let lvl = level.min(9);
+        let x = g.new_dataset::<u16>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).shuffle(true).deflate(lvl).create("x")?;
+        let y = g.new_dataset::<u16>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).shuffle(true).deflate(lvl).create("y")?;
+        let t = g.new_dataset::<i64>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).shuffle(true).deflate(lvl).create("t")?;
+        let p = g.new_dataset::<i8>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).deflate(lvl).create("p")?;
+        Ok(EventWriter { group: g, x, y, t, p, n: 0, ms_index: vec![], t0_us: (t0 * 1e6).round() as i64 })
     }
 
-    pub fn set_t0(&mut self, t0_s: f64) {
-        self.t0_us = (t0_s * 1e6).round() as i64;
-    }
-
+    /// Append events (absolute µs, sorted).
     pub fn write(&mut self, ev: &[Event]) -> Result<()> {
         if ev.is_empty() {
             return Ok(());
         }
-        // ms map: entry m = index of the first event with t >= t0 + m ms
-        for (i, e) in ev.iter().enumerate() {
-            let ms = ((e.t_us - self.t0_us).max(0) / 1000) as usize;
-            while self.ms_map.len() <= ms {
-                self.ms_map.push((self.n + i) as u64);
+        let ts: Vec<i64> = ev.iter().map(|e| e.t_us - self.t0_us).collect();
+        for (i, t) in ts.iter().enumerate() {
+            let ms = (t.max(&0) / 1000) as usize;
+            while self.ms_index.len() <= ms {
+                self.ms_index.push((self.n + i) as u64);
             }
         }
         let n1 = self.n + ev.len();
@@ -410,7 +370,6 @@ impl EventWriter {
         }
         let xs: Vec<u16> = ev.iter().map(|e| e.x).collect();
         let ys: Vec<u16> = ev.iter().map(|e| e.y).collect();
-        let ts: Vec<i64> = ev.iter().map(|e| e.t_us - self.t0_us).collect();
         let ps: Vec<i8> = ev.iter().map(|e| e.p).collect();
         self.x.write_slice(&xs, &[self.n], &[ev.len()])?;
         self.y.write_slice(&ys, &[self.n], &[ev.len()])?;
@@ -420,36 +379,26 @@ impl EventWriter {
         Ok(())
     }
 
-    pub fn add_pose(&mut self, t: f64, cam: &CamPose) {
-        self.gt.push((t, cam.pos, cam.q_ecef_cam()));
-    }
-
-    pub fn finish(mut self) -> Result<usize> {
-        // close the ms map one past the end (camodocal reads map[a]..map[b])
-        self.ms_map.push(self.n as u64);
-        let g = self.file.group(self.group.trim_start_matches('/'))?;
-        g.new_dataset::<u64>().shape(&[self.ms_map.len()]).create(&self.ms_map_name)?.write_all(&self.ms_map)?;
-        g.set_attr("t0_us", self.t0_us)?;
-        let n = self.gt.len();
-        let gt = self.file.ensure_group("gt_events")?;
-        gt.new_dataset::<f64>().shape(&[n]).create("t")?.write_all(&self.gt.iter().map(|g| g.0).collect::<Vec<_>>())?;
-        gt.new_dataset::<f64>().shape(&[n, 3]).create("cam_position_ecef")?.write_all(&self.gt.iter().flat_map(|g| g.1.to_array()).collect::<Vec<_>>())?;
-        gt.new_dataset::<f64>().shape(&[n, 4]).create("cam_q_ecef")?.write_all(&self.gt.iter().flat_map(|g| [g.2.w, g.2.x, g.2.y, g.2.z]).collect::<Vec<_>>())?;
-        gt.set_attr_str("conventions", "t in seconds (absolute trajectory time); events t = (t*1e6 - t0_us) µs; camera OpenCV frame; q = [w,x,y,z] camera→ECEF")?;
-        self.file.flush()?;
+    pub fn finish(mut self, cfg: &EventConfig) -> Result<usize> {
+        // closing entry one past the end, so events of ms m are [ms_index[m], ms_index[m+1])
+        self.ms_index.push(self.n as u64);
+        self.group.new_dataset::<u64>().shape(&[self.ms_index.len()]).create("ms_index")?.write_all(&self.ms_index)?;
+        self.group.set_attr_str("events_yaml", &serde_yaml::to_string(cfg)?)?;
         Ok(self.n)
     }
 }
 
-/// Simulate events over the scenario's time window. `progress(t_done, t_total)`.
-pub fn simulate_events(scn: &Scenario, poses: &[Pose], cache: Arc<TileCache>, ell: Ellipsoid, progress: &dyn Fn(f64, f64)) -> Result<usize> {
-    let ec = &scn.events;
+/// Simulate the events of one camera over [t_start, t_end] (trajectory time; t_start is the
+/// sequence start) into `<spec.path>/events` of the open sequence file.
+/// `progress(t_done, t_total)`.
+#[allow(clippy::too_many_arguments)]
+pub fn simulate(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], cache: Arc<TileCache>, ell: Ellipsoid, file: &h5::File, (t_start, t_end): (f64, f64), progress: &dyn Fn(f64, f64)) -> Result<usize> {
+    let Some(ec) = &spec.events else { bail!("camera {} has no events modality", spec.path) };
     if poses.len() < 2 {
         bail!("event simulation needs a trajectory");
     }
-    let cam_cfg = ec.camera.clone().unwrap_or_else(|| scn.camera.clone());
-    let ext = ec.extrinsics.clone().unwrap_or_else(|| scn.extrinsics.clone());
-    let model: Arc<dyn CameraModel> = cam_cfg.build()?;
+    let ext = &spec.extrinsics;
+    let model: Arc<dyn CameraModel> = spec.intrinsics.build()?;
     let (w, h) = (model.width() as usize, model.height() as usize);
     let mut rs: RenderSettings = scn.render.clone();
     rs.supersample = ec.supersample.max(1);
@@ -457,17 +406,13 @@ pub fn simulate_events(scn: &Scenario, poses: &[Pose], cache: Arc<TileCache>, el
     rs.max_zoom = rs.max_zoom.min(scn.tiles.max_zoom);
     let renderer = Renderer::new(model.clone(), rs, ell, cache);
     let mut sensor = EventSensor::new(ec.clone(), w, h);
-    let path = match (&ec.h5, &scn.output.h5) {
-        (Some(p), _) => p.clone(),
-        (None, Some(p)) => p.clone(),
-        (None, None) => bail!("events: set output.h5 (events go into the sequence file) or events.h5"),
-    };
-    let mut writer = EventWriter::new(&path, ec, &scn.output.layout, &cam_cfg, &ext, &scn.to_yaml())?;
+    let g = file.ensure_group(crate::scenario::h5path(&spec.path))?;
+    if !g.exists("calib") {
+        crate::output::write_camera_calib(&g, &spec.intrinsics, crate::output::transform_4x4(ext.r_body_cam(), ext.t_body_cam()))?;
+    }
+    let mut writer = EventWriter::new(&g, t_start, scn.output.compression.level)?;
 
     let tr0 = poses[0].t;
-    let t_start = tr0 + scn.output.start;
-    let t_end = scn.output.end.map(|e| tr0 + e).unwrap_or(poses[poses.len() - 1].t).min(poses[poses.len() - 1].t);
-    writer.set_t0(t_start);
     let sun_at = |t: f64, p: &Pose| -> SunState { scn.render.lighting.sun_at(t - tr0, p.geo.lat, p.geo.lon) };
     let mut t = t_start;
     let mut dt = 1.0 / ec.max_rate_hz.max(1.0);
@@ -475,16 +420,16 @@ pub fn simulate_events(scn: &Scenario, poses: &[Pose], cache: Arc<TileCache>, el
     progress(0.0, t_end - t_start);
     while t <= t_end + 1e-12 {
         let pose = trajectory::interpolate(poses, t);
-        let cam = pose.camera(&ext, &ell);
-        let frame = renderer.render(&cam, &sun_at(t, &pose));
+        let cam = pose.camera(ext, &ell);
+        let sun = sun_at(t, &pose);
+        let frame = renderer.render(&cam, &sun);
         let l = sensor.log_image(&frame.radiance);
         let ev = sensor.step(t, &l);
         n_events += ev.len();
         writer.write(&ev)?;
-        writer.add_pose(t, &cam);
         // next step: limit the image motion of the rendered points to max_px_per_step
         let probe = (t + dt).min(t_end.max(t + 1e-6));
-        let cam_n = trajectory::interpolate(poses, probe).camera(&ext, &ell);
+        let cam_n = trajectory::interpolate(poses, probe).camera(ext, &ell);
         let mut maxd: f64 = 0.0;
         let step = (w.max(h) / 24).max(1);
         for y in (step / 2..h).step_by(step) {
@@ -499,9 +444,8 @@ pub fn simulate_events(scn: &Scenario, poses: &[Pose], cache: Arc<TileCache>, el
         let rate = if maxd > 1e-9 { maxd / (probe - t).max(1e-9) } else { 0.0 }; // px/s
         dt = if rate > 0.0 { ec.max_px_per_step / rate } else { 1.0 / ec.min_rate_hz };
         dt = dt.clamp(1.0 / ec.max_rate_hz, 1.0 / ec.min_rate_hz);
-        let sun_now = sun_at(t, &pose);
-        if sun_now.lights > 0.01 && sun_now.flicker.enabled && ec.flicker_steps_per_period > 0.0 {
-            dt = dt.min(1.0 / (2.0 * sun_now.flicker.mains_hz * ec.flicker_steps_per_period)).max(1.0 / ec.max_rate_hz);
+        if sun.lights > 0.01 && sun.flicker.enabled && ec.flicker_steps_per_period > 0.0 {
+            dt = dt.min(1.0 / (2.0 * sun.flicker.mains_hz * ec.flicker_steps_per_period)).max(1.0 / ec.max_rate_hz);
         }
         if t >= t_end {
             break;
@@ -509,7 +453,7 @@ pub fn simulate_events(scn: &Scenario, poses: &[Pose], cache: Arc<TileCache>, el
         t = (t + dt).min(t_end);
         progress(t - t_start, t_end - t_start);
     }
-    writer.finish()?;
+    writer.finish(ec)?;
     Ok(n_events)
 }
 

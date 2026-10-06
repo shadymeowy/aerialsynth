@@ -34,13 +34,13 @@ enum Cmd {
     Config(commands::ConfigArgs),
     /// Synthesize a flight record (spline path + ODE disturbances) → trajectory.file.
     Traj(commands::TrajArgs),
-    /// List the XYZ tiles needed to render the trajectory.
+    /// List the XYZ tiles needed to render every camera along the trajectory.
     Plan(commands::PlanArgs),
     /// Generate tiles into the HDF5 tile store (from the plan, a tile list or a bbox).
     Gen(commands::GenArgs),
-    /// Render the camera sequence (images + depth / flow / poses) from the tile store.
+    /// Render the sequence file: body poses, IMU, every camera's frame modalities.
     Render(commands::RenderArgs),
-    /// Simulate an event camera (ESIM-style) along the trajectory → events.h5 (M3ED layout).
+    /// Simulate the cameras with an `events` modality (ESIM-style) into the sequence file.
     Events(commands::RenderArgs),
     /// traj (if missing) → plan → gen → render (→ events if enabled).
     Run(commands::RunArgs),

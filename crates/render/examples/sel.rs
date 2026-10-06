@@ -6,8 +6,9 @@ fn main() {
     let gen = terragen::Generator::new(s.world.clone());
     let est = render::pipeline::generator_range_estimator(&gen);
     let oracle = PlanOracle { estimate: Some(&est), fixed: (0.0, 0.0) };
-    let model = s.camera.build().unwrap();
-    let cam = poses[0].camera(&s.extrinsics, &ell);
+    let spec = &s.cameras[0];
+    let model = spec.intrinsics.build().unwrap();
+    let cam = poses[0].camera(&spec.extrinsics, &ell);
     let params = LodParams { min_zoom: 2, max_zoom: 17, texel_px: 0.8, cone_margin: 0.08, ..Default::default() };
     let sel = Selector::new(&cam, model.as_ref(), ell, &params, &oracle);
     let mut v = sel.select();

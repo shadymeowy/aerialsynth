@@ -16,6 +16,6 @@ pub mod sensor;
 pub mod raster;
 pub mod trajectory;
 
-pub use camera::{CameraConfig, CameraModel, Extrinsics, RigConfig};
+pub use camera::{CameraConfig, CameraModel, Extrinsics};
 pub use raster::{FrameOut, RenderSettings, Renderer, Shading};
 pub use trajectory::{CamPose, Pose};

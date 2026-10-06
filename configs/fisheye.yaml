@@ -4,6 +4,12 @@ tiles: { file: out/quick/world.h5, max_zoom: 17, lazy: true }
 trajectory:
   file: out/fisheye/traj.csv
   synth: { kind: circle, altitude: 800, speed: 40, duration: 2, radius: 900 }
-camera: { model: kannala_brandt, width: 640, height: 640, intrinsics: [205, 205, 319.5, 319.5], distortion: [0.02, -0.005, 0.0, 0.0] }
-extrinsics: { mount: nadir }
-output: { dir: out/fisheye/seq, h5: out/fisheye/seq.h5, frame_rate: 5 }
+cameras:
+  - path: /fisheye
+    intrinsics: { model: kannala_brandt, width: 640, height: 640, intrinsics: [205, 205, 319.5, 319.5], distortion: [0.02, -0.005, 0.0, 0.0] }
+    extrinsics: { mount: nadir }
+    frame_rate: 5
+    rgb: {}
+    depth: {}
+    flow: {}
+output: { file: out/fisheye/seq.h5 }
