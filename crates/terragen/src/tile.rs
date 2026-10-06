@@ -175,6 +175,8 @@ impl Generator {
             emission: DVec3,
             albedo: DVec3,
             height: f64,
+            /// bare ground under the pixel (for the canopy clean-up below)
+            ground: f64,
             lit: f64,
             class: u8,
         }
@@ -196,6 +198,7 @@ impl Generator {
                     let mut acc_e = DVec3::ZERO;
                     let mut acc_h = 0.0;
                     let mut acc_l = 0.0;
+                    let mut acc_g = 0.0;
                     let mut counts = [0u16; 32];
                     for sy in 0..ss {
                         for sx in 0..ss {
@@ -210,6 +213,7 @@ impl Generator {
                             let nb = [at(i0, j0), at(i0 + 1, j0), at(i0, j0 + 1), at(i0 + 1, j0 + 1)];
                             let t = at(ii, jj);
                             let ground = bilerp(nb.map(|t| t.ground), fx, fy);
+                            acc_g += ground;
                             let mut wl = f64::NEG_INFINITY;
                             let mut wk = water::NONE;
                             for t in nb {
@@ -252,12 +256,48 @@ impl Generator {
                     }
                     let inv = 1.0 / (ss * ss) as f64;
                     let class = counts.iter().enumerate().max_by_key(|(_, c)| **c).map(|(k, _)| k as u8).unwrap_or(0);
-                    row.push(PixB { emission: acc_e * inv, albedo: acc_a * inv, height: acc_h * inv, lit: acc_l * inv, class });
+                    row.push(PixB { emission: acc_e * inv, albedo: acc_a * inv, height: acc_h * inv, ground: acc_g * inv, lit: acc_l * inv, class });
                 }
                 row
             })
             .collect();
-        let pb: Vec<PixB> = rows_b.into_iter().flatten().collect();
+        let mut pb: Vec<PixB> = rows_b.into_iter().flatten().collect();
+
+        // ---------------- canopy clean-up: morphological opening of the height above ground with
+        // a ~1 m radius. Tree / land-use densities are evaluated per pixel, so wherever an input
+        // mask changes sharply (slope stripes on gully walls, field edges) a crown can be clipped
+        // into a sliver: a needle in the DSM. Whole crowns, hedges and buildings are wider than
+        // the structuring element and survive.
+        let r_open = (0.9 / row_gsd[na / 2]).floor() as usize;
+        if r_open >= 1 {
+            let r = r_open.min(4);
+            let canopy: Vec<f64> = pb.iter().map(|p| (p.height - p.ground).max(0.0)).collect();
+            let filt = |src: &[f64], max: bool| -> Vec<f64> {
+                // separable square min / max filter over (2r+1)^2, clamped at the grid border
+                let pick = |a: f64, b: f64| if max { a.max(b) } else { a.min(b) };
+                let mut tmp = vec![0.0; na * na];
+                for j in 0..na {
+                    for i in 0..na {
+                        let (lo, hi) = (i.saturating_sub(r), (i + r).min(na - 1));
+                        tmp[j * na + i] = (lo..=hi).map(|k| src[j * na + k]).fold(if max { f64::MIN } else { f64::MAX }, pick);
+                    }
+                }
+                let mut out = vec![0.0; na * na];
+                for j in 0..na {
+                    for i in 0..na {
+                        let (lo, hi) = (j.saturating_sub(r), (j + r).min(na - 1));
+                        out[j * na + i] = (lo..=hi).map(|k| tmp[k * na + i]).fold(if max { f64::MIN } else { f64::MAX }, pick);
+                    }
+                }
+                out
+            };
+            let opened = filt(&filt(&canopy, false), true);
+            for (k, p) in pb.iter_mut().enumerate() {
+                if opened[k] < canopy[k] - 0.5 {
+                    p.height = p.ground + opened[k];
+                }
+            }
+        }
 
         if prof {
             eprintln!("tile {id}: pass A {:.3}s, pass B {:.3}s", t_a, t_start.elapsed().as_secs_f64() - t_a);

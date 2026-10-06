@@ -23,17 +23,17 @@ shots:
     text: "A whole planet, generated procedurally on the WGS84 ellipsoid"
     seconds: 6
     scenario:
-      trajectory: { synth: { kind: line, lat: 39.905, lon: 32.775, heading_deg: 65, altitude: 420 } }
-      cameras: [ { extrinsics: { pitch_deg: -24 } } ]
+      trajectory: { synth: { kind: line, lat: 39.905, lon: 32.775, heading_deg: 65, altitude: 480 } }
+      cameras: [ { extrinsics: { pitch_deg: -48 } } ]
 
   - id: river
     label: "River valley"
     text: "Rivers drain downhill through carved valleys and floodplains"
     seconds: 5.5
     scenario:
-      trajectory: { synth: { kind: line, lat: 39.89, lon: 36.57, heading_deg: 60, altitude: 380 } }
+      trajectory: { synth: { kind: line, lat: 39.89, lon: 36.57, heading_deg: 60, altitude: 650 } }
       render: { lighting: { time_utc: "07:10:00" } }
-      cameras: [ { extrinsics: { pitch_deg: -22, yaw_deg: -28 } } ]
+      cameras: [ { extrinsics: { mount: nadir, pitch_deg: 0 } } ]
 
   - id: mountains
     label: "Snow-capped mountains"
@@ -42,15 +42,15 @@ shots:
     scenario:
       trajectory: { synth: { kind: line, lat: 39.17, lon: 33.70, heading_deg: 80, altitude: 1100, speed: 70 } }
       render: { lighting: { time_utc: "04:45:00" } }
-      cameras: [ { extrinsics: { pitch_deg: -14 } } ]
+      cameras: [ { extrinsics: { pitch_deg: -24 } } ]
 
   - id: town
     label: "Town"
     text: "Street grids, parks and buildings — part of the elevation model"
     seconds: 6
     scenario:
-      trajectory: { synth: { kind: line, lat: 41.585, lon: 32.975, heading_deg: 100, altitude: 450 } }
-      cameras: [ { extrinsics: { pitch_deg: -35 } } ]
+      trajectory: { synth: { kind: line, lat: 41.585, lon: 32.972, heading_deg: 100, altitude: 450 } }
+      cameras: [ { extrinsics: { pitch_deg: -55 } } ]
 
   - id: coast
     label: "Coastline"
@@ -58,9 +58,9 @@ shots:
     seconds: 5.5
     scenario:
       # over the headland at 40.23N 36.76E towards the sea to the north-east, morning sun ahead
-      trajectory: { synth: { kind: line, lat: 40.215, lon: 36.745, heading_deg: 40, altitude: 350 } }
+      trajectory: { synth: { kind: line, lat: 40.215, lon: 36.745, heading_deg: 40, altitude: 600 } }
       render: { lighting: { time_utc: "06:00:00" } }
-      cameras: [ { extrinsics: { pitch_deg: -16 } } ]
+      cameras: [ { extrinsics: { pitch_deg: -38 } } ]
 
   - id: forest
     label: "Forest"
@@ -68,9 +68,9 @@ shots:
     seconds: 5.5
     scenario:
       # a river through the forest at 41.591N 33.201E
-      trajectory: { synth: { kind: line, lat: 41.583, lon: 33.175, heading_deg: 68, altitude: 250 } }
+      trajectory: { synth: { kind: line, lat: 41.583, lon: 33.175, heading_deg: 68, altitude: 380 } }
       render: { lighting: { time_utc: "05:40:00" } }
-      cameras: [ { extrinsics: { pitch_deg: -30 } } ]
+      cameras: [ { extrinsics: { pitch_deg: -60 } } ]
 
   - id: golden
     label: "Golden hour"
@@ -88,9 +88,9 @@ shots:
     seconds: 7
     scenario:
       # towards the town at 39.893N 32.925E from 2.5 km west; ~86 min of dusk in 8.6 s
-      trajectory: { synth: { kind: line, lat: 39.894, lon: 32.896, heading_deg: 90, altitude: 600, speed: 40 } }
+      trajectory: { synth: { kind: line, lat: 39.894, lon: 32.912, heading_deg: 90, altitude: 600, speed: 40 } }
       render: { lighting: { time_utc: "16:50:00", time_scale: 600 } }
-      cameras: [ { extrinsics: { pitch_deg: -17 }, rgb: { sensor: { exposure: { max_time: 0.04, max_gain: 160, tau: 0.25 } } } } ]
+      cameras: [ { extrinsics: { pitch_deg: -34 }, rgb: { sensor: { exposure: { max_time: 0.04, max_gain: 160, tau: 0.25 } } } } ]
 
   - id: night
     label: "Night · towns"
@@ -101,7 +101,7 @@ shots:
       trajectory: { synth: { kind: line, lat: 41.581, lon: 32.955, heading_deg: 95, altitude: 600, speed: 50 } }
       render: { lighting: { date: "2026-03-19", time_utc: "21:30:00" } }
       cameras:
-        - extrinsics: { pitch_deg: -24 }
+        - extrinsics: { pitch_deg: -45 }
           rgb: { sensor: { exposure: { target: 0.05, max_time: 0.033, max_gain: 24 }, optics: { bloom: 0.03 }, noise: { read: 0.05, shot: 0.08 } } }
 
   - id: moon
@@ -131,7 +131,7 @@ shots:
     seconds: 5
     scenario:
       trajectory: { synth: { kind: line, lat: 39.902, lon: 32.785, heading_deg: 75, altitude: 120, speed: 55 } }
-      cameras: [ { extrinsics: { pitch_deg: -14 } } ]
+      cameras: [ { extrinsics: { pitch_deg: -35 } } ]
 
   - id: bank
     label: "Steep turns"
@@ -165,7 +165,7 @@ shots:
           speed: 60
           vibration: { harmonic_deg: 0.35, harmonic_hz: 24, broadband_deg: 0.3 }
       render: { lighting: { time_utc: "17:00:00" } }
-      cameras: [ { extrinsics: { pitch_deg: -18 }, rgb: { sensor: { exposure: { max_time: 0.03, target: 0.19 }, motion_blur: { max_samples: 48 } } } } ]
+      cameras: [ { extrinsics: { pitch_deg: -40 }, rgb: { sensor: { exposure: { max_time: 0.03, target: 0.19 }, motion_blur: { max_samples: 48 } } } } ]
 
   - id: fisheye
     label: "Fisheye · 200°"
@@ -188,19 +188,19 @@ shots:
       cameras:
         - path: /pinhole
           intrinsics: { model: pinhole, width: 640, height: 360, intrinsics: [457.0, 457.0, 319.5, 179.5] }
-          extrinsics: { mount: forward, pitch_deg: -30 }
+          extrinsics: { mount: forward, pitch_deg: -45 }
           rgb: {}
         - path: /barrel
           intrinsics: { model: pinhole, width: 640, height: 360, intrinsics: [300.0, 300.0, 319.5, 179.5], distortion: [-0.32, 0.09, 0.0, 0.0] }
-          extrinsics: { mount: forward, pitch_deg: -30 }
+          extrinsics: { mount: forward, pitch_deg: -45 }
           rgb: {}
         - path: /kb
           intrinsics: { model: kannala_brandt, width: 640, height: 360, intrinsics: [125.0, 125.0, 319.5, 179.5], distortion: [0.0, 0.0, 0.0, 0.0], max_fov_deg: 190 }
-          extrinsics: { mount: forward, pitch_deg: -30 }
+          extrinsics: { mount: forward, pitch_deg: -45 }
           rgb: {}
         - path: /mei
           intrinsics: { model: mei, width: 640, height: 360, intrinsics: [230.0, 230.0, 319.5, 179.5], xi: 1.3, distortion: [0.0, 0.0, 0.0, 0.0], max_fov_deg: 200 }
-          extrinsics: { mount: forward, pitch_deg: -30 }
+          extrinsics: { mount: forward, pitch_deg: -45 }
           rgb: {}
 
   - id: rig
@@ -258,7 +258,7 @@ shots:
       cameras:
         - path: /cam0
           intrinsics: { model: pinhole, width: 864, height: 486, intrinsics: [617.0, 617.0, 431.5, 242.5] }
-          extrinsics: { mount: forward, pitch_deg: -28 }
+          extrinsics: { mount: forward, pitch_deg: -45 }
           rgb: {}
           depth: {}
 

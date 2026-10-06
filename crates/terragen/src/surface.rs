@@ -301,6 +301,8 @@ struct TreeLayer {
     cell: f64,
     seed: u64,
     density: f64,
+    /// density of the whole stand (all layers): crowns grow to close the canopy
+    closure: f64,
     height: f64,
     color: DVec3,
     conifer: f64,
@@ -497,6 +499,14 @@ impl SurfaceModel {
             }
         }
         col *= 1.0 + 0.22 * detail;
+        // meadow texture: dry straw-coloured patches and mottling (tussocks, growth) at a few
+        // metres to tens of metres, band-limited (the mean is unchanged at coarse zooms)
+        {
+            let dry_p = smoothstep(0.05, 0.55, perlin3(0x3EAD, p / 60.0) + 0.5 * perlin3(0x3EAE, p / 22.0)) * band(30.0, gsd) * cover;
+            col = mixc(col, col * DVec3::new(1.16, 1.06, 0.80), 0.45 * dry_p);
+            col *= 1.0 + (0.10 * perlin3(0x3EB1, p / 12.0) * band(12.0, gsd) + 0.08 * perlin3(0x3EB2, p / 4.0) * band(4.0, gsd)
+                + 0.06 * perlin3(0x3EB3, p / 1.3) * band(1.3, gsd)) * cover;
+        }
         // drainage lines: moister, greener, darker channels; dry bright spurs
         if t.gully != 0.0 {
             let ch = smoothstep(0.1, 0.8, -t.gully);
@@ -556,7 +566,13 @@ impl SurfaceModel {
             }
         }
 
-        let mut height = l.ground;
+        // micro-relief of the ground: hummocks, tussocks and bumps (decimetres over metres),
+        // band-limited; fields get a smoother, tilled surface (applied below)
+        let micro_relief = (0.30 * perlin3(0x9A01, p / 9.0) * band(9.0, gsd)
+            + 0.14 * perlin3(0x9A02, p / 3.2) * band(3.2, gsd)
+            + 0.06 * perlin3(0x9A03, p / 1.1) * band(1.1, gsd))
+            * (1.0 - 0.5 * rock);
+        let mut height = l.ground + micro_relief;
         let mut lit: f64 = 1.0;
         let mut emission = DVec3::ZERO;
         let natural_ok = (1.0 - rock) * (1.0 - snow) * (1.0 - t.sand);
@@ -584,15 +600,31 @@ impl SurfaceModel {
             0.0
         };
 
+        // ------------------------------------------------------------- woodlots
+        // farmland keeps forest on its most forest-prone patches (low values of the forest
+        // pattern, up to ~1/7 of the land, less in dry climates): areas of woodland between the
+        // fields, not only the riparian strips and hedgerows
+        let woodlot = {
+            let fpu = 0.5 + 0.5 * pf.forest;
+            let cover = smoothstep(0.12, 0.45, t.moist.max(0.0)) * smoothstep(-6.0, 2.0, t.temp) * world.cfg.vegetation.tree_density;
+            smoothstep(-0.02, 0.02, 0.34 * cover - fpu) * natural_ok
+        };
+
         // ------------------------------------------------------------- fields
         let flat_ok = 1.0 - smoothstep(0.12, 0.22, slope);
         let mut field_cov = 0.0;
         if let Some(r) = &region {
             if t.agri > 0.02 && natural_ok * flat_ok > 0.3 && world.cfg.landuse.agriculture > 0.0 {
                 if let Some((fcol, fh, cov, edge_kind)) = self.field(r, t, q_rot, p, gsd, fw, pf) {
-                    let a = cov * natural_ok * flat_ok * (1.0 - riparian);
+                    // a field is there or not: a crisp (noisy) cutoff instead of fading fields out
+                    // over gentle valley sides, which left washed, half-transparent bands
+                    let keep = natural_ok * flat_ok * (1.0 - riparian) * (1.0 - woodlot);
+                    // (constant threshold: a noisy one left specks of open ground inside fields,
+                    // where trees clipped to a pixel or two became spikes)
+                    let a = cov * smoothstep(0.45, 0.55, keep);
                     col = mixc(col, fcol, a);
-                    height += fh * a;
+                    // tilled fields are smoother than natural ground
+                    height += fh * a - 0.6 * micro_relief * a;
                     field_cov = a;
                     if a > 0.5 {
                         class = if edge_kind == 1 { lc::FOREST } else if edge_kind == 2 { lc::ROAD } else { lc::CROP };
@@ -623,36 +655,46 @@ impl SurfaceModel {
             // savanna / steppe scattered trees
             let savanna = smoothstep(0.18, 0.35, wet) * (1.0 - smoothstep(0.55, 0.7, wet)) * smoothstep(12.0, 20.0, temp) * 0.12;
             let groves = 0.04 * smoothstep(0.15, 0.3, wet);
-            let clear = 1.0 - 0.85 * smoothstep(0.05, 0.4, t.agri) * flat_ok;
+            let clear = 1.0 - 0.85 * smoothstep(0.05, 0.4, t.agri) * flat_ok * (1.0 - woodlot);
             let mut dens = (forest * 0.9 * clear + savanna + groves) * natural_ok * (1.0 - field_cov) * veg.tree_density;
             dens = dens.max(0.8 * riparian * veg.tree_density);
-            dens = (dens + 0.35 * smoothstep(0.2, 0.9, -t.gully) * smoothstep(0.2, 0.5, wet) * natural_ok).min(1.0);
+            // drainage lines carry scrub, not trees: the lines are only metres wide, so tree
+            // crowns there were clipped into slivers (spikes in the DSM) and drew curving tree
+            // lines across the land
+            let gully_scrub = 0.55 * smoothstep(0.2, 0.9, -t.gully) * smoothstep(0.2, 0.5, wet) * natural_ok * (1.0 - field_cov);
             dens *= 1.0 - smoothstep(0.9, 1.4, slope);
             dens *= 1.0 - smoothstep(0.0, 0.6, t.mountain * smoothstep(-2.0, -6.0, temp)); // tree line
             dens *= not_urban;
             // shrubs / bushes in steppe, maquis and rocky slopes (texture of natural ground)
             let shrub_clim = smoothstep(0.15, 0.3, wet) * (1.0 - smoothstep(0.6, 0.8, wet)) * smoothstep(2.0, 10.0, temp);
             let shrub_patch = smoothstep(-0.2, 0.5, patch + 0.4 * pf.land);
-            let shrub = (0.45 * shrub_clim * shrub_patch * (1.0 - forest) * natural_ok.max(0.4 * rock) * (1.0 - field_cov) * veg.tree_density * not_urban)
-                .clamp(0.0, 0.6);
+            let shrub = ((0.45 * shrub_clim * shrub_patch * (1.0 - forest) * natural_ok.max(0.4 * rock) * (1.0 - field_cov) + gully_scrub) * veg.tree_density * not_urban)
+                .clamp(0.0, 0.7);
             if dens > 0.0 || shrub > 0.01 {
-                let conifer = 1.0 - smoothstep(4.0, 13.0, temp);
+                // conifers in proper stands; lone and scattered trees in open land are broadleaf
+                // (lower, wider crowns), not needle-thin spruces
+                let stand_d = smoothstep(0.3, 0.75, dens);
+                let conifer = (1.0 - smoothstep(4.0, 13.0, temp)) * stand_d.max(1.0 - smoothstep(-5.0, 1.0, temp));
                 let tropic = smoothstep(19.0, 25.0, temp) * smoothstep(0.55, 0.75, wet);
                 let dry = 1.0 - smoothstep(0.3, 0.5, wet);
                 let tall = 0.5 + 0.5 * st[3];
                 let layers = [
-                    TreeLayer { cell: 5.5, seed: 0x7EE1, density: dens * conifer, height: 14.0 + 10.0 * tall, color: pal.crown_conifer, conifer: 1.0 },
+                    TreeLayer { cell: 5.5, seed: 0x7EE1, density: dens * conifer, closure: dens, height: 14.0 + 10.0 * tall, color: pal.crown_conifer, conifer: 1.0 },
                     TreeLayer {
                         cell: 8.5,
                         seed: 0x7EE2,
                         density: dens * (1.0 - conifer) * (1.0 - tropic),
-                        height: 10.0 + 10.0 * tall,
+                        closure: dens,
+                        height: (10.0 + 10.0 * tall) * (0.65 + 0.35 * stand_d),
                         color: mixc(pal.crown_decid, pal.crown_dry, dry),
                         conifer: 0.0,
                     },
-                    TreeLayer { cell: 13.0, seed: 0x7EE3, density: dens * tropic, height: 22.0 + 14.0 * tall, color: pal.crown_tropic, conifer: 0.0 },
-                    TreeLayer { cell: 3.2, seed: 0x7EE4, density: shrub, height: 1.6, color: pal.shrub, conifer: 0.0 },
+                    TreeLayer { cell: 13.0, seed: 0x7EE3, density: dens * tropic, closure: dens, height: 22.0 + 14.0 * tall, color: pal.crown_tropic, conifer: 0.0 },
+                    TreeLayer { cell: 3.2, seed: 0x7EE4, density: shrub, closure: 0.0, height: 1.6, color: pal.shrub, conifer: 0.0 },
                 ];
+                // forest floor: shaded litter and understory, not sunlit grass, between the crowns
+                let floor = smoothstep(0.25, 0.8, dens);
+                col = mixc(col, mixc(pal.crown_conifer, pal.soil[0], 0.45) * 0.7, floor * 0.85);
                 let (mut tc, th, tcov) = self.trees(&layers, q_loc, gsd, fw, p);
                 if tcov > 0.0 {
                     // forest stands of different age / species composition
@@ -908,29 +950,42 @@ impl SurfaceModel {
             for dy in -1..=1 {
                 for dx in -1..=1 {
                     let h = hash2(layer.seed, ix + dx, iy + dy);
-                    if u01k(h, 3) >= layer.density {
+                    let u = u01k(h, 3);
+                    if u >= layer.density {
                         continue;
                     }
+                    // density is evaluated per pixel: where it falls (stand / field edges) a crown
+                    // would be clipped into a wall or a spike; fade it out with the margin instead
+                    let fade = smoothstep(0.0, 0.3, (layer.density - u) / layer.density.max(1e-6));
                     let c = DVec2::new(
                         (ix + dx) as f64 + 0.5 + 0.8 * (u01k(h, 1) - 0.5),
                         (iy + dy) as f64 + 0.5 + 0.8 * (u01k(h, 2) - 0.5),
                     ) * layer.cell;
-                    let r = layer.cell * (0.36 + 0.24 * u01k(h, 4));
+                    // crowns grow with the stand density: dense forest closes its canopy
+                    let r = layer.cell * (0.36 + 0.24 * u01k(h, 4)) * (1.0 + 0.55 * smoothstep(0.35, 0.9, layer.closure));
                     let d = (q - c).length();
                     if d > r + fw {
                         continue;
                     }
-                    let cov = ((r - d) / fw + 0.5).clamp(0.0, 1.0) * explicit;
+                    let cov = ((r - d) / fw + 0.5).clamp(0.0, 1.0) * explicit * fade;
                     let x = (d / r).min(1.0);
-                    let hh = layer.height * (0.7 + 0.6 * u01k(h, 5));
-                    let prof = if layer.conifer > 0.5 { 0.35 + 0.65 * (1.0 - x) } else { 0.55 + 0.45 * (1.0 - x * x).sqrt() };
-                    let th = hh * prof;
+                    let hh = layer.height * (0.55 + 0.9 * u01k(h, 5));
+                    // crown surfaces taper towards the ground (cone / dome): a tall vertical wall at
+                    // the crown rim made every tree a column, seen as a spike from low angles
+                    let prof = if layer.conifer > 0.5 { 0.08 + 0.92 * (1.0 - x).powf(1.15) } else { 0.12 + 0.88 * (1.0 - x * x).sqrt() };
+                    // foliage clumps: a bumpy crown surface gives the shading texture (a smooth cone or
+                    // dome shades as a glossy blob)
+                    let clump = perlin3(h ^ 0xC1, p / 1.6) * band(1.6, gsd) + 0.5 * perlin3(h ^ 0xC2, p / 0.8) * band(0.8, gsd);
+                    let th = hh * prof * (1.0 + 0.10 * clump * (0.3 + 0.7 * (1.0 - x))) * fade;
                     if th > best_h {
                         best_h = th;
-                        let tint = 0.8 + 0.4 * u01k(h, 6);
-                        let hue = DVec3::new(1.0 + 0.15 * (u01k(h, 7) - 0.5), 1.0, 1.0 - 0.1 * (u01k(h, 7) - 0.5));
+                        let tint = 0.72 + 0.5 * u01k(h, 6);
+                        let hv = u01k(h, 7) - 0.5;
+                        let hue = DVec3::new(1.0 + 0.35 * hv, 1.0 + 0.06 * (u01k(h, 9) - 0.5), 1.0 - 0.25 * hv);
+                        // leafy mottling inside the crown (clumps of foliage, ~1 m)
+                        let leaf = 0.82 + 0.36 * (0.5 + 0.5 * perlin3(h, p / 1.1)) * band(1.1, gsd);
                         // crowns are a bit darker at the rim (self-shading inside the crown)
-                        best_col = layer.color * tint * hue * (0.75 + 0.35 * (1.0 - x));
+                        best_col = layer.color * tint * hue * leaf * (0.75 + 0.35 * (1.0 - x));
                     }
                     cov_total = cov_total.max(cov);
                 }
@@ -1069,8 +1124,12 @@ impl SurfaceModel {
         col *= tint;
         // within-field variation (soil moisture, growth, management) at several scales
         col *= 1.0 + 0.10 * pf.field_var
-            + 0.07 * perlin3(id, p / 35.0) * band(35.0, gsd)
+            + 0.12 * perlin3(id, p / 35.0) * band(35.0, gsd)
             + 0.08 * perlin3(id ^ 1, p / (0.8 * r.fw));
+        // growth zones (soil, moisture): greener / yellower patches of tens of metres
+        let gz = perlin3(id ^ 0x6A0, p / 55.0) * band(55.0, gsd);
+        col = mixc(col, col * DVec3::new(1.12, 1.04, 0.82), 0.5 * smoothstep(0.0, 0.6, gz));
+        col = mixc(col, col * DVec3::new(0.86, 0.93, 0.88), 0.5 * smoothstep(0.0, 0.6, -gz));
         // management direction: rows / tramlines along one field axis; in the headland (strip
         // along the field edge where the tractor turns) the pattern runs parallel to the edge
         let row_ang = if u01k(id, 9) < 0.7 { 0.0 } else { std::f64::consts::FRAC_PI_2 };
@@ -1081,9 +1140,10 @@ impl SurfaceModel {
         let along = fx * ca + fy * sa;
         let mut extra_h = 0.0;
         // soil / growth texture at several scales (band-limited)
-        let tex = 0.13 * perlin3(id ^ 0x7E1, p / 7.0) * band(7.0, gsd)
-            + 0.08 * perlin3(id ^ 0x7E2, p / 2.5) * band(2.5, gsd)
-            + 0.10 * perlin3(id ^ 0x7E4, p / 22.0) * band(22.0, gsd)
+        let tex = 0.18 * perlin3(id ^ 0x7E1, p / 7.0) * band(7.0, gsd)
+            + 0.13 * perlin3(id ^ 0x7E2, p / 2.5) * band(2.5, gsd)
+            + 0.07 * perlin3(id ^ 0x7E5, p / 0.9) * band(0.9, gsd)
+            + 0.12 * perlin3(id ^ 0x7E4, p / 22.0) * band(22.0, gsd)
             + 0.10 * perlin3(id ^ 0x7E3, p / 90.0) * band(90.0, gsd);
         col *= 1.0 + tex;
         // wet hollows / bare patches inside some fields
@@ -1139,7 +1199,11 @@ impl SurfaceModel {
             if u01k(hb, 1) < r.hedge {
                 let hc = pal.crown_decid * (0.8 + 0.3 * pf.field_var3);
                 col = mixc(col, hc, bcov);
-                extra_h = lerp(extra_h, 4.0 + 3.0 * u01k(hb, 2), bcov);
+                // rounded cross-section and a height varying along the hedge (a row of shrubs and
+                // small trees, not a flat-topped wall)
+                let across = (1.0 - (edge.abs() / bw.max(0.1)).powi(2)).max(0.0).sqrt();
+                let along = 0.45 + 0.55 * (0.5 + 0.5 * perlin3(hb, p / 6.0));
+                extra_h = lerp(extra_h, (2.2 + 2.3 * u01k(hb, 2)) * across * along, bcov);
                 if bcov > 0.5 {
                     kind_out = 1;
                 }
