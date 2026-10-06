@@ -14,13 +14,18 @@ plus a per-millisecond index; we use the same data types.
 
 | approach | idea | pros | cons |
 |---|---|---|---|
-| **A. Adaptive re-rendering (ESIM)**, *implemented* | render log intensity at times chosen so image motion between renders ≤ `max_px_per_step`; interpolate per pixel between renders | exact geometry, occlusions and lighting; any camera model; the trajectory's vibration is handled naturally (dense sampling only where the image moves) | cost ∝ image motion (~0.06–0.2 s per internal render) |
-| B. Frame interpolation (v2e style) | render at frame rate, synthesize intermediate frames | cheaper | interpolation artifacts at occlusions; our exact flow would make warping easy, but disocclusions still need content |
+| **A. Adaptive re-rendering (ESIM)**, *implemented* | render log intensity at times chosen so image motion between renders ≤ `max_px_per_step`; interpolate per pixel between renders | exact geometry, occlusions and lighting; any camera model; the trajectory's vibration is handled naturally (dense sampling only where the image moves) | cost ∝ image motion (~0.2 s per internal render) |
+| B. Frame interpolation (v2e style), *tried and rejected* | render keyframes every few px of motion, reproject them with the exact per-pixel geometry for the steps in between | 5–7x faster | ~37% fewer events than A in textured terrain, also with 2x-resolution keyframes (see below) |
 | C. Linearized brightness constancy | `dL/dt = −∇L · flow` from one render + exact flow | very cheap | ignores occlusions and non-linear changes; poor for large motion |
 | D. GPU renderer at kHz | same as A on the GPU | real-time-ish | needs the GPU renderer (planned by the user) |
 
-A is the reference implementation. B and C could be added later as fast modes on top of the
-same sensor model.
+A is the implementation. B was implemented and measured (commit 3138801): the reprojection
+itself is exact (image shifts match the geometric flow, identity warps are exact), but a
+pixel is a box integral of texture with detail near its Nyquist frequency, and under a
+sub-pixel shift that integral changes in ways no interpolation of the integrated image can
+predict (the best shift explains only 5–25% of the change between renders 0.15 px apart).
+Interpolated images are too smooth in time, so B systematically loses events (per-pixel event
+maps correlate at 0.92 with A, at 0.63x the count). C has the same problem in a stronger form.
 
 ## Sensor model (`crates/render/src/events.rs`)
 
@@ -88,8 +93,9 @@ Output, in the sequence file:
   at any time is the `/pose` body pose composed with `T_body_cam`.
 
 Performance on 8 cores (VGA, supersample 2, `max_px_per_step` 0.5, ~1000 m AGL flight with
-vibration): about 60 s of compute per simulated second, at ~300 internal renders/s. Two knobs
-trade fidelity for speed:
+engine vibration): about 100 s of compute per simulated second, at ~520 renders/s; the
+`terrain events` summary prints renders, sensor steps and their times. The sensor model runs
+in parallel (~3 ms per step) and is not the bottleneck. Two knobs trade fidelity for speed:
 
 - **`max_px_per_step`:** step size limit; larger is faster and less exact.
 - **`supersample`:** 1 is faster but adds aliasing events.
@@ -98,11 +104,13 @@ trade fidelity for speed:
 
 `render.lighting.flicker` makes artificial lights flicker at twice the mains frequency (default
 50 Hz mains), with three supply phases and a fraction of LED lamps that barely flicker. When
-lights are on, the event simulation renders at least `flicker_steps_per_period` times per
-flicker period. At night this produces the periodic ON/OFF bursts at lamps that real event
-cameras show (activity spectrum peaks at 100/200/300 Hz). It costs ~2.4k renders/s of simulated
-time.
+lights are on, the event sensor steps at least `flicker_steps_per_period` times per flicker
+period. At night this produces the periodic ON/OFF bursts at lamps that real event cameras
+show (activity spectrum peaks at 100/200/300 Hz). These steps need no extra renders: the
+renderer returns the lamp light as `radiance + cos(ωt)·A + sin(ωt)·B` (exact; checked against
+direct renders to 1e-11), so only image motion triggers renders.
 
 ## Possible next steps
 
-- **Fast modes B/C** for long sequences.
+- **GPU renderer** (option D): the only route to much faster event simulation that keeps the
+  fidelity of A.

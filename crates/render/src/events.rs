@@ -9,13 +9,12 @@
 //!    a render projected with the step poses), and lamp flicker is resolved
 //!    (`flicker_steps_per_period`). Vibration therefore produces dense steps only when it
 //!    actually moves the image.
-//! 2. Images at the steps (`mode`):
-//!    * `render`: every motion step is rendered; flicker-only sub-steps evaluate the rendered
-//!      flicker split (`FrameOut::radiance_at`) and interpolate between renders per pixel.
-//!    * `warp`: keyframes are rendered every `key_px` of image motion; the steps in between
-//!      reproject both neighbouring keyframes with the exact pose and per-pixel geometry and
-//!      blend them (occlusion-checked). Exact for a static Lambertian scene except at
-//!      occlusion edges and view-dependent shading (water glint, haze path); ~5-10x faster.
+//! 2. Every step that moves the image is rendered. Steps that only resolve lamp flicker (or the
+//!    minimum step rate) are not: the renderer returns the flicker as separate cos / sin images
+//!    (`FrameOut::radiance_at`, exact), interpolated between the neighbouring renders.
+//!    (Reprojecting sparse keyframes instead was tried and rejected: ~37% fewer events in
+//!    textured terrain, because a pixel's box integral of near-Nyquist texture under a
+//!    sub-pixel shift cannot be interpolated from the integrated image; see git history.)
 //! 3. Per pixel, log intensity is linearly interpolated between steps; every crossing of the
 //!    reference level ± C emits an event at the interpolated time (several per step if the
 //!    change spans several thresholds), subject to a refractory period.
@@ -39,16 +38,6 @@ use h5::Attrs;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum EventMode {
-    /// Render every motion step (reference quality).
-    Render,
-    /// Render keyframes every `key_px` of motion, reproject them for the steps in between.
-    #[default]
-    Warp,
-}
 
 /// Event camera knobs. Names in parentheses are the corresponding Prophesee biases.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -95,10 +84,6 @@ pub struct EventConfig {
     pub max_rate_mev_s: f64,
 
     // ---- simulation
-    /// How the images between renders are obtained (see the module docs).
-    pub mode: EventMode,
-    /// `warp` mode: max image motion between rendered keyframes (px).
-    pub key_px: f64,
     /// Max image motion between sensor steps (px).
     pub max_px_per_step: f64,
     /// Sensor step-rate bounds (Hz).
@@ -134,8 +119,6 @@ impl Default for EventConfig {
             hot_pixel_hz: 200.0,
             timestamp_jitter_us: 2.0,
             max_rate_mev_s: 50.0,
-            mode: EventMode::Warp,
-            key_px: 4.0,
             max_px_per_step: 0.5,
             min_rate_hz: 100.0,
             max_rate_hz: 5000.0,
@@ -437,7 +420,7 @@ impl EventWriter {
     }
 }
 
-/// A rendered keyframe.
+/// A render at a sensor step.
 struct Key {
     t: f64,
     cam: CamPose,
@@ -451,10 +434,6 @@ impl Key {
         let w = model.width() as usize;
         let o = self.frame.sample_offset;
         self.frame.points[k].unwrap_or_else(|| self.cam.cam_to_world(model.unproject(DVec2::new((k % w) as f64 + o, (k / w) as f64 + o)).unwrap_or(DVec3::Z) * 1e7))
-    }
-
-    fn points(&self, model: &dyn CameraModel) -> Vec<DVec3> {
-        (0..self.frame.points.len()).into_par_iter().map(|k| self.point(k, model)).collect()
     }
 }
 
@@ -472,147 +451,6 @@ fn max_motion(key: &Key, a: &CamPose, b: &CamPose, model: &dyn CameraModel) -> f
         }
     }
     maxd
-}
-
-/// Catmull-Rom weights for fractional offset f.
-#[inline]
-fn cubic_w(f: f32) -> [f32; 4] {
-    let (f2, f3) = (f * f, f * f * f);
-    [-0.5 * f3 + f2 - 0.5 * f, 1.5 * f3 - 2.5 * f2 + 1.0, -1.5 * f3 + 2.0 * f2 + 0.5 * f, 0.5 * f3 - 0.5 * f2]
-}
-
-/// Reproject keyframe radiance `rad` (rendered at the pose of `pts`, the world points of its
-/// pixels sampled at pixel + `offset`) into the camera `cam`.
-/// Backward warp: for each target pixel x find the source pixel s with s + F(s) = x, where F is
-/// the exact forward flow of the key's points, by fixed-point iteration. Returns the warped
-/// radiance and a validity mask (false where the iteration does not converge: occlusions,
-/// image borders).
-#[allow(clippy::too_many_arguments)]
-pub fn warp(rad: &[f32], pts: &[DVec3], offset: f64, cam: &CamPose, w: usize, h: usize, model: &dyn CameraModel) -> (Vec<f32>, Vec<bool>) {
-    let flow: Vec<[f32; 2]> = pts
-        .par_iter()
-        .enumerate()
-        .map(|(k, p)| match model.project(cam.world_to_cam(*p)) {
-            Some(px) => [(px.x - (k % w) as f64 - offset) as f32, (px.y - (k / w) as f64 - offset) as f32],
-            None => [f32::NAN; 2],
-        })
-        .collect();
-    let bil_flow = |x: f32, y: f32| -> Option<[f32; 2]> {
-        if !(x >= 0.0 && y >= 0.0 && x <= (w - 1) as f32 && y <= (h - 1) as f32) {
-            return None;
-        }
-        let (x0, y0) = ((x as usize).min(w - 2), (y as usize).min(h - 2));
-        let (fx, fy) = (x - x0 as f32, y - y0 as f32);
-        let f = |i: usize, j: usize| flow[j * w + i];
-        let (a, b, c, d) = (f(x0, y0), f(x0 + 1, y0), f(x0, y0 + 1), f(x0 + 1, y0 + 1));
-        let mut out = [0f32; 2];
-        for k in 0..2 {
-            out[k] = (a[k] * (1.0 - fx) + b[k] * fx) * (1.0 - fy) + (c[k] * (1.0 - fx) + d[k] * fx) * fy;
-        }
-        out[0].is_finite().then_some(out)
-    };
-    let mut out = vec![0f32; w * h * 3];
-    let mut valid = vec![false; w * h];
-    out.par_chunks_mut(w * 3).zip(valid.par_chunks_mut(w)).enumerate().for_each(|(y, (orow, vrow))| {
-        for x in 0..w {
-            let (tx, ty) = (x as f32, y as f32);
-            let mut s = match flow[y * w + x] {
-                f if f[0].is_finite() => [tx - f[0], ty - f[1]],
-                _ => [tx, ty],
-            };
-            let mut ok = false;
-            for _ in 0..4 {
-                let Some(f) = bil_flow(s[0], s[1]) else { break };
-                let n = [tx - f[0], ty - f[1]];
-                let r = (n[0] - s[0]).abs().max((n[1] - s[1]).abs());
-                s = n;
-                if r < 0.02 {
-                    ok = true;
-                    break;
-                }
-            }
-            if !ok || !(s[0] >= 0.0 && s[1] >= 0.0 && s[0] <= (w - 1) as f32 && s[1] <= (h - 1) as f32) {
-                continue;
-            }
-            // bicubic (Catmull-Rom) resampling keeps the pixel-scale texture contrast that
-            // bilinear interpolation would wash out (fewer, wrong events)
-            let (xi, yi) = (s[0].floor(), s[1].floor());
-            let (wx, wy) = (cubic_w(s[0] - xi), cubic_w(s[1] - yi));
-            let mut acc = [0f32; 3];
-            for (j, wyj) in wy.iter().enumerate() {
-                let yy = (yi as isize + j as isize - 1).clamp(0, h as isize - 1) as usize;
-                for (i, wxi) in wx.iter().enumerate() {
-                    let xx = (xi as isize + i as isize - 1).clamp(0, w as isize - 1) as usize;
-                    let k = (yy * w + xx) * 3;
-                    let wgt = wyj * wxi;
-                    for ch in 0..3 {
-                        acc[ch] += wgt * rad[k + ch];
-                    }
-                }
-            }
-            for ch in 0..3 {
-                orow[3 * x + ch] = acc[ch].max(0.0);
-            }
-            vrow[x] = true;
-        }
-    });
-    (out, valid)
-}
-
-/// Box-filter an RGB image of (w·s) x (h·s) down to w x h.
-fn box_down(img: &[f32], w: usize, h: usize, s: usize) -> Vec<f32> {
-    let ws = w * s;
-    let norm = 1.0 / (s * s) as f32;
-    let mut out = vec![0f32; w * h * 3];
-    out.par_chunks_mut(w * 3).enumerate().for_each(|(y, row)| {
-        for x in 0..w {
-            for j in 0..s {
-                let base = ((y * s + j) * ws + x * s) * 3;
-                for i in 0..s {
-                    for ch in 0..3 {
-                        row[3 * x + ch] += img[base + 3 * i + ch];
-                    }
-                }
-            }
-            for v in &mut row[3 * x..3 * x + 3] {
-                *v *= norm;
-            }
-        }
-    });
-    out
-}
-
-/// Radiance at `t` between keyframes `k0`, `k1` (fraction `a` from k0 to k1).
-#[allow(clippy::too_many_arguments)]
-fn between(k0: &Key, k1: &Key, p0: &[DVec3], p1: &[DVec3], cam: &CamPose, t: f64, a: f64, omega: f64, mode: EventMode, model: &dyn CameraModel) -> Vec<f32> {
-    let (r0, r1) = (k0.frame.radiance_at(t, omega), k1.frame.radiance_at(t, omega));
-    let a = a as f32;
-    match mode {
-        // motion below a step: per-pixel interpolation (as the sensor does in log space)
-        EventMode::Render => r0.par_iter().zip(&r1).map(|(u, v)| u + a * (v - u)).collect(),
-        EventMode::Warp => {
-            let (w, h) = (model.width() as usize, model.height() as usize);
-            let ((w0, v0), (w1, v1)) = rayon::join(|| warp(&r0, p0, k0.frame.sample_offset, cam, w, h, model), || warp(&r1, p1, k1.frame.sample_offset, cam, w, h, model));
-            let mut out = vec![0f32; w * h * 3];
-            out.par_chunks_mut(3).enumerate().for_each(|(k, o)| {
-                let (wa, wb) = match (v0[k], v1[k]) {
-                    (true, true) => (1.0 - a, a),
-                    (true, false) => (1.0, 0.0),
-                    (false, true) => (0.0, 1.0),
-                    // neither keyframe sees it: the nearer keyframe unwarped
-                    (false, false) => {
-                        let src = if a < 0.5 { &r0 } else { &r1 };
-                        o.copy_from_slice(&src[3 * k..3 * k + 3]);
-                        return;
-                    }
-                };
-                for ch in 0..3 {
-                    o[ch] = wa * w0[3 * k + ch] + wb * w1[3 * k + ch];
-                }
-            });
-            out
-        }
-    }
 }
 
 /// Simulation statistics of one camera.
@@ -636,29 +474,13 @@ pub fn simulate(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], cache: Arc<Ti
     }
     let ext = &spec.extrinsics;
     let model: Arc<dyn CameraModel> = spec.intrinsics.build()?;
+    let m = model.as_ref();
     let (w, h) = (model.width() as usize, model.height() as usize);
-    // Keyframes: in warp mode rendered at the supersampled resolution without supersampling
-    // (same cost), warped there and box-filtered to sensor pixels afterwards. A sub-pixel shift
-    // of the scene changes a pixel's box average in ways that cannot be interpolated from the
-    // downsampled image (it lost ~1/3 of the events against the render reference).
-    let ss = ec.supersample.max(1);
-    let (km, kss): (Arc<dyn CameraModel>, u32) = match ec.mode {
-        EventMode::Warp => (model.scaled(ss), ss),
-        EventMode::Render => (model.clone(), 1),
-    };
     let mut rs: RenderSettings = scn.render.clone();
-    rs.supersample = ss / kss;
-    // same level of detail as a supersampled render: LOD targets are in key-image pixels
-    rs.texel_px *= kss as f64;
-    rs.mesh_px *= kss as f64;
+    rs.supersample = ec.supersample.max(1);
     rs.min_zoom = scn.tiles.min_zoom;
     rs.max_zoom = rs.max_zoom.min(scn.tiles.max_zoom);
-    let mut renderer = Renderer::new(km.clone(), rs, ell, cache);
-    let km = km.as_ref();
-    // key image → sensor pixels (box filter)
-    let down = |img: Vec<f32>| -> Vec<f32> { if kss == 1 { img } else { box_down(&img, w, h, kss as usize) } };
-    // image motion between two poses in sensor pixels
-    let motion = |key: &Key, a: &CamPose, b: &CamPose| max_motion(key, a, b, km) / kss as f64;
+    let mut renderer = Renderer::new(model.clone(), rs, ell, cache);
     renderer.split_flicker = true;
     let mut sensor = EventSensor::new(ec.clone(), w, h);
     let g = file.ensure_group(crate::scenario::h5path(&spec.path))?;
@@ -701,60 +523,48 @@ pub fn simulate(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], cache: Arc<Ti
             f64::INFINITY
         }
     };
-    let key_px = match ec.mode {
-        EventMode::Render => ec.max_px_per_step,
-        EventMode::Warp => ec.key_px.max(ec.max_px_per_step),
-    };
+    let max_px = ec.max_px_per_step;
     let (dt_min, dt_max) = (1.0 / ec.max_rate_hz.max(1.0), 1.0 / ec.min_rate_hz.max(1e-3));
-    // keyframes may be further apart than a step when the image hardly moves
-    let key_dt_max = dt_max * (key_px / ec.max_px_per_step).max(1.0);
 
     progress(0.0, t_end - t_start);
     let mut k0 = render_key(t_start, &mut st);
-    step(t_start, &down(k0.frame.radiance_at(t_start, omega)), &mut st, &mut writer)?;
-    let mut p0 = if ec.mode == EventMode::Warp { k0.points(km) } else { vec![] };
+    step(t_start, &k0.frame.radiance_at(t_start, omega), &mut st, &mut writer)?;
     let mut dt = dt_min * 4.0;
     while k0.t < t_end {
-        // Walk the sensor steps along the path (image motion of k0's points ≤ max_px_per_step
-        // per step, so vibration inside a keyframe interval is sampled), until the image has
-        // moved key_px from k0: that is the next keyframe.
+        // Walk the sensor steps along the path, each moving the image by at most max_px (so
+        // vibration between renders is sampled), until the image has moved: render there.
+        // Steps before that only resolve flicker / the minimum rate and are interpolated.
         let dt_cap = dt_max.min(flicker_dt(k0.t)).max(dt_min);
         let mut times = vec![];
         let (mut t, mut cam) = (k0.t, k0.cam);
         loop {
             let tn = (t + dt.min(dt_cap)).min(t_end);
             let cam_n = cam_at(tn);
-            let d = motion(&k0, &cam, &cam_n);
-            if d > ec.max_px_per_step && tn - t > dt_min * 1.001 {
-                dt = ((tn - t) * 0.9 * ec.max_px_per_step / d).max(dt_min);
+            let d = max_motion(&k0, &cam, &cam_n, m);
+            if d > max_px && tn - t > dt_min * 1.001 {
+                dt = ((tn - t) * 0.9 * max_px / d).max(dt_min);
                 continue;
             }
-            if d < 0.5 * ec.max_px_per_step {
+            if d < 0.5 * max_px {
                 dt = (dt * 1.5).min(dt_cap);
             }
             times.push(tn);
             (t, cam) = (tn, cam_n);
-            // render mode: every step that moves the image is rendered (only flicker / rate
-            // sub-steps are interpolated)
-            let new_key = match ec.mode {
-                EventMode::Render => d >= 0.25 * ec.max_px_per_step || motion(&k0, &k0.cam, &cam_n) >= 0.5 * ec.max_px_per_step,
-                EventMode::Warp => motion(&k0, &k0.cam, &cam_n) >= key_px,
-            };
-            if new_key || tn >= t_end || tn - k0.t >= key_dt_max * 0.999 {
+            let moved = d >= 0.25 * max_px || max_motion(&k0, &k0.cam, &cam_n, m) >= 0.5 * max_px;
+            if moved || tn >= t_end {
                 break;
             }
         }
         let t1 = *times.last().unwrap();
         let k1 = render_key(t1, &mut st);
-        let p1 = if ec.mode == EventMode::Warp { k1.points(km) } else { vec![] };
-        let span = t1 - k0.t;
         for &ts in &times[..times.len() - 1] {
-            let rad = between(&k0, &k1, &p0, &p1, &cam_at(ts), ts, (ts - k0.t) / span, omega, ec.mode, km);
-            step(ts, &down(rad), &mut st, &mut writer)?;
+            let a = ((ts - k0.t) / (t1 - k0.t)) as f32;
+            let (r0, r1) = (k0.frame.radiance_at(ts, omega), k1.frame.radiance_at(ts, omega));
+            let rad: Vec<f32> = r0.par_iter().zip(&r1).map(|(u, v)| u + a * (v - u)).collect();
+            step(ts, &rad, &mut st, &mut writer)?;
         }
-        step(t1, &down(k1.frame.radiance_at(t1, omega)), &mut st, &mut writer)?;
+        step(t1, &k1.frame.radiance_at(t1, omega), &mut st, &mut writer)?;
         k0 = k1;
-        p0 = p1;
         progress(k0.t - t_start, t_end - t_start);
     }
     writer.finish(ec)?;
