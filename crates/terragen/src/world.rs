@@ -375,30 +375,45 @@ impl World {
                 break;
             }
             let freq = lam0 / lam;
-            let (v, d) = Self::gully_octave(self.seed ^ (0xE205 + i * 0x9E37), p / lam, dir0 + up.cross(hd));
+            // bending rotates the stripe direction; keep its length (= stripe frequency) at 1
+            let dir = (dir0 + up.cross(hd) * 0.7).normalize_or_zero();
+            let (v, d) = Self::gully_octave(self.seed ^ (0xE205 + i * 0x9E37), p / lam, dir);
             h += v * a * wb;
-            hd += d * (a * freq * wb);
+            hd += d * (a * wb);
+            let _ = freq;
             a *= 0.45;
             lam *= 0.5;
         }
         h
     }
 
-    fn dunes(&self, p: DVec3, gsd: f64) -> f64 {
-        let mut lam = 900.0;
-        let mut amp = 1.0;
+    /// Sand dunes: main ridges perpendicular to a slowly varying, locally bent wind direction
+    /// (oriented stripe kernel → curved transverse / barchanoid crests), plus isotropic ridged
+    /// secondary dunes.
+    pub fn dunes(&self, ctx: &Ctx, m: &Macro, gsd: f64) -> f64 {
+        // NB: never modulate a noise wavelength with a spatially varying field — with absolute
+        // (ECEF) coordinates that shears the noise into streaks. Wavelengths are constants.
+        let lam0 = 520.0;
         let mut sum = 0.0;
-        for i in 0..5 {
-            let wb = band(lam, gsd);
+        if band(lam0, gsd) > 0.0 {
+            let bend = 0.7 * perlin3(self.seed ^ 0xB3D, ctx.p / (4.0 * lam0)) + 0.3 * perlin3(self.seed ^ 0xB3E, ctx.p / (1.5 * lam0));
+            let th = 2.5 * m.style[0] + 0.8 * m.style[2] + bend;
+            let wind = ctx.east * th.cos() + ctx.north * th.sin();
+            let (v, _) = Self::gully_octave(self.seed ^ 0xD0E, ctx.p / lam0, wind);
+            sum += (0.5 + 0.5 * v).max(0.0).powf(1.25) * band(lam0, gsd);
+        }
+        let mut lam = lam0 * 0.33;
+        let mut amp = 0.3;
+        for i in 0..3usize {
+            let wb = band(lam, 1.5 * gsd);
             if wb <= 0.0 {
                 break;
             }
-            let q = self.dune_frames.rot[i] * (p / lam) + self.dune_frames.off[i];
-            let n = perlin3(self.dune_frames.seeds[i], q);
-            let r = 1.0 - n.abs();
-            sum += (r * r * r) * amp * wb;
-            lam *= 0.45;
+            let q = self.dune_frames.rot[i] * (ctx.p / lam) + self.dune_frames.off[i];
+            let r = 1.0 - perlin3(self.dune_frames.seeds[i], q).abs();
+            sum += r * r * amp * wb;
             amp *= 0.35;
+            lam *= 0.4;
         }
         sum
     }
@@ -457,9 +472,10 @@ impl World {
         t -= c.lapse_rate * elev.max(0.0) / KM;
         let latd = lat.abs().to_degrees();
         let hadley = (-((latd - 24.0) / 9.0).powi(2)).exp();
-        let mut w = 0.58 + 0.55 * m.moist;
-        w -= 0.32 * hadley;
+        let mut w = 0.56 + 0.62 * m.moist;
+        w -= 0.40 * hadley;
         w += 0.12 * (1.0 - smoothstep(0.0, 0.25, m.cont)); // coastal
+        w -= 0.22 * smoothstep(0.15, 0.55, m.cont); // continental interiors
         w -= 0.10 * smoothstep(1500.0, 3500.0, elev); // high plateaus drier
         w += c.moisture_bias;
         (t, w.clamp(0.0, 1.0))
@@ -643,13 +659,13 @@ impl World {
 
         // ---- sand seas with dunes
         let sand_n = m.sand;
-        let sand = (1.0 - smoothstep(0.08, 0.24, moist))
+        let sand = (1.0 - smoothstep(0.1, 0.28, moist))
             * smoothstep(6.0, 14.0, temp0)
-            * smoothstep(-0.05, 0.3, sand_n)
+            * smoothstep(-0.25, 0.15, sand_n)
             * (1.0 - mountain)
             * smoothstep(0.01, 0.06, s);
         if sand > 1e-3 && r.dune_height > 0.0 {
-            h += r.dune_height * sand * self.dunes(p, gsd);
+            h += r.dune_height * sand * self.dunes(ctx, m, gsd);
         }
 
         // ---- rivers: major + minor networks carve valleys, set water level

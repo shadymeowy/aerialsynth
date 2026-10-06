@@ -113,7 +113,7 @@ impl Default for Relief {
             hill_height: 260.0,
             micro_height: 3.0,
             mesas: 0.5,
-            dune_height: 25.0,
+            dune_height: 35.0,
             erosion: 1.0,
             gully_wavelength: 1400.0,
         }

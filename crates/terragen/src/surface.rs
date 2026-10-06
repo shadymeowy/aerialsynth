@@ -202,7 +202,7 @@ impl Palette {
             grass_cold: srgb(112.0, 116.0, 84.0),
             rock: [srgb(128.0, 122.0, 114.0), srgb(150.0, 128.0, 104.0), srgb(92.0, 90.0, 88.0)],
             snow: srgb(238.0, 242.0, 248.0),
-            sand: [srgb(218.0, 190.0, 142.0), srgb(204.0, 150.0, 96.0), srgb(228.0, 210.0, 170.0)],
+            sand: [srgb(212.0, 190.0, 150.0), srgb(198.0, 162.0, 118.0), srgb(224.0, 208.0, 176.0)],
             beach: srgb(222.0, 206.0, 165.0),
             wet_sand: srgb(150.0, 140.0, 118.0),
             tundra: srgb(128.0, 124.0, 98.0),
@@ -453,7 +453,7 @@ impl SurfaceModel {
             };
             // sediment / plankton variation
             let v = pf.water;
-            col *= 1.0 + 0.12 * v;
+            col *= 1.0 + 0.06 * v;
             // surf/foam close to the ocean shore
             if l.water_kind == water::OCEAN && depth < 1.2 {
                 let foam = (1.0 - depth / 1.2) * 0.5 * (0.5 + 0.5 * perlin3(7, p / 6.0)) * band(6.0, gsd);

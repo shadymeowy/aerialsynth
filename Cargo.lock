@@ -777,6 +777,7 @@ dependencies = [
  "anyhow",
  "geodesy",
  "glam",
+ "image",
  "rayon",
  "serde",
  "serde_yaml",

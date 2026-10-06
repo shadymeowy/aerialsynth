@@ -11,3 +11,6 @@ serde.workspace = true
 serde_yaml.workspace = true
 anyhow.workspace = true
 rayon.workspace = true
+
+[dev-dependencies]
+image.workspace = true
