@@ -243,6 +243,33 @@ pub fn render(a: RenderArgs) -> Result<()> {
     do_render(&s)
 }
 
+fn do_events(s: &Scenario) -> Result<()> {
+    let poses = load_poses(s)?;
+    let gen = Arc::new(Generator::new(s.world.clone()));
+    let store = if s.tiles.lazy {
+        pipeline::open_or_create_store(s, &gen)?
+    } else {
+        TileStore::open(&s.tiles.file).with_context(|| "opening tile store (run `terrain gen` first, or use --lazy)")?
+    };
+    let b = ProgressBar::new(1000);
+    b.set_style(ProgressStyle::with_template("events {bar:40} {percent}% [{elapsed_precise} < {eta_precise}]").unwrap());
+    let t0 = std::time::Instant::now();
+    let n = pipeline::render_events(s, &poses, Arc::new(store), Some(gen), &|done, total| {
+        b.set_position((1000.0 * done / total.max(1e-9)) as u64);
+    })?;
+    b.finish();
+    eprintln!("simulated {n} events in {:.1}s → {}", t0.elapsed().as_secs_f64(), s.events.h5.display());
+    Ok(())
+}
+
+pub fn events(a: RenderArgs) -> Result<()> {
+    let mut s = setup(&a.common)?;
+    if a.lazy {
+        s.tiles.lazy = true;
+    }
+    do_events(&s)
+}
+
 #[derive(Args)]
 pub struct RunArgs {
     #[command(flatten)]
@@ -261,7 +288,11 @@ pub fn run(a: RunArgs) -> Result<()> {
     let tiles = plan_tiles(&s, &gen)?;
     gen_tiles(&s, &gen, tiles.into_iter().collect(), false)?;
     drop(gen);
-    do_render(&s)
+    do_render(&s)?;
+    if s.events.enabled {
+        do_events(&s)?;
+    }
+    Ok(())
 }
 
 #[derive(Args)]

@@ -40,7 +40,9 @@ enum Cmd {
     Gen(commands::GenArgs),
     /// Render the camera sequence (images + depth / flow / poses) from the tile store.
     Render(commands::RenderArgs),
-    /// traj (if missing) → plan → gen → render.
+    /// Simulate an event camera (ESIM-style) along the trajectory → events.h5 (M3ED layout).
+    Events(commands::RenderArgs),
+    /// traj (if missing) → plan → gen → render (→ events if enabled).
     Run(commands::RunArgs),
     /// Summarize a tile store or a rendered sequence file.
     Info(commands::InfoArgs),
@@ -56,6 +58,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Plan(a) => commands::plan(a),
         Cmd::Gen(a) => commands::gen(a),
         Cmd::Render(a) => commands::render(a),
+        Cmd::Events(a) => commands::events(a),
         Cmd::Run(a) => commands::run(a),
         Cmd::Info(a) => commands::info(a),
         Cmd::Preview(a) => preview::run(a),

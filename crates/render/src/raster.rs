@@ -148,6 +148,8 @@ struct TileView {
     tiles: HashMap<TileId, Arc<TileData>, FxBuild>,
     /// max elevation over 16x16-pixel blocks of each tile (shadow-ray empty-space skipping)
     blockmax: HashMap<TileId, Box<[f32; 256]>, FxBuild>,
+    /// highest DSM point of all tiles in view (shadow rays above it can stop)
+    max_elev: f64,
 }
 
 impl TileView {
@@ -170,7 +172,8 @@ impl TileView {
         } else {
             HashMap::default()
         };
-        TileView { tiles, blockmax }
+        let max_elev = tiles.values().filter(|t| !t.elevation.is_empty()).map(|t| t.elev_max as f64).fold(f64::MIN, f64::max);
+        TileView { tiles, blockmax, max_elev }
     }
 
     /// Max elevation of the 16x16 block containing global pixel (gx, gy) at zoom z, if known.
@@ -768,6 +771,9 @@ impl Renderer {
             // empty-space skipping: if the ray is above the current block's max, jump to the
             // block exit (blocks are 16x16 texels of the current level)
             let ray_here = h0 + bias + dist * tan_e - dist * dist / (2.0 * r_earth);
+            if ray_here > view.max_elev + 1.0 {
+                break; // above everything that could occlude
+            }
             if let Some(bm) = view.block_max(zl, px.x, px.y) {
                 if ray_here > bm as f64 + 0.01 {
                     let fx = px.x.rem_euclid(16.0);

@@ -364,3 +364,23 @@ pub fn render_sequence(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, ge
     }
     Ok(())
 }
+
+/// Event-camera simulation over the scenario (see `events.rs`). Returns the number of events.
+pub fn render_events(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, gen: Option<Arc<Generator>>, progress: &dyn Fn(f64, f64)) -> Result<usize> {
+    let ell = store.meta().ellipsoid();
+    let mut layers = vec![Layer::Elevation, Layer::Landcover, Layer::Emission];
+    match scn.render.shading {
+        crate::raster::Shading::Relit => layers.extend([Layer::Albedo, Layer::Normal]),
+        crate::raster::Shading::Satellite => layers.push(Layer::Rgb),
+    }
+    let mut cache = TileCache::new(store, layers, scn.tiles.cache_tiles);
+    if scn.tiles.lazy {
+        if let Some(g) = gen {
+            cache = cache.with_generator(g, scn.tiles.max_zoom, true);
+        }
+    }
+    let cache = Arc::new(cache);
+    let n = crate::events::simulate_events(scn, poses, cache.clone(), ell, progress)?;
+    cache.flush_generated()?;
+    Ok(n)
+}

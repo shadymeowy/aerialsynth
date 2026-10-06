@@ -35,7 +35,8 @@ python scripts/view_seq.py out/quick/seq.h5 view.png  # rgb | depth | flow | val
 | `plan`    | tiles needed for the trajectory/camera (`-o tiles.txt`) |
 | `gen`     | generate tiles into `tiles.file` (from the plan, `--tiles list`, or `--bbox … --zooms a-b`); existing tiles are skipped, so the store grows lazily |
 | `render`  | render the sequence (`--lazy` generates missing tiles on the fly and stores them) |
-| `run`     | `traj` (if missing) → `plan` → `gen` → `render` |
+| `events`  | event camera simulation (ESIM-style, realistic sensor noise) → M3ED-layout HDF5 readable by camodocal; see `docs/events.md` |
+| `run`     | `traj` (if missing) → `plan` → `gen` → `render` (→ `events` if `events.enabled`) |
 | `info`    | summarize a tile store / sequence file |
 | `preview` | generate tiles straight into a PNG mosaic (`--layers rgb,albedo,elevation,normal,landcover,hillshade`) |
 
@@ -146,7 +147,14 @@ All subcommands read **one scenario YAML** (`-c`). Its sections are `world`, `ti
 **Rendering (`crates/render`)**
 - **Geometry:**
   - CPU reference rasterizer; tile meshes are built on the fly from the elevation layer
-  - generic `CameraModel` trait: pinhole radtan and Kannala-Brandt fisheye included (`configs/fisheye.yaml`)
+  - generic `CameraModel` trait implementing all of camodocal's `calib/camera.cpp` models, with
+    the same YAML schema (`model`, `width`, `height`, `intrinsics`, `distortion`, `xi`,
+    `max_fov_deg`, `inv_poly`, `affine`, `center`):
+    - `pinhole` and `pinhole_full` (OpenCV rational)
+    - `kannala_brandt`
+    - `mei`
+    - `scaramuzza`
+  - fields of view beyond 180° are supported (range-based depth buffer)
   - quadtree LOD by projected texel size, with skirts against cracks
   - f64 transforms and an exact per-vertex camera model (incl. distortion)
 - **Shading:**
@@ -180,8 +188,9 @@ crates/tilestore  HDF5 tile pyramid (layout above), parallel codec
 crates/terragen   procedural terrain generator
 crates/render     camera, trajectories/dynamics, LOD, rasterizer, lighting, sensor, writers, pipeline
 crates/cli        `terrain` binary
-scripts/          contact.py (generator contact sheets), check_gt.py (GT validation), view_seq.py
-configs/          example scenarios (quick, dataset, fisheye, oblique_sunset, night, night_moon, cruise)
+scripts/          contact.py (generator contact sheets), check_gt.py + cammodels.py (GT validation, all camera models), view_seq.py, view_events.py
+docs/events.md    event camera modality: options, sensor model, format
+configs/          example scenarios (quick, dataset, fisheye, events, oblique_sunset, night, night_moon, cruise)
 ```
 
 ## Performance (8 cores)

@@ -9,6 +9,7 @@
 //! render:     { supersample: 3, shading: relit, lighting: {...}, ... }
 //! sensor:     { exposure: {...}, motion_blur: {...}, noise: {...}, ... }
 //! output:     { dir: out/seq, frame_rate: 10, png: true, h5: out/seq.h5, ... }
+//! events:     { enabled: false, h5: out/seq_events.h5, contrast_pos: 0.25, ... }
 //! ```
 //! Relative paths are relative to the current working directory.
 
@@ -31,6 +32,8 @@ pub struct Scenario {
     pub render: RenderSettings,
     pub sensor: SensorSettings,
     pub output: OutputConfig,
+    /// Event camera simulation (`terrain events`, or `run` when enabled).
+    pub events: crate::events::EventConfig,
 }
 
 impl Default for Scenario {
@@ -44,6 +47,7 @@ impl Default for Scenario {
             render: RenderSettings::default(),
             sensor: SensorSettings::default(),
             output: OutputConfig::default(),
+            events: crate::events::EventConfig::default(),
         }
     }
 }
