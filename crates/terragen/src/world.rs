@@ -8,6 +8,20 @@ use crate::noise::*;
 use geodesy::{Ellipsoid, Geodetic};
 use glam::{DVec2, DVec3};
 
+#[path = "hydro.rs"]
+mod hydro;
+pub use hydro::{RiverHit, Seg};
+
+/// What `terrain_impl` evaluates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Mode {
+    Full,
+    /// everything but lakes (used to find lake spill levels)
+    NoLakes,
+    /// relief only: no water, no land-use sites or roads (drainage heights)
+    Relief,
+}
+
 /// Sampling context of a point on the ellipsoid surface.
 #[derive(Clone, Copy, Debug)]
 pub struct Ctx {
@@ -123,7 +137,6 @@ pub struct Macro {
     pub agri: f64,
     pub style: [f64; 4],
     pub river_width: f64,
-    pub river_mask: [f64; 2],
     pub mtn_warp: [f64; 2],
 }
 
@@ -151,7 +164,6 @@ impl Macro {
             agri: l4(&|m| m.agri),
             style: [l4(&|m| m.style[0]), l4(&|m| m.style[1]), l4(&|m| m.style[2]), l4(&|m| m.style[3])],
             river_width: l4(&|m| m.river_width),
-            river_mask: [l4(&|m| m.river_mask[0]), l4(&|m| m.river_mask[1])],
             mtn_warp: [l4(&|m| m.mtn_warp[0]), l4(&|m| m.mtn_warp[1])],
         }
     }
@@ -175,11 +187,8 @@ pub struct World {
     micro: Fbm,
     temp_n: Fbm,
     moist_n: Fbm,
-    river_major: Fbm,
-    river_minor: Fbm,
     river_warp: [Fbm; 2],
     river_width_n: Fbm,
-    river_mask: [Fbm; 2],
     mesa_n: Fbm,
     dune_frames: OctaveFrames,
     sand_n: Fbm,
@@ -199,7 +208,7 @@ impl World {
         let k = |i: u64| mix64(s.wrapping_mul(0x9E37_79B9).wrapping_add(i * 7919));
         let c = &cfg.continents;
         let r = &cfg.relief;
-        let h = &cfg.hydro;
+
         let cw = c.wavelength_km * KM;
         let home = cfg.home.as_ref().map(|h| {
             let p = geodesy::geodetic2ecef(Geodetic::from_deg(h.lat, h.lon, 0.0), &ell);
@@ -225,11 +234,8 @@ impl World {
             micro: Fbm::new(k(15), 160.0, 9, 2.0, 0.55),
             temp_n: Fbm::new(k(16), 900.0 * KM, 3, 2.0, 0.5),
             moist_n: Fbm::new(k(17), 1400.0 * KM, 5, 2.0, 0.55),
-            river_major: Fbm::new(k(18), h.major_river_wavelength_km * KM, 3, 2.1, 0.45),
-            river_minor: Fbm::new(k(19), h.minor_river_wavelength_km * KM, 3, 2.1, 0.45),
             river_warp: [Fbm::new(k(20), 12.0 * KM, 3, 2.0, 0.5), Fbm::new(k(21), 12.0 * KM, 3, 2.0, 0.5)],
             river_width_n: Fbm::new(k(22), 300.0 * KM, 2, 2.0, 0.5),
-            river_mask: [Fbm::new(k(33), h.major_river_wavelength_km * KM * 0.8, 3, 2.0, 0.5), Fbm::new(k(34), h.minor_river_wavelength_km * KM * 0.7, 3, 2.0, 0.5)],
             mesa_n: Fbm::new(k(23), 250.0 * KM, 3, 2.0, 0.5),
             dune_frames: OctaveFrames::new(k(24), 8),
             sand_n: Fbm::new(k(25), 350.0 * KM, 3, 2.0, 0.5),
@@ -414,10 +420,6 @@ impl World {
             agri: self.agri_n.eval(p, gsd) * self.agri_n.norm() * 1.8,
             style: [self.style_n[0].eval(p, gsd), self.style_n[1].eval(p, gsd), self.style_n[2].eval(p, gsd), self.style_n[3].eval(p, gsd)],
             river_width: self.river_width_n.eval(p, gsd),
-            river_mask: [
-                self.river_mask[0].eval(p, gsd.max(200.0)) * self.river_mask[0].norm() * 1.8,
-                self.river_mask[1].eval(p, gsd.max(200.0)) * self.river_mask[1].norm() * 1.8,
-            ],
             mtn_warp: [self.mtn_warp[0].eval(p, gsd), self.mtn_warp[1].eval(p, gsd)],
         }
     }
@@ -508,7 +510,7 @@ impl World {
         }
         let g = geodesy::ecef2geodetic(center, &self.ell);
         let cctx = Ctx::new(g.lat, g.lon, 20.0, &self.ell);
-        let tc = self.terrain_impl(&cctx, &self.macro_at(cctx.p, cctx.gsd), false);
+        let tc = self.terrain_impl(&cctx, &self.macro_at(cctx.p, cctx.gsd), Mode::NoLakes, None);
         let v = if tc.water_kind != water::NONE || tc.ground < 1.0 {
             None
         } else {
@@ -518,7 +520,7 @@ impl World {
                 let q = cctx.offset(rad * a.cos(), rad * a.sin());
                 let gq = geodesy::ecef2geodetic(q, &self.ell);
                 let qctx = Ctx::new(gq.lat, gq.lon, 20.0, &self.ell);
-                let tq = self.terrain_impl(&qctx, &self.macro_at(qctx.p, qctx.gsd), false);
+                let tq = self.terrain_impl(&qctx, &self.macro_at(qctx.p, qctx.gsd), Mode::NoLakes, None);
                 rim = rim.min(tq.ground);
             }
             if rim < tc.ground - 4.0 {
@@ -537,18 +539,20 @@ impl World {
         v
     }
 
-    /// Pass A at one point (macro fields evaluated exactly).
+    /// Pass A at one point (macro fields and drainage evaluated exactly).
     pub fn terrain(&self, ctx: &Ctx) -> Terrain {
         let m = self.macro_at(ctx.p, ctx.gsd);
-        self.terrain_impl(ctx, &m, true)
+        self.terrain_impl(ctx, &m, Mode::Full, None)
     }
 
-    /// Pass A with given (e.g. interpolated) macro fields.
-    pub fn terrain_with(&self, ctx: &Ctx, m: &Macro) -> Terrain {
-        self.terrain_impl(ctx, m, true)
+    /// Pass A with given (e.g. interpolated) macro fields and the drainage segments near the
+    /// point (see `river_segments`).
+    pub fn terrain_with(&self, ctx: &Ctx, m: &Macro, segs: &[Seg]) -> Terrain {
+        self.terrain_impl(ctx, m, Mode::Full, Some(segs))
     }
 
-    fn terrain_impl(&self, ctx: &Ctx, m: &Macro, with_lakes: bool) -> Terrain {
+    fn terrain_impl(&self, ctx: &Ctx, m: &Macro, mode: Mode, segs: Option<&[Seg]>) -> Terrain {
+        let with_lakes = mode == Mode::Full;
         let p = ctx.p;
         let gsd = ctx.gsd;
         let r = &self.cfg.relief;
@@ -656,60 +660,42 @@ impl World {
             ..Default::default()
         };
         let mut floodplain: f64 = 0.0;
-        if self.cfg.hydro.rivers && land > 0.2 {
-            let wn = smoothstep(-0.6, 0.6, m.river_width);
-            let warp = self.network_warp(ctx);
-            let nets = [
-                (&self.river_major, m.river_mask[0], 900.0, 30.0 + 240.0 * wn, 2500.0 + 3500.0 * wn, 0.08),
-                (&self.river_minor, m.river_mask[1], 450.0, 5.0 + 20.0 * wn, 300.0 + 500.0 * wn, 0.3),
-            ];
-            for (ni, (net, mask_n, warp_amp, width, valley, wet_thr)) in nets.into_iter().enumerate() {
-                if net.wavelength < 3.0 * gsd || (ni == 1 && mountain > 0.5) {
-                    continue;
+        if mode != Mode::Relief && self.cfg.hydro.rivers && land > 0.2 {
+            let local;
+            let segs = match segs {
+                Some(s) => s,
+                None => {
+                    local = self.river_segments(p, 0.0, gsd);
+                    &local[..]
                 }
-                // the mask breaks the closed iso-lines into open, tapering segments (sources)
-                let mk = smoothstep(-0.35, 0.25, mask_n)
-                    * if ni == 1 { 1.0 - smoothstep(0.1, 0.5, mountain) } else { 1.0 };
-                if mk < 0.02 {
-                    continue;
-                }
-                let valley = valley * (0.4 + 0.6 * mk);
-                let (d, gn) = self.network_dist_g(net, ctx, &warp, warp_amp);
-                // fade out near noise extrema (tiny closed loops) → open, river-like segments
-                let mk = mk * smoothstep(1.2, 2.6, gn);
-                if mk < 0.02 {
-                    continue;
-                }
-                let ad = d.abs();
-                if ad > valley * 1.2 + 2.2 * (h - smooth).max(0.0) {
-                    continue;
-                }
-                let width = width * mk.powf(0.8);
-                let hw = width * 0.5;
-                let wet = smoothstep(wet_thr, wet_thr + 0.12, moist);
-                let fp_w = hw + width * (1.5 + 4.0 * wn);
-                let incision = (2.0 + 0.02 * width) * mk;
-                // minor rivers follow the hills more closely (shallow valleys)
-                let base_floor = if ni == 0 { smooth } else { smooth + 0.7 * hill_amp * (hl - hl_low) };
-                let floor = base_floor.max(1.0) - incision;
-                if h > floor {
-                    // valley profile: bed, floodplain, then walls; depth fades with the mask.
-                    // Walls are kept below ~30° by widening the valley with its depth (V shape).
-                    let valley = valley.max(fp_w + 2.2 * (h - floor));
+            };
+            if let Some(rh) = self.river_query(ctx, segs) {
+                let lc = &self.cfg.hydro.levels[rh.level as usize];
+                let wn = smoothstep(-0.6, 0.6, m.river_width);
+                let ad = rh.d.abs();
+                let hw = rh.hw;
+                let width = 2.0 * hw;
+                let wet = smoothstep(lc.wet_moisture, lc.wet_moisture + 0.12, moist);
+                let fp_w = hw + width * (1.0 + 3.0 * wn);
+                let incision = 1.0 + 0.02 * width;
+                let floor = rh.floor.max(1.0) - incision;
+                if h > floor && ad < rh.valley * 1.2 + 2.2 * (h - floor) {
+                    // valley profile: bed, floodplain, walls kept below ~30° (V shape)
+                    let valley = rh.valley.max(fp_w + 2.2 * (h - floor));
                     let wall = smoothstep(fp_w, valley, ad);
                     let wall = wall * wall * (3.0 - 2.0 * wall);
-                    let fp = floor + 1.0 + 0.4 * micro.abs();
-                    let target = if ad < hw { floor - 1.0 - 0.03 * width } else { fp };
-                    let hv = lerp(target, h, wall);
-                    h = lerp(h, h.min(hv), smoothstep(0.02, 0.4, mk));
-                    floodplain = floodplain.max((1.0 - wall) * land * mk);
+                    let fp = floor + 0.8 + 0.4 * micro.abs();
+                    let target = if ad < hw { floor - 0.8 - 0.02 * width } else { fp };
+                    let carved = h.min(lerp(target, h, wall));
+                    // limit the carve depth (small streams only notch the terrain)
+                    h = carved.max(h - lc.max_depth_m * (1.0 - 0.3 * wall));
+                    floodplain = floodplain.max((1.0 - wall) * land * smoothstep(20.0, 120.0, width));
                 }
-                if hw > 0.5 && ad - hw < t.river_d.abs() - t.river_hw {
-                    t.river_d = d;
-                    t.river_hw = hw;
-                    t.river_level = floor;
-                    t.river_wet = wet;
-                }
+                t.river_d = rh.d;
+                t.river_hw = hw;
+                // water surface: the drainage floor, but never buried below the (notched) ground
+                t.river_level = if ad < hw { floor.max(h + 0.6) } else { floor.max(h) };
+                t.river_wet = wet;
             }
         }
 
@@ -779,7 +765,7 @@ impl World {
 
         // ---- land-use sites (only relevant when such features can be resolved)
         let region_cell = self.cfg.landuse.region_km * KM;
-        if gsd < region_cell * 0.1 {
+        if mode != Mode::Relief && gsd < region_cell * 0.1 {
             // warped lookup → curvy (not straight) borders between field systems
             let wq = DVec3::new(
                 perlin3(self.seed ^ 0xA1, p / (0.9 * region_cell)),
@@ -792,7 +778,7 @@ impl World {
             t.region = Site { id: wc.id, id2: wc.id2, center: wc.point, dist: wc.f1, edge: worley_edge_dist(&wc, pw) };
         }
         let town_cell = self.cfg.landuse.town_cell_km * KM;
-        if gsd < town_cell * 0.05 && self.cfg.landuse.towns > 0.0 {
+        if mode != Mode::Relief && gsd < town_cell * 0.05 && self.cfg.landuse.towns > 0.0 {
             let wc = worley3(self.seed ^ 0x70E1, p, town_cell, 0.8);
             t.town = Site { id: wc.id, id2: wc.id2, center: wc.point, dist: wc.f1, edge: worley_edge_dist(&wc, p) };
         }
@@ -800,7 +786,7 @@ impl World {
         // ---- road networks (iso-lines of warped noise), only where people live
         t.road_major = f64::MAX;
         t.road_minor = f64::MAX;
-        if self.cfg.landuse.roads > 0.0 && habit > 0.02 && gsd < 60.0 {
+        if mode != Mode::Relief && self.cfg.landuse.roads > 0.0 && habit > 0.02 && gsd < 60.0 {
             let warp = self.network_warp(ctx);
             t.road_major = self.network_dist(&self.road_major, ctx, &warp, 2500.0);
             if gsd < 15.0 {

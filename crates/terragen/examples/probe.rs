@@ -1,10 +1,17 @@
+// Find towns: scan a grid and print locations classified as building.
 fn main() {
     let g = terragen::Generator::new(terragen::Config::default());
-    let args: Vec<f64> = std::env::args().skip(1).map(|s| s.parse().unwrap()).collect();
-    let (lat, lon) = (args[0].to_radians(), args[1].to_radians());
-    for gsd in [600.0, 150.0, 38.0, 9.5, 2.4, 0.6] {
-        let (t, h, c) = g.probe(lat, lon, gsd);
-        println!("gsd {gsd:6.1}: class {c:2} dsm {h:7.1} ground {:7.1} temp {:5.1} moist {:.2} agri {:.2} habit {:.2} mtn {:.2} sand {:.2} rock {:.2}",
-            t.ground, t.temp, t.moist, t.agri, t.habit, t.mountain, t.sand, t.rock_expect);
+    let mut found = 0;
+    for j in 0..120 {
+        for i in 0..120 {
+            let lat = 39.6 + j as f64 * 0.006;
+            let lon = 32.5 + i as f64 * 0.006;
+            let (_, _, c) = g.probe(lat.to_radians(), lon.to_radians(), 1.0);
+            if c == terragen::landcover::BUILDING || c == terragen::landcover::URBAN {
+                if found % 15 == 0 { println!("{lat:.4},{lon:.4}"); }
+                found += 1;
+            }
+        }
     }
+    eprintln!("{found} urban samples");
 }

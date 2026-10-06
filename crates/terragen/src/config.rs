@@ -124,9 +124,8 @@ impl Default for Relief {
 #[serde(default, deny_unknown_fields)]
 pub struct Hydro {
     pub rivers: bool,
-    /// Wavelength of the major river network (km).
-    pub major_river_wavelength_km: f64,
-    pub minor_river_wavelength_km: f64,
+    /// Drainage network levels (coarse → fine): major rivers, tributaries, streams.
+    pub levels: Vec<RiverLevel>,
     /// Probability of a lake per lake cell, scaled by moisture/flatness.
     pub lake_density: f64,
     pub lake_cell_km: f64,
@@ -135,11 +134,37 @@ impl Default for Hydro {
     fn default() -> Self {
         Hydro {
             rivers: true,
-            major_river_wavelength_km: 160.0,
-            minor_river_wavelength_km: 28.0,
+            levels: vec![
+                RiverLevel { cell_km: 30.0, width_m: [60.0, 260.0], valley_m: 2500.0, wet_moisture: 0.08, meander: 0.35, max_depth_m: 400.0 },
+                RiverLevel { cell_km: 8.0, width_m: [12.0, 45.0], valley_m: 700.0, wet_moisture: 0.25, meander: 0.4, max_depth_m: 35.0 },
+                RiverLevel { cell_km: 2.2, width_m: [2.5, 8.0], valley_m: 140.0, wet_moisture: 0.5, meander: 0.45, max_depth_m: 6.0 },
+            ],
             lake_density: 0.55,
             lake_cell_km: 22.0,
         }
+    }
+}
+
+/// One level of the drainage network.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RiverLevel {
+    /// Lattice cell size: typical distance between drainage nodes (km).
+    pub cell_km: f64,
+    /// Channel width range (m).
+    pub width_m: [f64; 2],
+    /// Valley half width (m).
+    pub valley_m: f64,
+    /// Moisture above which the channel carries water (dry bed otherwise).
+    pub wet_moisture: f64,
+    /// Meander wavelength as a fraction of the cell size.
+    pub meander: f64,
+    /// Maximum depth the channel/valley is carved into the local terrain (m).
+    pub max_depth_m: f64,
+}
+impl Default for RiverLevel {
+    fn default() -> Self {
+        RiverLevel { cell_km: 8.0, width_m: [12.0, 45.0], valley_m: 700.0, wet_moisture: 0.25, meander: 0.4, max_depth_m: 35.0 }
     }
 }
 

@@ -125,6 +125,9 @@ pub struct TownInfo {
     pub roof_style: f64,
     pub height: f64,
     pub lot: f64,
+    /// footprint elongation (≥ 1) and a per-town seed
+    pub elong: f64,
+    pub seed: u64,
     /// Horizontal unit vector towards the sun (ECEF).
     pub sun: DVec3,
 }
@@ -420,11 +423,13 @@ impl SurfaceModel {
             ey: north * ca - east * sa,
             radius: radius.min(world.cfg.landuse.town_cell_km * 1000.0 * 0.45),
             block: 70.0 + 70.0 * u01k(id, 5),
-            street: 9.0 + 7.0 * u01k(id, 6),
+            street: 6.5 + 6.0 * u01k(id, 6),
             organic: u01k(id, 7),
             roof_style: u01k(id, 8),
             height: u01k(id, 9),
             lot: 13.0 + 12.0 * u01k(id, 10),
+            elong: 1.0 + 1.6 * u01k(id, 11) * u01k(id, 12),
+            seed: mix64(id ^ 0x70E5),
             sun: east * self.sun_h.x + north * self.sun_h.y,
         };
         cache.towns.insert(id, info);
@@ -566,9 +571,14 @@ impl SurfaceModel {
         };
 
         // riparian belt along rivers
-        let riparian = if l.river_hw > 0.0 {
+        let riparian = if l.river_hw > 0.0 && t.river_wet > 0.3 {
             let ad = l.river_d.abs();
-            (1.0 - smoothstep(l.river_hw + 4.0, l.river_hw * 2.0 + 30.0, ad)) * smoothstep(0.3, 0.6, t.moist) * natural_ok
+            let belt = 4.0 + 0.6 * l.river_hw.min(60.0);
+            (1.0 - smoothstep(l.river_hw + 0.3 * belt, l.river_hw + belt, ad))
+                * smoothstep(0.35, 0.6, t.moist)
+                * smoothstep(0.3, 0.7, t.river_wet)
+                * natural_ok
+                * (0.55 + 0.45 * smoothstep(-0.3, 0.3, pf.patch))
         } else {
             0.0
         };
@@ -716,7 +726,7 @@ impl SurfaceModel {
             let town = self.town_info(world, cache, t);
             if town.exists {
                 if let Some((tcol, th, cov, cls, shadow, em)) = self.town(&town, p, gsd, fw, slope, world.cfg.look.shadows, pf) {
-                    emission = em;
+                    emission = em * cov;
                     col = mixc(col, tcol, cov);
                     if world.cfg.landuse.buildings_in_dsm {
                         height = lerp(height, l.ground + th, cov);
@@ -736,7 +746,8 @@ impl SurfaceModel {
             if cov > 0.0 {
                 let wet_r = t.river_wet;
                 let wcol = mixc(pal.river, pal.lake_deep, smoothstep(30.0, 200.0, l.river_hw * 2.0));
-                let dry_col = mixc(pal.gravel, pal.sand[2], 0.5) * (1.0 + 0.1 * detail);
+                // dry beds are only a subtle pale line (gravel / sand with some vegetation)
+                let dry_col = mixc(col, mixc(pal.gravel, pal.sand[2], 0.5) * (1.0 + 0.1 * detail), 0.55);
                 let rc = mixc(dry_col, wcol, wet_r);
                 col = mixc(col, rc, cov);
                 height = lerp(height, l.river_level, cov);
@@ -939,10 +950,10 @@ impl SurfaceModel {
         let along = fx * ca + fy * sa;
         let mut extra_h = 0.0;
         // soil / growth texture at several scales (band-limited)
-        let tex = 0.08 * perlin3(id ^ 0x7E1, p / 7.0) * band(7.0, gsd)
-            + 0.06 * perlin3(id ^ 0x7E2, p / 2.5) * band(2.5, gsd)
-            + 0.05 * perlin3(id ^ 0x7E4, p / 22.0) * band(22.0, gsd)
-            + 0.08 * perlin3(id ^ 0x7E3, p / 90.0) * band(90.0, gsd);
+        let tex = 0.13 * perlin3(id ^ 0x7E1, p / 7.0) * band(7.0, gsd)
+            + 0.08 * perlin3(id ^ 0x7E2, p / 2.5) * band(2.5, gsd)
+            + 0.10 * perlin3(id ^ 0x7E4, p / 22.0) * band(22.0, gsd)
+            + 0.10 * perlin3(id ^ 0x7E3, p / 90.0) * band(90.0, gsd);
         col *= 1.0 + tex;
         // wet hollows / bare patches inside some fields
         if u01k(id, 12) < 0.35 {
@@ -1013,104 +1024,138 @@ impl SurfaceModel {
         Some((col, extra_h, inside, kind_out))
     }
 
-    /// Town at point p. Returns (colour, height above ground, coverage, class, shadow amount).
+    /// Town at point p. Returns (colour, height above ground, coverage, class, shadow, emission).
+    /// Coverage is crisp: streets and built lots cover the ground fully, open land in the
+    /// outskirts shows the underlying fields / nature.
     #[allow(clippy::too_many_arguments)]
     fn town(&self, town: &TownInfo, p: DVec3, gsd: f64, fw: f64, slope: f64, shadows: bool, pf: &PixFields) -> Option<(DVec3, f64, f64, u8, f64, DVec3)> {
         let pal = &self.pal;
         let d = p - town.center;
         let q0 = DVec2::new(d.dot(town.ex), d.dot(town.ey));
-        let dist = q0.length();
-        if dist > town.radius * 1.6 {
+        let r = town.radius;
+        // elongated, irregular footprint (noise relative to the town size)
+        let qa = DVec2::new(q0.x / town.elong.sqrt(), q0.y * town.elong.sqrt());
+        if qa.length() > r * 2.0 {
             return None;
         }
-        let edge_n = pf.warp2;
-        let urban = 1.0 - smoothstep(0.45, 1.0, dist / (town.radius * (1.0 + 0.45 * edge_n)));
-        let urban = urban * (1.0 - smoothstep(0.2, 0.4, slope));
-        if urban <= 0.0 {
+        let n1 = 0.32 * perlin3(town.seed ^ 0x71, p / (0.9 * r)) + 0.18 * perlin3(town.seed ^ 0x72, p / (0.35 * r)) * band(0.35 * r, gsd)
+            + 0.08 * pf.warp2;
+        let rel = qa.length() / (r * (1.0 + n1)).max(1.0);
+        let urban = (1.0 - smoothstep(0.3, 1.0, rel)) * (1.0 - smoothstep(0.2, 0.4, slope));
+        if urban <= 0.02 {
             return None;
         }
         // organic (curved) streets in old towns
-        let warp = DVec2::new(perlin3(town.lot.to_bits(), p / 350.0), perlin3(town.lot.to_bits() ^ 9, p / 350.0)) * (35.0 * town.organic);
+        let warp = DVec2::new(perlin3(town.seed, p / 350.0), perlin3(town.seed ^ 9, p / 350.0)) * (35.0 * town.organic);
         let q = q0 + warp;
+        // street grid with jittered (irregularly spaced) street lines
         let b = town.block;
-        let s = town.street;
-        let bi = (q / b).floor();
-        let bq = q - bi * b; // within block cell [0,b)
-        // streets on the cell borders
-        let ds = bq.x.min(b - bq.x).min(bq.y).min(b - bq.y);
-        let big_street = (bi.x as i64).rem_euclid(4) == 0 && bq.x < b * 0.5 || (bi.y as i64).rem_euclid(4) == 0 && bq.y < b * 0.5;
-        let sw = if big_street { s * 1.4 } else { s } * 0.5;
-        let street = band_cov(ds, sw, fw.max(gsd * 0.5));
-        let bh = hash2(town.lot.to_bits() ^ 0xB10C, bi.x as i64, bi.y as i64);
+        let line = |axis: u64, i: i64| (i as f64 + 0.36 * (u01(hash2(town.seed ^ 0x5EE7, axis as i64, i)) - 0.5)) * b;
+        let cell = |axis: u64, x: f64| -> (i64, f64, f64) {
+            let mut i = (x / b).floor() as i64;
+            if x < line(axis, i) {
+                i -= 1;
+            } else if x >= line(axis, i + 1) {
+                i += 1;
+            }
+            let (a0, a1) = (line(axis, i), line(axis, i + 1));
+            (i, x - a0, a1 - a0)
+        };
+        let (bix, bqx, bsx) = cell(0, q.x);
+        let (biy, bqy, bsy) = cell(1, q.y);
+        let ds = bqx.min(bsx - bqx).min(bqy).min(bsy - bqy);
+        let big_street = bix.rem_euclid(4) == 0 && bqx < bsx * 0.5 || biy.rem_euclid(4) == 0 && bqy < bsy * 0.5;
+        let sw = if big_street { town.street * 1.4 } else { town.street } * 0.5;
+        // streets exist where the town is dense enough; outskirts keep only some of them
+        let sh = hash2(town.seed ^ 0x57, bix, biy);
+        let street_here = smoothstep(0.15, 0.3, urban) * if urban < 0.45 && u01k(sh, 3) < 0.4 { 0.0 } else { 1.0 };
+        let street = band_cov(ds, sw, fw.max(gsd * 0.5)) * street_here;
+        let bh = hash2(town.seed ^ 0xB10C, bix, biy);
         let block_kind = u01k(bh, 1);
-        let mut col;
+        let mut col = pal.asphalt;
         let mut height = 0.0;
         let mut class = lc::URBAN;
         let mut shadow = 0.0;
-        // block content
-        let inner = DVec2::new(bq.x - sw, bq.y - sw);
-        let bsz = b - 2.0 * sw;
-        let central = 1.0 - dist / town.radius;
+        let mut cov_lot = 0.0;
+        let inner = DVec2::new(bqx - sw, bqy - sw);
+        let (bw, bd) = (bsx - 2.0 * sw, bsy - 2.0 * sw);
+        let central = (1.0 - rel).max(0.0);
         let buildings_resolved = band(town.lot, gsd);
-        if block_kind < 0.08 + 0.1 * (1.0 - urban) {
-            // park / green
+        if urban > 0.5 && block_kind < 0.07 {
+            // park
             col = pal.grass_wet * (1.0 + 0.15 * pf.detail);
             class = lc::GRASS;
-        } else if block_kind < 0.14 {
-            col = pal.concrete * 0.85; // parking / plaza
-        } else {
-            let industrial = block_kind > 0.93 && central < 0.4;
-            let (lot_w, rows) = if industrial { (bsz, 1.0) } else { (town.lot, 2.0) };
+            cov_lot = 1.0;
+        } else if urban > 0.45 && block_kind < 0.12 {
+            col = pal.concrete * (0.82 + 0.1 * u01k(bh, 4)); // parking / plaza
+            cov_lot = 1.0;
+        } else if inner.x >= 0.0 && inner.y >= 0.0 && inner.x < bw && inner.y < bd {
+            let industrial = block_kind > 0.92 && central < 0.5;
+            let lot_w = if industrial { bw } else { town.lot * (0.7 + 0.6 * u01k(bh, 5)) };
+            let rows = if industrial || bd < 2.6 * town.lot { 1.0 } else { 2.0 };
             let li = (inner.x / lot_w).floor();
-            let lj = (inner.y / (bsz / rows)).floor();
+            let lj = (inner.y / (bd / rows)).floor();
             let lx = inner.x - li * lot_w;
-            let ly = inner.y - lj * (bsz / rows);
+            let ly = inner.y - lj * (bd / rows);
             let lh = hash2(bh, li as i64, lj as i64);
-            let yard = mixc(pal.grass_wet, pal.soil[0], 0.4) * (1.0 + 0.2 * pf.detail);
-            col = yard;
-            // building footprint inside the lot
-            let setb = if industrial { 6.0 } else { 2.0 + 3.0 * u01k(lh, 1) };
-            let fwid = lot_w - 2.0 * setb.min(lot_w * 0.3);
-            let fdep = bsz / rows - setb - 2.0 - 4.0 * u01k(lh, 2);
-            let exists = u01k(lh, 3) < (0.25 + 0.75 * urban) && inner.x >= 0.0 && inner.y >= 0.0 && inner.x < bsz && inner.y < bsz;
-            if exists && fwid > 3.0 && fdep > 3.0 {
-                let cx = lx - lot_w * 0.5;
-                let cy = if lj as i64 % 2 == 0 { ly - setb - fdep * 0.5 } else { ly - (bsz / rows - setb - fdep * 0.5) };
-                let ex = fwid * 0.5 - cx.abs();
-                let ey = fdep * 0.5 - cy.abs();
-                let inside = (ex.min(ey) / fw + 0.5).clamp(0.0, 1.0);
-                let tall = (central.max(0.0)).powf(2.0) * town.height;
-                let hb = if industrial { 8.0 + 6.0 * u01k(lh, 4) } else { 3.5 + 4.0 * u01k(lh, 4) + 40.0 * tall * u01k(lh, 5) };
-                let flat_roof = industrial || hb > 12.0 || u01k(lh, 6) < 0.25;
-                let ri = ((town.roof_style * 3.0 + u01k(lh, 7) * 4.0) as usize) % 7;
-                let mut roof = if industrial { mixc(pal.roofs[4], pal.roofs[2], u01k(lh, 8)) } else { pal.roofs[ri] };
-                roof *= 0.85 + 0.3 * u01k(lh, 9);
-                let mut h_here = hb;
-                if !flat_roof {
-                    // pitched roof along the longer axis
-                    let (half, dperp) = if fwid > fdep { (fdep * 0.5, ey) } else { (fwid * 0.5, ex) };
-                    let ridge = 0.35 * half;
-                    h_here = hb + ridge * (dperp / half).clamp(0.0, 1.0);
-                } else {
-                    roof *= 1.0 - 0.15 * band_cov(ex.min(ey), 0.6, fw); // parapet edge
-                }
-                if inside > 0.0 {
-                    col = mixc(col, roof, inside * buildings_resolved + (1.0 - buildings_resolved) * 0.45);
-                    height = h_here * inside;
-                    if inside > 0.5 {
-                        class = lc::BUILDING;
+            let built = u01k(lh, 3) < urban.powf(0.7) * 1.05;
+            if built || urban > 0.65 {
+                cov_lot = 1.0;
+                let yard = mixc(mixc(pal.grass_wet, pal.soil[0], 0.3 + 0.4 * u01k(lh, 10)), pal.concrete, 0.25 * central)
+                    * (1.0 + 0.2 * pf.detail);
+                col = yard;
+                if built {
+                    // building footprint inside the lot (sometimes L-shaped)
+                    let setb = if industrial { 6.0 } else { 1.5 + 3.5 * u01k(lh, 1) };
+                    let fwid = lot_w - 2.0 * setb.min(lot_w * 0.3);
+                    let fdep = (bd / rows - setb - 2.0 - 5.0 * u01k(lh, 2)).max(0.0);
+                    if fwid > 3.0 && fdep > 3.0 {
+                        let cx = lx - lot_w * 0.5;
+                        let cy = if (lj as i64) % 2 == 0 { ly - setb - fdep * 0.5 } else { ly - (bd / rows - setb - fdep * 0.5) };
+                        let ex = fwid * 0.5 - cx.abs();
+                        let ey = fdep * 0.5 - cy.abs();
+                        let mut inside = (ex.min(ey) / fw + 0.5).clamp(0.0, 1.0);
+                        if !industrial && u01k(lh, 11) < 0.3 {
+                            // L-shape: remove a corner quadrant
+                            let qx = if u01k(lh, 12) < 0.5 { cx } else { -cx };
+                            let qy = if u01k(lh, 13) < 0.5 { cy } else { -cy };
+                            let cut = (qx - fwid * 0.1).min(qy - fdep * 0.1);
+                            inside *= 1.0 - (cut / fw + 0.5).clamp(0.0, 1.0);
+                        }
+                        let tall = central.powf(2.0) * town.height;
+                        let hb = if industrial { 7.0 + 7.0 * u01k(lh, 4) } else { 3.5 + 4.0 * u01k(lh, 4) + 40.0 * tall * u01k(lh, 5) };
+                        let flat_roof = industrial || hb > 12.0 || u01k(lh, 6) < 0.2 + 0.3 * central;
+                        let ri = ((town.roof_style * 3.0 + u01k(lh, 7) * 4.0) as usize) % 7;
+                        let mut roof = if industrial { mixc(pal.roofs[4], pal.roofs[2], u01k(lh, 8)) } else { pal.roofs[ri] };
+                        roof *= 0.82 + 0.36 * u01k(lh, 9);
+                        let mut h_here = hb;
+                        if !flat_roof {
+                            // pitched roof along the longer axis
+                            let (half, dperp) = if fwid > fdep { (fdep * 0.5, ey) } else { (fwid * 0.5, ex) };
+                            h_here = hb + 0.35 * half * (dperp / half).clamp(0.0, 1.0);
+                        } else {
+                            roof *= 1.0 - 0.15 * band_cov(ex.min(ey), 0.6, fw); // parapet edge
+                        }
+                        if inside > 0.0 {
+                            col = mixc(col, roof, inside);
+                            height = h_here * inside;
+                            if inside > 0.5 {
+                                class = lc::BUILDING;
+                            }
+                        }
                     }
                 }
-                let _ = slope;
             }
             // mean appearance when lots are unresolved
             if buildings_resolved < 1.0 {
                 let mean_roof = mixc(pal.roofs[(town.roof_style * 6.99) as usize], pal.concrete, 0.3);
-                col = mixc(mixc(yard, mean_roof, 0.45 * urban), col, buildings_resolved);
-                height = lerp(5.0 * urban * 0.4, height, buildings_resolved);
+                let mean = mixc(mixc(pal.grass_wet, pal.soil[0], 0.4), mean_roof, 0.5);
+                col = mixc(mean, col, buildings_resolved);
+                height = lerp(3.0 * urban, height, buildings_resolved);
+                cov_lot = lerp(urban.powf(0.7), cov_lot, buildings_resolved);
             }
             // cast shadows of buildings onto the ground (march toward the sun)
-            if shadows && buildings_resolved > 0.0 && height < 0.5 {
+            if shadows && buildings_resolved > 0.0 && height < 0.5 && cov_lot > 0.0 {
                 for k in 1..=4 {
                     let dist_s = k as f64 * 3.5;
                     let need = dist_s * self.sun_tan;
@@ -1123,7 +1168,11 @@ impl SurfaceModel {
                 }
             }
         }
-        col = mixc(col, pal.asphalt * (1.0 + 0.05 * pf.detail), street);
+        let cov = cov_lot.max(street);
+        if cov <= 0.0 {
+            return None;
+        }
+        col = mixc(col, pal.asphalt * (1.0 + 0.05 * pf.detail), street / cov.max(1e-6));
         if street > 0.5 {
             class = lc::ROAD;
         }
@@ -1134,11 +1183,12 @@ impl SurfaceModel {
         let lamp_col = if town.roof_style < 0.55 { DVec3::new(1.0, 0.58, 0.24) } else { DVec3::new(0.86, 0.9, 1.0) };
         let lamp_res = band(lamp_sp, gsd);
         let mut emission = DVec3::ZERO;
-        if lamp_res > 0.0 {
+        if lamp_res > 0.0 && street_here > 0.0 {
             let ql = (q / lamp_sp).round() * lamp_sp;
-            let lq = ql - (ql / b).floor() * b;
-            let dsl = lq.x.min(b - lq.x).min(lq.y).min(b - lq.y);
-            let lh = hash2(town.lot.to_bits() ^ 0x1A3B, (ql.x / lamp_sp) as i64, (ql.y / lamp_sp) as i64);
+            let (_, lqx, lsx) = cell(0, ql.x);
+            let (_, lqy, lsy) = cell(1, ql.y);
+            let dsl = lqx.min(lsx - lqx).min(lqy).min(lsy - lqy);
+            let lh = hash2(town.seed ^ 0x1A3B, (ql.x / lamp_sp) as i64, (ql.y / lamp_sp) as i64);
             if dsl < sw * 1.6 && u01k(lh, 1) < 0.9 {
                 let d2 = (q - ql).length_squared();
                 let pool = 0.35 * (-d2 / (2.0 * 7.0 * 7.0)).exp();
@@ -1147,15 +1197,14 @@ impl SurfaceModel {
             }
         }
         // prefiltered mean when lamps are unresolved (town glow)
-        emission = emission * lamp_res + lamp_col * 0.07 * (1.0 - lamp_res);
-        if block_kind < 0.14 && block_kind >= 0.08 + 0.1 * (1.0 - urban) {
+        emission = emission * lamp_res + lamp_col * 0.07 * (1.0 - lamp_res) * smoothstep(0.15, 0.4, urban);
+        if urban > 0.45 && (0.07..0.12).contains(&block_kind) {
             emission += lamp_col * 0.12; // lit plaza / parking
         }
-        if block_kind > 0.93 && central < 0.4 {
+        if block_kind > 0.92 && central < 0.5 {
             emission += DVec3::new(0.9, 0.95, 1.0) * 0.08; // industrial yard floodlights
         }
-        emission *= urban;
-        Some((col, height, urban, class, shadow * (1.0 - street * 0.5), emission))
+        Some((col, height, cov, class, shadow * (1.0 - street * 0.5), emission / cov.max(0.05)))
     }
 
     fn building_height_at(&self, town: &TownInfo, p: DVec3, gsd: f64, pf: &PixFields) -> f64 {

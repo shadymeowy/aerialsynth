@@ -107,6 +107,16 @@ impl Generator {
             Macro::bilerp(g(i0, j0), g(i0 + 1, j0), g(i0, j0 + 1), g(i0 + 1, j0 + 1), fx, fy)
         };
 
+        // ---------------- drainage segments that can affect this tile
+        let segs = {
+            let (lat_c, lon_c) = pixel_to_latlon(DVec2::new(ox + 128.0, oy + 128.0), z, n as u32);
+            let c = Ctx::new(lat_c, lon_c, 1.0, &ell);
+            let (lat0, lon0) = pixel_to_latlon(DVec2::new(ox - 1.0, oy - 1.0), z, n as u32);
+            let corner = Ctx::new(lat0, lon0, 1.0, &ell).p;
+            let gsd_c = gsd_ew(lat_c, z, n as u32, &ell);
+            self.world.river_segments(c.p, (corner - c.p).length(), gsd_c)
+        };
+
         // ---------------- pass A on pixel centres incl. 1px apron
         let rows_a: Vec<Vec<Terrain>> = (0..na)
             .into_par_iter()
@@ -120,7 +130,7 @@ impl Generator {
                     let (lat, lon) = pixel_to_latlon(DVec2::new(px, py), z, n as u32);
                     let ctx = Ctx::new(lat, lon, gsd, &ell);
                     let m = macro_at(px, py, &ctx);
-                    row.push(self.world.terrain_with(&ctx, &m));
+                    row.push(self.world.terrain_with(&ctx, &m, &segs));
                 }
                 row
             })
