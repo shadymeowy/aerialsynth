@@ -974,20 +974,38 @@ impl SurfaceModel {
                 let wq = DVec2::new(perlin3(r.split.to_bits(), p / 900.0), perlin3(r.split.to_bits() ^ 1, p / 900.0));
                 let q = q + wq * (0.08 * r.fw);
                 let (w, h) = (r.fw, r.fh.max(r.fw));
-                let j = (q.y / h).floor();
-                let shift = u01(hash1(r.split.to_bits(), j as i64)) * w;
+                let seed = r.split.to_bits();
+                // rows with jittered heights; within a row, field boundaries are jittered lines
+                // (widths vary ~0.55-1.45 w) so the grid does not look like a regular quilt
+                let row_line = |j: i64| (j as f64 + 0.32 * (u01(hash2(seed ^ 0x40, 7, j)) - 0.5)) * h;
+                let mut j = (q.y / h).floor() as i64;
+                if q.y < row_line(j) {
+                    j -= 1;
+                } else if q.y >= row_line(j + 1) {
+                    j += 1;
+                }
+                let (y0, y1) = (row_line(j), row_line(j + 1));
+                let shift = u01(hash1(seed, j)) * w;
                 let x = q.x + shift;
-                let i = (x / w).floor();
-                let fx = x - i * w;
-                let fy = q.y - j * h;
+                let col_line = |i: i64| (i as f64 + 0.45 * (u01(hash2(seed ^ 0x41, j, i)) - 0.5)) * w;
+                let mut i = (x / w).floor() as i64;
+                if x < col_line(i) {
+                    i -= 1;
+                } else if x >= col_line(i + 1) {
+                    i += 1;
+                }
+                let (x0, x1) = (col_line(i), col_line(i + 1));
+                let (cw, ch) = (x1 - x0, y1 - y0);
+                let fx = x - x0;
+                let fy = q.y - y0;
                 // split some cells into strips
-                let hc = hash2(r.split.to_bits() ^ 0x55, i as i64, j as i64);
+                let hc = hash2(seed ^ 0x55, i, j);
                 let nstrip = 1 + (u01k(hc, 1) * if r.style == 3 { 1.0 } else { 3.5 }) as i64;
-                let sh = h / nstrip as f64;
+                let sh = ch / nstrip as f64;
                 let k = (fy / sh).floor().min(nstrip as f64 - 1.0);
                 let fy2 = fy - k * sh;
-                let edge = fx.min(w - fx).min(fy2).min(sh - fy2);
-                let fc = DVec2::new(i * w + 0.5 * w - shift, j * h + k * sh + 0.5 * sh);
+                let edge = fx.min(cw - fx).min(fy2).min(sh - fy2);
+                let fc = DVec2::new(x0 + 0.5 * cw - shift, y0 + k * sh + 0.5 * sh);
                 (mix64(hc ^ k as u64), fx, fy2, edge, 1.0, fc)
             }
             1 => {
@@ -1030,9 +1048,12 @@ impl SurfaceModel {
         if !self.cultivated(c3, cult, gsd) || u01k(id, 5) < 0.06 {
             return None;
         }
-        let kind = crop_kind(r.season, u01k(id, 6), t.moist < 0.33 && r.style != 2);
+        // neighbouring fields often grow the same crop: draw from a coarse crop-cluster cell
+        let cluster = worley2(r.split.to_bits() ^ 0xC1C, fc, 700.0, 1.0).id;
+        let u_crop = if u01k(id, 16) < 0.5 { u01k(cluster, 6) } else { u01k(id, 6) };
+        let kind = crop_kind(r.season, u_crop, t.moist < 0.33 && r.style != 2);
         let mut col = pal.crop[kind];
-        col *= 0.92 + 0.16 * u01k(id, 8);
+        col *= 0.94 + 0.12 * u01k(id, 8);
         col *= tint;
         // within-field variation (soil moisture, growth, management) at several scales
         col *= 1.0 + 0.10 * pf.field_var
