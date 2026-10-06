@@ -34,11 +34,16 @@ pub struct Atmosphere {
     horizon: DVec3,
     sun_col: DVec3,
     pub sun_dir: DVec3,
+    pub moon_dir: DVec3,
+    moon_col: DVec3,
+    moon_disc: f64,
+    /// 0 (day) .. 1 (dark night): visibility of stars
+    star_vis: f64,
 }
 
 impl Atmosphere {
     /// `sun_dir`: unit vector towards the sun (ECEF); `sun`: current sun / sky state.
-    pub fn new(p: AtmoParams, sun_dir: DVec3, sun: &SunState) -> Self {
+    pub fn new(p: AtmoParams, sun_dir: DVec3, moon_dir: DVec3, sun: &SunState) -> Self {
         let beta_m = 3.912 / (p.visibility_km.max(0.1) * 1000.0);
         let el = sun.elevation;
         let low = 1.0 - (el.max(0.0) / 0.45).min(1.0); // 1 at sunrise/sunset, 0 at high sun
@@ -47,21 +52,30 @@ impl Atmosphere {
         let dusk = DVec3::new(1.0, 0.62 - 0.1 * low, 0.40);
         let horizon_day = DVec3::new(0.62, 0.72, 0.85);
         let horizon = (horizon_day * (1.0 - 0.6 * low) + dusk * (0.6 * low)) * sky;
-        let night = DVec3::new(0.4, 0.6, 1.2) * 1e-5;
+        let night = DVec3::new(0.4, 0.6, 1.2) * 1e-7;
+        let moon_col = DVec3::new(0.80, 0.86, 1.0) * sun.moon_direct;
         Atmosphere {
             beta_m,
             rayleigh_col: DVec3::new(0.30, 0.48, 0.85) * (0.7 * sky) + sun_col * 0.15 * DVec3::new(0.3, 0.45, 0.8) + night,
-            mie_col: DVec3::new(0.80, 0.82, 0.86) * (0.5 * sky) + sun_col * 0.35 + night,
+            mie_col: DVec3::new(0.80, 0.82, 0.86) * (0.5 * sky) + sun_col * 0.35 + moon_col * 0.35 + night,
             zenith: DVec3::new(0.10, 0.22, 0.55) * sky * (1.0 - 0.5 * low) + night,
             horizon: horizon + night * 1.5,
             sun_col,
             sun_dir,
+            moon_dir,
+            moon_col,
+            // lunar disc radiance relative to a sunlit white surface (~2500 cd/m² at full moon)
+            moon_disc: 0.03 * sun.moon_phase * if sun.moon_elevation > -0.01 { 1.0 } else { 0.0 },
+            star_vis: if sun.stars { 1.0 - (sky / 1e-3).min(1.0) } else { 0.0 },
             p,
         }
     }
 
     pub fn sun_color(&self) -> DVec3 {
         self.sun_col
+    }
+    pub fn moon_color(&self) -> DVec3 {
+        self.moon_col
     }
 
     /// Optical depth per channel between heights `h0` and `h1` (m above the ellipsoid) over
@@ -119,6 +133,28 @@ impl Atmosphere {
         c += self.sun_col * (0.25 * cs.max(0.0).powi(8) + 0.4 * cs.max(0.0).powi(64));
         if cs > 0.99996 && e > -0.01 {
             c += self.sun_col * 20.0;
+        }
+        if self.moon_disc > 0.0 {
+            let cm = dir.dot(self.moon_dir);
+            if cm > 0.99999 {
+                c += DVec3::new(0.95, 0.95, 1.0) * self.moon_disc;
+            }
+            c += DVec3::new(0.8, 0.85, 1.0) * (self.moon_disc * 2e-3 * cm.max(0.0).powi(512));
+        }
+        if self.star_vis > 0.0 && e > 0.0 {
+            // stars: hashed points on a fine direction lattice (~0.1°)
+            let q = dir * 600.0;
+            let (ix, iy, iz) = (q.x.floor() as i64, q.y.floor() as i64, q.z.floor() as i64);
+            let mut h = (ix as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (iy as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F) ^ (iz as u64).wrapping_mul(0x1656_67B1_9E37_79F9);
+            h ^= h >> 31;
+            h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+            h ^= h >> 29;
+            let u = (h >> 11) as f64 / (1u64 << 53) as f64;
+            if u < 0.004 {
+                let mag = (h & 0xffff) as f64 / 65535.0;
+                let b = 4e-5 * 10f64.powf(2.0 * (1.0 - mag).powi(3)) * self.star_vis * e.min(0.3) / 0.3;
+                c += DVec3::new(0.9 + 0.2 * mag, 0.95, 1.1 - 0.2 * mag) * b;
+            }
         }
         c
     }

@@ -633,7 +633,11 @@ impl Renderer {
             let (az, el) = (sun_state.azimuth, sun_state.elevation);
             geodesy::rot_ecef2enu(cam_geo0.lat, cam_geo0.lon).transpose() * DVec3::new(az.sin() * el.cos(), az.cos() * el.cos(), el.sin())
         };
-        let atmo = Atmosphere::new(self.settings.atmosphere.clone(), sun, sun_state);
+        let moon = {
+            let (az, el) = (sun_state.moon_azimuth, sun_state.moon_elevation);
+            geodesy::rot_ecef2enu(cam_geo0.lat, cam_geo0.lon).transpose() * DVec3::new(az.sin() * el.cos(), az.cos() * el.cos(), el.sin())
+        };
+        let atmo = Atmosphere::new(self.settings.atmosphere.clone(), sun, moon, sun_state);
         let cam_geo = geodesy::ecef2geodetic(cam.pos, &self.ell);
         let cam_up = geodesy::up_vector(cam_geo.lat, cam_geo.lon);
         let cs = ss / 2; // central sub-sample
@@ -845,7 +849,11 @@ impl Renderer {
                 let n_enu = view.sample3(z, gx, gy, Which::Normal).unwrap_or(DVec3::Z);
                 let n = (east * n_enu.x + north * n_enu.y + up * n_enu.z).normalize();
                 let ndl = n.dot(atmo.sun_dir).max(0.0);
-                (atmo.sun_color() * (ndl * 1.25 * shadow) + sky_amb * (0.6 + 0.4 * n.dot(up)), DVec3::ZERO)
+                let ndm = n.dot(atmo.moon_dir).max(0.0);
+                (
+                    atmo.sun_color() * (ndl * 1.25 * shadow) + atmo.moon_color() * (ndm * 1.25) + sky_amb * (0.6 + 0.4 * n.dot(up)),
+                    DVec3::ZERO,
+                )
             }
         };
         if self.settings.shading == Shading::Relit && self.settings.water_glint && terragen::landcover::is_water(view.landcover(z, gx, gy)) {
@@ -860,7 +868,15 @@ impl Renderer {
         // height of the point above the ellipsoid (closed form given its geodetic latitude)
         let p_w = cam_pos - v * range;
         let h_pt = if cl.abs() > 0.1 { (p_w.x * p_w.x + p_w.y * p_w.y).sqrt() / cl - nrad } else { p_w.z.abs() / sl.abs() - nrad * (1.0 - e2) };
-        let (t, ins) = atmo.transmittance(h_cam, h_pt, range, dir_w);
+        let (t, mut ins) = atmo.transmittance(h_cam, h_pt, range, dir_w);
+        // light pollution: artificial light (averaged over ~0.5 km) scattered by the haze
+        if sun_state.lights > 1e-3 && sun_state.light_pollution > 0.0 {
+            let k = ((400.0 / texel).log2().ceil().max(0.0) as u8).min(z);
+            let s = 0.5f64.powi(k as i32);
+            if let Some(e) = view.sample3(z - k, gx * s, gy * s, Which::Emission) {
+                ins += e * (DVec3::ONE - t) * (sun_state.lights * sun_state.light_pollution * 6.0);
+            }
+        }
         PixShade {
             z,
             range,

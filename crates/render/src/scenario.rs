@@ -115,8 +115,30 @@ pub struct OutputConfig {
     /// HDF5 dataset with images + GT (None = not written).
     pub h5: Option<PathBuf>,
     pub depth: bool,
+    /// Forward optical flow. Note: flow is exactly recomputable from depth + poses
+    /// (scripts/check_gt.py does so); disable it to save ~half of the file size.
     pub flow: bool,
     pub landcover: bool,
+    pub compression: Compression,
+}
+
+/// HDF5 compression of the sequence file (shuffle + deflate, i.e. h5py `compression="gzip",
+/// shuffle=True`), with optional lossy mantissa rounding of the float GT (depth, flow).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Compression {
+    /// deflate level 0..9
+    pub level: u8,
+    /// Keep this many of the 23 f32 mantissa bits in depth / flow (None = lossless).
+    /// 16 bits: max relative error 7.6e-6 (7.6 mm at 1 km, 1e-4 px on 10 px of flow), files
+    /// ~35-40% smaller; 12 bits: 1.2e-4, ~55% smaller. Applied to the NPY outputs as well.
+    pub float_keep_bits: Option<u8>,
+}
+
+impl Default for Compression {
+    fn default() -> Self {
+        Compression { level: 4, float_keep_bits: None }
+    }
 }
 
 impl Default for OutputConfig {
@@ -132,6 +154,7 @@ impl Default for OutputConfig {
             depth: true,
             flow: true,
             landcover: true,
+            compression: Compression::default(),
         }
     }
 }

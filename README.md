@@ -104,6 +104,10 @@ All subcommands read **one scenario YAML** (`-c`). Its sections are `world`, `ti
 - **Directory output:** `rgb/*.png`, `depth/*.npy`, `flow/*.npy`, `flow_valid/*.png`,
   `landcover/*.png`, `poses.csv`, `camera.yaml` and `scenario.yaml`.
 - **GT timing:** all GT refers to the mid-exposure pose.
+- **Compression:** `output.compression` sets the deflate level (shuffle + gzip, as in h5py) and
+  `float_keep_bits`, an optional lossy rounding of depth/flow mantissas. 16 bits gives a max
+  relative error of 7.6e-6 and shrinks depth/flow by ~35–40%. Flow is exactly recomputable from
+  depth + poses (`scripts/check_gt.py`), so `output.flow: false` halves the file.
 - **Validation:** `scripts/check_gt.py` reprojects depth with the poses. Flow agrees to about
   1e-5 px, and photometric warping errors are about 2 DN (sensor noise plus motion blur).
 
@@ -132,6 +136,7 @@ All subcommands read **one scenario YAML** (`-c`). Its sections are `world`, `ti
   - per-region field systems: grid, irregular, strips, centre pivots
   - seasonal crop palettes, crop rows, tramlines, headlands, wet/bare patches
   - hedges and tracks along field edges
+- **Farmsteads:** house, barn, gravel yard and yard lamp.
 - **Settlements:**
   - towns and villages with street grids (organic in old centres)
   - lots, pitched or flat roofs, building heights in the DSM, parks and industry
@@ -149,12 +154,16 @@ All subcommands read **one scenario YAML** (`-c`). Its sections are `world`, `ti
   - trilinear plus anisotropic pyramid texture filtering
 - **Lighting:**
   - `relit` (albedo + normals + DSM ray-marched cast shadows) or `satellite` (baked imagery)
-  - sun fixed or from date/time (NOAA), twilight, town lights at night
+  - sun fixed or from date/time (NOAA), continuous twilight
+  - moon position and phase with moonlight and the lunar disc, stars
+  - night lights from the generated emission layer: street lamps (sodium/LED), porch lights,
+    farmsteads, lit main roads near towns, plazas and industry
+  - light-pollution glow in the haze
   - aerial perspective, sky and water glint
 - **Sensor:**
   - auto exposure as a 1st-order ODE, split into exposure time and gain
   - motion blur from sub-frame poses of the high-rate trajectory
-  - defocus, chromatic aberration, vignetting, bloom
+  - defocus, chromatic aberration, vignetting, bloom, starburst spikes on bright lights
   - shot, read and PRNU noise, then tone curve
 - **Trajectories:**
   - arc-length spline path (line, circle, figure8, lawnmower, random, waypoints)
@@ -172,7 +181,7 @@ crates/terragen   procedural terrain generator
 crates/render     camera, trajectories/dynamics, LOD, rasterizer, lighting, sensor, writers, pipeline
 crates/cli        `terrain` binary
 scripts/          contact.py (generator contact sheets), check_gt.py (GT validation), view_seq.py
-configs/          example scenarios (quick, dataset, fisheye, oblique_sunset, night, cruise)
+configs/          example scenarios (quick, dataset, fisheye, oblique_sunset, night, night_moon, cruise)
 ```
 
 ## Performance (8 cores)
@@ -198,3 +207,14 @@ cargo test --release
 - **Sensor:** auto-exposure ODE.
 - **Solar position.**
 - **Generator invariants:** determinism, seamless tile borders, parent ≈ mean of its children.
+
+## Look / colour knobs
+
+| knob | effect |
+|------|--------|
+| `world.look.albedo_saturation`, `albedo_brightness` | the generated surface colours |
+| `world.look.*` | sun, ambient, haze of the baked satellite layer |
+| `render.atmosphere.visibility_km`, `inscatter` | haze |
+| `sensor.tone` | `saturation`, `white_balance`, `curve` (`srgb`/`filmic`/`gamma`) |
+| `sensor.exposure.target` | overall brightness |
+| `render.lighting` | `lights_intensity`, `moon_intensity`, `night_sky`, `light_pollution` |

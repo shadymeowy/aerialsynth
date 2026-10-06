@@ -46,7 +46,7 @@ sensor:
   exposure: { mode: auto, tau: 0.5, max_time: 0.008 }
   motion_blur: { enabled: true, max_samples: 16 }
   optics: { defocus_px: 0.4, chromatic_aberration_px: 0.5, vignette: 0.3 }
-  noise: { enabled: true, read: 0.8, shot: 0.2 }
+  noise: { enabled: true, read: 0.15, shot: 0.2 }
 output:
   dir: out/dataset/seq
   h5: out/dataset/seq.h5

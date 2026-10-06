@@ -44,6 +44,15 @@ pub struct LightingConfig {
     /// Radiance scale of artificial lights (the emission layer is ~0..4; street lighting is
     /// ~1e-4..1e-3 of daylight, lamp cores much brighter).
     pub lights_intensity: f64,
+    /// Moon (position and phase from `date` / `time_utc` even in `fixed` sun mode).
+    pub moon: bool,
+    /// Moonlight scale (1 = physical: full moon ≈ 2.5e-6 of direct sunlight).
+    pub moon_intensity: f64,
+    /// Night sky floor (starlight + airglow + regional light pollution), relative to daylight.
+    pub night_sky: f64,
+    /// Glow of artificial light scattered in the haze above towns.
+    pub light_pollution: f64,
+    pub stars: bool,
 }
 
 impl Default for LightingConfig {
@@ -61,6 +70,11 @@ impl Default for LightingConfig {
             lights: LightsMode::Auto,
             lights_on_below_deg: 1.0,
             lights_intensity: 0.012,
+            moon: true,
+            moon_intensity: 1.0,
+            night_sky: 1e-6,
+            light_pollution: 1.0,
+            stars: true,
         }
     }
 }
@@ -152,6 +166,14 @@ pub struct SunState {
     pub sky: f64,
     /// artificial lights multiplier (0..1)
     pub lights: f64,
+    pub moon_azimuth: f64,
+    pub moon_elevation: f64,
+    /// direct moonlight multiplier (relative to direct sunlight)
+    pub moon_direct: f64,
+    /// illuminated fraction of the lunar disc (0 new .. 1 full)
+    pub moon_phase: f64,
+    pub stars: bool,
+    pub light_pollution: f64,
 }
 
 impl LightingConfig {
@@ -170,14 +192,64 @@ impl LightingConfig {
         let direct = if eld > -0.8 { (0.9f64).powf(am.min(40.0)) / 0.9 * smooth(-0.8, 1.0, eld) } else { 0.0 } * self.sun_intensity;
         // twilight: sky light falls ~3 orders of magnitude from sunset to the end of civil
         // twilight, then to a starlight / airglow floor (~3e-5 of daylight)
-        let sky = ((0.03 + 0.97 * smooth(-6.0, 12.0, eld)) * smooth(-14.0, -1.0, eld).powi(3)).max(3e-5) * self.sky_intensity;
+        let sky = ((0.03 + 0.97 * smooth(-6.0, 12.0, eld)) * smooth(-14.0, -1.0, eld).powi(3)).max(self.night_sky) * self.sky_intensity;
         let lights = match self.lights {
             LightsMode::On => 1.0,
             LightsMode::Off => 0.0,
             LightsMode::Auto => smooth(self.lights_on_below_deg, self.lights_on_below_deg - 4.0, eld),
         } * self.lights_intensity;
-        SunState { azimuth: az, elevation: el, direct, sky, lights }
+        let (moon_azimuth, moon_elevation, moon_phase) = if self.moon {
+            let t0 = parse_utc(&self.date, &self.time_utc).unwrap_or(0.0);
+            let ts = if self.mode == SunMode::Clock { self.time_scale } else { 0.0 };
+            moon_position(t0 + t * ts, lat, lon)
+        } else {
+            (0.0, -1.0, 0.0)
+        };
+        let mel = moon_elevation.to_degrees();
+        let moon_direct = if self.moon {
+            2.5e-6 * moon_phase.powf(1.5) * smooth(-0.5, 8.0, mel) * self.moon_intensity
+        } else {
+            0.0
+        };
+        SunState {
+            azimuth: az,
+            elevation: el,
+            direct,
+            sky,
+            lights,
+            moon_azimuth,
+            moon_elevation,
+            moon_direct,
+            moon_phase,
+            stars: self.stars,
+            light_pollution: self.light_pollution,
+        }
     }
+}
+
+/// Low-precision lunar position (Meeus / Astronomical Almanac mean elements, ~0.5°) and the
+/// illuminated fraction. Returns (azimuth from north clockwise, elevation, phase), radians.
+pub fn moon_position(unix: f64, lat: f64, lon: f64) -> (f64, f64, f64) {
+    let deg = std::f64::consts::PI / 180.0;
+    let d = unix / 86400.0 + 2440587.5 - 2451545.0;
+    let l = (218.316 + 13.176396 * d).rem_euclid(360.0);
+    let m = (134.963 + 13.064993 * d).rem_euclid(360.0);
+    let f = (93.272 + 13.229350 * d).rem_euclid(360.0);
+    let lam = (l + 6.289 * (m * deg).sin()) * deg;
+    let beta = 5.128 * (f * deg).sin() * deg;
+    let eps = 23.439 * deg;
+    let ra = (lam.sin() * eps.cos() - beta.tan() * eps.sin()).atan2(lam.cos());
+    let dec = (beta.sin() * eps.cos() + beta.cos() * eps.sin() * lam.sin()).asin();
+    let gmst = (280.46061837 + 360.98564736629 * d).rem_euclid(360.0) * deg;
+    let ha = gmst + lon - ra;
+    let el = (lat.sin() * dec.sin() + lat.cos() * dec.cos() * ha.cos()).asin();
+    let az = (-ha.sin()).atan2(dec.tan() * lat.cos() - lat.sin() * ha.cos()).rem_euclid(std::f64::consts::TAU);
+    // phase from the elongation to the sun (sun's ecliptic longitude, low precision)
+    let ms = (357.529 + 0.98560028 * d) * deg;
+    let ls = (280.459 + 0.98564736 * d) * deg + (1.915 * ms.sin() + 0.020 * (2.0 * ms).sin()) * deg;
+    let cos_e = beta.cos() * (lam - ls).cos();
+    let phase = (1.0 - cos_e) * 0.5;
+    (az, el, phase)
 }
 
 fn smooth(e0: f64, e1: f64, x: f64) -> f64 {
@@ -203,6 +275,17 @@ mod tests {
         let (az, el) = solar_position(t, lat, lon);
         assert!(el.to_degrees().abs() < 1.5, "{}", el.to_degrees());
         assert!(az.to_degrees() > 50.0 && az.to_degrees() < 70.0, "{}", az.to_degrees());
+    }
+
+    #[test]
+    fn moon_phase_known_dates() {
+        // full moon 2026-03-03 ~11:38 UTC, new moon 2026-03-19 ~01:23 UTC
+        let full = parse_utc("2026-03-03", "11:38:00").unwrap();
+        let new = parse_utc("2026-03-19", "01:23:00").unwrap();
+        let (_, _, pf) = moon_position(full, 0.7, 0.57);
+        let (_, _, pn) = moon_position(new, 0.7, 0.57);
+        assert!(pf > 0.97, "full {pf}");
+        assert!(pn < 0.03, "new {pn}");
     }
 
     #[test]

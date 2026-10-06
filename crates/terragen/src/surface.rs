@@ -676,6 +676,7 @@ impl SurfaceModel {
 
         // ------------------------------------------------------------- roads
         let roads = world.cfg.landuse.roads;
+        let mut road_major_cov: f64 = 0.0;
         if roads > 0.0 {
             let steep = 1.0 - smoothstep(0.25, 0.45, slope);
             let habit = smoothstep(0.02, 0.25, t.habit) * steep * (1.0 - snow) * (1.0 - t.sand * 0.7);
@@ -686,6 +687,7 @@ impl SurfaceModel {
                 let c1 = band_cov(l.road_major, w_major * 0.5, fw.max(gsd * 0.5));
                 if c1 > 0.0 {
                     road_cov = c1 * habit;
+                    road_major_cov = road_cov;
                     // lighter shoulders
                     let sh = band_cov(l.road_major, w_major * 0.5 + 1.5, fw) - band_cov(l.road_major, w_major * 0.5, fw);
                     road_col = mixc(pal.asphalt, pal.concrete, sh.max(0.0) * 0.6);
@@ -721,12 +723,47 @@ impl SurfaceModel {
             }
         }
 
+        // ------------------------------------------------------------- farmsteads
+        if let Some(r) = &region {
+            if t.agri > 0.06 && flat_ok > 0.3 && natural_ok > 0.3 && world.cfg.landuse.towns > 0.0 {
+                if let Some((fcol, fh, fcov, fcls, fem)) = self.farmstead(r, t, q_rot, gsd, fw) {
+                    col = mixc(col, fcol, fcov);
+                    if world.cfg.landuse.buildings_in_dsm {
+                        height = lerp(height, l.ground + fh, fcov);
+                    }
+                    emission += fem;
+                    if fcov > 0.5 {
+                        class = fcls;
+                    }
+                }
+            }
+        }
+
+        // ------------------------------------------------------------- lit main roads near towns
+        if road_major_cov > 0.0 && t.town.id != 0 && world.cfg.landuse.towns > 0.0 {
+            let town = self.town_info(world, cache, t);
+            if town.exists {
+                let dist = (p - town.center).length();
+                let near = 1.0 - smoothstep(1.2 * town.radius, 2.2 * town.radius, dist);
+                let sp = 38.0;
+                let res = band(sp, gsd);
+                if near > 0.0 {
+                    let ql = (q_loc / sp).round() * sp;
+                    let d2 = (q_loc - ql).length_squared();
+                    let lh = hash2(town.seed ^ 0x40AD, (ql.x / sp) as i64, (ql.y / sp) as i64);
+                    let lamp_col = if u01k(lh, 1) < 0.5 { DVec3::new(1.0, 0.6, 0.26) } else { DVec3::new(0.88, 0.92, 1.0) };
+                    let pool = 0.3 * (-d2 / (2.0 * 8.0 * 8.0)).exp() * res + 0.04 * (1.0 - res);
+                    emission += lamp_col * pool * near * road_major_cov;
+                }
+            }
+        }
+
         // ------------------------------------------------------------- towns
         if t.town.id != 0 && world.cfg.landuse.towns > 0.0 {
             let town = self.town_info(world, cache, t);
             if town.exists {
                 if let Some((tcol, th, cov, cls, shadow, em)) = self.town(&town, p, gsd, fw, slope, world.cfg.look.shadows, pf) {
-                    emission = em * cov;
+                    emission += em * cov;
                     col = mixc(col, tcol, cov);
                     if world.cfg.landuse.buildings_in_dsm {
                         height = lerp(height, l.ground + th, cov);
@@ -762,6 +799,67 @@ impl SurfaceModel {
         }
 
         Surface { albedo: col.max(DVec3::ZERO), height, class, lit, is_water: false, emission }
+    }
+
+    /// Farmstead: a small cluster (house, barn, gravel yard, yard lamp) on a sparse lattice in the
+    /// agricultural regions. Returns (colour, height, coverage, class, emission).
+    fn farmstead(&self, r: &RegionInfo, t: &Terrain, q: DVec2, gsd: f64, fw: f64) -> Option<(DVec3, f64, f64, u8, DVec3)> {
+        let pal = &self.pal;
+        let wc = worley2(r.split.to_bits() ^ 0xFA4, q, 650.0, 0.8);
+        let fid = wc.id;
+        if u01k(fid, 1) > 0.55 * smoothstep(0.05, 0.4, t.agri) {
+            return None;
+        }
+        let rel0 = q - wc.point;
+        if rel0.length() > 60.0 {
+            return None;
+        }
+        let ang = (u01k(fid, 2) - 0.5) * 0.4;
+        let (sa, ca) = ang.sin_cos();
+        let rel = DVec2::new(rel0.x * ca + rel0.y * sa, -rel0.x * sa + rel0.y * ca);
+        let fwe = fw.max(0.3 * gsd);
+        let boxc = |c: DVec2, half: DVec2| -> f64 {
+            let d = (half - (rel - c).abs()).min_element();
+            (d / fwe + 0.5).clamp(0.0, 1.0)
+        };
+        let yard_half = DVec2::new(20.0 + 10.0 * u01k(fid, 3), 14.0 + 8.0 * u01k(fid, 4));
+        let yard = boxc(DVec2::ZERO, yard_half);
+        // lamp light pool (also lights the surrounding field a little)
+        let lamp = rel - DVec2::new(2.0, 6.0);
+        let d2 = lamp.length_squared();
+        let lamp_col = if u01k(fid, 9) < 0.6 { DVec3::new(1.0, 0.68, 0.34) } else { DVec3::new(0.9, 0.94, 1.0) };
+        let res = band(10.0, gsd);
+        let emission = lamp_col * (0.3 * (-d2 / (2.0 * 9.0 * 9.0)).exp() + 3.0 * (-d2 / (2.0 * 0.6 * 0.6)).exp() * band(1.2, gsd)) * res
+            + lamp_col * 0.02 * (1.0 - res) * (1.0 - smoothstep(20.0, 60.0, rel.length()));
+        if yard <= 0.0 {
+            return if emission.max_element() > 1e-4 { Some((DVec3::ZERO, 0.0, 0.0, lc::CROP, emission)) } else { None };
+        }
+        let mut col = mixc(pal.gravel, pal.concrete, 0.3 * u01k(fid, 5)) * (0.9 + 0.2 * u01k(fid, 6));
+        let mut h = 0.0;
+        let mut class = lc::URBAN;
+        // house (pitched roof) and barn (long, low-pitched metal roof)
+        let hc = DVec2::new(-yard_half.x * 0.45, -yard_half.y * 0.3);
+        let hh = DVec2::new(5.5, 4.5);
+        let house = boxc(hc, hh);
+        if house > 0.0 {
+            let roof = pal.roofs[(u01k(fid, 7) * 2.99) as usize] * (0.9 + 0.2 * u01k(fid, 8));
+            let ridge = ((hh.y - (rel.y - hc.y).abs()) / hh.y).clamp(0.0, 1.0);
+            col = mixc(col, roof, house);
+            h = (5.5 + 2.0 * ridge) * house;
+            class = lc::BUILDING;
+        }
+        let bc = DVec2::new(yard_half.x * 0.3, yard_half.y * 0.35);
+        let bh = DVec2::new(11.0 + 5.0 * u01k(fid, 10), 6.0);
+        let barn = boxc(bc, bh);
+        if barn > 0.0 {
+            let roof = mixc(pal.roofs[4], pal.roofs[2], u01k(fid, 11));
+            let ridge = ((bh.y - (rel.y - bc.y).abs()) / bh.y).clamp(0.0, 1.0);
+            col = mixc(col, roof, barn);
+            h = h.max((6.0 + 1.5 * ridge) * barn);
+            class = lc::BUILDING;
+        }
+        let cov = yard * smoothstep(1.0 * gsd, 3.0 * gsd, 30.0).max(0.25);
+        Some((col, h, cov, class, emission))
     }
 
     /// Tree crowns of several layers at local position `q`. Returns (colour, canopy height, coverage).
@@ -1077,6 +1175,7 @@ impl SurfaceModel {
         let mut class = lc::URBAN;
         let mut shadow = 0.0;
         let mut cov_lot = 0.0;
+        let mut porch = 0.0;
         let inner = DVec2::new(bqx - sw, bqy - sw);
         let (bw, bd) = (bsx - 2.0 * sw, bsy - 2.0 * sw);
         let central = (1.0 - rel).max(0.0);
@@ -1143,6 +1242,12 @@ impl SurfaceModel {
                                 class = lc::BUILDING;
                             }
                         }
+                        // porch / yard light in front of some houses
+                        if !industrial && u01k(lh, 14) < 0.45 {
+                            let front_y = if (lj as i64) % 2 == 0 { setb * 0.5 } else { bd / rows - setb * 0.5 };
+                            let d2 = (lx - lot_w * 0.5).powi(2) + (ly - front_y).powi(2);
+                            porch = 0.22 * (-d2 / (2.0 * 3.5 * 3.5)).exp() * band(4.0, gsd);
+                        }
                     }
                 }
             }
@@ -1180,7 +1285,9 @@ impl SurfaceModel {
 
         // ---- night lights: pools of light under street lamps, lit plazas / industrial yards
         let lamp_sp = 26.0 + 12.0 * town.organic;
-        let lamp_col = if town.roof_style < 0.55 { DVec3::new(1.0, 0.58, 0.24) } else { DVec3::new(0.86, 0.9, 1.0) };
+        // sodium vs LED lamps: mostly per town, varying per street
+        let led = u01k(sh, 5) < if town.roof_style < 0.55 { 0.2 } else { 0.8 };
+        let lamp_col = if led { DVec3::new(0.86, 0.9, 1.0) } else { DVec3::new(1.0, 0.58, 0.24) };
         let lamp_res = band(lamp_sp, gsd);
         let mut emission = DVec3::ZERO;
         if lamp_res > 0.0 && street_here > 0.0 {
@@ -1204,6 +1311,7 @@ impl SurfaceModel {
         if block_kind > 0.92 && central < 0.5 {
             emission += DVec3::new(0.9, 0.95, 1.0) * 0.08; // industrial yard floodlights
         }
+        emission += DVec3::new(1.0, 0.72, 0.42) * porch;
         Some((col, height, cov, class, shadow * (1.0 - street * 0.5), emission / cov.max(0.05)))
     }
 

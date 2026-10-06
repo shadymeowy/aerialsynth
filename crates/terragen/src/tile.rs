@@ -290,10 +290,15 @@ impl Generator {
                 normal[3 * k + 1] = (nrm.y * 127.0).round() as i8;
                 normal[3 * k + 2] = (nrm.z * 127.0).round() as i8;
                 let light = look.ambient * (0.55 + 0.45 * nrm.z) + look.direct * nrm.dot(sun).max(0.0) * px.lit;
-                let mut c = px.albedo * (light / l0) * look.exposure;
+                let alb = {
+                    let a = px.albedo;
+                    let lum = 0.2126 * a.x + 0.7152 * a.y + 0.0722 * a.z;
+                    ((DVec3::splat(lum) + (a - DVec3::splat(lum)) * look.albedo_saturation) * look.albedo_brightness).max(DVec3::ZERO)
+                };
+                let mut c = alb * (light / l0) * look.exposure;
                 c = c * (1.0 - look.haze) + haze_col * look.haze;
                 for ch in 0..3 {
-                    albedo[3 * k + ch] = (l2s(px.albedo[ch]) * 255.0).round() as u8;
+                    albedo[3 * k + ch] = (l2s(alb[ch]) * 255.0).round() as u8;
                     rgb[3 * k + ch] = (l2s(c[ch]) * 255.0).round() as u8;
                     emission[3 * k + ch] = ((px.emission[ch] / 4.0).clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0).round() as u8;
                 }

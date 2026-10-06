@@ -79,11 +79,28 @@ pub struct OpticsConfig {
     pub bloom: f64,
     pub bloom_threshold: f64,
     pub bloom_sigma_px: f64,
+    /// Diffraction spikes (aperture blades) on very bright points: strength, threshold
+    /// (exposed linear value), streak length (px), number of rays (4 or 8).
+    pub starburst: f64,
+    pub starburst_threshold: f64,
+    pub starburst_len_px: f64,
+    pub starburst_rays: u32,
 }
 
 impl Default for OpticsConfig {
     fn default() -> Self {
-        OpticsConfig { defocus_px: 0.35, chromatic_aberration_px: 0.35, vignette: 0.25, bloom: 0.05, bloom_threshold: 1.0, bloom_sigma_px: 6.0 }
+        OpticsConfig {
+            defocus_px: 0.35,
+            chromatic_aberration_px: 0.35,
+            vignette: 0.25,
+            bloom: 0.05,
+            bloom_threshold: 1.0,
+            bloom_sigma_px: 6.0,
+            starburst: 0.15,
+            starburst_threshold: 2.0,
+            starburst_len_px: 18.0,
+            starburst_rays: 8,
+        }
     }
 }
 
@@ -102,7 +119,7 @@ pub struct NoiseConfig {
 
 impl Default for NoiseConfig {
     fn default() -> Self {
-        NoiseConfig { enabled: true, read: 0.6, shot: 0.15, prnu: 0.004, seed: 7 }
+        NoiseConfig { enabled: true, read: 0.12, shot: 0.15, prnu: 0.004, seed: 7 }
     }
 }
 
@@ -234,6 +251,45 @@ pub fn blur_rgb(img: &mut [f32], w: usize, h: usize, sigma: f64) {
             row[x * 3..x * 3 + 3].copy_from_slice(&acc);
         }
     });
+}
+
+/// Exponentially decaying streaks along 2 (rays=4) or 4 (rays=8) line directions through every
+/// bright pixel (recursive filters forward and backward). Energy per ray ≈ source / rays.
+fn starburst(src: &[f32], w: usize, h: usize, len: f64, rays: u32) -> Vec<f32> {
+    let a = (-1.0 / len.max(1.0)).exp() as f32;
+    let dirs: &[(isize, isize)] = if rays >= 8 { &[(1, 0), (0, 1), (1, 1), (1, -1)] } else { &[(1, 0), (0, 1)] };
+    let norm = (1.0 - a) / (2 * dirs.len()) as f32;
+    let mut out = vec![0f32; src.len()];
+    let idx = |x: isize, y: isize| -> Option<usize> {
+        if x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h {
+            Some((y as usize * w + x as usize) * 3)
+        } else {
+            None
+        }
+    };
+    let mut buf = vec![0f32; src.len()];
+    for &(dx, dy) in dirs {
+        for sign in [1isize, -1] {
+            let (dx, dy) = (dx * sign, dy * sign);
+            // visit pixels so that the predecessor (x-dx, y-dy) is processed first
+            let ys: Vec<isize> = if dy >= 0 { (0..h as isize).collect() } else { (0..h as isize).rev().collect() };
+            let xs: Vec<isize> = if dx >= 0 { (0..w as isize).collect() } else { (0..w as isize).rev().collect() };
+            for &y in &ys {
+                for &x in &xs {
+                    let k = idx(x, y).unwrap();
+                    let prev = idx(x - dx, y - dy);
+                    for c in 0..3 {
+                        let p = prev.map(|pk| buf[pk + c]).unwrap_or(0.0);
+                        buf[k + c] = src[k + c] + a * p;
+                    }
+                }
+            }
+            for (o, (b, s0)) in out.iter_mut().zip(buf.iter().zip(src.iter())) {
+                *o += (b - s0) * norm;
+            }
+        }
+    }
+    out
 }
 
 #[inline]
@@ -373,6 +429,15 @@ impl Sensor {
                 blur_rgb(&mut b, w, h, o.bloom_sigma_px);
                 let s = o.bloom as f32 * 4.0;
                 img.par_iter_mut().zip(b.par_iter()).for_each(|(v, bb)| *v += s * bb);
+            }
+        }
+        if o.starburst > 0.0 {
+            let thr = o.starburst_threshold as f32;
+            let src: Vec<f32> = img.iter().map(|v| (v - thr).max(0.0)).collect();
+            if src.iter().any(|v| *v > 0.0) {
+                let streaks = starburst(&src, w, h, o.starburst_len_px, o.starburst_rays);
+                let s = o.starburst as f32;
+                img.par_iter_mut().zip(streaks.par_iter()).for_each(|(v, b)| *v += s * b);
             }
         }
         let t = &self.cfg.tone;

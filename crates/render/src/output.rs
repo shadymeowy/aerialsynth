@@ -51,6 +51,22 @@ fn q4(q: DQuat) -> [f64; 4] {
     [q.w, q.x, q.y, q.z]
 }
 
+/// Round f32 values to `keep` mantissa bits (round-to-nearest; inf/nan untouched). Relative
+/// error ≤ 2^-(keep+1); the zeroed low bits make shuffle+deflate far more effective.
+pub fn round_mantissa(v: &mut [f32], keep: u8) {
+    if keep >= 23 {
+        return;
+    }
+    let drop = 23 - keep as u32;
+    let half = 1u32 << (drop - 1);
+    let mask = !((1u32 << drop) - 1);
+    for x in v.iter_mut() {
+        if x.is_finite() {
+            *x = f32::from_bits((x.to_bits().wrapping_add(half)) & mask);
+        }
+    }
+}
+
 fn write_npy_f32(path: &Path, shape: &[usize], data: &[f32]) -> Result<()> {
     let shape_s = match shape.len() {
         1 => format!("({},)", shape[0]),
@@ -185,7 +201,8 @@ pub struct H5Writer {
 
 impl H5Writer {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(path: &Path, w: u32, h: u32, n: usize, cam: &CameraConfig, ext: &Extrinsics, scenario_yaml: &str, depth: bool, flow: bool, landcover: bool) -> Result<Self> {
+    pub fn new(path: &Path, w: u32, h: u32, n: usize, cam: &CameraConfig, ext: &Extrinsics, scenario_yaml: &str, depth: bool, flow: bool, landcover: bool, comp: &crate::scenario::Compression) -> Result<Self> {
+        let lvl = comp.level.min(9);
         if let Some(p) = path.parent() {
             if !p.as_os_str().is_empty() {
                 std::fs::create_dir_all(p)?;
@@ -196,6 +213,7 @@ impl H5Writer {
         file.set_attr_str("format", "terrain-sequence")?;
         file.set_attr("format_version", 1i32)?;
         file.set_attr_str("scenario", scenario_yaml)?;
+        file.set_attr("float_keep_bits", comp.float_keep_bits.map(|b| b as i32).unwrap_or(23))?;
         file.set_attr_str("camera", &serde_yaml::to_string(cam)?)?;
         file.set_attr_str("extrinsics", &serde_yaml::to_string(ext)?)?;
         file.set_attr_str(
@@ -205,22 +223,22 @@ impl H5Writer {
              ned0 = local NED at the first camera position; depth = z along the optical axis (m), inf = sky; \
              flow[k] = forward flow from frame k to k+1 in px (dx, dy); poses at mid-exposure",
         )?;
-        let rgb = file.new_dataset::<u8>().shape(&[n, h, w, 3]).chunk(&[1, h, w, 3]).shuffle(true).deflate(4).create("rgb")?;
+        let rgb = file.new_dataset::<u8>().shape(&[n, h, w, 3]).chunk(&[1, h, w, 3]).shuffle(true).deflate(lvl).create("rgb")?;
         let depth = if depth {
-            Some(file.new_dataset::<f32>().shape(&[n, h, w]).chunk(&[1, h, w]).shuffle(true).deflate(4).create("depth")?)
+            Some(file.new_dataset::<f32>().shape(&[n, h, w]).chunk(&[1, h, w]).shuffle(true).deflate(lvl).create("depth")?)
         } else {
             None
         };
         let flow = if flow {
             Some((
-                file.new_dataset::<f32>().shape(&[n, h, w, 2]).chunk(&[1, h, w, 2]).shuffle(true).deflate(4).create("flow")?,
-                file.new_dataset::<u8>().shape(&[n, h, w]).chunk(&[1, h, w]).deflate(4).create("flow_valid")?,
+                file.new_dataset::<f32>().shape(&[n, h, w, 2]).chunk(&[1, h, w, 2]).shuffle(true).deflate(lvl).create("flow")?,
+                file.new_dataset::<u8>().shape(&[n, h, w]).chunk(&[1, h, w]).deflate(lvl).create("flow_valid")?,
             ))
         } else {
             None
         };
         let landcover = if landcover {
-            Some(file.new_dataset::<u8>().shape(&[n, h, w]).chunk(&[1, h, w]).deflate(4).create("landcover")?)
+            Some(file.new_dataset::<u8>().shape(&[n, h, w]).chunk(&[1, h, w]).deflate(lvl).create("landcover")?)
         } else {
             None
         };

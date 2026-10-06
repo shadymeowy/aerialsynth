@@ -241,6 +241,10 @@ pub struct SatelliteLook {
     pub haze: f64,
     /// Cast shadows of trees/buildings.
     pub shadows: bool,
+    /// Global colour knobs applied to the generated surface albedo (and therefore to both the
+    /// `albedo` and `rgb` layers): saturation (1 = as designed, >1 more vivid) and brightness.
+    pub albedo_saturation: f64,
+    pub albedo_brightness: f64,
 }
 impl Default for SatelliteLook {
     fn default() -> Self {
@@ -252,6 +256,8 @@ impl Default for SatelliteLook {
             exposure: 1.0,
             haze: 0.04,
             shadows: true,
+            albedo_saturation: 1.0,
+            albedo_brightness: 1.0,
         }
     }
 }

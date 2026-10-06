@@ -232,7 +232,7 @@ pub fn render_sequence(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, ge
     let o = &scn.output;
     let mut png = if o.png { Some(PngWriter::new(&o.dir, w as u32, h as u32, &scn.camera, &scn.extrinsics, &yaml, o.depth, o.flow, o.landcover)?) } else { None };
     let mut h5w = match &o.h5 {
-        Some(p) => Some(H5Writer::new(p, w as u32, h as u32, n, &scn.camera, &scn.extrinsics, &yaml, o.depth, o.flow, o.landcover)?),
+        Some(p) => Some(H5Writer::new(p, w as u32, h as u32, n, &scn.camera, &scn.extrinsics, &yaml, o.depth, o.flow, o.landcover, &o.compression)?),
         None => None,
     };
     let first_cam = trajectory::interpolate(poses, times[0]).camera(&scn.extrinsics, &ell);
@@ -251,7 +251,12 @@ pub fn render_sequence(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, ge
         sun: crate::lighting::SunState,
     }
     let mut pending: Option<Pending> = None;
-    let flush = |p: Pending, flow: Vec<f32>, valid: Vec<u8>, png: &mut Option<PngWriter>, h5w: &mut Option<H5Writer>| -> Result<()> {
+    let keep_bits = o.compression.float_keep_bits;
+    let flush = |mut p: Pending, mut flow: Vec<f32>, valid: Vec<u8>, png: &mut Option<PngWriter>, h5w: &mut Option<H5Writer>| -> Result<()> {
+        if let Some(k) = keep_bits {
+            crate::output::round_mantissa(&mut p.depth, k);
+            crate::output::round_mantissa(&mut flow, k);
+        }
         let rec = FrameRecord {
             index: p.index,
             t: p.t,
