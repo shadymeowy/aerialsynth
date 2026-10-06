@@ -98,7 +98,9 @@ w_ref = np.array([r[2] for r in rows])
 ga, gg = I["gt_accel"][:][k], I["gt_gyro"][:][k]
 rms = lambda x: float(np.sqrt(np.mean(np.sum(x ** 2, -1))))
 dyn = lambda x: x - x.mean(0)
-print(f"truth over {len(k)} samples:")
+pose_rate = 1 / np.median(np.diff(tp))
+coarse = pose_rate < 4 / dt
+print(f"truth over {len(k)} samples:" + (f"  [/pose at {pose_rate:.0f} Hz is too coarse for an exact rebuild (want ≥ {4 / dt:.0f} Hz): indicative only under vibration]" if coarse else ""))
 print(f"  gt_accel - rebuilt: RMS {rms(ga - f_ref):.4f} m/s²  (signal RMS {rms(f_ref):.3f}, dynamic part {rms(dyn(f_ref)):.3f})")
 print(f"  gt_gyro  - rebuilt: RMS {rms(gg - w_ref):.2e} rad/s (signal RMS {rms(w_ref):.2e}, dynamic part {rms(dyn(w_ref)):.2e})")
 g_norm = np.linalg.norm(f_ref, axis=1).mean()
