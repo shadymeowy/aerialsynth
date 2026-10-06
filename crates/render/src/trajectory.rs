@@ -188,13 +188,14 @@ pub struct ImuTruth {
     pub w: DVec3,
 }
 
-/// Load IMU truth columns if the trajectory has them.
+/// Load IMU truth columns if the trajectory has them. Each record is the mean specific force /
+/// inertial body rate (body frame) over the interval since the previous record.
 pub fn load_imu_truth(path: &Path) -> Result<Option<Vec<ImuTruth>>> {
     let text = std::fs::read_to_string(path)?;
     let (h, rows, _) = parse_csv(&text)?;
     let col = |n: &str| h.iter().position(|c| c == n);
     let (Some(t), Some(fx), Some(fy), Some(fz), Some(wx), Some(wy), Some(wz)) =
-        (col("t"), col("f_x"), col("f_y"), col("f_z"), col("w_x"), col("w_y"), col("w_z"))
+        (col("t").or(col("time")).or(col("timestamp")), col("f_x"), col("f_y"), col("f_z"), col("w_x"), col("w_y"), col("w_z"))
     else {
         return Ok(None);
     };

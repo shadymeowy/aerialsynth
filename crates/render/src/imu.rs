@@ -119,29 +119,90 @@ pub struct ImuData {
     pub from_truth_columns: bool,
 }
 
-/// Numerical truth from poses (fallback when the trajectory has no IMU columns).
+/// Numerical truth from poses at time t (fallback when the trajectory has no IMU columns):
+/// central differences with step h, the stencil kept inside the trajectory.
 fn numeric_truth(poses: &[Pose], ell: &Ellipsoid, t: f64, h: f64) -> (DVec3, DVec3) {
+    let (lo, hi) = (poses[0].t, poses[poses.len() - 1].t);
+    let h = h.min(0.5 * (hi - lo)).max(1e-6);
+    let t = t.clamp(lo + h, hi - h);
     let p = |tt: f64| trajectory::interpolate(poses, tt);
     let (a, b, c) = (p(t - h), p(t), p(t + h));
     let (pa, pb, pc) = (a.ecef(ell), b.ecef(ell), c.ecef(ell));
     let v = (pc - pa) / (2.0 * h);
     let acc = (pc - 2.0 * pb + pa) / (h * h);
-    let r_ne = geodesy::rot_ecef2ned(b.geo.lat, b.geo.lon);
     let w_ie_e = DVec3::new(0.0, 0.0, geodesy::EARTH_RATE);
     // specific force in ECEF: a + 2 Ω×v − g_normal (normal gravity includes the centrifugal term)
+    let r_ne = geodesy::rot_ecef2ned(b.geo.lat, b.geo.lon);
     let g_e = r_ne.transpose() * DVec3::new(0.0, 0.0, geodesy::normal_gravity(b.geo.lat, b.geo.h));
     let f_e = acc + 2.0 * w_ie_e.cross(v) - g_e;
     let r_eb = b.r_ecef_body();
-    let f_b = r_eb.transpose() * f_e;
-    // body rate from consecutive attitudes (ECEF-referenced → already inertial apart from Ω)
+    // body rate from the neighbouring attitudes (ECEF-referenced → inertial apart from Ω)
     let (ra, rc) = (DQuat::from_mat3(&a.r_ecef_body()), DQuat::from_mat3(&c.r_ecef_body()));
     let dq = (ra.inverse() * rc).normalize();
     let dq = if dq.w < 0.0 { -dq } else { dq };
-    let w_eb = dq.to_scaled_axis() / (2.0 * h);
-    (f_b, w_eb + r_eb.transpose() * w_ie_e)
+    (r_eb.transpose() * f_e, dq.to_scaled_axis() / (2.0 * h) + r_eb.transpose() * w_ie_e)
 }
 
-/// Synthesize the IMU over [t0, t1] (trajectory time).
+/// Truth source: simulator records (piecewise constant over each record interval, integrated
+/// exactly over a window) or numeric differentiation of the poses.
+enum Truth<'a> {
+    Records { tr: &'a [ImuTruth], cum_f: Vec<DVec3>, cum_w: Vec<DVec3>, centre: Vec<f64> },
+    Numeric { poses: &'a [Pose], ell: &'a Ellipsoid },
+}
+
+impl Truth<'_> {
+    fn new<'a>(truth: Option<&'a [ImuTruth]>, poses: &'a [Pose], ell: &'a Ellipsoid) -> Truth<'a> {
+        match truth {
+            Some(tr) if tr.len() >= 2 => {
+                // record i covers (t[i-1], t[i]]; the first one an interval as long as the next
+                let start = |i: usize| if i == 0 { 2.0 * tr[0].t - tr[1].t } else { tr[i - 1].t };
+                let (mut cf, mut cw) = (vec![DVec3::ZERO], vec![DVec3::ZERO]);
+                for (i, r) in tr.iter().enumerate() {
+                    let d = r.t - start(i);
+                    cf.push(cf[i] + r.f * d);
+                    cw.push(cw[i] + r.w * d);
+                }
+                let centre = (0..tr.len()).map(|i| 0.5 * (start(i) + tr[i].t)).collect();
+                Truth::Records { tr, cum_f: cf, cum_w: cw, centre }
+            }
+            _ => Truth::Numeric { poses, ell },
+        }
+    }
+
+    /// ∫ (f, ω) dt from the start of the records to `t` (clamped to the record span).
+    fn integral(tr: &[ImuTruth], cum_f: &[DVec3], cum_w: &[DVec3], t: f64) -> (DVec3, DVec3) {
+        let t_first = 2.0 * tr[0].t - tr[1].t;
+        let t = t.clamp(t_first, tr[tr.len() - 1].t);
+        let i = tr.partition_point(|r| r.t < t).min(tr.len() - 1); // record covering t
+        let s = if i == 0 { t_first } else { tr[i - 1].t };
+        (cum_f[i] + tr[i].f * (t - s), cum_w[i] + tr[i].w * (t - s))
+    }
+
+    /// Mean (f, ω) over [a, b] and the instantaneous ω at a and b (for ω̇).
+    fn window(&self, a: f64, b: f64) -> (DVec3, DVec3, DVec3, DVec3) {
+        match self {
+            Truth::Records { tr, cum_f, cum_w, centre } => {
+                let (fa, wa) = Self::integral(tr, cum_f, cum_w, a);
+                let (fb, wb) = Self::integral(tr, cum_f, cum_w, b);
+                // instantaneous rate: records interpolated at their interval centres
+                let w_at = |t: f64| {
+                    let j = centre.partition_point(|&c| c < t).clamp(1, tr.len() - 1);
+                    let u = ((t - centre[j - 1]) / (centre[j] - centre[j - 1]).max(1e-12)).clamp(0.0, 1.0);
+                    tr[j - 1].w.lerp(tr[j].w, u)
+                };
+                ((fb - fa) / (b - a), (wb - wa) / (b - a), w_at(a), w_at(b))
+            }
+            Truth::Numeric { poses, ell } => {
+                let h = (b - a).max(0.01);
+                let (f, w) = numeric_truth(poses, ell, 0.5 * (a + b), h);
+                (f, w, numeric_truth(poses, ell, a, h).1, numeric_truth(poses, ell, b, h).1)
+            }
+        }
+    }
+}
+
+/// Synthesize the IMU over [t0, t1] (trajectory time). Sample k at t is the mean over the
+/// centred window [t - dt/2, t + dt/2] (delta-velocity / delta-angle semantics, no delay).
 pub fn synthesize(cfg: &ImuConfig, poses: &[Pose], truth: Option<&[ImuTruth]>, ell: &Ellipsoid, t0: f64, t1: f64) -> Result<ImuData> {
     if cfg.rate_hz <= 0.0 {
         bail!("imu.rate_hz must be > 0");
@@ -158,29 +219,8 @@ pub fn synthesize(cfg: &ImuConfig, poses: &[Pose], truth: Option<&[ImuTruth]>, e
     let scale_a = DVec3::ONE + rng.gvec() * cfg.accel.scale_sigma;
     let mut bg = rng.gvec() * cfg.gyro.bias_init;
     let mut ba = rng.gvec() * cfg.accel.bias_init;
+    let src = Truth::new(truth, poses, ell);
 
-    // truth in the body frame at each IMU sample: average of the truth records in (t-dt, t]
-    let body_truth = |t: f64| -> (DVec3, DVec3) {
-        match truth {
-            Some(tr) if !tr.is_empty() => {
-                let i1 = tr.partition_point(|s| s.t <= t + 1e-9);
-                let i0 = tr.partition_point(|s| s.t <= t - dt + 1e-9);
-                if i1 > i0 {
-                    let k = (i1 - i0) as f64;
-                    let f = tr[i0..i1].iter().fold(DVec3::ZERO, |a, s| a + s.f) / k;
-                    let w = tr[i0..i1].iter().fold(DVec3::ZERO, |a, s| a + s.w) / k;
-                    (f, w)
-                } else {
-                    // IMU faster than the truth record: interpolate
-                    let j = i1.clamp(1, tr.len() - 1);
-                    let (a, b) = (&tr[j - 1], &tr[j]);
-                    let u = ((t - a.t) / (b.t - a.t).max(1e-12)).clamp(0.0, 1.0);
-                    (a.f.lerp(b.f, u), a.w.lerp(b.w, u))
-                }
-            }
-            _ => numeric_truth(poses, ell, t, (2.0 * dt).max(0.02)),
-        }
-    };
     let mut d = ImuData {
         t: Vec::with_capacity(n),
         accel: Vec::with_capacity(n),
@@ -189,16 +229,14 @@ pub fn synthesize(cfg: &ImuConfig, poses: &[Pose], truth: Option<&[ImuTruth]>, e
         gt_omega: Vec::with_capacity(n),
         bias_accel: Vec::with_capacity(n),
         bias_gyro: Vec::with_capacity(n),
-        from_truth_columns: truth.is_some_and(|t| !t.is_empty()),
+        from_truth_columns: matches!(src, Truth::Records { .. }),
     };
-    let mut w_prev: Option<DVec3> = None;
     let sat = |v: DVec3, s: f64| if s > 0.0 { v.clamp(DVec3::splat(-s), DVec3::splat(s)) } else { v };
     for k in 0..n {
         let t = t0 + k as f64 * dt;
-        let (f_b, w_b) = body_truth(t);
-        // lever arm (body frame): f_imu = f + ω̇ × r + ω × (ω × r)
-        let wd = w_prev.map(|wp| (w_b - wp) / dt).unwrap_or(DVec3::ZERO);
-        w_prev = Some(w_b);
+        let (f_b, w_b, w_a, w_e) = src.window(t - 0.5 * dt, t + 0.5 * dt);
+        // lever arm (body frame): f_imu = f + ω̇ × r + ω × (ω × r), ω̇ averaged over the window
+        let wd = (w_e - w_a) / dt;
         let f_l = f_b + wd.cross(lever) + w_b.cross(w_b.cross(lever));
         // into the IMU frame
         let f_i = r_bi.transpose() * f_l;
@@ -291,5 +329,55 @@ mod tests {
         let dn = synthesize(&cfg, &poses, None, &ell, 5.0, 10.0).unwrap();
         let k = dn.t.len() / 2;
         assert!((dn.gt_accel[k] - d.gt_accel[(4.0 * cfg.rate_hz) as usize + k]).length() < 0.2);
+    }
+
+    #[test]
+    fn lever_arm_and_timing() {
+        // vibrating flight recorded at 1 kHz; IMU at 200 Hz with a 10 cm lever arm
+        let ell = Ellipsoid::WGS84;
+        let sc = SynthConfig { kind: crate::dynamics::PathKind::Circle, duration: 6.0, rate: 1000.0, ..Default::default() };
+        let recs = simulate(&sc, (39.9, 32.8), &ell, None);
+        let poses: Vec<Pose> = recs.iter().map(|r| r.pose).collect();
+        let truth: Vec<ImuTruth> = recs.iter().map(|r| ImuTruth { t: r.pose.t, f: r.imu_f, w: r.imu_w }).collect();
+        let lever = DVec3::new(0.1, 0.0, 0.05);
+        let cfg = ImuConfig { extrinsics: ImuExtrinsics { translation: lever.to_array(), ..Default::default() }, ..Default::default() };
+        let d = synthesize(&cfg, &poses, Some(&truth), &ell, 1.0, 5.0).unwrap();
+        // reference: lever-corrected force per record (central-difference ω̇), box-averaged
+        let n = truth.len();
+        let fl: Vec<DVec3> = (0..n)
+            .map(|i| {
+                let (a, b) = (i.saturating_sub(1), (i + 1).min(n - 1));
+                let wd = (truth[b].w - truth[a].w) / (truth[b].t - truth[a].t);
+                truth[i].f + wd.cross(lever) + truth[i].w.cross(truth[i].w.cross(lever))
+            })
+            .collect();
+        let (mut e2, mut l2, mut m) = (0.0, 0.0, 0);
+        for (k, &t) in d.t.iter().enumerate() {
+            // records (each covering the ms before its stamp) weighted by their overlap with
+            // the centred window [t - dt/2, t + dt/2]
+            let (a, b) = (t - 0.0025, t + 0.0025);
+            let (mut r, mut f0, mut ws) = (DVec3::ZERO, DVec3::ZERO, 0.0);
+            for i in 1..n {
+                let wgt = (truth[i].t.min(b) - truth[i - 1].t.max(a)).max(0.0);
+                r += fl[i] * wgt;
+                f0 += truth[i].f * wgt;
+                ws += wgt;
+            }
+            let (r, f0) = (r / ws, f0 / ws);
+            e2 += (d.gt_accel[k] - r).length_squared();
+            l2 += (r - f0).length_squared();
+            m += 1;
+        }
+        let (e, l) = ((e2 / m as f64).sqrt(), (l2 / m as f64).sqrt());
+        eprintln!("lever-arm error {e:.3} vs lever term {l:.3} m/s² RMS");
+        assert!(e < 0.1 * l, "lever-arm error {e} vs lever term {l}");
+        // timing: gyro truth matches the attitude rate at the sample time, not half a sample late
+        let rate_at = |t: f64| {
+            let (a, b) = (trajectory::interpolate(&poses, t - 0.001), trajectory::interpolate(&poses, t + 0.001));
+            let dq = (DQuat::from_mat3(&a.r_ecef_body()).inverse() * DQuat::from_mat3(&b.r_ecef_body())).normalize();
+            (if dq.w < 0.0 { -dq } else { dq }).to_scaled_axis() / 0.002
+        };
+        let err = |lag: f64| -> f64 { (0..d.t.len()).map(|k| (d.gt_omega[k] - rate_at(d.t[k] + lag)).length_squared()).sum::<f64>().sqrt() };
+        assert!(err(0.0) < err(0.0025) && err(0.0) < err(-0.0025), "{} {} {}", err(-0.0025), err(0.0), err(0.0025));
     }
 }

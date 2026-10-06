@@ -264,20 +264,27 @@ impl GaussMarkov {
     }
 }
 
-/// Damped oscillator driven by white noise, scaled to a target RMS.
+/// Damped oscillator driven by band-limited noise (Gauss-Markov force with a corner at 8x the
+/// resonance), scaled to a target RMS. A white force would make the angular acceleration white
+/// at the integration rate, which no physical airframe does (and which would make the IMU
+/// lever-arm term meaningless).
 #[derive(Default, Clone, Copy)]
 struct Oscillator {
     x: f64,
     v: f64,
+    force: f64,
 }
 impl Oscillator {
     fn step(&mut self, rng: &mut Rng, f: f64, zeta: f64, rms: f64, dt: f64) -> f64 {
         let w = std::f64::consts::TAU * f;
-        // white-noise force intensity giving stationary RMS of x: σx² = q / (4 ζ ω³)
+        // white-force intensity giving stationary RMS of x: σx² = q / (4 ζ ω³); the Gauss-Markov
+        // force with variance q / (2τ) has the same spectral level below its corner
         let q = rms * rms * 4.0 * zeta * w * w * w;
-        let force = (q / dt).sqrt() * rng.gauss();
+        let tau = 1.0 / (8.0 * w);
+        let a = (-dt / tau).exp();
+        self.force = a * self.force + (q / (2.0 * tau) * (1.0 - a * a)).sqrt() * rng.gauss();
         // semi-implicit Euler (stable for ω dt << 1)
-        self.v += (-2.0 * zeta * w * self.v - w * w * self.x + force) * dt;
+        self.v += (-2.0 * zeta * w * self.v - w * w * self.x + self.force) * dt;
         self.x += self.v * dt;
         self.x
     }
@@ -579,6 +586,7 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
     let mut imu_f_acc = DVec3::ZERO;
     let mut imu_w_acc = DVec3::ZERO;
     let mut imu_n = 0usize;
+    let mut imu_wn = 0usize;
     let n_steps = (cfg.duration / dt).round() as usize;
     let rec_every = (1.0 / (cfg.rate * dt)).round().max(1.0) as usize;
     let tau_t = cfg.wind.length_scale / v;
@@ -635,10 +643,18 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
         let pitch_cmd = gamma + rc.trim_aoa_deg.to_radians();
         // heading: crab into the crosswind (air velocity = ground velocity - wind)
         let (st, ct) = track.sin_cos();
-        let heading = if rc.crab { (v * st - wmean.0 - gv[1] * ct).atan2(v * ct - wmean.1 + gv[1] * st) } else { track };
+        // the crab angle is the yaw command (the airframe weathervanes through its yaw dynamics;
+        // feeding it straight into the heading would make the yaw rate white noise)
+        let crab = if rc.crab {
+            let hd = (v * st - wmean.0 - gv[1] * ct).atan2(v * ct - wmean.1 + gv[1] * st);
+            (hd - track + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+        } else {
+            0.0
+        };
+        let heading = track;
 
         // ---------------- attitude responses (2nd order towards command + turbulence)
-        let cmds = [bank_cmd, pitch_cmd, 0.0];
+        let cmds = [bank_cmd, pitch_cmd, crab];
         let hz = [rc.roll_hz, rc.pitch_hz, rc.yaw_hz];
         let zeta = [rc.roll_damping, rc.pitch_damping, rc.yaw_damping];
         let gain = [rc.roll_gain, rc.pitch_gain, rc.yaw_gain];
@@ -699,15 +715,13 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
             imu_f_acc += c_bn * f_ned;
             // body rate w.r.t. the local NED frame from consecutive attitudes, plus Earth and
             // transport rate
-            let w_nb = match q_prev {
-                Some(qp) => {
-                    let dq = (qp.inverse() * q).normalize();
-                    let dq = if dq.w < 0.0 { -dq } else { dq };
-                    dq.to_scaled_axis() / dt
-                }
-                None => DVec3::ZERO,
-            };
-            imu_w_acc += w_nb + c_bn * (w_ie + rho);
+            // (no rate before the first attitude: the first record copies the second's)
+            if let Some(qp) = q_prev {
+                let dq = (qp.inverse() * q).normalize();
+                let dq = if dq.w < 0.0 { -dq } else { dq };
+                imu_w_acc += dq.to_scaled_axis() / dt + c_bn * (w_ie + rho);
+                imu_wn += 1;
+            }
             imu_n += 1;
             q_prev = Some(q);
         }
@@ -719,13 +733,17 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
         out.push(Record {
             pose: Pose { t, geo: Geodetic::new(geo.lat, geo.lon, h), q_ned_body: q },
             imu_f: imu_f_acc * inv,
-            imu_w: imu_w_acc * inv,
+            imu_w: if imu_wn > 0 { imu_w_acc / imu_wn as f64 } else { DVec3::NAN },
             vel_ned: vel,
             wind_ned: [wmean.1 + gv[0] * ct - gv[1] * st, wmean.0 + gv[0] * st + gv[1] * ct, -gv[2]],
         });
         imu_f_acc = DVec3::ZERO;
         imu_w_acc = DVec3::ZERO;
         imu_n = 0;
+        imu_wn = 0;
+    }
+    if out.len() > 1 && out[0].imu_w.is_nan() {
+        out[0].imu_w = out[1].imu_w;
     }
     out
 }
