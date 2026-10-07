@@ -651,6 +651,51 @@ def shot_stream(shot, scn, video):
     return gen
 
 
+def assemble(base, story, out_mp4, shots_scn):
+    """The final video from the per-shot clips (out/showcase/clips): title and outro are encoded
+    as clips too, then everything is joined in one ffmpeg pass with `crossfade`-second fades
+    (xfade) — minutes instead of re-composing every frame from the sequences."""
+    video = story["video"]
+    W, H, fps = video["width"], video["height"], video["fps"]
+    xf = video["crossfade"]
+    d = os.path.join(OUT, "clips")
+    ids = [s["id"] for s in story["shots"]]
+    clips = [os.path.join(d, f"{i + 1:02d}_{sid}.mp4") for i, sid in enumerate(ids)]
+    missing = [c for c in clips if not os.path.exists(c)]
+    if missing:
+        raise SystemExit(f"assemble: missing clips {missing}")
+
+    def encode(path, frames):
+        ff = ffmpeg_writer(path, video)
+        for fr in frames:
+            ff.stdin.write(np.ascontiguousarray(fr, dtype=np.uint8).tobytes())
+        ff.stdin.close()
+        ff.wait()
+
+    title, outro = os.path.join(d, "title.mp4"), os.path.join(d, "outro.mp4")
+    encode(title, title_frames(video, 5.0 + xf, collage_sources(shots_scn, video)))
+    parts = [title] + clips
+    if story.get("outro"):
+        encode(outro, outro_frames(video, story["outro"], 6.0))
+        parts.append(outro)
+    dur = [float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", c],
+                                capture_output=True, text=True, check=True).stdout) for c in parts]
+    graph, prev, t = [], "[0:v]", 0.0
+    for i in range(1, len(parts)):
+        t += dur[i - 1] - xf
+        out = f"[v{i}]"
+        graph.append(f"{prev}[{i}:v]xfade=transition=fade:duration={xf}:offset={t:.4f}{out}")
+        prev = out
+    cmd = ["ffmpeg", "-y", "-loglevel", "error"]
+    for c in parts:
+        cmd += ["-i", c]
+    cmd += ["-filter_complex", ";".join(graph), "-map", prev, "-r", str(fps), "-c:v", "libx264", "-preset", "medium", "-crf", "17",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_mp4]
+    subprocess.run(cmd, check=True)
+    total = t + dur[-1]
+    print(f"wrote {out_mp4}: {len(parts)} parts, {total:.1f} s")
+
+
 def compose(base, story, out_mp4, shots_scn, preview_seconds=None):
     video = story["video"]
     W, H, fps = video["width"], video["height"], video["fps"]
@@ -797,6 +842,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--only", nargs="*", help="render only these shot ids")
     ap.add_argument("--compose-only", action="store_true")
+    ap.add_argument("--full-compose", action="store_true", help="re-compose every frame from the sequences instead of joining the clips")
     ap.add_argument("--stills", action="store_true", help="framing check (3 small frames per shot) → out/showcase/stills.png")
     ap.add_argument("--force", action="store_true", help="re-render even if up to date")
     ap.add_argument("--title-preview", action="store_true", help="save a few title-card frames (from the stills) → out/showcase/title_*.png")
@@ -851,7 +897,10 @@ def main():
         name = os.path.splitext(os.path.basename(a.story))[0]
         stills_sheet(base, story, done, os.path.join(OUT, "stills.png" if name == "storyboard" else f"stills_{name}.png"))
     elif not a.only or a.compose_only:
-        compose(base, story, a.out, done)
+        if a.full_compose:
+            compose(base, story, a.out, done)
+        else:
+            assemble(base, story, a.out, done)
 
 
 if __name__ == "__main__":
