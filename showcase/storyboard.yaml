@@ -150,7 +150,7 @@ shots:
       intrinsics: {model: pinhole, width: 1280, height: 720, intrinsics: [640.0, 640.0, 639.5, 359.5]}
       extrinsics: {mount: forward, pitch_deg: 38}
       rgb: null
-      events: {supersample: 1, shot_noise_dark_gain: 3.0}
+      events: {supersample: 1, shot_noise_hz: 0.02, leak_hz: 0.01, shot_noise_dark_gain: 3.0}  # a low-noise sensor
     render:
       lighting: {date: '2026-01-10', time_utc: '20:15:00'}
     trajectory:
@@ -160,7 +160,7 @@ shots:
   seconds: 6
   extend: 6.6
   text: 'Real stars and planets at their true positions (error < 0.01″)'
-- {id: events_stars, label: Event camera · night sky, text: 'The same sky as events: stars drift through the view as the plane turns', seconds: 6, layout: events,
+- {id: events_stars, window_ms: 100, label: Event camera · night sky, text: 'The same sky as events: stars drift through the view as the plane turns', seconds: 6, layout: events,
   source: stars, offset: 6.6}
 - id: modalities_night
   label: Ground truth · night
@@ -218,7 +218,7 @@ shots:
       intrinsics: {model: pinhole, width: 1280, height: 720, intrinsics: [2887.0, 2887.0, 639.5, 359.5]}
       extrinsics: {mount: forward, pitch_deg: 45, yaw_deg: -4}
       rgb: null
-      events: {supersample: 1, shot_noise_dark_gain: 3.0}
+      events: {supersample: 1, shot_noise_hz: 0.02, leak_hz: 0.01, shot_noise_dark_gain: 3.0}  # a low-noise sensor
     render:
       lighting: {date: '2026-01-20', time_utc: '19:30:00'}
     trajectory:
@@ -228,7 +228,7 @@ shots:
   seconds: 6
   extend: 6.6
   text: 'Rings mark each catalogue star''s ground-truth position (sub-pixel)'
-- {id: events_tracker, label: Event camera · star tracker, text: 'The tracker as events: Orion''s belt and sword at their true positions', seconds: 6, layout: events,
+- {id: events_tracker, window_ms: 100, label: Event camera · star tracker, text: 'The tracker as events: Orion''s belt and sword at their true positions', seconds: 6, layout: events,
   source: star_tracker, offset: 6.6}
 - id: braided
   label: Rivers converging
