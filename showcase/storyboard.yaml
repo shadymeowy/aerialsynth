@@ -180,6 +180,8 @@ shots:
   seconds: 6
   extend: 6.6
   text: 'Real stars and planets at their true positions (error < 0.01″)'
+- {id: events_stars, window_ms: 300, label: Event camera · night sky, text: 'The same sky as events: stars drift through the view as the plane turns', seconds: 6, layout: events,
+  source: stars, offset: 6.6}
 - id: modalities_night
   label: Ground truth · night
   layout: modalities
@@ -246,6 +248,8 @@ shots:
   seconds: 6
   extend: 6.6
   text: 'Rings mark each catalogue star''s ground-truth position (sub-pixel)'
+- {id: events_tracker, window_ms: 100, label: Event camera · star tracker, text: 'The tracker as events: Orion''s belt and sword at their true positions', seconds: 6, layout: events,
+  source: star_tracker, offset: 6.6}
 - id: braided
   label: Rivers converging
   text: Big rivers meeting in a wooded hill country
