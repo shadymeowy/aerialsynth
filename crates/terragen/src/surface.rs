@@ -1566,6 +1566,11 @@ impl SurfaceModel {
         let d = p - town.center;
         let q0 = DVec2::new(d.dot(town.ex), d.dot(town.ey));
         let r = town.radius;
+        // far outside: the test below without its square roots (|qa|² >= |q0|² min(e, 1/e))
+        let (e, q2, r2) = (town.elong, q0.length_squared(), 4.0 * r * r * (1.0 + 1e-9));
+        if if e >= 1.0 { q2 > r2 * e } else { e * q2 > r2 } {
+            return (0.0, 2.0);
+        }
         // elongated, irregular footprint (noise relative to the town size)
         let qa = DVec2::new(q0.x / town.elong.sqrt(), q0.y * town.elong.sqrt());
         if qa.length() > r * 2.0 {
