@@ -77,6 +77,30 @@ shots:
   seconds: 10
   speedup: 8
   text: 'Each flight plans its XYZ tiles: only what the camera sees is generated, at the right zoom'
+- id: cruise
+  label: High altitude · 10 km
+  scenario:
+    cameras:
+    - extrinsics: {pitch_deg: -22}
+      intrinsics:
+        intrinsics: [960.0, 960.0, 959.5, 539.5]
+    tiles: {max_zoom: 15}
+    trajectory:
+      synth: {altitude: 10000, altitude_ref: ellipsoid, heading_deg: 70, kind: line, lat: 39.0, lon: 33.35, speed: 230}
+    render:
+      lighting: {time_utc: '08:45:00'}
+  seconds: 6
+  text: From cruise altitude, with Earth curvature and aerial perspective …
+- id: low
+  label: Low altitude · 120 m
+  scenario:
+    cameras:
+    - extrinsics: {pitch_deg: -35}
+    tiles: {max_zoom: 19}
+    trajectory:
+      synth: {altitude: 120, heading_deg: 75, kind: line, lat: 39.902, lon: 32.785, speed: 55}
+  seconds: 5
+  text: … down to low-level flight, in the same consistent world
 - id: modalities_mountains
   label: Ground truth · mountains
   layout: modalities
@@ -527,30 +551,6 @@ shots:
       synth: {altitude: 1400, heading_deg: 30, kind: line, lat: -23.0, lon: 78.08, speed: 60}
   seconds: 5.5
   text: Centre-pivot irrigation where farming meets a dry climate
-- id: cruise
-  label: High altitude · 10 km
-  scenario:
-    cameras:
-    - extrinsics: {pitch_deg: -22}
-      intrinsics:
-        intrinsics: [960.0, 960.0, 959.5, 539.5]
-    tiles: {max_zoom: 15}
-    trajectory:
-      synth: {altitude: 10000, altitude_ref: ellipsoid, heading_deg: 70, kind: line, lat: 39.0, lon: 33.35, speed: 230}
-    render:
-      lighting: {time_utc: '08:45:00'}
-  seconds: 6
-  text: From cruise altitude, with Earth curvature and aerial perspective …
-- id: low
-  label: Low altitude · 120 m
-  scenario:
-    cameras:
-    - extrinsics: {pitch_deg: -35}
-    tiles: {max_zoom: 19}
-    trajectory:
-      synth: {altitude: 120, heading_deg: 75, kind: line, lat: 39.902, lon: 32.785, speed: 55}
-  seconds: 5
-  text: … down to low-level flight, in the same consistent world
 - id: canyon
   label: Red rock desert
   scenario:

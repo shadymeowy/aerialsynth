@@ -660,7 +660,11 @@ def assemble(base, story, out_mp4, shots_scn):
     xf = video["crossfade"]
     d = os.path.join(OUT, "clips")
     ids = [s["id"] for s in story["shots"]]
-    clips = [os.path.join(d, f"{i + 1:02d}_{sid}.mp4") for i, sid in enumerate(ids)]
+    # each shot's clip by name (any position number; the newest if several)
+    def clip_of(sid):
+        c = [os.path.join(d, n) for n in os.listdir(d) if n[:2].isdigit() and n[2:3] == "_" and n[3:] == f"{sid}.mp4"]
+        return max(c, key=os.path.getmtime) if c else os.path.join(d, f"??_{sid}.mp4")
+    clips = [clip_of(sid) for sid in ids]
     missing = [c for c in clips if not os.path.exists(c)]
     if missing:
         raise SystemExit(f"assemble: missing clips {missing}")
