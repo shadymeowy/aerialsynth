@@ -870,14 +870,20 @@ impl World {
                     + perlin3(id ^ 7, p / (lw * 0.45)) * 0.18 * band(lw * 0.45, gsd)
                     + perlin3(id ^ 9, p / (lw * 0.12)) * 0.06 * band(lw * 0.12, gsd);
                 let de = d / rad * (1.0 + warpn);
-                // the whole basin is filled: a bowl below the level, rising to a low shore that
-                // blends into the land (partly flooded basins drew thin crescents of water)
+                // the basin is filled up to the level: ground a little above it is flooded too
+                // (partly flooded basins drew thin crescents of water), but higher ground is not
+                // dug away (that carved pits into the hillsides of sloping basins); the shore
+                // follows the terrain's contours
                 let depth = 3.0 + 0.01 * rad;
-                if de < 1.0 {
-                    h = h.min(level - depth * (1.0 - de * de) - 0.3);
-                    t.water = t.water.max(level);
-                    t.water_kind = water::LAKE;
-                } else if de < 1.5 {
+                let near = 1.0 - smoothstep(1.5, 4.0, h - level);
+                if de < 1.0 && near > 0.0 {
+                    let bowl = level - depth * (1.0 - de * de) - 0.3;
+                    h = h.min(lerp(h, bowl, near));
+                    if h < level {
+                        t.water = t.water.max(level);
+                        t.water_kind = water::LAKE;
+                    }
+                } else if de < 1.5 && h < level + 4.0 {
                     let shore = level + 0.4 + 12.0 * (de - 1.0) * (de - 1.0);
                     h = h.min(lerp(shore, h, smoothstep(1.0, 1.5, de)));
                 }
