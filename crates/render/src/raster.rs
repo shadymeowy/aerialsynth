@@ -24,7 +24,7 @@ use std::f64::consts::PI;
 use std::sync::Arc;
 use tilestore::{TileData, TILE_SIZE};
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum Shading {
     /// Drape the satellite-look `rgb` layer (baked lighting) — closest to the map imagery.
@@ -52,6 +52,16 @@ pub struct RenderSettings {
     pub max_aniso: u32,
     /// Specular sun glint on water (relit mode).
     pub water_glint: bool,
+    /// cpu (reference) or gpu (wgpu, headless; needs the `gpu` feature)
+    pub backend: Backend,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Backend {
+    #[default]
+    Cpu,
+    Gpu,
 }
 
 impl Default for RenderSettings {
@@ -67,6 +77,7 @@ impl Default for RenderSettings {
             atmosphere: AtmoParams::default(),
             max_aniso: 8,
             water_glint: true,
+            backend: Backend::Cpu,
         }
     }
 }
@@ -119,27 +130,27 @@ struct RowOut {
     fs: Vec<f32>,
 }
 
-const NO_UNIT: u32 = u32::MAX;
+pub(crate) const NO_UNIT: u32 = u32::MAX;
 
 #[derive(Clone, Copy, Default)]
-struct Vert {
-    sx: f64,
-    sy: f64,
-    z: f64,
-    u: f32,
-    v: f32,
-    ok: bool,
+pub(crate) struct Vert {
+    pub sx: f64,
+    pub sy: f64,
+    pub z: f64,
+    pub u: f32,
+    pub v: f32,
+    pub ok: bool,
 }
 
-struct Mesh {
-    unit_idx: u32,
-    nx: usize,
-    ny: usize,
-    verts: Vec<Vert>,
+pub(crate) struct Mesh {
+    pub unit_idx: u32,
+    pub nx: usize,
+    pub ny: usize,
+    pub verts: Vec<Vert>,
     /// skirt vertices: same layout as the border ring of `verts`, pushed down
-    skirt: Vec<(usize, Vert)>,
-    bbox: [f64; 4],
-    row_y: Vec<(f64, f64)>,
+    pub skirt: Vec<(usize, Vert)>,
+    pub bbox: [f64; 4],
+    pub row_y: Vec<(f64, f64)>,
 }
 
 #[derive(Clone, Copy)]
@@ -176,16 +187,16 @@ impl std::hash::Hasher for FxHasher {
 type FxBuild = std::hash::BuildHasherDefault<FxHasher>;
 
 /// Frame-local view of the tiles needed for shading.
-struct TileView {
-    tiles: HashMap<TileId, Arc<TileData>, FxBuild>,
+pub(crate) struct TileView {
+    pub tiles: HashMap<TileId, Arc<TileData>, FxBuild>,
     /// max elevation over 16x16-pixel blocks of each tile (shadow-ray empty-space skipping)
-    blockmax: HashMap<TileId, Box<[f32; 256]>, FxBuild>,
+    pub blockmax: HashMap<TileId, Box<[f32; 256]>, FxBuild>,
     /// highest DSM point of all tiles in view (shadow rays above it can stop)
-    max_elev: f64,
+    pub max_elev: f64,
 }
 
 impl TileView {
-    fn new(tiles: HashMap<TileId, Arc<TileData>, FxBuild>, with_blockmax: bool) -> Self {
+    pub(crate) fn new(tiles: HashMap<TileId, Arc<TileData>, FxBuild>, with_blockmax: bool) -> Self {
         let blockmax = if with_blockmax {
             tiles
                 .par_iter()
@@ -455,7 +466,7 @@ fn lon_of(gx: f64, z: u8) -> f64 {
 
 pub struct Renderer {
     pub model: Arc<dyn CameraModel>,
-    model_ss: Arc<dyn CameraModel>,
+    pub(crate) model_ss: Arc<dyn CameraModel>,
     pub settings: RenderSettings,
     pub ell: Ellipsoid,
     pub cache: Arc<TileCache>,
@@ -465,7 +476,9 @@ pub struct Renderer {
     /// Return lamp flicker as separate cos / sin images instead of applying it (see `FrameOut`).
     pub split_flicker: bool,
     /// unit rays of the supersampled grid (camera frame)
-    rays: Vec<[f32; 3]>,
+    pub(crate) rays: Vec<[f32; 3]>,
+    /// unique id of this renderer (GPU-side caches of its ray table)
+    pub(crate) id: u64,
 }
 
 impl Renderer {
@@ -481,7 +494,9 @@ impl Renderer {
                 [r.x as f32, r.y as f32, r.z as f32]
             })
             .collect();
-        Renderer { model, model_ss, settings, ell, cache, geometry_only: false, split_flicker: false, rays }
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Renderer { model, model_ss, settings, ell, cache, geometry_only: false, split_flicker: false, rays, id }
     }
 
     pub fn select_units(&self, cam: &CamPose) -> Vec<Unit> {
@@ -495,19 +510,10 @@ impl Renderer {
         sel.select()
     }
 
-    /// Render one frame for camera pose `cam` under the given sun / light state.
-    pub fn render(&self, cam: &CamPose, sun_state: &SunState) -> FrameOut {
-        let ss = self.settings.supersample.max(1) as usize;
-        let ms = &self.model_ss;
-        let (w, h) = (ms.width() as usize, ms.height() as usize);
-        let prof = std::env::var_os("RENDER_PROFILE").is_some();
-        let t0 = std::time::Instant::now();
-        let units = self.select_units(cam);
-        let t_sel = t0.elapsed().as_secs_f64();
-
-        // ---------------- gather tiles: unit data, neighbours, ancestors for mip levels
+    /// Tiles of the selected units with their neighbours and ancestors (the texture pyramid).
+    pub(crate) fn gather_ids(&self, units: &[Unit]) -> Vec<TileId> {
         let mut need: Vec<TileId> = Vec::new();
-        for u in &units {
+        for u in units {
             need.push(u.data);
             for dy in -1..=1 {
                 for dx in -1..=1 {
@@ -533,18 +539,29 @@ impl Renderer {
         }
         need.sort_unstable();
         need.dedup();
+        need
+    }
+
+    /// The tiles of `gather_ids`, fetched (and generated if lazy).
+    pub(crate) fn gather(&self, units: &[Unit], sun_state: &SunState) -> TileView {
+        let need = self.gather_ids(units);
         self.cache.prefetch(&need);
         let shadows_needed = !self.geometry_only && self.settings.shading == Shading::Relit && self.settings.lighting.shadows && sun_state.direct > 1e-4;
-        let view = TileView::new(need.iter().filter_map(|id| self.cache.get(*id).map(|t| (*id, t))).collect(), shadows_needed);
-        let t_fetch = t0.elapsed().as_secs_f64();
+        TileView::new(need.iter().filter_map(|id| self.cache.get(*id).map(|t| (*id, t))).collect(), shadows_needed)
 
-        // ---------------- build meshes
+    }
+
+    /// Grid meshes of the units (camera-model projected vertices, skirts), f64 throughout.
+    pub(crate) fn build_meshes(&self, cam: &CamPose, units: &[Unit], view: &TileView) -> Vec<Mesh> {
+        let ss = self.settings.supersample.max(1) as usize;
+        let ms = &self.model_ss;
+        let (w, h) = (ms.width() as usize, ms.height() as usize);
         let rt = cam.r_ecef_cam.transpose();
         let half_lim = (ms.max_half_angle() * 1.35 + 0.05).min(PI - 0.03);
         let cos_lim = half_lim.cos();
         let focal = ms.focal_px();
         let e2 = self.ell.e2();
-        let meshes: Vec<Mesh> = units
+        units
             .par_iter()
             .enumerate()
             .filter_map(|(ui, u)| {
@@ -677,7 +694,29 @@ impl Renderer {
                     .collect();
                 Some(Mesh { unit_idx: ui as u32, nx, ny, verts, skirt, bbox, row_y })
             })
-            .collect();
+            .collect()
+    }
+
+    /// Render one frame for camera pose `cam` under the given sun / light state.
+    pub fn render(&self, cam: &CamPose, sun_state: &SunState) -> FrameOut {
+        #[cfg(feature = "gpu")]
+        if self.settings.backend == Backend::Gpu {
+            return crate::gpu::render(self, cam, sun_state);
+        }
+        #[cfg(not(feature = "gpu"))]
+        if self.settings.backend == Backend::Gpu {
+            panic!("render.backend: gpu needs the `gpu` feature of the render crate");
+        }
+        let ss = self.settings.supersample.max(1) as usize;
+        let ms = &self.model_ss;
+        let (w, h) = (ms.width() as usize, ms.height() as usize);
+        let prof = std::env::var_os("RENDER_PROFILE").is_some();
+        let t0 = std::time::Instant::now();
+        let units = self.select_units(cam);
+        let t_sel = t0.elapsed().as_secs_f64();
+        let view = self.gather(&units, sun_state);
+        let t_fetch = t0.elapsed().as_secs_f64();
+        let meshes = self.build_meshes(cam, &units, &view);
 
         let t_mesh = t0.elapsed().as_secs_f64();
         // ---------------- rasterize (parallel over horizontal bands)
@@ -736,7 +775,7 @@ impl Renderer {
         let cam_geo = geodesy::ecef2geodetic(cam.pos, &self.ell);
         let cam_up = geodesy::up_vector(cam_geo.lat, cam_geo.lon);
         let cs = ss / 2; // central sub-sample
-        let alpha = 1.0 / focal; // sub-sample angular size
+        let alpha = 1.0 / ms.focal_px(); // sub-sample angular size
         let do_shadow = self.settings.shading == Shading::Relit && self.settings.lighting.shadows && sun_state.direct > 1e-4;
         let split = self.split_flicker && !self.geometry_only && sun_state.lights > 1e-3 && sun_state.flicker.enabled;
         let rows_out: Vec<RowOut> = (0..oh)

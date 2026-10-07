@@ -6,6 +6,8 @@ pub mod cache;
 pub mod camera;
 pub mod dynamics;
 pub mod events;
+#[cfg(feature = "gpu")]
+pub mod gpu;
 pub mod imu;
 pub mod lighting;
 pub mod lod;

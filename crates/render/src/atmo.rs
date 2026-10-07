@@ -25,20 +25,20 @@ impl Default for AtmoParams {
 const BETA_R: [f64; 3] = [5.8e-6, 13.5e-6, 33.1e-6];
 
 pub struct Atmosphere {
-    p: AtmoParams,
-    beta_m: f64,
+    pub(crate) p: AtmoParams,
+    pub(crate) beta_m: f64,
     /// Linear-light colours
-    rayleigh_col: DVec3,
-    mie_col: DVec3,
-    zenith: DVec3,
-    horizon: DVec3,
-    sun_col: DVec3,
+    pub(crate) rayleigh_col: DVec3,
+    pub(crate) mie_col: DVec3,
+    pub(crate) zenith: DVec3,
+    pub(crate) horizon: DVec3,
+    pub(crate) sun_col: DVec3,
     pub sun_dir: DVec3,
     pub moon_dir: DVec3,
-    moon_col: DVec3,
-    moon_disc: f64,
+    pub(crate) moon_col: DVec3,
+    pub(crate) moon_disc: f64,
     /// 0 (day) .. 1 (dark night): visibility of stars
-    star_vis: f64,
+    pub(crate) star_vis: f64,
 }
 
 impl Atmosphere {

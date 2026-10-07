@@ -15,3 +15,11 @@ anyhow.workspace = true
 rayon.workspace = true
 parking_lot.workspace = true
 image.workspace = true
+wgpu = { workspace = true, optional = true }
+pollster = { workspace = true, optional = true }
+bytemuck = { workspace = true, optional = true }
+
+[features]
+default = ["gpu"]
+# wgpu backend (headless) of the renderer
+gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]

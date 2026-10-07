@@ -246,7 +246,7 @@ pub fn open_or_create_store(scn: &Scenario, gen: &Generator) -> Result<TileStore
 
 /// Tile cache with the layers the shading mode needs (~40% less memory per cached tile), lazily
 /// generating missing tiles when `tiles.lazy`.
-fn tile_cache(scn: &Scenario, store: Arc<TileStore>, gen: Option<Arc<Generator>>) -> Arc<TileCache> {
+pub fn tile_cache(scn: &Scenario, store: Arc<TileStore>, gen: Option<Arc<Generator>>) -> Arc<TileCache> {
     let mut layers = vec![Layer::Elevation, Layer::Landcover, Layer::Emission];
     match scn.render.shading {
         crate::raster::Shading::Relit => layers.extend([Layer::Albedo, Layer::Normal]),
@@ -261,7 +261,7 @@ fn tile_cache(scn: &Scenario, store: Arc<TileStore>, gen: Option<Arc<Generator>>
     Arc::new(cache)
 }
 
-fn renderer(scn: &Scenario, model: Arc<dyn CameraModel>, supersample: u32, ell: Ellipsoid, cache: Arc<TileCache>) -> Renderer {
+pub fn renderer(scn: &Scenario, model: Arc<dyn CameraModel>, supersample: u32, ell: Ellipsoid, cache: Arc<TileCache>) -> Renderer {
     let mut rs = scn.render.clone();
     rs.supersample = supersample.max(1);
     rs.min_zoom = rs.min_zoom.max(scn.tiles.min_zoom);
