@@ -1055,14 +1055,22 @@ impl SurfaceModel {
             let cov = band_cov(l.river_d, l.river_hw, fwr);
             if cov > 0.0 {
                 let wet_r = t.river_wet;
-                let wcol = mixc(pal.river, pal.lake_deep, smoothstep(30.0, 200.0, l.river_hw * 2.0));
+                let mut wcol = mixc(pal.river, pal.lake_deep, smoothstep(30.0, 200.0, l.river_hw * 2.0));
+                // mountain rivers carry glacial flour: milky turquoise, not deep dark water
+                wcol = mixc(wcol, srgb(96.0, 138.0, 140.0), 0.7 * t.mountain * smoothstep(8.0, 0.0, temp));
+                // in the cold the river freezes over and is snowed on (a dark channel through the
+                // snowfields read as a crack)
+                let ice = smoothstep(-1.5, -4.0, temp + 1.5 * snow_n);
+                wcol = mixc(wcol, mixc(pal.snow * 0.9, srgb(170.0, 190.0, 200.0), 0.35 * (0.5 + 0.5 * detail)), ice);
                 // dry beds are only a subtle pale line (gravel / sand with some vegetation)
                 let dry_col = mixc(col, mixc(pal.gravel, pal.sand[2], 0.5) * (1.0 + 0.1 * detail), 0.55);
                 let rc = mixc(dry_col, wcol, wet_r);
                 col = mixc(col, rc, cov);
                 height = lerp(height, l.river_level, cov);
                 lit = lerp(lit, 1.0, cov);
-                if cov > 0.5 {
+                if cov > 0.5 && ice > 0.5 && wet_r > 0.5 {
+                    class = lc::SNOW;
+                } else if cov > 0.5 {
                     if wet_r > 0.5 {
                         return Surface { albedo: col, height, class: lc::RIVER, lit, is_water: true, emission };
                     }

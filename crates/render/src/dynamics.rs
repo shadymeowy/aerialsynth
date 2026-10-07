@@ -179,6 +179,9 @@ pub struct SynthConfig {
     pub heading_deg: f64,
     pub altitude: f64,
     pub altitude_ref: AltitudeRef,
+    /// Climb (m/s, negative: descent): the altitude target rises along the path at this rate
+    /// (pitch follows from the climb).
+    pub climb_rate: f64,
     /// True airspeed (m/s).
     pub speed: f64,
     pub duration: f64,
@@ -210,6 +213,7 @@ impl Default for SynthConfig {
             heading_deg: 30.0,
             altitude: 800.0,
             altitude_ref: AltitudeRef::Agl,
+            climb_rate: 0.0,
             speed: 45.0,
             duration: 60.0,
             rate: 200.0,
@@ -554,6 +558,8 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
         }
         _ => vec![cfg.altitude; nh],
     };
+    let climb = cfg.climb_rate / v.max(1e-3); // m per m of path
+    let h_prof: Vec<f64> = h_prof.iter().enumerate().map(|(k, h)| h + climb * k as f64 * ds_h).collect();
     let alt_at = |s: f64| -> (f64, f64) {
         let x = (s / ds_h).clamp(0.0, (nh - 1) as f64);
         let i = (x.floor() as usize).min(nh - 2);

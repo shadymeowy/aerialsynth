@@ -358,21 +358,24 @@ impl World {
         let mut v = 0.0;
         let mut d = DVec3::ZERO;
         let mut wt = 0.0;
-        for dz in -1..=1i64 {
-            for dy in -1..=1i64 {
-                for dx in -1..=1i64 {
+        // kernel (1 − d²/1.5²)³: close to the Gaussian e^(−2d²) it replaces but exactly zero
+        // beyond 1.5 cells, so the ±2-cell window holds every contributing point (points of cells
+        // 3 away are ≥ 2 cells off). The truncated Gaussian creased the terrain along the lattice
+        // planes; a support of 1 cell made the blend switch abruptly between neighbouring points,
+        // cutting straight cliffs and grooves along their bisectors. Every point lies within
+        // √3/2 of some point, so the weight sum stays well above zero.
+        for dz in -2..=2i64 {
+            for dy in -2..=2i64 {
+                for dx in -2..=2i64 {
                     let h = hash3(seed, ix + dx, iy + dy, iz + dz);
                     let jit = DVec3::new(u01k(h, 1), u01k(h, 2), u01k(h, 3)) * 0.5;
                     let pp = f - DVec3::new(dx as f64, dy as f64, dz as f64) - jit;
-                    // compact support (zero beyond one cell): every point outside the 3×3×3
-                    // window is at least one cell away, so the sum is continuous (a Gaussian was
-                    // still ~1% at the window edge: creases along the lattice planes, a grid of
-                    // straight lines on the slopes)
                     let d2 = pp.length_squared();
-                    if d2 >= 1.0 {
+                    if d2 >= 2.25 {
                         continue;
                     }
-                    let w = (1.0 - d2).powi(3);
+                    let k = 1.0 - d2 / 2.25;
+                    let w = k * k * k;
                     wt += w;
                     let mag = pp.dot(dir) * std::f64::consts::TAU;
                     let (s, c) = mag.sin_cos();
@@ -381,8 +384,7 @@ impl World {
                 }
             }
         }
-        // (a small constant keeps the ratio continuous where no point is near)
-        (v / (wt + 0.02), d / (wt + 0.02))
+        (v / wt, d / wt)
     }
 
     /// Erosion-like gullies: stripes running down the large-scale slope `grad` (m/m, tangent),
