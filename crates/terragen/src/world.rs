@@ -807,7 +807,11 @@ impl World {
                 t.river_d = rh.d;
                 t.river_hw = rh.hw;
                 // water surface: the drainage floor, but never buried below the (notched) ground
-                t.river_level = if ad < rh.hw { floor.max(h + 0.6) } else { floor.max(h) };
+                // nor above its banks: a tributary's floor (from the uncarved relief) can lie far
+                // above the floor of a bigger valley it crosses, and that perched water surface,
+                // blended into wide coarse-zoom pixels, raised walls tens of metres high along the
+                // rivers. Outside the channel the level is the ground.
+                t.river_level = if ad < rh.hw { floor.min(h + 1.0 + 0.06 * rh.hw).max(h + 0.6) } else { h };
                 t.river_wet = smoothstep(lc.wet_moisture, lc.wet_moisture + 0.12, moist);
             }
         }

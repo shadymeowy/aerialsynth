@@ -212,8 +212,10 @@ impl World {
                 continue;
             }
             // a node's channels reach to the middle of its downstream node's outgoing edge
-            // (edges are ≤ 1.8 cells, rarely up to 3, see `flow_target`)
-            let reach = radius + 2.9 * cell + lc.valley_m;
+            // (edges up to 3 cells, see `flow_target`: a curve piece lies up to 4.5 cells from
+            // the node that owns it; a shorter reach dropped pieces in some tiles only, leaving
+            // elevation steps at tile edges)
+            let reach = radius + 4.6 * cell + lc.valley_m;
             let lo = ((center - DVec3::splat(reach)) / cell).floor();
             let hi = ((center + DVec3::splat(reach)) / cell).floor();
             let width = |c: (i64, i64, i64)| {
@@ -252,9 +254,10 @@ impl World {
                                     let (u, v) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t));
                                     (mid * u + tp.s * v + mid2 * (t * t), hmid * u + tp.h * v + hmid2 * (t * t), hw + (hw2 - hw) * t)
                                 };
-                                // pieces of ~8 pixels at most (fewer at coarse zooms, where every
-                                // pixel tests every piece)
-                                let n = (((mid2 - mid).length() / (8.0 * gsd)).ceil() as usize).clamp(1, 6);
+                                // a fixed number of pieces: the curve must not depend on the zoom
+                                // (pieces adapted to the pixel size moved the centreline between
+                                // zoom levels: elevation steps at LOD seams, walls along rivers)
+                                let n = 6usize;
                                 for k in 0..n {
                                     let (a, ha, wa) = at(k as f64 / n as f64);
                                     let (b, hb, wb) = at((k + 1) as f64 / n as f64);

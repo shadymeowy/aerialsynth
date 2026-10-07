@@ -59,7 +59,7 @@ def shot_scenario(base, shot, video, stills=False):
         # look check: 3 frames, half resolution, light supersampling, no events
         scn["output"]["file"] = os.path.join(d, "stills.h5")
         # (geometry ground truth needs an odd supersample)
-        ss = 3 if any(c.get("depth") or c.get("flow") or c.get("landcover") for c in scn["cameras"]) else 2
+        ss = 3 if any(k in c for c in scn["cameras"] for k in ("depth", "flow", "landcover")) else 2
         scn["render"]["supersample"] = ss
         for c in scn["cameras"]:
             c["frame_rate"] = 3.0 / span
