@@ -191,7 +191,8 @@ pub struct SynthConfig {
     pub rate: f64,
     /// Integration step (s).
     pub dt: f64,
-    /// Turn radius for circle/figure8/lawnmower and the random path's typical turn (m).
+    /// Turn radius for circle/figure8/lawnmower and the random path's typical turn (m); a
+    /// negative radius makes the circle turn left.
     pub radius: f64,
     /// Lawnmower leg length (m).
     pub leg: f64,
@@ -436,12 +437,15 @@ fn control_points(cfg: &SynthConfig, length: f64, ell: &Ellipsoid, origin: Geode
             }
         }
         PathKind::Circle => {
-            let center = (right.0 * r, right.1 * r);
+            // a negative radius turns left (centre to the left of the heading)
+            let side = if cfg.radius < 0.0 { -1.0 } else { 1.0 };
+            let r = cfg.radius.abs().max(50.0);
+            let center = (right.0 * r * side, right.1 * r * side);
             let turns = length / (std::f64::consts::TAU * r) + 0.2;
             let n = (turns * 24.0).ceil() as usize + 2;
-            let a0 = (-right.0).atan2(-right.1); // angle of the start point seen from the centre
+            let a0 = (-right.0 * side).atan2(-right.1 * side); // angle of the start point seen from the centre
             for k in 0..=n {
-                let a = a0 + std::f64::consts::TAU * k as f64 / 24.0;
+                let a = a0 + side * std::f64::consts::TAU * k as f64 / 24.0;
                 c.push((center.0 + r * a.sin(), center.1 + r * a.cos()));
             }
         }
