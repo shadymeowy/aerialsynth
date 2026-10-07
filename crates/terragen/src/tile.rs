@@ -19,6 +19,18 @@ pub struct Generator {
     pub surface: SurfaceModel,
 }
 
+/// A node of the tile's coarse grid.
+struct Node {
+    m: Macro,
+    pre: Pre,
+    /// long octaves of the pixel fields
+    pf_low: [f64; PixFields::N],
+    /// `pre` (with the mountain warp) flattened for interpolation
+    flat: [f64; NPRE],
+    /// forest stand
+    stand: u64,
+}
+
 /// Grid-interpolated inputs of pass A, flattened: mountain warp, gully gradient, roads, relief
 /// octaves, meander warps, region warp, gully octaves, floodplain-edge noise.
 const NPRE: usize = 34;
@@ -148,7 +160,7 @@ impl Generator {
         let pf_cut = 8.0 * G * gsd_ew(0.0, z, n as u32, &ell);
         // the long octaves of the relief likewise (ridged: 16 spacings, its creases need more)
         let relief_cut = if use_grid { Some([2.0 * pf_cut, pf_cut]) } else { None };
-        let nodes: Vec<(Macro, Pre, [f64; PixFields::N], [f64; NPRE])> = if use_grid {
+        let nodes: Vec<Node> = if use_grid {
             (0..ng * ng)
                 .into_par_iter()
                 .map(|k| {
@@ -161,7 +173,8 @@ impl Generator {
                     let pre = self.world.pre_at(&ctx, &m, gully_on_grid, roads_on_grid, relief_cut);
                     let pf_low = self.surface.pixel_fields_part(ctx.p, gsd, Some((pf_cut, true)));
                     let flat = pack_pre(&m, &pre);
-                    (m, pre, pf_low, flat)
+                    let stand = self.surface.stand_id(ctx.p, None);
+                    Node { m, pre, pf_low, flat, stand }
                 })
                 .collect()
         } else {
@@ -176,24 +189,24 @@ impl Generator {
             let (i0, j0) = ((u.floor() as usize).clamp(1, ng - 3), (v.floor() as usize).clamp(1, ng - 3));
             let (fx, fy) = (u - i0 as f64, v - j0 as f64);
             let g = |i: usize, j: usize| &nodes[j * ng + i];
-            let mut m = Macro::bilerp(&g(i0, j0).0, &g(i0 + 1, j0).0, &g(i0, j0 + 1).0, &g(i0 + 1, j0 + 1).0, fx, fy);
+            let mut m = Macro::bilerp(&g(i0, j0).m, &g(i0 + 1, j0).m, &g(i0, j0 + 1).m, &g(i0 + 1, j0 + 1).m, fx, fy);
             // the smooth inputs: Catmull-Rom over the 4x4 nodes around the pixel
             let (wx, wy) = (catmull_rom_weights(fx), catmull_rom_weights(fy));
             let mut f = [0.0; NPRE];
             for (b, wyb) in wy.iter().enumerate() {
                 for (a, wxa) in wx.iter().enumerate() {
                     let w = wxa * wyb;
-                    for (fk, nk) in f.iter_mut().zip(&g(i0 + a - 1, j0 + b - 1).3) {
+                    for (fk, nk) in f.iter_mut().zip(&g(i0 + a - 1, j0 + b - 1).flat) {
                         *fk += w * nk;
                     }
                 }
             }
-            let (mtn_warp, mut pre) = unpack_pre(&f, &g(i0, j0).1);
+            let (mtn_warp, mut pre) = unpack_pre(&f, &g(i0, j0).pre);
             // lattice sites: when the four nodes around the pixel have the same two nearest
             // sites, so has the pixel (the region of points with a given pair is convex)
             for k in 0..3 {
-                let s0 = g(i0, j0).1.sites[k];
-                let same = |n: &(Macro, Pre, [f64; PixFields::N], [f64; NPRE])| match (n.1.sites[k], s0) {
+                let s0 = g(i0, j0).pre.sites[k];
+                let same = |n: &Node| match (n.pre.sites[k], s0) {
                     (Some([a, b]), Some([c, d])) => (a.0 == c.0 && b.0 == d.0) || (a.0 == d.0 && b.0 == c.0),
                     _ => false,
                 };
@@ -343,13 +356,19 @@ impl Generator {
                             for (b, wyb) in wy.iter().enumerate() {
                                 for (a, wxa) in wx.iter().enumerate() {
                                     let w = wxa * wyb;
-                                    let node = &nodes[(j0 + b - 1) * ng + i0 + a - 1].2;
+                                    let node = &nodes[(j0 + b - 1) * ng + i0 + a - 1].pf_low;
                                     for (fk, nk) in f.iter_mut().zip(node) {
                                         *fk += w * nk;
                                     }
                                 }
                             }
-                            PixFields::from_array(f)
+                            let mut pf = PixFields::from_array(f);
+                            // the forest stand: known when the four nodes around agree
+                            let st = nodes[j0 * ng + i0].stand;
+                            if nodes[j0 * ng + i0 + 1].stand == st && nodes[(j0 + 1) * ng + i0].stand == st && nodes[(j0 + 1) * ng + i0 + 1].stand == st {
+                                pf.stand_id = Some(st);
+                            }
+                            pf
                         } else {
                             self.surface.pixel_fields(p, gsd)
                         }

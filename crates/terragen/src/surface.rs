@@ -89,13 +89,15 @@ pub struct PixFields {
     pub water: f64,
     /// domain warp of the forest-stand lattice (×70 m)
     pub stand_warp: [f64; 3],
+    /// the forest stand, where known for the whole pixel
+    pub stand_id: Option<u64>,
 }
 
 impl PixFields {
     pub const N: usize = 16;
     pub fn from_array(a: [f64; Self::N]) -> Self {
         let [detail, patch, land, strata, strata2, snow, forest, stand, field_var, field_var2, field_var3, warp2, water, w0, w1, w2] = a;
-        PixFields { detail, patch, land, strata, strata2, snow, forest, stand, field_var, field_var2, field_var3, warp2, water, stand_warp: [w0, w1, w2] }
+        PixFields { detail, patch, land, strata, strata2, snow, forest, stand, field_var, field_var2, field_var3, warp2, water, stand_warp: [w0, w1, w2], stand_id: None }
     }
 }
 
@@ -388,6 +390,14 @@ impl SurfaceModel {
             *g = SharedSites::default();
         }
         f(&mut g);
+    }
+
+    /// Forest stand at `p` (~240 m, irregular borders) given the stand warp (else evaluated at `p`;
+    /// it is smooth at the scale of a pixel, so the pixel's is used for its samples).
+    pub fn stand_id(&self, p: DVec3, warp: Option<[f64; 3]>) -> u64 {
+        let w = warp.unwrap_or_else(|| [0x57A1, 0x57A2, 0x57A3].map(|k| perlin3(k, p / 180.0)));
+        let sp = p + DVec3::from_array(w) * 70.0;
+        worley3(0x57A4, sp, 240.0, 0.9).id
     }
 
     /// Per-pixel smooth fields (band-limited at the pixel GSD).
@@ -911,9 +921,7 @@ impl SurfaceModel {
             // forest stands (~240 m, irregular borders): each of its own age (crown size, height),
             // tone and conifer / broadleaf mix, with small canopy gaps; one lattice of identical
             // crowns read as a uniform camouflage texture
-            // (the warp per pixel, not per sample: it is smooth at the scale of a pixel)
-            let sp = p + DVec3::from_array(pf.stand_warp) * 70.0;
-            let stand_id = worley3(0x57A4, sp, 240.0, 0.9).id;
+            let stand_id = pf.stand_id.unwrap_or_else(|| self.stand_id(p, Some(pf.stand_warp)));
             let age = u01k(stand_id, 1);
             let tone_u = u01k(stand_id, 2);
             let stand_tone = mixc(DVec3::new(0.86, 0.93, 0.92), DVec3::new(1.12, 1.08, 0.88), tone_u) * (0.92 + 0.12 * age);
