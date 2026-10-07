@@ -168,6 +168,8 @@ pub struct Pre {
     /// meander warps of the drainage levels, the warp of the region lattice
     pub river_warp: [Option<[f64; 2]>; 4],
     pub region_warp: Option<[f64; 3]>,
+    /// the long gully octaves (state of `gullies_part`, split at `relief_cut[1]`)
+    pub gully_oct: Option<[f64; 4]>,
 }
 
 impl Macro {
@@ -456,27 +458,38 @@ impl World {
     /// bent by the gullies of previous octaves → dendritic patterns. Returns a height offset in
     /// units of the first octave amplitude (roughly within [-1.5, 1.5]).
     fn gullies(&self, p: DVec3, up: DVec3, grad: DVec3, gsd: f64, lam0: f64) -> f64 {
+        self.gullies_part(p, up, grad, gsd, lam0, 0.0, true, [0.0; 4])[0]
+    }
+
+    /// The octaves of [`World::gullies`] of wavelength >= `cut` (`low`, from the start) or < `cut`
+    /// (not `low`, continuing from the state `st` of the long ones). State: height and the
+    /// accumulated derivative that bends the next octaves.
+    #[allow(clippy::too_many_arguments)]
+    fn gullies_part(&self, p: DVec3, up: DVec3, grad: DVec3, gsd: f64, lam0: f64, cut: f64, low: bool, st: [f64; 4]) -> [f64; 4] {
         let dir0 = up.cross(grad).normalize_or_zero();
         let mut a = 1.0;
         let mut lam = lam0;
-        let mut h = 0.0;
-        let mut hd = DVec3::ZERO;
+        let mut h = st[0];
+        let mut hd = DVec3::new(st[1], st[2], st[3]);
         for i in 0..5u64 {
+            if low && lam < cut {
+                break;
+            }
             let wb = band(lam, gsd);
             if wb <= 0.0 {
                 break;
             }
-            let freq = lam0 / lam;
-            // bending rotates the stripe direction; keep its length (= stripe frequency) at 1
-            let dir = (dir0 + up.cross(hd) * 0.7).normalize_or_zero();
-            let (v, d) = Self::gully_octave(self.seed ^ (0xE205 + i * 0x9E37), p / lam, dir);
-            h += v * a * wb;
-            hd += d * (a * wb);
-            let _ = freq;
+            if low || lam < cut {
+                // bending rotates the stripe direction; keep its length (= stripe frequency) at 1
+                let dir = (dir0 + up.cross(hd) * 0.7).normalize_or_zero();
+                let (v, d) = Self::gully_octave(self.seed ^ (0xE205 + i * 0x9E37), p / lam, dir);
+                h += v * a * wb;
+                hd += d * (a * wb);
+            }
             a *= 0.45;
             lam *= 0.5;
         }
-        h
+        [h, hd.x, hd.y, hd.z]
     }
 
     /// Sand dunes: main ridges perpendicular to a slowly varying, locally bent wind direction
@@ -589,6 +602,12 @@ impl World {
             };
             pre.road_major = Some(field(&self.road_major, 2500.0));
             pre.road_minor = Some(field(&self.road_minor, 700.0));
+        }
+        // the long gully octaves (they follow the low-passed relief gradient above)
+        if let (Some(cut), Some([ge, gn])) = (relief_cut, pre.gully) {
+            let grad = ctx.east * ge + ctx.north * gn;
+            let lam_e = self.cfg.relief.gully_wavelength;
+            pre.gully_oct = Some(self.gullies_part(ctx.p, ctx.up, grad, ctx.gsd, lam_e, cut[1], true, [0.0; 4]));
         }
         pre
     }
@@ -880,7 +899,12 @@ impl World {
             let slope_l = (ge * ge + gn * gn).sqrt();
             let mask = smoothstep(0.03, 0.25, slope_l) * smoothstep(40.0, 140.0, relief_amp);
             if mask > 0.0 {
-                gully_n = self.gullies(p, ctx.up, grad, gsd, lam_e) * mask;
+                let g = match m.pre.and_then(|p| p.gully_oct.map(|st| (st, p.relief_cut[1]))) {
+                    // the long octaves from the tile's coarse grid
+                    Some((st, cut)) => self.gullies_part(p, ctx.up, grad, gsd, lam_e, cut, false, st)[0],
+                    None => self.gullies(p, ctx.up, grad, gsd, lam_e),
+                };
+                gully_n = g * mask;
                 gully = gully_n * self.cfg.relief.erosion * (0.05 * amp_m + 0.12 * hill_amp);
             }
         }

@@ -1,3 +1,4 @@
-# AVX2 / FMA / BMI2 (any x86-64 CPU since ~2013): inlined floor / round, vectorized math
+# x86-64-v2 (SSE4.2, any x86-64 CPU since ~2009). v3 (AVX2) was slower for the generator: LLVM
+# vectorises the 64-bit hash multiplies of the noise with emulated AVX2 multiplies.
 [target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "target-cpu=x86-64-v3"]
+rustflags = ["-C", "target-cpu=x86-64-v2"]

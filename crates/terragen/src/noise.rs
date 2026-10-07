@@ -152,21 +152,26 @@ pub fn perlin3(seed: u64, p: DVec3) -> f64 {
     let (u, v, w) = (fade(f.x), fade(f.y), fade(f.z));
     let hx0 = hash1(seed, ix);
     let hx1 = hash1(seed, ix + 1);
-    let mut val = [0.0f64; 8];
-    let mut k = 0;
-    for dz in 0..2i64 {
-        let hz = ((iz + dz) as u64).wrapping_mul(0x1656_67B1_9E37_79F9);
-        for dy in 0..2i64 {
-            let hy = ((iy + dy) as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
-            for (dx, hx) in [(0i64, hx0), (1, hx1)] {
-                let h = mix64(mix64(hx ^ hy) ^ hz);
-                let gv = g[(h >> 56) as usize];
-                val[k] = gv[0] * (f.x - dx as f64) + gv[1] * (f.y - dy as f64) + gv[2] * (f.z - dz as f64);
-                k += 1;
-            }
-        }
-    }
-    let (a, b, c, d, e, ff, gg, h) = (val[0], val[1], val[2], val[3], val[4], val[5], val[6], val[7]);
+    let hy0 = (iy as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+    let hy1 = ((iy + 1) as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+    let hz0 = (iz as u64).wrapping_mul(0x1656_67B1_9E37_79F9);
+    let hz1 = ((iz + 1) as u64).wrapping_mul(0x1656_67B1_9E37_79F9);
+    // the (x, y) part of the corner hashes is shared by both z layers
+    let hxy = [mix64(hx0 ^ hy0), mix64(hx1 ^ hy0), mix64(hx0 ^ hy1), mix64(hx1 ^ hy1)];
+    let (fx1, fy1, fz1) = (f.x - 1.0, f.y - 1.0, f.z - 1.0);
+    let corner = |h: u64, x: f64, y: f64, z: f64| -> f64 {
+        let gv = g[(mix64(h) >> 56) as usize];
+        gv[0] * x + gv[1] * y + gv[2] * z
+    };
+    // corners (x,y,z): 000 100 010 110 001 101 011 111
+    let a = corner(hxy[0] ^ hz0, f.x, f.y, f.z);
+    let b = corner(hxy[1] ^ hz0, fx1, f.y, f.z);
+    let c = corner(hxy[2] ^ hz0, f.x, fy1, f.z);
+    let d = corner(hxy[3] ^ hz0, fx1, fy1, f.z);
+    let e = corner(hxy[0] ^ hz1, f.x, f.y, fz1);
+    let ff = corner(hxy[1] ^ hz1, fx1, f.y, fz1);
+    let gg = corner(hxy[2] ^ hz1, f.x, fy1, fz1);
+    let h = corner(hxy[3] ^ hz1, fx1, fy1, fz1);
     let k1 = b - a;
     let k2 = c - a;
     let k3 = e - a;
