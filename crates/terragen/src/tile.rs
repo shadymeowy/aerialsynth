@@ -247,7 +247,8 @@ impl Generator {
                 // channel pieces prefiltered per chunk of the row (coarse tiles hold tens of
                 // thousands of pieces, most of them far from any given pixel); exact, see
                 // `World::local_segments`
-                const CHUNK: usize = 32;
+                // (smaller at low zooms, where a chunk spans many valleys)
+                let chunk: usize = if z <= 12 { 16 } else { 32 };
                 let pt = |i: f64| {
                     let px = ox + i - 2.0 + 0.5;
                     let (lat, lon) = pixel_to_latlon(DVec2::new(px, py), z, n as u32);
@@ -257,9 +258,9 @@ impl Generator {
                 };
                 // per chunk: centre, radius, bound of the ground before carving
                 let chunks: Vec<(usize, usize, DVec3, f64, f64)> = (0..na2)
-                    .step_by(CHUNK)
+                    .step_by(chunk)
                     .map(|i0| {
-                        let i1 = (i0 + CHUNK).min(na2);
+                        let i1 = (i0 + chunk).min(na2);
                         let probes = [pt(i0 as f64), pt(0.5 * (i0 + i1 - 1) as f64), pt((i1 - 1) as f64)];
                         let center = probes[1].0.p;
                         let radius = (probes[0].0.p - center).length().max((probes[2].0.p - center).length()) + gsd;

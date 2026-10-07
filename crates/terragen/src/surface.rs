@@ -590,13 +590,17 @@ impl SurfaceModel {
         }
         let ctx = site_ctx(world, center, 300.0);
         let (east, north) = (ctx.east, ctx.north);
-        let tc = world.terrain(&ctx);
-        let p_exist = (tc.habit * 1.1 * world.cfg.landuse.towns).min(0.95);
         // only lattice sites within 0.8 cells of the surface make towns: a town sits below /
         // above its site, and a site farther away lay outside the ±2-cell candidate search of the
         // pixels its town covers (the town was cut along lattice-cell planes); see `select_town`
         let near_surface = (center.length() - ctx.p.length()).abs() < 0.8 * world.cfg.landuse.town_cell_km * 1000.0;
-        let exists = near_surface && u01k(id, 1) < p_exist && tc.water_kind == water::NONE && tc.ground > 2.0 && tc.ground < 4000.0;
+        // the terrain under the site (expensive: drainage) only where a town can still exist
+        // (p_exist <= 0.95)
+        let exists = near_surface && u01k(id, 1) < 0.95 && {
+            let tc = world.terrain(&ctx);
+            let p_exist = (tc.habit * 1.1 * world.cfg.landuse.towns).min(0.95);
+            u01k(id, 1) < p_exist && tc.water_kind == water::NONE && tc.ground > 2.0 && tc.ground < 4000.0
+        };
         let ang = u01k(id, 2) * std::f64::consts::FRAC_PI_2;
         let (sa, ca) = ang.sin_cos();
         let mut radius = 160.0 * (u01k(id, 3).powf(1.6) * 2.4).exp();
