@@ -188,7 +188,19 @@ impl Generator {
                     }
                 }
             }
-            let (mtn_warp, pre) = unpack_pre(&f, &g(i0, j0).1);
+            let (mtn_warp, mut pre) = unpack_pre(&f, &g(i0, j0).1);
+            // lattice sites: when the four nodes around the pixel have the same two nearest
+            // sites, so has the pixel (the region of points with a given pair is convex)
+            for k in 0..3 {
+                let s0 = g(i0, j0).1.sites[k];
+                let same = |n: &(Macro, Pre, [f64; PixFields::N], [f64; NPRE])| match (n.1.sites[k], s0) {
+                    (Some([a, b]), Some([c, d])) => (a.0 == c.0 && b.0 == d.0) || (a.0 == d.0 && b.0 == c.0),
+                    _ => false,
+                };
+                if same(g(i0 + 1, j0)) && same(g(i0, j0 + 1)) && same(g(i0 + 1, j0 + 1)) {
+                    pre.sites[k] = s0;
+                }
+            }
             m.mtn_warp = if warp_on_grid { mtn_warp } else { self.world.mtn_warp_at(ctx.p, ctx.gsd) };
             m.pre = Some(pre);
             m

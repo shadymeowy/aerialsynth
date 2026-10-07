@@ -172,7 +172,15 @@ pub struct Pre {
     pub gully_oct: Option<[f64; 4]>,
     /// floodplain-edge noise per drainage level
     pub floodplain: [Option<f64>; 4],
+    /// the two nearest sites of the lake, region and town lattices where known (the same for a
+    /// whole block of the tile's coarse grid)
+    pub sites: [Option<[(u64, DVec3); 2]>; 3],
 }
+
+/// Indices of [`Pre::sites`].
+pub const SITE_LAKE: usize = 0;
+pub const SITE_REGION: usize = 1;
+pub const SITE_TOWN: usize = 2;
 
 impl Macro {
     /// Bilinear interpolation of four corner values (a b / c d).
@@ -553,6 +561,15 @@ impl World {
         }
     }
 
+    /// Worley cell of the lake / region / town lattice at `p`, from the sites known for the pixel
+    /// when there.
+    fn site_cell(&self, m: &Macro, which: usize, key: u64, p: DVec3, cell: f64, jitter: f64) -> Cell3 {
+        match m.pre.and_then(|pre| pre.sites[which]) {
+            Some(s) => worley3_from(p, cell, s),
+            None => worley3(self.seed ^ key, p, cell, jitter),
+        }
+    }
+
     /// Wavelength (m) of the floodplain-edge noise of drainage level `li`.
     fn floodplain_wavelength(&self, li: usize) -> f64 {
         let lc = &self.cfg.hydro.levels[li];
@@ -619,6 +636,14 @@ impl World {
             };
             pre.road_major = Some(field(&self.road_major, 2500.0));
             pre.road_minor = Some(field(&self.road_minor, 700.0));
+        }
+        // the nearest sites of the lake, region and town lattices
+        if relief_cut.is_some() {
+            pre.sites[SITE_LAKE] = Some(worley3_sites(self.seed ^ 0x1A4E, ctx.p, self.cfg.hydro.lake_cell_km * KM, 0.85));
+            let region_cell = self.cfg.landuse.region_km * KM;
+            let pw = ctx.p + self.region_warp(ctx.p);
+            pre.sites[SITE_REGION] = Some(worley3_sites(self.seed ^ 0x5E61, pw, region_cell, 0.9));
+            pre.sites[SITE_TOWN] = Some(worley3_sites(self.seed ^ 0x70E1, ctx.p, self.cfg.landuse.town_cell_km * KM, 0.8));
         }
         // the long gully octaves (they follow the low-passed relief gradient above)
         if let (Some(cut), Some([ge, gn])) = (relief_cut, pre.gully) {
@@ -1083,7 +1108,7 @@ impl World {
         // (resolution cutoffs below are placed where the feature covers at most a few percent of a
         // pixel, so switching it off along a row of constant GSD is invisible)
         if with_lakes && self.cfg.hydro.lake_density > 0.0 && land > 0.3 && lake_cell > gsd {
-            let wc = worley3(self.seed ^ 0x1A4E, p, lake_cell, 0.85);
+            let wc = self.site_cell(m, SITE_LAKE, 0x1A4E, p, lake_cell, 0.85);
             for (id, pt) in [(wc.id, wc.point), (wc.id2, wc.point2)] {
                 let prob = self.cfg.hydro.lake_density * (0.3 + 0.9 * moist) * (1.0 - 0.8 * mountain);
                 if u01k(id, 1) > prob {
@@ -1190,12 +1215,12 @@ impl World {
                 None => self.region_warp(p),
             };
             let pw = p + wq;
-            let wc = worley3(self.seed ^ 0x5E61, pw, region_cell, 0.9);
+            let wc = self.site_cell(m, SITE_REGION, 0x5E61, pw, region_cell, 0.9);
             t.region = Site { id: wc.id, id2: wc.id2, center: wc.point, dist: wc.f1, edge: worley_edge_dist(&wc, pw) };
         }
         let town_cell = self.cfg.landuse.town_cell_km * KM;
         if mode != Mode::Relief && gsd < town_cell * 0.25 && self.cfg.landuse.towns > 0.0 {
-            let wc = worley3(self.seed ^ 0x70E1, p, town_cell, 0.8);
+            let wc = self.site_cell(m, SITE_TOWN, 0x70E1, p, town_cell, 0.8);
             t.town = Site { id: wc.id, id2: wc.id2, center: wc.point, dist: wc.f1, edge: worley_edge_dist(&wc, p) };
         }
 

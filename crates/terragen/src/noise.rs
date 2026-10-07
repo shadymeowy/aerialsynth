@@ -438,6 +438,12 @@ pub fn nb_gap(f: f64, d: i64, half: f64) -> f64 {
 
 /// Nearest two feature points of a jittered 3D lattice with cell size `cell` (meters).
 pub fn worley3(seed: u64, p: DVec3, cell: f64, jitter: f64) -> Cell3 {
+    let [(id, a), (id2, b)] = worley3_sites(seed, p, cell, jitter);
+    worley3_from(p, cell, [(id, a), (id2, b)])
+}
+
+/// The two nearest sites of [`worley3`]: ids and feature points in lattice units.
+pub fn worley3_sites(seed: u64, p: DVec3, cell: f64, jitter: f64) -> [(u64, DVec3); 2] {
     let q = p / cell;
     let qf = q.floor();
     let (ix, iy, iz) = (qf.x as i64, qf.y as i64, qf.z as i64);
@@ -472,11 +478,22 @@ pub fn worley3(seed: u64, p: DVec3, cell: f64, jitter: f64) -> Cell3 {
             best.point2 = fp;
         }
     }
-    best.f1 = best.f1.sqrt() * cell;
-    best.f2 = best.f2.sqrt() * cell;
-    best.point *= cell;
-    best.point2 *= cell;
-    best
+    [(best.id, best.point), (best.id2, best.point2)]
+}
+
+/// The [`worley3`] cell at `p` given its two nearest sites (ids, feature points in lattice
+/// units, either order), e.g. known for a whole block of pixels.
+#[inline]
+pub fn worley3_from(p: DVec3, cell: f64, sites: [(u64, DVec3); 2]) -> Cell3 {
+    let q = p / cell;
+    let [(mut id, mut a), (mut id2, mut b)] = sites;
+    let (mut f1, mut f2) = ((a - q).length_squared(), (b - q).length_squared());
+    if f2 < f1 {
+        std::mem::swap(&mut id, &mut id2);
+        std::mem::swap(&mut a, &mut b);
+        std::mem::swap(&mut f1, &mut f2);
+    }
+    Cell3 { id, point: a * cell, f1: f1.sqrt() * cell, f2: f2.sqrt() * cell, id2, point2: b * cell }
 }
 
 /// Approximate distance (meters) from `q` to the bisector between the two nearest Worley points.
