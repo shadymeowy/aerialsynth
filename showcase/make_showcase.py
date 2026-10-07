@@ -195,11 +195,13 @@ def flow_to_rgb(flow, rad_max):
 
 
 def depth_to_rgb(depth, cmap):
-    """Normalised to [0, max depth of the frame] and colour mapped; sky black."""
+    """Normalised to [0, 98th percentile of the frame's depth] and colour mapped; sky black
+    (the plain maximum is the far horizon in oblique views, hundreds of km, which flattened
+    all the terrain in front into one colour)."""
     fin = np.isfinite(depth) & (depth > 0)
     out = np.zeros(depth.shape + (3,), np.uint8)
     if fin.any():
-        dmax = depth[fin].max()
+        dmax = float(np.percentile(depth[fin], 98))
         c = cmap(np.clip(depth / dmax, 0, 1))[..., :3]
         out[fin] = (c[fin] * 255).astype(np.uint8)
         return out, dmax

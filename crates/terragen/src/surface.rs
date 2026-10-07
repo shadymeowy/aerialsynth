@@ -1749,7 +1749,14 @@ impl SurfaceModel {
             LAMPS[t]
         };
         let lamp_col = LAMPS[dominant];
-        let lamp_res = band(lamp_sp, gsd);
+        // lamps stay points down to the scale of the street grid: where they would merge (sample
+        // spacing above half their spacing) only every m-th lamp is drawn, m times brighter. An
+        // area mean there was clipped by the camera very differently from the points it averaged:
+        // the far part of a town glowed as a flat slab next to the point-lit near part.
+        let lamp_res = band(town.block, gsd);
+        let fwl = fw.max(0.5 * gsd);
+        let m = (2.0 * fwl / lamp_sp).max(1.0).log2().ceil().exp2();
+        let sp_eff = lamp_sp * m;
         let mut emission = DVec3::ZERO;
         if lamp_res > 0.0 && here_x.max(here_y) > 0.0 {
             // lamps every lamp_sp along each street, alternating sides of the carriageway
@@ -1758,10 +1765,11 @@ impl SurfaceModel {
                 // signed offset of the pixel from the nearest street centreline, and that line's index
                 let (off, li) = if bq < bs - bq { (bq, bi) } else { (-(bs - bq), bi + 1) };
                 let (here, swa) = if axis == 0 { (here_x, sw_x) } else { (here_y, sw_y) };
-                if here <= 0.0 || off.abs() > swa + 22.0 {
+                if here <= 0.0 || off.abs() > swa + 22.0 + 3.0 * fwl {
                     continue;
                 }
-                let k = (along / lamp_sp).round();
+                // index of the lamp (in units of lamp_sp; a multiple of m when thinned)
+                let k = (along / sp_eff).round() * m;
                 let side = if (k as i64).rem_euclid(2) == 0 { 1.0 } else { -1.0 };
                 let lamp_off = side * swa * 0.85;
                 let (dp, da) = (off - lamp_off, along - k * lamp_sp);
@@ -1773,8 +1781,8 @@ impl SurfaceModel {
                     // (the head carries most of the light seen from the air: with a bright pool
                     // every lamp was a soft disc)
                     let pool = 0.03 * (-(dp * dp) / (2.0 * 3.5 * 3.5) - (da * da) / (2.0 * sa * sa)).exp();
-                    let core = point_light(d2, 6.0, 0.4, fw);
-                    emission += lamp_type(axis, li) * (pool + core) * (0.75 + 0.5 * u01k(lh, 2));
+                    let core = point_light(d2, 6.0, 0.4, fw.max(0.5 * gsd));
+                    emission += lamp_type(axis, li) * ((pool + core) * m) * (0.75 + 0.5 * u01k(lh, 2));
                 }
             }
         }
@@ -1783,13 +1791,22 @@ impl SurfaceModel {
         emission *= ground_lit;
         porch *= ground_lit;
         // prefiltered mean when lamps are unresolved (town glow)
-        emission = emission * lamp_res + lamp_col * 0.07 * (1.0 - lamp_res) * smoothstep(0.15, 0.4, urban);
+        // unresolved lamps: their mean over the area (lamp energy: head 2π·6·0.4² + pool
+        // 2π·0.03·3.5·0.28·sp, 93% present, every sp along streets every ~block on both axes); a
+        // fixed 0.07 was ~7x the mean of the resolved lamps, so the far part of a town glowed as a
+        // flat orange slab next to the dark-roofed near part
+        let lamp_e = 0.93 * (2.0 * std::f64::consts::PI * (6.0 * 0.16 + 0.03 * 3.5 * 0.28 * lamp_sp));
+        let lamp_mean = lamp_e * 2.0 / (town.block * lamp_sp);
+        emission = emission * lamp_res + lamp_col * lamp_mean * (1.0 - lamp_res) * smoothstep(0.15, 0.4, urban);
+        // windows: only where the buildings are resolved (a rim smeared over coarse pixels lit
+        // whole blocks; the lamps carry the town's light at coarse zooms)
+        let windows = windows * buildings_resolved;
         emission += win_col * (0.55 * windows);
         // industrial yards: a dim base (plazas and parking have only the street lamps around
         // them: a lit base drew uniform grey slabs)
 
         if block_kind > 0.92 && central < 0.5 {
-            emission += DVec3::new(1.0, 0.88, 0.7) * 0.02 * lamp_res;
+            emission += DVec3::new(1.0, 0.88, 0.7) * 0.02 * band(lamp_sp, gsd);
         }
         emission += DVec3::new(1.0, 0.72, 0.42) * porch;
         Some((col, height, cov, class, shadow * (1.0 - street * 0.5), emission / cov.max(0.05)))

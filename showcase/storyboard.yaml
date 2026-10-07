@@ -317,22 +317,20 @@ shots:
   label: Engine vibration · motion blur
   scenario:
     cameras:
-    - extrinsics: {pitch_deg: -40}
+    - extrinsics: {pitch_deg: -14}
       rgb:
         sensor:
           exposure: {max_time: 0.03, target: 0.19}
           motion_blur: {max_samples: 48}
     render:
-      lighting: {time_utc: '17:00:00'}
-    tiles: {max_zoom: 19}
+      lighting: {time_utc: '16:08:00'}
     trajectory:
       synth:
-        altitude: 220
-        heading_deg: 75
+        altitude: 700
+        heading_deg: 20
         kind: line
-        lat: 39.902
-        lon: 32.79
-        speed: 60
+        lat: 39.25
+        lon: 33.95
         vibration: {broadband_deg: 0.3, harmonic_deg: 0.35, harmonic_hz: 24}
   seconds: 5.5
   text: Vibration and exposure time produce physically based motion blur
@@ -349,8 +347,10 @@ shots:
         model: kannala_brandt
         width: 720
     trajectory:
-      synth: {altitude: 450, heading_deg: 90, kind: circle, lat: 39.93, lon: 32.8, radius: 700}
-  seconds: 5.5
+      synth: {altitude: 1400, heading_deg: 90, kind: line, lat: 7.0, lon: -102.0}
+    render:
+      lighting: {time_utc: '16:48:00'}
+  seconds: 5
   text: 'Kannala–Brandt fisheye: wider than a hemisphere'
 - id: models
   label: Camera models
@@ -358,7 +358,7 @@ shots:
   panels: [Pinhole · 70°, Pinhole · strong radial distortion, Kannala–Brandt · 190°, Mei omnidirectional · 200°]
   scenario:
     cameras:
-    - extrinsics: {mount: forward, pitch_deg: -45}
+    - extrinsics: {mount: forward, pitch_deg: -40}
       intrinsics:
         height: 360
         intrinsics: [457.0, 457.0, 319.5, 179.5]
@@ -366,7 +366,7 @@ shots:
         width: 640
       path: /pinhole
       rgb: {}
-    - extrinsics: {mount: forward, pitch_deg: -45}
+    - extrinsics: {mount: forward, pitch_deg: -40}
       intrinsics:
         distortion: [-0.32, 0.09, 0.0, 0.0]
         height: 360
@@ -375,7 +375,7 @@ shots:
         width: 640
       path: /barrel
       rgb: {}
-    - extrinsics: {mount: forward, pitch_deg: -45}
+    - extrinsics: {mount: forward, pitch_deg: -40}
       intrinsics:
         distortion: [0.0, 0.0, 0.0, 0.0]
         height: 360
@@ -385,7 +385,7 @@ shots:
         width: 640
       path: /kb
       rgb: {}
-    - extrinsics: {mount: forward, pitch_deg: -45}
+    - extrinsics: {mount: forward, pitch_deg: -40}
       intrinsics:
         distortion: [0.0, 0.0, 0.0, 0.0]
         height: 360
@@ -397,8 +397,10 @@ shots:
       path: /mei
       rgb: {}
     trajectory:
-      synth: {altitude: 300, heading_deg: 50, kind: line, lat: 39.905, lon: 32.79}
-  seconds: 6
+      synth: {altitude: 800, heading_deg: 352, kind: line, lat: 40.276, lon: 36.834}
+    render:
+      lighting: {time_utc: '06:00:00'}
+  seconds: 5.5
   text: camodocal's camera models, from the same pose
 - id: rig
   label: Multi-camera rig
@@ -439,17 +441,19 @@ shots:
       path: /right
       rgb: {}
     trajectory:
-      synth: {altitude: 420, heading_deg: 60, kind: random, lat: 39.92, lon: 32.78, radius: 900}
-  seconds: 7
+      synth: {kind: line, lat: 3.47675, lon: -103.43456, heading_deg: 215, altitude: 1000, speed: 60}
+    render:
+      lighting: {time_utc: '16:20:00'}
+  seconds: 6.5
   text: Any number of cameras, each with its own intrinsics and mounting
-- id: modalities
-  label: Ground truth
+- id: modalities_mountains
+  label: Ground truth · mountains
   layout: modalities
   scenario:
     cameras:
     - depth: {}
       events: {supersample: 2}
-      extrinsics: {mount: forward, pitch_deg: -40}
+      extrinsics: {mount: forward, pitch_deg: -24}
       flow: {}
       intrinsics:
         height: 360
@@ -460,9 +464,59 @@ shots:
       rgb: {}
     imu: {path: /imu}
     trajectory:
-      synth: {altitude: 260, heading_deg: 70, kind: line, lat: 39.93, lon: 32.775, speed: 55}
-  seconds: 8
+      synth: {altitude: 1100, heading_deg: 80, kind: line, lat: 39.17, lon: 33.7, speed: 70}
+    render:
+      lighting: {time_utc: '04:45:00'}
+  seconds: 6
   text: Every pixel comes with depth, optical flow and events — plus IMU and poses
+- id: modalities_night
+  label: Ground truth · night
+  layout: modalities
+  scenario:
+    cameras:
+    - depth: {}
+      events: {supersample: 2, shot_noise_dark_gain: 3.0}
+      extrinsics: {mount: forward, pitch_deg: -28}
+      flow: {}
+      intrinsics:
+        height: 360
+        intrinsics: [457.0, 457.0, 319.5, 179.5]
+        model: pinhole
+        width: 640
+      path: /cam0
+      rgb:
+        sensor:
+          exposure: {max_gain: 64, max_time: 0.008, target: 0.012}
+          noise: {read: 0.04, shot: 0.06}
+          optics: {bloom: 0.02, chromatic_aberration_px: 0.0, defocus_px: 0.0}
+    trajectory:
+      synth: {altitude: 1500, heading_deg: 75, kind: line, lat: 41.562, lon: 32.955, speed: 50}
+    render:
+      lighting: {date: '2026-03-19', time_utc: '21:30:00'}
+  seconds: 6
+  text: 'Event cameras at night: street lamps fire bright, sharp events'
+- id: modalities_rivers
+  label: Ground truth · rivers
+  layout: modalities
+  scenario:
+    cameras:
+    - depth: {}
+      events: {supersample: 2}
+      extrinsics: {mount: forward, pitch_deg: -25}
+      flow: {}
+      intrinsics:
+        height: 360
+        intrinsics: [457.0, 457.0, 319.5, 179.5]
+        model: pinhole
+        width: 640
+      path: /cam0
+      rgb: {}
+    trajectory:
+      synth: {kind: line, lat: -26.00742, lon: 32.99572, heading_deg: 105, altitude: 1300, speed: 60}
+    render:
+      lighting: {time_utc: '07:20:00'}
+  seconds: 6.5
+  text: Depth and flow over the river valleys; events along every edge
 - id: map
   label: Tiles on demand
   layout: map
