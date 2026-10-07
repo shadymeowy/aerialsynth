@@ -27,3 +27,10 @@ impl Gpu {
         })
     }
 }
+
+static SHARED: std::sync::OnceLock<Result<std::sync::Arc<Gpu>, String>> = std::sync::OnceLock::new();
+
+/// The process-wide device (renderer and event sensor share it).
+pub fn shared() -> Result<std::sync::Arc<Gpu>> {
+    SHARED.get_or_init(|| Gpu::new().map(std::sync::Arc::new).map_err(|e| e.to_string())).clone().map_err(|e| anyhow!("{e}"))
+}

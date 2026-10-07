@@ -131,7 +131,7 @@ impl Default for EventConfig {
 
 /// splitmix64 RNG
 #[derive(Clone)]
-struct Rng(u64);
+pub(crate) struct Rng(pub(crate) u64);
 impl Rng {
     fn next(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -160,26 +160,26 @@ pub struct Event {
 
 /// State of one pixel.
 #[derive(Clone, Copy, Debug)]
-struct Pixel {
+pub(crate) struct Pixel {
     /// low-pass filtered log intensity (photoreceptor output)
-    lp: f32,
+    pub(crate) lp: f32,
     /// reference level of the change detector
-    l_ref: f32,
-    last_t: f64,
-    c_pos: f32,
-    c_neg: f32,
+    pub(crate) l_ref: f32,
+    pub(crate) last_t: f64,
+    pub(crate) c_pos: f32,
+    pub(crate) c_neg: f32,
     /// leak rate (Hz)
-    leak: f32,
+    pub(crate) leak: f32,
 }
 
 /// Per-pixel event generator.
 pub struct EventSensor {
-    w: usize,
-    cfg: EventConfig,
-    px: Vec<Pixel>,
+    pub(crate) w: usize,
+    pub(crate) cfg: EventConfig,
+    pub(crate) px: Vec<Pixel>,
     hot: Vec<(usize, f64, f64)>,
-    t_prev: Option<f64>,
-    n_steps: u64,
+    pub(crate) t_prev: Option<f64>,
+    pub(crate) n_steps: u64,
     rng: Rng,
 }
 
@@ -308,7 +308,15 @@ impl EventSensor {
                 ev
             })
             .collect();
-        let mut ev: Vec<Event> = rows.concat();
+        let ev: Vec<Event> = rows.concat();
+        self.finish_step(t0, t, ev)
+    }
+
+    /// Sensor-level effects of one step over (t0, t] after the pixel pass: hot pixels, timestamp
+    /// jitter, sorting and the rate controller (shared by the CPU and GPU pixel passes).
+    pub(crate) fn finish_step(&mut self, t0: f64, t: f64, mut ev: Vec<Event>) -> Vec<Event> {
+        let w = self.w;
+        let dt = t - t0;
         // hot pixels
         for i in 0..self.hot.len() {
             let (k, rate, pol) = self.hot[i];
@@ -326,7 +334,11 @@ impl EventSensor {
                 e.t_us = (e.t_us + (c.timestamp_jitter_us * self.rng.gauss()).round() as i64).clamp(lo, hi.max(lo));
             }
         }
-        ev.par_sort_by_key(|e| e.t_us);
+        if ev.len() < 1 << 17 {
+            ev.sort_by_key(|e| e.t_us);
+        } else {
+            ev.par_sort_by_key(|e| e.t_us);
+        }
         // event rate controller: cap events per 1 ms window, drop the excess at random
         if c.max_rate_mev_s > 0.0 && !ev.is_empty() {
             let cap = c.max_rate_mev_s * 1e3; // events per ms
@@ -453,6 +465,67 @@ fn max_motion(key: &Key, a: &CamPose, b: &CamPose, model: &dyn CameraModel) -> f
     maxd
 }
 
+/// The pixel pass on the CPU or on the GPU.
+#[allow(clippy::large_enum_variant)]
+enum Sensor {
+    Cpu(EventSensor),
+    #[cfg(feature = "gpu")]
+    Gpu(crate::gpu::events::GpuEventSensor),
+}
+
+impl Sensor {
+    /// Sensor steps at `times` (ascending); the radiance at time t is interpolated between
+    /// keyframes k0 and k1 (the last time is k1's), or is k0's when there is no k1. Returns the
+    /// events, sorted.
+    fn steps(&mut self, k0: &Key, k1: Option<&Key>, times: &[f64], omega: f64) -> Result<Vec<Event>> {
+        let weight = |t: f64| k1.map_or(0.0, |k1| ((t - k0.t) / (k1.t - k0.t)) as f32);
+        match self {
+            Sensor::Cpu(s) => {
+                let mut out = vec![];
+                for &t in times {
+                    let rad = match k1 {
+                        Some(k1) if t >= k1.t => k1.frame.radiance_at(t, omega),
+                        Some(k1) => {
+                            let a = weight(t);
+                            let (r0, r1) = (k0.frame.radiance_at(t, omega), k1.frame.radiance_at(t, omega));
+                            r0.par_iter().zip(&r1).map(|(u, v)| u + a * (v - u)).collect()
+                        }
+                        None => k0.frame.radiance_at(t, omega),
+                    };
+                    out.extend(s.step(t, &s.log_image(&rad)));
+                }
+                Ok(out)
+            }
+            #[cfg(feature = "gpu")]
+            Sensor::Gpu(g) => {
+                // key slots alternate: k0 sits in the slot written last time
+                let slot = g.key_slot();
+                match k1 {
+                    None => {
+                        g.set_key(slot, &k0.frame);
+                        for &t in times {
+                            g.push(t, slot, 0.0, omega);
+                        }
+                    }
+                    Some(k1) => {
+                        let s1 = 1 - slot;
+                        g.set_key(s1, &k1.frame);
+                        for &t in times {
+                            if t >= k1.t {
+                                g.push(t, s1, 0.0, omega);
+                            } else {
+                                g.push(t, slot, weight(t), omega);
+                            }
+                        }
+                        g.set_key_slot(s1);
+                    }
+                }
+                g.flush()
+            }
+        }
+    }
+}
+
 /// Simulation statistics of one camera.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EventStats {
@@ -482,7 +555,17 @@ pub fn simulate(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], cache: Arc<Ti
     rs.max_zoom = rs.max_zoom.min(scn.tiles.max_zoom);
     let mut renderer = Renderer::new(model.clone(), rs, ell, cache);
     renderer.split_flicker = true;
-    let mut sensor = EventSensor::new(EventConfig { seed: ec.seed ^ spec.seed_mix(), ..ec.clone() }, w, h);
+    let cpu_sensor = EventSensor::new(EventConfig { seed: ec.seed ^ spec.seed_mix(), ..ec.clone() }, w, h);
+    let mut sensor = if scn.render.backend == crate::raster::Backend::Gpu {
+        #[cfg(feature = "gpu")]
+        {
+            Sensor::Gpu(crate::gpu::events::GpuEventSensor::new(cpu_sensor)?)
+        }
+        #[cfg(not(feature = "gpu"))]
+        bail!("render.backend: gpu needs the `gpu` feature of the render crate")
+    } else {
+        Sensor::Cpu(cpu_sensor)
+    };
     let g = file.ensure_group(crate::scenario::h5path(&spec.path))?;
     if !g.exists("calib") {
         crate::output::write_camera_calib(&g, &spec.intrinsics, crate::output::transform_4x4(ext.r_body_cam(), ext.t_body_cam()))?;
@@ -505,11 +588,13 @@ pub fn simulate(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], cache: Arc<Ti
         st.renders += 1;
         Key { t, cam, frame }
     };
-    let mut step = |t: f64, rad: &[f32], st: &mut EventStats, writer: &mut EventWriter| -> Result<()> {
+    // one batch of sensor steps: (time, key weights) with key k1 = None before the first render
+    let mut run = |k0: &Key, k1: Option<&Key>, times: &[f64], st: &mut EventStats, writer: &mut EventWriter| -> Result<()> {
         let c0 = std::time::Instant::now();
-        let ev = sensor.step(t, &sensor.log_image(rad));
+        let ev = sensor.steps(k0, k1, times, omega);
         st.step_s += c0.elapsed().as_secs_f64();
-        st.steps += 1;
+        st.steps += times.len();
+        let ev = ev?;
         st.events += ev.len();
         writer.write(&ev)
     };
@@ -528,7 +613,7 @@ pub fn simulate(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], cache: Arc<Ti
 
     progress(0.0, t_end - t_start);
     let mut k0 = render_key(t_start, &mut st);
-    step(t_start, &k0.frame.radiance_at(t_start, omega), &mut st, &mut writer)?;
+    run(&k0, None, &[t_start], &mut st, &mut writer)?;
     let mut dt = dt_min * 4.0;
     while k0.t < t_end {
         // Walk the sensor steps along the path, each moving the image by at most max_px (so
@@ -557,13 +642,7 @@ pub fn simulate(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], cache: Arc<Ti
         }
         let t1 = *times.last().unwrap();
         let k1 = render_key(t1, &mut st);
-        for &ts in &times[..times.len() - 1] {
-            let a = ((ts - k0.t) / (t1 - k0.t)) as f32;
-            let (r0, r1) = (k0.frame.radiance_at(ts, omega), k1.frame.radiance_at(ts, omega));
-            let rad: Vec<f32> = r0.par_iter().zip(&r1).map(|(u, v)| u + a * (v - u)).collect();
-            step(ts, &rad, &mut st, &mut writer)?;
-        }
-        step(t1, &k1.frame.radiance_at(t1, omega), &mut st, &mut writer)?;
+        run(&k0, Some(&k1), &times, &mut st, &mut writer)?;
         k0 = k1;
         progress(k0.t - t_start, t_end - t_start);
     }

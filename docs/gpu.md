@@ -41,6 +41,33 @@ weights 1/range, exactly like the CPU rasterizer.
 Over a flight each tile and each mesh crosses the bus once; per frame only small tables, the
 per-unit offsets and the read-back (radiance, depth, land cover) move.
 
+## Event cameras
+
+With `backend: gpu` the event simulation renders its keyframes on the GPU and also runs the
+pixel model of the event sensor there (`gpu/events.rs`, `gpu/events.wgsl`, a port of
+`EventSensor::step`): photoreceptor low-pass, high-pass, leak, threshold crossings with the
+refractory period and shot noise, with the pixel state resident on the GPU.
+
+* Each keyframe (radiance and, with flickering lamps, the cos / sin split) is uploaded once. The
+  sensor steps between two keyframes are interpolated on the GPU and run in one submission;
+  only the events come back (12 bytes each).
+* Events are appended with an atomic counter; on overflow the batch is rerun from a copy of the
+  pixel state with a larger buffer.
+* Hot pixels, timestamp jitter, sorting and the rate controller stay on the CPU and share the
+  CPU sensor's code. The fixed pattern (per-pixel thresholds, leak rates) and hot pixels are
+  the CPU sensor's, so both backends simulate the same sensor.
+* Random numbers come from a per-(step, pixel) hash: statistically equivalent to the CPU
+  streams, not bit-identical. The output is deterministic (events are put in row-major order
+  before the time sort).
+
+Validation (`cargo test -p render gpu::events`): the deterministic moving edge gives the CPU's
+events to within 1 µs. Flicker interpolation, noise rates and low-light bandwidth match the CPU
+sensor.
+
+On a 1 s, 640×360 test flight, the GPU path gives 2,441,653 events against 2,440,883 on the CPU
+(+0.03%), with correlation 1.0000 in both the 10 ms rate histogram and the spatial histogram.
+The sensor steps take 3.4 s instead of 37 s, and the keyframe renders 10 s instead of 150 s.
+
 ## Tile cache on the GPU
 
 * A fixed pool of slots (`gpu::POOL_SLOTS`: 2048 ≈ 2.2 GB, or the adapter's texture-array limit): texture arrays with one layer per

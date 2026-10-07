@@ -8,6 +8,7 @@
 //! small per-unit transforms and tables are uploaded. One device for the whole process.
 
 pub mod device;
+pub mod events;
 pub mod tiles;
 
 use crate::lighting::SunState;
@@ -120,7 +121,7 @@ struct Targets {
 }
 
 struct Ctx {
-    gpu: Gpu,
+    gpu: Arc<Gpu>,
     meshes: HashMap<MeshKey, CachedMesh>,
     mesh_bytes: u64,
     /// grid + skirt index buffers by mesh size (nx, ny): (buffer, index count)
@@ -142,7 +143,7 @@ fn ctx() -> &'static Mutex<Ctx> {
 
 impl Ctx {
     fn new() -> anyhow::Result<Ctx> {
-        let gpu = Gpu::new()?;
+        let gpu = device::shared()?;
         let d = &gpu.device;
         let gmod = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("mesh"), source: wgpu::ShaderSource::Wgsl(include_str!("mesh.wgsl").into()) });
         let gbuf_pipe = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
