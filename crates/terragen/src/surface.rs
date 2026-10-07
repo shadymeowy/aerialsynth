@@ -635,8 +635,12 @@ impl SurfaceModel {
             let ri = st[2] * 2.0;
             let j = (ri.floor() as usize).min(1);
             let mut rc = mixc(pal.rock[j], pal.rock[j + 1], ri - j as f64);
-            let strata = (l.ground / (6.0 + 10.0 * st[3]) + 3.0 * pf.strata).sin();
-            rc *= 1.0 + 0.06 * strata * band(8.0, gsd) + 0.25 * detail + 0.12 * pf.strata2;
+            // bands along the contours: their horizontal wavelength shrinks with the slope (a
+            // fixed band limit aliased them into hairlines on steep valley walls)
+            let strata_h = 6.0 + 10.0 * st[3];
+            let strata = (l.ground / strata_h + 3.0 * pf.strata).sin();
+            let strata_w = std::f64::consts::TAU * strata_h / slope.max(0.05);
+            rc *= 1.0 + 0.06 * strata * band(strata_w, 1.5 * gsd) + 0.25 * detail + 0.12 * pf.strata2;
             col = mixc(col, rc, rock);
             if rock > 0.5 {
                 class = lc::ROCK;

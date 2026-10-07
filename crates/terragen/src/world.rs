@@ -754,7 +754,11 @@ impl World {
                 let width = 2.0 * hw;
                 // irregular floodplain edge (a constant width drew the edge as a straight line
                 // along straight reaches)
-                let fp_w = (hw + width * (1.0 + 3.0 * wn)) * (1.0 + 0.25 * perlin3(0xF10D ^ rh.level as u64, p / (1.5 * width + 400.0)));
+                // (a constant wavelength per level: one following the channel width sheared the
+                // noise into streaks — absolute ECEF coordinates turn a tiny wavelength change into
+                // a large phase shift)
+                let fp_lam = 400.0 + 0.75 * (lc.width_m[0] + lc.width_m[1]);
+                let fp_w = (hw + width * (1.0 + 3.0 * wn)) * (1.0 + 0.25 * perlin3(0xF10D ^ rh.level as u64, p / fp_lam));
                 let incision = 1.0 + 0.02 * width;
                 let floor = rh.floor.max(1.0) - incision;
                 // valley profile: bed, floodplain, walls kept below ~30° (V shape); every channel

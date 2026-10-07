@@ -56,14 +56,16 @@ def shot_scenario(base, shot, video, stills=False):
     for c in scn["cameras"]:
         c["frame_rate"] = fps / speedup
     if stills:
-        # framing check: 3 frames, half resolution, no supersampling, no events
+        # look check: 3 frames, half resolution, light supersampling, no events
         scn["output"]["file"] = os.path.join(d, "stills.h5")
-        scn["render"]["supersample"] = 1
+        # (geometry ground truth needs an odd supersample)
+        ss = 3 if any(c.get("depth") or c.get("flow") or c.get("landcover") for c in scn["cameras"]) else 2
+        scn["render"]["supersample"] = ss
         for c in scn["cameras"]:
             c["frame_rate"] = 3.0 / span
             c.pop("events", None)
             if "rgb" in c:
-                c["rgb"] = deep_merge(c["rgb"], {"supersample": 1})
+                c["rgb"] = deep_merge(c["rgb"], {"supersample": ss})
             i = c["intrinsics"]
             if i.get("model", "pinhole") in ("pinhole", "kannala_brandt", "mei", "pinhole_full"):
                 i["width"], i["height"] = i["width"] // 2, i["height"] // 2
@@ -633,11 +635,12 @@ def main():
     ap.add_argument("--force", action="store_true", help="re-render even if up to date")
     ap.add_argument("--title-preview", action="store_true", help="save a few title-card frames (from the stills) → out/showcase/title_*.png")
     ap.add_argument("--out", default=os.path.join(OUT, "showcase.mp4"))
+    ap.add_argument("--story", default=os.path.join(HERE, "storyboard.yaml"), help="storyboard (e.g. showcase/scout.yaml: candidate places)")
     a = ap.parse_args()
     if not os.path.exists(TERRAIN):
         raise SystemExit("build terrain first: cargo build --release")
     base = yaml.safe_load(open(os.path.join(HERE, "base.yaml")))
-    story = yaml.safe_load(open(os.path.join(HERE, "storyboard.yaml")))
+    story = yaml.safe_load(open(a.story))
     shots = story["shots"]
     if a.only:
         shots = [s for s in shots if s["id"] in a.only]
@@ -660,7 +663,8 @@ def main():
                 export_stills(s, scn)  # PNGs per shot as soon as it is done, for feedback
         done.append((s, scn))
     if a.stills:
-        stills_sheet(base, story, done, os.path.join(OUT, "stills.png"))
+        name = os.path.splitext(os.path.basename(a.story))[0]
+        stills_sheet(base, story, done, os.path.join(OUT, "stills.png" if name == "storyboard" else f"stills_{name}.png"))
     elif not a.only or a.compose_only:
         compose(base, story, a.out, done)
 

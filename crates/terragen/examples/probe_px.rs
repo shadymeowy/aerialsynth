@@ -12,6 +12,24 @@ fn main() {
         }
         return;
     }
+    if args[0] == "scan" {
+        // scan LAT0 LAT1 LON0 LON1 STEP: one line of features per grid point (coarse, 200 m)
+        let a: Vec<f64> = args[1..].iter().map(|s| s.parse().unwrap()).collect();
+        let mut lat = a[0];
+        while lat <= a[1] {
+            let mut lon = a[2];
+            while lon <= a[3] {
+                let (t, _, c) = g.probe(lat.to_radians(), lon.to_radians(), 200.0);
+                println!(
+                    "{lat:.3} {lon:.3} temp {:.1} moist {:.2} ground {:.0} mountain {:.2} mesa {:.2} sand {:.2} kind {} river_hw {:.0} agri {:.2} habit {:.2} class {c}",
+                    t.temp, t.moist, t.ground, t.mountain, t.mesa, t.sand, t.water_kind, t.river_hw, t.agri, t.habit
+                );
+                lon += a[4];
+            }
+            lat += a[4];
+        }
+        return;
+    }
     let a: Vec<f64> = args.iter().map(|s| s.parse().unwrap()).collect();
     let (t, h, c) = g.probe(a[0].to_radians(), a[1].to_radians(), a.get(2).copied().unwrap_or(5.0));
     println!(
