@@ -19,6 +19,9 @@ pub struct Config {
     pub look: SatelliteLook,
     /// Supersampling per axis for colour (1 = one sample per pixel).
     pub supersample: u32,
+    /// With supersample 2: evaluate the two diagonal samples first and the other two only where
+    /// those differ (class, colour, height, light); flat areas cost half.
+    pub adaptive_supersample: bool,
 }
 
 impl Default for Config {
@@ -35,6 +38,7 @@ impl Default for Config {
             landuse: Landuse::default(),
             look: SatelliteLook::default(),
             supersample: 2,
+            adaptive_supersample: true,
         }
     }
 }

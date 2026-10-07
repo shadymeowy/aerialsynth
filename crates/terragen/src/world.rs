@@ -377,9 +377,33 @@ impl World {
         // planes; a support of 1 cell made the blend switch abruptly between neighbouring points,
         // cutting straight cliffs and grooves along their bisectors. Every point lies within
         // √3/2 of some point, so the weight sum stays well above zero.
+        // a point of cell offset `o` lies at f − o − [0, 0.5) per axis: cells whose box is 1.5
+        // cells away or more contribute nothing and are skipped before hashing (same result)
+        let gap = |f: f64, o: i64| -> f64 {
+            let t = f - o as f64;
+            if t < 0.0 {
+                t * t
+            } else if t > 0.5 {
+                (t - 0.5) * (t - 0.5)
+            } else {
+                0.0
+            }
+        };
+        const R2: f64 = 2.25 + 1e-9;
         for dz in -2..=2i64 {
+            let gz = gap(f.z, dz);
+            if gz > R2 {
+                continue;
+            }
             for dy in -2..=2i64 {
+                let gzy = gz + gap(f.y, dy);
+                if gzy > R2 {
+                    continue;
+                }
                 for dx in -2..=2i64 {
+                    if gzy + gap(f.x, dx) > R2 {
+                        continue;
+                    }
                     let h = hash3(seed, ix + dx, iy + dy, iz + dz);
                     let jit = DVec3::new(u01k(h, 1), u01k(h, 2), u01k(h, 3)) * 0.5;
                     let pp = f - DVec3::new(dx as f64, dy as f64, dz as f64) - jit;
