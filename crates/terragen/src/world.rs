@@ -724,10 +724,12 @@ impl World {
                 // along the floodplains of big lowland rivers)
                 let wall_k = lerp(6.0, 2.2, mountain);
                 let valley = rh.valley.max(fp_w + wall_k * (h0 - floor));
-                // no carving of the seabed; floodplains stay above the sea (near the coast they were
+                // no carving of the deeper seabed; floodplains stay above the sea (near the coast they were
                 // carved below it and flooded: straight "coastlines" along the valley walls and
                 // channels drawn into the sea) — only the channel itself forms an estuary
-                if h0 > floor && h0 > 0.0 && ad < valley {
+                // (the channel runs on across the shallow shelf, so it reaches open water instead
+                // of stopping square at the 0 m contour of a flat coast)
+                if h0 > floor && h0 > -4.0 && ad < valley {
                     let wall = smoothstep(fp_w, valley, ad);
                     let wall = wall * wall * (3.0 - 2.0 * wall);
                     let fp = (floor + 0.8).max(0.5) + 0.4 * micro.abs();
@@ -737,7 +739,10 @@ impl World {
                     let carved = carved.max(h0 - lc.max_depth_m * (1.0 - 0.3 * wall));
                     // valleys narrower than a pixel fade out per pixel (no hard level cutoff)
                     let fade = if width < 0.3 * ctx.gsd { smoothstep(0.25, 0.5, rh.valley / ctx.gsd) } else { 1.0 };
-                    h = h.min(h0 + (carved - h0) * fade * land_fade);
+                    // the cut fades out across the shallow shelf (a channel continuing into the sea
+                    // drew a dark band that ended square)
+                    let shelf = smoothstep(-4.0, 0.5, h0);
+                    h = h.min(h0 + (carved - h0) * fade * land_fade * shelf);
                     floodplain = floodplain.max((1.0 - wall) * land_fade * smoothstep(20.0, 120.0, width) * fade);
                 }
             }

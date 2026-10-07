@@ -138,6 +138,8 @@ pub struct TownInfo {
 pub struct Caches {
     regions: HashMap<u64, RegionInfo>,
     towns: HashMap<u64, TownInfo>,
+    /// towns before resolving overlaps
+    towns_base: HashMap<u64, TownInfo>,
     /// existing towns around each cell of the town lattice
     town_cands: HashMap<(i64, i64, i64), Vec<TownInfo>>,
 }
@@ -308,6 +310,10 @@ struct TreeLayer {
     height: f64,
     color: DVec3,
     conifer: f64,
+    /// crown size of the stand (age): ~0.7 young … ~1.25 old
+    scale: f64,
+    /// colour of the stand (species, age, health)
+    tone: DVec3,
 }
 
 impl SurfaceModel {
@@ -405,15 +411,87 @@ impl SurfaceModel {
         info
     }
 
+    /// The most built-up town at `p` among the existing towns of the lattice cells within
+    /// ±`range` cells of p's cell (cached per cell). Complete for `range` 2: a town reaches at
+    /// most ~1.16 cells from its centre, which is within 0.8 cells of its site.
+    #[allow(clippy::too_many_arguments)]
+    fn select_town(&self, world: &World, cache: &mut Caches, p: DVec3, gsd: f64, slope: f64, clear: f64, pf: &PixFields, range: i64) -> Option<(TownInfo, f64)> {
+        let cell = world.cfg.landuse.town_cell_km * 1000.0;
+        let qf = (p / cell).floor();
+        let key = (qf.x as i64, qf.y as i64, qf.z as i64);
+        if !cache.town_cands.contains_key(&key) {
+            let mut v = Vec::new();
+            for dz in -range..=range {
+                for dy in -range..=range {
+                    for dx in -range..=range {
+                        let (id, c) = worley3_site(world.seed ^ 0x70E1, (key.0 + dx, key.1 + dy, key.2 + dz), cell, 0.8);
+                        let info = self.town_info(world, cache, id, c);
+                        if info.exists {
+                            v.push(info);
+                        }
+                    }
+                }
+            }
+            cache.town_cands.insert(key, v);
+        }
+        let mut sel: Option<(TownInfo, f64)> = None;
+        for info in &cache.town_cands[&key] {
+            let u = self.town_urban(info, p, gsd, slope, clear, pf).0;
+            if u > sel.map_or(0.0, |b| b.1) {
+                sel = Some((*info, u));
+            }
+        }
+        sel
+    }
+
+    /// A town site, with overlaps resolved: of two towns whose footprints would overlap only the
+    /// larger exists (overlapping towns with different street grids met along seams that cut
+    /// streets and houses).
     fn town_info(&self, world: &World, cache: &mut Caches, id: u64, center: DVec3) -> TownInfo {
         if let Some(r) = cache.towns.get(&id) {
+            return *r;
+        }
+        let mut info = self.town_base(world, cache, id, center);
+        if info.exists {
+            let cell = world.cfg.landuse.town_cell_km * 1000.0;
+            let extent = |t: &TownInfo| 1.6 * t.radius * t.elong.sqrt();
+            let k = (center / cell).floor();
+            'search: for dz in -2..=2i64 {
+                for dy in -2..=2i64 {
+                    for dx in -2..=2i64 {
+                        let (nid, nc) = worley3_site(world.seed ^ 0x70E1, (k.x as i64 + dx, k.y as i64 + dy, k.z as i64 + dz), cell, 0.8);
+                        if nid == id {
+                            continue;
+                        }
+                        let n = self.town_base(world, cache, nid, nc);
+                        if !n.exists || (n.center - info.center).length() > extent(&n) + extent(&info) {
+                            continue;
+                        }
+                        if n.radius > info.radius || (n.radius == info.radius && nid > id) {
+                            info.exists = false;
+                            break 'search;
+                        }
+                    }
+                }
+            }
+        }
+        cache.towns.insert(id, info);
+        info
+    }
+
+    fn town_base(&self, world: &World, cache: &mut Caches, id: u64, center: DVec3) -> TownInfo {
+        if let Some(r) = cache.towns_base.get(&id) {
             return *r;
         }
         let ctx = site_ctx(world, center, 300.0);
         let (east, north) = (ctx.east, ctx.north);
         let tc = world.terrain(&ctx);
         let p_exist = (tc.habit * 1.1 * world.cfg.landuse.towns).min(0.95);
-        let exists = u01k(id, 1) < p_exist && tc.water_kind == water::NONE && tc.ground > 2.0 && tc.ground < 4000.0;
+        // only lattice sites within 0.8 cells of the surface make towns: a town sits below /
+        // above its site, and a site farther away lay outside the ±2-cell candidate search of the
+        // pixels its town covers (the town was cut along lattice-cell planes); see `select_town`
+        let near_surface = (center.length() - ctx.p.length()).abs() < 0.8 * world.cfg.landuse.town_cell_km * 1000.0;
+        let exists = near_surface && u01k(id, 1) < p_exist && tc.water_kind == water::NONE && tc.ground > 2.0 && tc.ground < 4000.0;
         let ang = u01k(id, 2) * std::f64::consts::FRAC_PI_2;
         let (sa, ca) = ang.sin_cos();
         let mut radius = 160.0 * (u01k(id, 3).powf(1.6) * 2.4).exp();
@@ -437,7 +515,7 @@ impl SurfaceModel {
             seed: mix64(id ^ 0x70E5),
             sun: east * self.sun_h.x + north * self.sun_h.y,
         };
-        cache.towns.insert(id, info);
+        cache.towns_base.insert(id, info);
         info
     }
 
@@ -678,40 +756,22 @@ impl SurfaceModel {
         // lines (taking only the nearest site, or the two nearest, did that)
         // towns end at the bank of a river (with a riverside strip), not under the water
         let river_clear = if l.river_hw > 0.0 {
-            1.0 - (1.0 - smoothstep(l.river_hw + 6.0, l.river_hw + 30.0, l.river_d.abs())) * smoothstep(0.3, 0.6, t.river_wet)
+            // a narrow bank (a few metres plus a tenth of the width), not a wide green strip
+            let bank = 2.0 + 0.1 * l.river_hw;
+            1.0 - (1.0 - smoothstep(l.river_hw + bank, l.river_hw + 2.0 * bank + 2.0, l.river_d.abs())) * smoothstep(0.3, 0.6, t.river_wet)
         } else {
             1.0
         };
-        let mut town_sel: Option<(TownInfo, f64)> = None;
-        if t.town.id != 0 && world.cfg.landuse.towns > 0.0 {
-            let cell = world.cfg.landuse.town_cell_km * 1000.0;
-            let qf = (p / cell).floor();
-            let key = (qf.x as i64, qf.y as i64, qf.z as i64);
-            if !cache.town_cands.contains_key(&key) {
-                let mut v = Vec::new();
-                // ±2 cells: a large town's footprint reaches up to ~1.5 cells from its site
-                for dz in -2..=2 {
-                    for dy in -2..=2 {
-                        for dx in -2..=2 {
-                            let (id, c) = worley3_site(world.seed ^ 0x70E1, (key.0 + dx, key.1 + dy, key.2 + dz), cell, 0.8);
-                            let info = self.town_info(world, cache, id, c);
-                            if info.exists {
-                                v.push(info);
-                            }
-                        }
-                    }
-                }
-                cache.town_cands.insert(key, v);
-            }
-            for info in &cache.town_cands[&key] {
-                let u = self.town_urban(info, p, gsd, slope, river_clear, pf).0;
-                if u > town_sel.map_or(0.0, |b| b.1) {
-                    town_sel = Some((*info, u));
-                }
-            }
-        }
+        // towns avoid steep relief, judged from the relief type (smooth), not the slope of each
+        // pixel: that cut houses in half along every terrace edge and gully wall
+        let town_slope = 0.12 + 0.75 * t.rock_expect;
+        let town_sel = if t.town.id != 0 && world.cfg.landuse.towns > 0.0 {
+            self.select_town(world, cache, p, gsd, town_slope, river_clear, pf, 2)
+        } else {
+            None
+        };
         let town_urban = town_sel.map_or(0.0, |x| x.1);
-        let town_px = town_sel.and_then(|(town, _)| self.town(&town, p, gsd, fw, slope, river_clear, world.cfg.look.shadows, pf));
+        let town_px = town_sel.and_then(|(town, _)| self.town(&town, p, gsd, fw, town_slope, river_clear, world.cfg.look.shadows, pf));
         let town_cov = town_px.map_or(0.0, |x| x.2);
         let not_urban = (1.0 - smoothstep(0.0, 0.08, town_urban)) * (1.0 - town_cov);
 
@@ -746,16 +806,29 @@ impl SurfaceModel {
             let shrub_patch = smoothstep(-0.2, 0.5, patch + 0.4 * pf.land);
             let shrub = ((0.45 * shrub_clim * shrub_patch * (1.0 - forest) * natural_ok.max(0.4 * rock) * (1.0 - field_cov) + gully_scrub) * veg.tree_density * not_urban)
                 .clamp(0.0, 0.7);
+            // forest stands (~240 m, irregular borders): each of its own age (crown size, height),
+            // tone and conifer / broadleaf mix, with small canopy gaps; one lattice of identical
+            // crowns read as a uniform camouflage texture
+            let sp = p + DVec3::new(perlin3(0x57A1, p / 180.0), perlin3(0x57A2, p / 180.0), perlin3(0x57A3, p / 180.0)) * 70.0;
+            let stand_id = worley3(0x57A4, sp, 240.0, 0.9).id;
+            let age = u01k(stand_id, 1);
+            let tone_u = u01k(stand_id, 2);
+            let stand_tone = mixc(DVec3::new(0.86, 0.93, 0.92), DVec3::new(1.12, 1.08, 0.88), tone_u) * (0.92 + 0.12 * age);
+            let gap = smoothstep(0.3, 0.6, perlin3(0x6A9, p / 30.0) + 0.5 * perlin3(0x6AA, p / 11.0)) * (0.2 + 0.8 * u01k(stand_id, 4));
+            dens *= 1.0 - 0.9 * gap * smoothstep(0.3, 0.7, dens);
             if dens > 0.0 || shrub > 0.01 {
                 // conifers in proper stands; lone and scattered trees in open land are broadleaf
                 // (lower, wider crowns), not needle-thin spruces
                 let stand_d = smoothstep(0.3, 0.75, dens);
                 let conifer = (1.0 - smoothstep(4.0, 13.0, temp)) * stand_d.max(1.0 - smoothstep(-5.0, 1.0, temp));
+                // mixed forests: stands lean conifer or broadleaf
+                let conifer = (conifer + 0.9 * (u01k(stand_id, 3) - 0.5) * (1.0 - (2.0 * conifer - 1.0).abs())).clamp(0.0, 1.0);
+                let scale = 0.7 + 0.55 * age;
                 let tropic = smoothstep(19.0, 25.0, temp) * smoothstep(0.55, 0.75, wet);
                 let dry = 1.0 - smoothstep(0.3, 0.5, wet);
                 let tall = 0.5 + 0.5 * st[3];
                 let layers = [
-                    TreeLayer { cell: 5.5, seed: 0x7EE1, density: dens * conifer, closure: dens, height: 14.0 + 10.0 * tall, color: pal.crown_conifer, conifer: 1.0 },
+                    TreeLayer { cell: 5.5, seed: 0x7EE1, density: dens * conifer, closure: dens, height: 14.0 + 10.0 * tall, color: pal.crown_conifer, conifer: 1.0, scale, tone: stand_tone },
                     TreeLayer {
                         cell: 8.5,
                         seed: 0x7EE2,
@@ -764,9 +837,11 @@ impl SurfaceModel {
                         height: (10.0 + 10.0 * tall) * (0.65 + 0.35 * stand_d),
                         color: mixc(pal.crown_decid, pal.crown_dry, dry),
                         conifer: 0.0,
+                        scale,
+                        tone: stand_tone,
                     },
-                    TreeLayer { cell: 13.0, seed: 0x7EE3, density: dens * tropic, closure: dens, height: 22.0 + 14.0 * tall, color: pal.crown_tropic, conifer: 0.0 },
-                    TreeLayer { cell: 3.2, seed: 0x7EE4, density: shrub, closure: 0.0, height: 1.6, color: pal.shrub, conifer: 0.0 },
+                    TreeLayer { cell: 13.0, seed: 0x7EE3, density: dens * tropic, closure: dens, height: 22.0 + 14.0 * tall, color: pal.crown_tropic, conifer: 0.0, scale, tone: stand_tone },
+                    TreeLayer { cell: 3.2, seed: 0x7EE4, density: shrub, closure: 0.0, height: 1.6, color: pal.shrub, conifer: 0.0, scale: 1.0, tone: DVec3::ONE },
                 ];
                 // forest floor: shaded litter and understory, not sunlit grass, between the crowns
                 let floor = smoothstep(0.25, 0.8, dens);
@@ -1009,7 +1084,7 @@ impl SurfaceModel {
                 // stochastic canopy texture (gaps, crown clusters) at scales just above the pixel
                 let tex = perlin3(layer.seed, p / (layer.cell * 3.0)) * band(layer.cell * 3.0, gsd)
                     + 0.6 * perlin3(layer.seed ^ 5, p / (layer.cell * 9.0)) * band(layer.cell * 9.0, gsd);
-                mean_col += layer.color * (0.85 + 0.3 * tex) * w;
+                mean_col += layer.color * layer.tone * (0.85 + 0.3 * tex) * w;
                 mean_w += w;
                 mean_h += layer.height * 0.6 * cov_mean * (1.0 - explicit);
             }
@@ -1034,14 +1109,14 @@ impl SurfaceModel {
                         (iy + dy) as f64 + 0.5 + 0.8 * (u01k(h, 2) - 0.5),
                     ) * layer.cell;
                     // crowns grow with the stand density: dense forest closes its canopy
-                    let r = layer.cell * (0.36 + 0.24 * u01k(h, 4)) * (1.0 + 0.55 * smoothstep(0.35, 0.9, layer.closure));
+                    let r = layer.cell * (0.36 + 0.24 * u01k(h, 4)) * (1.0 + 0.55 * smoothstep(0.35, 0.9, layer.closure)) * layer.scale;
                     let d = (q - c).length();
                     if d > r + fw {
                         continue;
                     }
                     let cov = ((r - d) / fw + 0.5).clamp(0.0, 1.0) * explicit * fade;
                     let x = (d / r).min(1.0);
-                    let hh = layer.height * (0.55 + 0.9 * u01k(h, 5));
+                    let hh = layer.height * (0.55 + 0.9 * u01k(h, 5)) * (0.45 + 0.55 * layer.scale);
                     // crown surfaces taper towards the ground (cone / dome): a tall vertical wall at
                     // the crown rim made every tree a column, seen as a spike from low angles
                     let prof = if layer.conifer > 0.5 { 0.08 + 0.92 * (1.0 - x).powf(1.15) } else { 0.12 + 0.88 * (1.0 - x * x).sqrt() };
@@ -1051,13 +1126,15 @@ impl SurfaceModel {
                     let th = hh * prof * (1.0 + 0.10 * clump * (0.3 + 0.7 * (1.0 - x))) * fade;
                     if th > best_h {
                         best_h = th;
-                        let tint = 0.72 + 0.5 * u01k(h, 6);
+                        // neighbouring crowns of a stand look alike (strong per-tree tints made
+                        // the canopy a camouflage pattern); the stand tone carries the variety
+                        let tint = 0.86 + 0.24 * u01k(h, 6);
                         let hv = u01k(h, 7) - 0.5;
-                        let hue = DVec3::new(1.0 + 0.35 * hv, 1.0 + 0.06 * (u01k(h, 9) - 0.5), 1.0 - 0.25 * hv);
+                        let hue = DVec3::new(1.0 + 0.16 * hv, 1.0 + 0.04 * (u01k(h, 9) - 0.5), 1.0 - 0.12 * hv);
                         // leafy mottling inside the crown (clumps of foliage, ~1 m)
                         let leaf = 0.82 + 0.36 * (0.5 + 0.5 * perlin3(h, p / 1.1)) * band(1.1, gsd);
                         // crowns are a bit darker at the rim (self-shading inside the crown)
-                        best_col = layer.color * tint * hue * leaf * (0.75 + 0.35 * (1.0 - x));
+                        best_col = layer.color * layer.tone * tint * hue * leaf * (0.75 + 0.35 * (1.0 - x));
                     }
                     cov_total = cov_total.max(cov);
                 }
@@ -1368,7 +1445,7 @@ impl SurfaceModel {
         let d = p - town.center;
         let q0 = DVec2::new(d.dot(town.ex), d.dot(town.ey));
         let (urban, rel) = self.town_urban(town, p, gsd, slope, clear, pf);
-        if urban <= 0.02 {
+        if urban <= 0.0 {
             return None;
         }
         // organic (curved) streets in old towns
@@ -1398,15 +1475,21 @@ impl SurfaceModel {
         // not (a fading street left half-transparent asphalt with half-masked trees on it)
         let near_x = bix + (bqx > bsx - bqx) as i64; // nearest line across x and across y
         let near_y = biy + (bqy > bsy - bqy) as i64;
-        let seg_here = |h: u64| smoothstep(-0.01, 0.01, urban - (0.15 + 0.12 * u01k(h, 4))) * if urban < 0.45 && u01k(h, 3) < 0.4 { 0.0 } else { 1.0 };
-        let here_x = seg_here(hash2(town.seed ^ 0x57, near_x, biy));
-        let here_y = seg_here(hash2(town.seed ^ 0x58, near_y, bix));
+        // each street segment exists or not as a whole: decided with the town density at its
+        // midpoint (per-pixel density faded streets in and out along a density contour, and the
+        // houses of the blocks beside them were cut along it)
+        let urban_at = |dq: DVec2| self.town_urban(town, p + town.ex * dq.x + town.ey * dq.y, gsd, slope, clear, pf).0;
+        let seg_here = |h: u64, u: f64| -> f64 { if u > 0.15 + 0.12 * u01k(h, 4) && !(u < 0.45 && u01k(h, 3) < 0.4) { 1.0 } else { 0.0 } };
+        let ymid = 0.5 * (line(1, biy) + line(1, biy + 1));
+        let xmid = 0.5 * (line(0, bix) + line(0, bix + 1));
+        let seg_x = |i: i64| seg_here(hash2(town.seed ^ 0x57, i, biy), urban_at(DVec2::new(line(0, i), ymid) - q));
+        let seg_y = |i: i64| seg_here(hash2(town.seed ^ 0x58, i, bix), urban_at(DVec2::new(xmid, line(1, i)) - q));
+        let (x0, x1, y0, y1) = (seg_x(bix), seg_x(bix + 1), seg_y(biy), seg_y(biy + 1));
+        let here_x = if near_x == bix { x0 } else { x1 };
+        let here_y = if near_y == biy { y0 } else { y1 };
         // a block is built on only if a street runs along at least one of its sides (houses stood
         // in the fields of the outskirts with no street anywhere near)
-        let access = seg_here(hash2(town.seed ^ 0x57, bix, biy))
-            .max(seg_here(hash2(town.seed ^ 0x57, bix + 1, biy)))
-            .max(seg_here(hash2(town.seed ^ 0x58, biy, bix)))
-            .max(seg_here(hash2(town.seed ^ 0x58, biy + 1, bix)));
+        let access = x0.max(x1).max(y0).max(y1);
         let sw_of = |line: i64| if line.rem_euclid(4) == 0 { town.street * 1.4 } else { town.street } * 0.5;
         let (sw_x, sw_y) = (sw_of(near_x), sw_of(near_y));
         let fws = fw.max(gsd * 0.5);
@@ -1424,6 +1507,8 @@ impl SurfaceModel {
         let mut cov_lot = 0.0;
         let mut porch = 0.0;
         let mut roof_frac = 0.0; // building roof coverage of this sample
+        let mut windows = 0.0; // lit windows on the walls (the footprint rim, which the renderer
+                               // stretches into the facades)
         let inner = DVec2::new(bqx - sw, bqy - sw);
         let (bw, bd) = (bsx - 2.0 * sw, bsy - 2.0 * sw);
         let central = (1.0 - rel).max(0.0);
@@ -1445,8 +1530,12 @@ impl SurfaceModel {
             let lx = inner.x - li * lot_w;
             let ly = inner.y - lj * (bd / rows);
             let lh = hash2(bh, li as i64, lj as i64);
-            let built = u01k(lh, 3) < urban.powf(0.7) * 1.05 && access > 0.5;
-            if built || urban > 0.65 {
+            // decided with the town density at the lot's centre, not per pixel: houses were cut
+            // in half where the density contour crossed them
+            let lot_c = DVec2::new(li * lot_w + 0.5 * lot_w - inner.x, (lj + 0.5) * (bd / rows) - inner.y);
+            let urban_lot = self.town_urban(town, p + town.ex * lot_c.x + town.ey * lot_c.y, gsd, slope, clear, pf).0;
+            let built = u01k(lh, 3) < urban_lot.powf(0.7) * 1.05 && access > 0.5;
+            if built || urban_lot > 0.65 {
                 cov_lot = 1.0;
                 let yard = mixc(mixc(pal.grass_wet, pal.soil[0], 0.3 + 0.4 * u01k(lh, 10)), pal.concrete, 0.25 * central)
                     * (1.0 + 0.2 * pf.detail);
@@ -1487,6 +1576,20 @@ impl SurfaceModel {
                             col = mixc(col, roof, inside);
                             height = h_here * inside;
                             roof_frac = inside * buildings_resolved;
+                            // windows every ~2.6 m along the walls, a share of them lit (more in
+                            // the centre, offices and flats included)
+                            let rim = (1.0 - smoothstep(0.0, 0.9, ex.min(ey))) * inside;
+                            if rim > 0.0 {
+                                let along = if ex < ey { cy } else { cx };
+                                let wsp = 2.6;
+                                let wi = (along / wsp).floor();
+                                let wf = along / wsp - wi;
+                                let lit_frac = 0.25 + 0.35 * central + 0.25 * u01k(lh, 15);
+                                let lit = u01k(hash2(lh ^ 0x3D0, wi as i64, (ex < ey) as i64), 1) < lit_frac;
+                                let explicit = band(wsp, gsd);
+                                let pane = if lit && (0.2..0.75).contains(&wf) { 1.0 } else { 0.0 };
+                                windows = rim * (pane * explicit + 0.55 * lit_frac * (1.0 - explicit));
+                            }
                             if inside > 0.5 {
                                 class = lc::BUILDING;
                             }
@@ -1537,8 +1640,10 @@ impl SurfaceModel {
         // ---- night lights: pools of light under street lamps, lit plazas / industrial yards
         let lamp_sp = 18.0 + 8.0 * town.organic;
         // sodium vs LED lamps: mostly per town, varying per street
-        let led = u01k(sh, 5) < if town.roof_style < 0.6 { 0.12 } else { 0.6 };
-        let lamp_col = if led { DVec3::new(0.86, 0.9, 1.0) } else { DVec3::new(1.0, 0.58, 0.24) };
+        // one warm palette per town: sodium (orange-yellow) or warm-white LED, ~10% of the
+        // streets on the other type (a saturated orange next to a cold blue-white looked unreal)
+        let led = (u01k(town.seed, 20) < 0.45) != (u01k(sh, 5) < 0.1);
+        let lamp_col = if led { DVec3::new(1.0, 0.84, 0.62) } else { DVec3::new(1.0, 0.64, 0.30) };
         let lamp_res = band(lamp_sp, gsd);
         let mut emission = DVec3::ZERO;
         if lamp_res > 0.0 && here_x.max(here_y) > 0.0 {
@@ -1574,13 +1679,14 @@ impl SurfaceModel {
         porch *= ground_lit;
         // prefiltered mean when lamps are unresolved (town glow)
         emission = emission * lamp_res + lamp_col * 0.07 * (1.0 - lamp_res) * smoothstep(0.15, 0.4, urban);
+        emission += DVec3::new(1.0, 0.76, 0.48) * (0.55 * windows);
         // plazas / parking and industrial yards: a dim base (their lamps are the street lamps
         // around them), not uniformly glowing slabs
         if urban > 0.45 && (0.07..0.12).contains(&block_kind) {
             emission += lamp_col * 0.025 * lamp_res;
         }
         if block_kind > 0.92 && central < 0.5 {
-            emission += DVec3::new(0.9, 0.95, 1.0) * 0.02 * lamp_res;
+            emission += DVec3::new(1.0, 0.88, 0.7) * 0.02 * lamp_res;
         }
         emission += DVec3::new(1.0, 0.72, 0.42) * porch;
         Some((col, height, cov, class, shadow * (1.0 - street * 0.5), emission / cov.max(0.05)))
@@ -1591,5 +1697,37 @@ impl SurfaceModel {
             Some((_, h, cov, _, _, _)) => h * cov,
             None => 0.0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The ±2-cell town candidate search finds the same town as a much wider (±4) search.
+    #[test]
+    fn town_search_is_complete() {
+        let world = World::new(crate::config::Config::default());
+        let sm = SurfaceModel::new(&world);
+        let mut rng = 0x1234_5678_u64;
+        let mut next = || {
+            rng = mix64(rng);
+            u01(rng)
+        };
+        let (mut towns, mut n) = (0, 0);
+        let (mut ca, mut cb) = (Caches::default(), Caches::default());
+        for &(lat0, lon0) in &[(41.58, 33.18), (16.69, -15.77), (39.6, 33.6), (41.573, 32.984), (39.894, 32.93)] {
+            for _ in 0..400 {
+                let (lat, lon) = (lat0 + 0.12 * (next() - 0.5), lon0 + 0.16 * (next() - 0.5));
+                let ctx = Ctx::new(lat.to_radians(), lon.to_radians(), 2.0, &world.ell);
+                let pf = sm.pixel_fields(ctx.p, 2.0);
+                let a = sm.select_town(&world, &mut ca, ctx.p, 2.0, 0.2, 1.0, &pf, 2);
+                let b = sm.select_town(&world, &mut cb, ctx.p, 2.0, 0.2, 1.0, &pf, 4);
+                assert_eq!(a.map(|x| x.0.seed), b.map(|x| x.0.seed), "different town at {lat},{lon}");
+                towns += a.is_some() as usize;
+                n += 1;
+            }
+        }
+        assert!(towns > n / 20, "too few town samples ({towns}/{n})");
     }
 }

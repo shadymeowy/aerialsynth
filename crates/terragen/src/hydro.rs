@@ -24,6 +24,8 @@ pub struct Seg {
     pub hw: f64,
     /// valley half width (m)
     pub valley: f64,
+    /// channel half width at `b` (narrower where the channel ends in a sink)
+    pub hw_b: f64,
 }
 
 /// Closest drainage channel to a point.
@@ -48,6 +50,7 @@ struct FlowPt {
 thread_local! {
     static PTS: RefCell<HashMap<(u64, i64, i64, i64), FlowPt>> = RefCell::new(HashMap::new());
     static TGT: RefCell<HashMap<(u64, i64, i64, i64), Option<(i64, i64, i64)>>> = RefCell::new(HashMap::new());
+    static SRC: RefCell<HashMap<(u64, i64, i64, i64), bool>> = RefCell::new(HashMap::new());
 }
 
 impl World {
@@ -97,7 +100,10 @@ impl World {
         let cell = self.cfg.hydro.levels[lvl].cell_km * KM;
         let me = self.flow_point(lvl, c);
         let mut best = None;
-        if me.active && me.h > 0.0 {
+        // shallow sea points (the coarse relief's coast is not the real one) drain on too, so
+        // rivers run on to the actual shoreline instead of ending in a blunt cap on land; the
+        // channel over the sea is under water (and the seabed is not carved)
+        if me.active && me.h > -150.0 {
             let mut best_slope = 0.0;
             for dz in -1..=1 {
                 for dy in -1..=1 {
@@ -122,6 +128,34 @@ impl World {
                     }
                 }
             }
+            // no lower neighbour: look a little farther for an outlet (often the sea beyond a
+            // shallow dip of the coarse relief; rivers ended there on land in a blunt cap).
+            // Targets are always lower, so the graph stays acyclic.
+            if best.is_none() {
+                for dz in -2..=2i64 {
+                    for dy in -2..=2i64 {
+                        for dx in -2..=2i64 {
+                            if dx.abs().max(dy.abs()).max(dz.abs()) < 2 {
+                                continue;
+                            }
+                            let n = (c.0 + dx, c.1 + dy, c.2 + dz);
+                            let o = self.flow_point(lvl, n);
+                            if !o.active {
+                                continue;
+                            }
+                            let d = (o.s - me.s).length();
+                            if d > 3.0 * cell {
+                                continue;
+                            }
+                            let slope = (o.h - me.h) / d;
+                            if slope < best_slope {
+                                best_slope = slope;
+                                best = Some(n);
+                            }
+                        }
+                    }
+                }
+            }
         }
         TGT.with(|m| {
             let mut m = m.borrow_mut();
@@ -131,6 +165,35 @@ impl World {
             m.insert(key, best);
         });
         best
+    }
+
+    /// No other point drains into `c` (cached).
+    fn is_source(&self, lvl: usize, c: (i64, i64, i64)) -> bool {
+        let key = (self.level_key(lvl) ^ self.cache_key ^ 0x50C, c.0, c.1, c.2);
+        if let Some(v) = SRC.with(|m| m.borrow().get(&key).copied()) {
+            return v;
+        }
+        let mut src = true;
+        // targets lie within ±2 cells (see `flow_target`)
+        'n: for dz in -2..=2i64 {
+            for dy in -2..=2i64 {
+                for dx in -2..=2i64 {
+                    let n = (c.0 + dx, c.1 + dy, c.2 + dz);
+                    if n != c && self.flow_point(lvl, n).active && self.flow_target(lvl, n) == Some(c) {
+                        src = false;
+                        break 'n;
+                    }
+                }
+            }
+        }
+        SRC.with(|m| {
+            let mut m = m.borrow_mut();
+            if m.len() > 400_000 {
+                m.clear();
+            }
+            m.insert(key, src);
+        });
+        src
     }
 
     /// All drainage edges whose valley could reach within `radius` of `center`.
@@ -146,9 +209,15 @@ impl World {
             if lc.valley_m < 0.2 * gsd && lc.width_m[1] < 0.15 * gsd {
                 continue;
             }
-            let reach = radius + 2.0 * cell + lc.valley_m + 0.2 * cell;
+            // a node's channels reach to the middle of its downstream node's outgoing edge
+            // (edges are ≤ 1.8 cells, rarely up to 3, see `flow_target`)
+            let reach = radius + 2.9 * cell + lc.valley_m;
             let lo = ((center - DVec3::splat(reach)) / cell).floor();
             let hi = ((center + DVec3::splat(reach)) / cell).floor();
+            let width = |c: (i64, i64, i64)| {
+                let hh = hash3(self.level_key(lvl) ^ 0x51DE, c.0, c.1, c.2);
+                (0.5 * (lc.width_m[0] + (lc.width_m[1] - lc.width_m[0]) * u01k(hh, 1)), lc.valley_m * (0.6 + 0.8 * u01k(hh, 2)))
+            };
             for cz in lo.z as i64..=hi.z as i64 {
                 for cy in lo.y as i64..=hi.y as i64 {
                     for cx in lo.x as i64..=hi.x as i64 {
@@ -159,9 +228,42 @@ impl World {
                         }
                         let Some(tc) = self.flow_target(lvl, c) else { continue };
                         let tp = self.flow_point(lvl, tc);
-                        let hh = hash3(self.level_key(lvl) ^ 0x51DE, cx, cy, cz);
-                        let w = lc.width_m[0] + (lc.width_m[1] - lc.width_m[0]) * u01k(hh, 1);
-                        out.push(Seg { a: fp.s, b: tp.s, ha: fp.h, hb: tp.h, level: lvl as u8, hw: 0.5 * w, valley: lc.valley_m * (0.6 + 0.8 * u01k(hh, 2)) });
+                        let (hw, valley) = width(c);
+                        let seg = |a: DVec3, b: DVec3, ha: f64, hb: f64, hw: f64, hw_b: f64| Seg { a, b, ha, hb, level: lvl as u8, hw, valley, hw_b };
+                        let mid = 0.5 * (fp.s + tp.s);
+                        let hmid = 0.5 * (fp.h + tp.h);
+                        // a source (nothing drains into it): straight from the source point to the
+                        // middle of its edge, where the bends start
+                        if self.is_source(lvl, c) {
+                            out.push(seg(fp.s, mid, fp.h, hmid, 0.08 * hw, hw)); // widening from a spring
+                        }
+                        match self.flow_target(lvl, tc) {
+                            // the bend at the downstream node: a quadratic curve from the middle
+                            // of this edge to the middle of the next (straight edges met in sharp
+                            // corners: bulging wedges where a wide river turned)
+                            Some(ttc) => {
+                                let tq = self.flow_point(lvl, ttc);
+                                let (hw2, _) = width(tc);
+                                let mid2 = 0.5 * (tp.s + tq.s);
+                                let hmid2 = 0.5 * (tp.h + tq.h);
+                                let at = |t: f64| {
+                                    let (u, v) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t));
+                                    (mid * u + tp.s * v + mid2 * (t * t), hmid * u + tp.h * v + hmid2 * (t * t), hw + (hw2 - hw) * t)
+                                };
+                                const N: usize = 6;
+                                for k in 0..N {
+                                    let (a, ha, wa) = at(k as f64 / N as f64);
+                                    let (b, hb, wb) = at((k + 1) as f64 / N as f64);
+                                    out.push(seg(a, b, ha, hb, wa, wb));
+                                }
+                            }
+                            // into the sea (full width) or a closed basin (tapering out instead of
+                            // ending in a blunt cap)
+                            None => {
+                                let sink = tp.h > 0.0;
+                                out.push(seg(mid, tp.s, hmid, tp.h, hw, if sink { 0.08 * hw } else { hw }));
+                            }
+                        }
                     }
                 }
             }
@@ -201,7 +303,7 @@ impl World {
                 continue;
             }
             let sign = if ab.cross(dv).dot(ctx.up) >= 0.0 { 1.0 } else { -1.0 };
-            hits.push(RiverHit { d: sign * dist, hw: s.hw, valley: s.valley, floor, level: s.level });
+            hits.push(RiverHit { d: sign * dist, hw: s.hw + (s.hw_b - s.hw) * u, valley: s.valley, floor, level: s.level });
         }
         hits
     }
