@@ -28,7 +28,7 @@ shots:
     trajectory:
       synth: {altitude: 1400, heading_deg: 90, kind: line, lat: 7.0, lon: -102.0}
   seconds: 5
-  text: A lone peak rising out of the rainforest
+  text: A whole planet, generated procedurally on the WGS84 ellipsoid
 - id: moon
   label: Full moon
   scenario:
@@ -47,7 +47,7 @@ shots:
   text: Moonlight and the lunar disc from the true lunar position and phase
 - id: boreal
   label: Boreal · 53°N
-  text: Spruce forest, bogs and a river in the north
+  text: 'From the tropics to the far north: spruce, bogs and rivers at 53°N'
   seconds: 6
   scenario:
     trajectory:
@@ -195,7 +195,7 @@ shots:
     render:
       lighting: {date: '2026-03-19', time_utc: '21:30:00'}
   seconds: 6
-  text: 'Event cameras at night: street lamps fire bright, sharp events'
+  text: 'Ground truth does not fade at night: depth and flow in the dark'
   extend: 6.6
 - {id: events_night, label: Event camera · night, text: 'Street lamps at night: high dynamic range, sharp events in the dark', seconds: 6, layout: events,
   source: modalities_night, offset: 6.6}
@@ -520,6 +520,16 @@ shots:
       lighting: {time_utc: '08:45:00'}
   seconds: 6
   text: From cruise altitude, with Earth curvature and aerial perspective …
+- id: low
+  label: Low altitude · 120 m
+  scenario:
+    cameras:
+    - extrinsics: {pitch_deg: -35}
+    tiles: {max_zoom: 19}
+    trajectory:
+      synth: {altitude: 120, heading_deg: 75, kind: line, lat: 39.902, lon: 32.785, speed: 55}
+  seconds: 5
+  text: … down to low-level flight, in the same consistent world
 - id: canyon
   label: Red rock desert
   scenario:
@@ -531,16 +541,6 @@ shots:
       synth: {altitude: 900, heading_deg: 120, kind: line, lat: 19.0, lon: -114.0}
   seconds: 5
   text: Eroded red uplands of a dry interior
-- id: low
-  label: Low altitude · 120 m
-  scenario:
-    cameras:
-    - extrinsics: {pitch_deg: -35}
-    tiles: {max_zoom: 19}
-    trajectory:
-      synth: {altitude: 120, heading_deg: 75, kind: line, lat: 39.902, lon: 32.785, speed: 55}
-  seconds: 5
-  text: … down to low-level flight, in the same consistent world
 - id: town
   label: Town
   scenario:
@@ -624,7 +624,7 @@ shots:
     trajectory:
       synth: {altitude: 700, heading_deg: 65, kind: line, lat: 39.905, lon: 32.775}
   seconds: 6
-  text: A whole planet, generated procedurally on the WGS84 ellipsoid
+  text: Fields, hedgerows and farm tracks in the morning light
 - id: map
   label: Tiles on demand
   layout: map
