@@ -696,7 +696,7 @@ def write_clip(index, shot, scn, video):
     # the rendered sequence are unchanged
     digest = hashlib.sha1(yaml.safe_dump([shot, video], sort_keys=True).encode()).hexdigest()
     src_mtime = os.path.getmtime(scn["output"]["file"])
-    old = [c for c in os.listdir(d) if c.endswith(f"_{shot['id']}.mp4") and c[:2].isdigit() and c[2] == "_"]
+    old = [c for c in os.listdir(d) if c[:2].isdigit() and c[2:3] == "_" and c[3:] == f"{shot['id']}.mp4"]
     reused = False
     for c in old:
         cp, st = os.path.join(d, c), os.path.join(d, c[:-4] + ".done")
