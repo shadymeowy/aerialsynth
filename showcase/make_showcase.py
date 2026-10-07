@@ -691,18 +691,41 @@ def write_clip(index, shot, scn, video):
     d = os.path.join(OUT, "clips")
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, f"{index:02d}_{shot['id']}.mp4")
-    ff = ffmpeg_writer(path, video)
-    for fr in shot_frames(shot, scn, video, bottom_band(video["width"], video["height"])):
-        ff.stdin.write(np.ascontiguousarray(fr, dtype=np.uint8).tobytes())
-    ff.stdin.close()
-    ff.wait()
+    # reuse the shot's clip (also from another position) when the shot, the video settings and
+    # the rendered sequence are unchanged
+    digest = hashlib.sha1(yaml.safe_dump([shot, video], sort_keys=True).encode()).hexdigest()
+    src_mtime = os.path.getmtime(scn["output"]["file"])
+    old = [c for c in os.listdir(d) if c.endswith(f"_{shot['id']}.mp4") and c[:2].isdigit() and c[2] == "_"]
+    reused = False
+    for c in old:
+        cp, st = os.path.join(d, c), os.path.join(d, c[:-4] + ".done")
+        if os.path.exists(st) and open(st).read() == digest and os.path.getmtime(cp) > src_mtime:
+            if cp != path:
+                os.replace(cp, path)
+                os.replace(st, path[:-4] + ".done")
+            reused = True
+            break
+    for c in old:
+        cp = os.path.join(d, c)
+        if cp != path and os.path.exists(cp):
+            os.remove(cp)
+            if os.path.exists(cp[:-4] + ".done"):
+                os.remove(cp[:-4] + ".done")
+    if not reused:
+        ff = ffmpeg_writer(path, video)
+        for fr in shot_frames(shot, scn, video, bottom_band(video["width"], video["height"])):
+            ff.stdin.write(np.ascontiguousarray(fr, dtype=np.uint8).tobytes())
+        ff.stdin.close()
+        ff.wait()
+        with open(path[:-4] + ".done", "w") as fh:
+            fh.write(digest)
     clips = sorted(c for c in os.listdir(d) if c.endswith(".mp4"))
     lst = os.path.join(d, "list.txt")
     with open(lst, "w") as fh:
         fh.writelines(f"file '{c}'\n" for c in clips)
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy",
                     os.path.join(OUT, "showcase_so_far.mp4")], check=True)
-    print(f"[{shot['id']}] clip {path}", flush=True)
+    print(f"[{shot['id']}] clip {path}" + (" (reused)" if reused else ""), flush=True)
 
 
 def export_stills(shot, scn):
