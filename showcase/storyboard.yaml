@@ -29,6 +29,33 @@ shots:
       synth: {altitude: 1400, heading_deg: 90, kind: line, lat: 7.0, lon: -102.0}
   seconds: 5
   text: A lone peak rising out of the rainforest
+- id: moon
+  label: Full moon
+  scenario:
+    cameras:
+    - extrinsics: {pitch_deg: -8}
+      rgb:
+        sensor:
+          exposure: {max_gain: 64, max_time: 0.04, target: 0.06}
+          noise: {read: 0.03, shot: 0.05}
+          optics: {bloom: 0.03}
+    render:
+      lighting: {date: '2026-03-03', moon_intensity: 40.0, time_utc: '17:40:00'}
+    trajectory:
+      synth: {altitude: 1300, heading_deg: 95, kind: line, lat: 39.17, lon: 33.62}
+  seconds: 6
+  text: Moonlight and the lunar disc from the true lunar position and phase
+- id: boreal
+  label: Boreal · 53°N
+  text: Spruce forest, bogs and a river in the north
+  seconds: 6
+  scenario:
+    trajectory:
+      synth: {kind: line, lat: 52.97924, lon: -16.41426, heading_deg: 60, altitude: 900}
+    render:
+      lighting: {time_utc: '12:00:00'}
+    cameras:
+    - extrinsics: {pitch_deg: -32}
 - id: modalities_mountains
   label: Ground truth · mountains
   layout: modalities
@@ -106,22 +133,6 @@ shots:
       synth: {altitude: 1500, heading_deg: 75, kind: line, lat: 41.562, lon: 32.955, speed: 50}
   seconds: 6
   text: 'A town at night from a plane: street lamps, windows and the glow of the haze'
-- id: moon
-  label: Full moon
-  scenario:
-    cameras:
-    - extrinsics: {pitch_deg: -8}
-      rgb:
-        sensor:
-          exposure: {max_gain: 64, max_time: 0.04, target: 0.06}
-          noise: {read: 0.03, shot: 0.05}
-          optics: {bloom: 0.03}
-    render:
-      lighting: {date: '2026-03-03', moon_intensity: 40.0, time_utc: '17:40:00'}
-    trajectory:
-      synth: {altitude: 1300, heading_deg: 95, kind: line, lat: 39.17, lon: 33.62}
-  seconds: 6
-  text: Moonlight and the lunar disc from the true lunar position and phase
 - id: stars
   label: Night sky · real stars and planets
   scenario:
@@ -405,17 +416,6 @@ shots:
       lighting: {time_utc: '06:00:00'}
   seconds: 5.5
   text: 'Four camera models from the same pose: pinhole, radial distortion, fisheye, omnidirectional'
-- id: boreal
-  label: Boreal · 53°N
-  text: Spruce forest, bogs and a river in the north
-  seconds: 6
-  scenario:
-    trajectory:
-      synth: {kind: line, lat: 52.97924, lon: -16.41426, heading_deg: 60, altitude: 900}
-    render:
-      lighting: {time_utc: '12:00:00'}
-    cameras:
-    - extrinsics: {pitch_deg: -32}
 - id: rig
   label: Multi-camera rig
   layout: grid
