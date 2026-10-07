@@ -81,9 +81,9 @@ shots:
     - extrinsics: {pitch_deg: -34}
       rgb:
         sensor:
-          # one fixed exposure for the whole time-lapse (16 ms, no gain), so the scene really
-          # darkens: an auto exposure (gain 160) brightened the night back to day
-          exposure: {mode: manual, ev: 4.0, max_gain: 1, max_time: 0.04}
+          # the stills' exposures at their frame times (trajectory time, s), interpolated: an
+          # auto exposure (gain 160) brightened the night back to day, one fixed EV cannot span it
+          exposure: {mode: manual, schedule: [[1.0, 2.09], [3.533, 2.09], [6.067, 3.88], [8.6, 7.665]], max_gain: 8, max_time: 0.04}
     render:
       lighting: {time_scale: 600, time_utc: '16:50:00'}
     trajectory:

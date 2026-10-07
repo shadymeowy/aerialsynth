@@ -32,6 +32,9 @@ pub struct ExposureConfig {
     pub max_gain: f64,
     /// Fraction of the metering weight on the image centre (0 = average metering).
     pub center_weight: f64,
+    /// Manual: EV over time as (time, EV) points, linearly interpolated (time = trajectory time of
+    /// the frame, s; held constant outside the points). Empty: the constant `ev`.
+    pub schedule: Vec<[f64; 2]>,
 }
 
 impl Default for ExposureConfig {
@@ -46,6 +49,7 @@ impl Default for ExposureConfig {
             max_time: 1.0 / 60.0,
             max_gain: 16.0,
             center_weight: 0.3,
+            schedule: vec![],
         }
     }
 }
@@ -319,6 +323,7 @@ impl Sensor {
     pub fn exposure_for(&mut self, t: f64) -> Exposure {
         let c = &self.cfg.exposure;
         let ev = match c.mode {
+            ExposureMode::Manual if !c.schedule.is_empty() => schedule_ev(&c.schedule, t),
             ExposureMode::Manual => c.ev,
             ExposureMode::Auto => {
                 let target = self.metered.map(|m| (c.target / m.max(1e-6)).log2() + c.ev);
@@ -493,9 +498,32 @@ impl Sensor {
     }
 }
 
+
+/// EV at time `t` from (time, EV) points (sorted by time), linear in between, constant outside.
+fn schedule_ev(s: &[[f64; 2]], t: f64) -> f64 {
+    if t <= s[0][0] {
+        return s[0][1];
+    }
+    for w in s.windows(2) {
+        if t <= w[1][0] {
+            let a = (t - w[0][0]) / (w[1][0] - w[0][0]).max(1e-12);
+            return w[0][1] + a * (w[1][1] - w[0][1]);
+        }
+    }
+    s[s.len() - 1][1]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manual_exposure_schedule() {
+        let s = [[1.0, 2.0], [3.0, 2.0], [5.0, 4.0]];
+        assert_eq!(schedule_ev(&s, 0.0), 2.0);
+        assert_eq!(schedule_ev(&s, 4.0), 3.0);
+        assert_eq!(schedule_ev(&s, 9.0), 4.0);
+    }
 
     #[test]
     fn auto_exposure_converges_with_lag() {
