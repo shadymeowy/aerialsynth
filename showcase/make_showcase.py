@@ -364,17 +364,43 @@ def modality_frames(shot, f, video):
     ev = ge["events"]
     evs = (ev["x"][:], ev["y"][:], ev["t"][:], ev["p"][:])
     ew, eh = (int(v) for v in ge["calib/resolution"][:])
-    # flow scale: robust maximum over the shot (stable colours)
     fl = g["flow"]
-    rad_max = np.percentile(np.hypot(fl[n // 2][..., 0], fl[n // 2][..., 1]), 99)
+    # The camera's attitude motion shifts the whole image by a few px per frame, while the
+    # depth-dependent parallax is a fraction of a pixel: shown raw, the flow is a smooth wash. The
+    # panel shows the flow minus the rotational flow of the recorded poses (pinhole cameras), i.e.
+    # the parallax, which carries the 3D structure.
+    pin = g["calib"].attrs.get("model", "pinhole") in ("pinhole", b"pinhole") if "calib" in g else False
+    fx, fy, cx, cy = (float(v) for v in g["calib/intrinsics"][:4])
+    q = g["pose/q_ecef_cam"][:]
+
+    def rot(qq):
+        w_, x_, y_, z_ = qq
+        return np.array([[1 - 2 * (y_ * y_ + z_ * z_), 2 * (x_ * y_ - w_ * z_), 2 * (x_ * z_ + w_ * y_)],
+                         [2 * (x_ * y_ + w_ * z_), 1 - 2 * (x_ * x_ + z_ * z_), 2 * (y_ * z_ - w_ * x_)],
+                         [2 * (x_ * z_ - w_ * y_), 2 * (y_ * z_ + w_ * x_), 1 - 2 * (x_ * x_ + y_ * y_)]])
+
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    rays = np.stack([(xx - cx) / fx, (yy - cy) / fy, np.ones_like(xx)], -1)
+
+    def parallax(k):
+        f_ = fl[k]
+        if not pin or k + 1 >= len(q):
+            return f_
+        rr = (rot(q[k + 1]).T @ rot(q[k])).astype(np.float32)
+        d_ = rays @ rr.T
+        rf = np.stack([fx * d_[..., 0] / d_[..., 2] + cx - xx, fy * d_[..., 1] / d_[..., 2] + cy - yy], -1)
+        return f_ - rf
+
+    # colour scale: robust maximum over the shot (stable colours)
+    rad_max = max(1e-3, np.percentile(np.hypot(*np.moveaxis(parallax(n // 2), -1, 0)), 99))
+    flow_label = "Optical flow · camera rotation removed (parallax)" if pin else "Optical flow"
     for k in range(n):
         rgb = g["rgb"][k]
         dep, dmax = depth_to_rgb(g["depth"][k], cmap)
-        fk = fl[min(k, n - 2)]
-        flo = flow_to_rgb(fk, rad_max)
+        flo = flow_to_rgb(parallax(min(k, n - 2)), rad_max)
         evi, ne = events_to_rgb(evs, ts[k], 10_000, ew, eh, None)
         tiles = [(rgb, "RGB"), (dep, f"Depth · 0 – {dmax / 1000:.1f} km" if dmax >= 1000 else f"Depth · 0 – {dmax:.0f} m"),
-                 (flo, "Optical flow"), (evi, "Events · 10 ms · ON red / OFF blue")]
+                 (flo, flow_label), (evi, "Events · 10 ms · ON red / OFF blue")]
         canvas = Image.new("RGB", (W, H))
         for i, (im, lab) in enumerate(tiles):
             pim = panel_label(Image.fromarray(fit(im, W // 2, H // 2)), lab)
