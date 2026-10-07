@@ -18,90 +18,6 @@ video:
   tagline: "Every frame below is rendered from generated tiles — no imagery, no elevation data."
 
 shots:
-- id: farmland
-  label: Morning · farmland
-  scenario:
-    cameras:
-    - extrinsics: {pitch_deg: -42}
-    trajectory:
-      synth: {altitude: 700, heading_deg: 65, kind: line, lat: 39.905, lon: 32.775}
-  seconds: 6
-  text: A whole planet, generated procedurally on the WGS84 ellipsoid
-- id: river
-  label: River valley
-  text: A river winding between forested ridges, carving its valley downhill
-  seconds: 6
-  scenario:
-    trajectory:
-      synth: {kind: line, lat: 49.00184, lon: 10.50018, heading_deg: 70, altitude: 900}
-    render:
-      lighting: {time_utc: '08:20:00'}
-    cameras:
-    - extrinsics: {pitch_deg: -30}
-- id: mountains
-  label: Snow-capped mountains
-  scenario:
-    cameras:
-    - extrinsics: {pitch_deg: -24}
-    render:
-      lighting: {time_utc: '04:45:00'}
-    trajectory:
-      synth: {altitude: 1100, heading_deg: 80, kind: line, lat: 39.17, lon: 33.7, speed: 70}
-  seconds: 6
-  text: Ridged mountains, erosion gullies and a climate-driven snow line
-- id: alpine_valley
-  label: Glacial valley
-  scenario:
-    cameras:
-    - extrinsics: {pitch_deg: -28}
-    render:
-      lighting: {time_utc: '05:54:00'}
-    trajectory:
-      synth: {altitude: 1300, heading_deg: 200, kind: line, lat: 38.5, lon: 61.5}
-  seconds: 5
-  text: Frozen rivers and snowfields high in the range
-- id: town
-  label: Town
-  scenario:
-    cameras:
-    - extrinsics: {pitch_deg: -48}
-    trajectory:
-      synth: {altitude: 500, heading_deg: 115, kind: line, lat: 41.58, lon: 32.976, climb_rate: 14.0, speed: 55}
-  seconds: 6
-  text: Street grids, parks and buildings — part of the elevation model
-- id: coast
-  label: Coastline
-  scenario:
-    cameras:
-    - extrinsics: {pitch_deg: -36}
-    render:
-      lighting: {time_utc: '06:00:00'}
-    trajectory:
-      synth: {altitude: 800, heading_deg: 352, kind: line, lat: 40.276, lon: 36.834}
-  seconds: 5.5
-  text: Shallows, surf and sun glint on open water
-- id: desert_coast
-  label: Desert coast
-  text: Red desert meeting a turquoise sea
-  seconds: 6
-  scenario:
-    trajectory:
-      synth: {kind: line, lat: -21.53612, lon: -45.01476, heading_deg: 255, altitude: 900}
-    render:
-      lighting: {time_utc: '12:30:00'}
-    cameras:
-    - extrinsics: {pitch_deg: -30}
-- id: tropics
-  label: Tropics
-  text: Plantations, rainforest and a river delta on a tropical coast
-  seconds: 6.5
-  scenario:
-    trajectory:
-      synth: {kind: line, lat: 3.47675, lon: -103.43456, heading_deg: 215, altitude: 1000, speed: 60}
-    render:
-      lighting: {time_utc: '16:20:00'}
-    cameras:
-    - extrinsics: {pitch_deg: -32}
 - id: volcano
   label: Rainforest peak
   scenario:
@@ -113,105 +29,40 @@ shots:
       synth: {altitude: 1400, heading_deg: 90, kind: line, lat: 7.0, lon: -102.0}
   seconds: 5
   text: A lone peak rising out of the rainforest
-- id: forest
-  label: Forest
+- id: modalities_mountains
+  label: Ground truth · mountains
+  layout: modalities
   scenario:
     cameras:
-    - extrinsics: {pitch_deg: -45}
-    render:
-      lighting: {time_utc: '05:40:00'}
+    - depth: {}
+      extrinsics: {mount: forward, pitch_deg: -24}
+      flow: {}
+      intrinsics:
+        model: pinhole
+        width: 1920
+        height: 1080
+        intrinsics: [1371.0, 1371.0, 959.5, 539.5]
+      path: /cam0
+      rgb: {}
+    - path: /events
+      intrinsics:
+        model: pinhole
+        width: 1280
+        height: 720
+        intrinsics: [914.0, 914.0, 639.5, 359.5]
+      extrinsics: {mount: forward, pitch_deg: -24}
+      rgb: null
+      events: {supersample: 1}
+    imu: {path: /imu}
     trajectory:
-      synth: {altitude: 900, heading_deg: 68, kind: line, lat: 41.583, lon: 33.175}
-  seconds: 5.5
-  text: Individual tree crowns with cast shadows, and a river winding through
-- id: boreal
-  label: Boreal · 53°N
-  text: Spruce forest, bogs and a river in the north
+      synth: {altitude: 1100, heading_deg: 80, kind: line, lat: 39.17, lon: 33.7, speed: 70}
+    render:
+      lighting: {time_utc: '04:45:00'}
   seconds: 6
-  scenario:
-    trajectory:
-      synth: {kind: line, lat: 52.97924, lon: -16.41426, heading_deg: 60, altitude: 900}
-    render:
-      lighting: {time_utc: '12:00:00'}
-    cameras:
-    - extrinsics: {pitch_deg: -32}
-- id: taiga_river
-  label: Taiga river
-  scenario:
-    cameras:
-    - extrinsics: {pitch_deg: -35}
-    render:
-      lighting: {time_utc: '23:42:00'}
-    trajectory:
-      synth: {altitude: 900, heading_deg: 160, kind: line, lat: 64.0, lon: -160.5}
-  seconds: 5
-  text: A river through boreal forest and lingering snow
-- id: braided
-  label: Rivers converging
-  text: Big rivers meeting in a wooded hill country
-  seconds: 6.5
-  scenario:
-    trajectory:
-      synth: {kind: line, lat: -26.00742, lon: 32.99572, heading_deg: 105, altitude: 1300, speed: 60}
-    render:
-      lighting: {time_utc: '07:20:00'}
-    cameras:
-    - extrinsics: {pitch_deg: -25}
-- id: terminal_lake
-  label: River-fed lake
-  text: Rivers draining into a lake in a closed basin
-  seconds: 6
-  scenario:
-    trajectory:
-      synth: {kind: line, lat: 40.95138, lon: 33.88939, heading_deg: 135, altitude: 1500}
-    render:
-      lighting: {time_utc: '07:45:00'}
-    cameras:
-    - extrinsics: {pitch_deg: -35}
-- id: dunes
-  label: Sand sea · 15°N
-  scenario:
-    cameras:
-    - extrinsics: {pitch_deg: -25}
-    render:
-      lighting: {time_utc: '00:55:00', date: '2026-06-22'}
-    trajectory:
-      synth: {altitude: 700, heading_deg: 120, kind: line, lat: 15.0, lon: -111.38, speed: 60}
-  seconds: 6
-  text: 'Sand seas: transverse and star dunes in low evening light'
-- id: canyon
-  label: Red rock desert
-  scenario:
-    cameras:
-    - extrinsics: {pitch_deg: -30}
-    render:
-      lighting: {time_utc: '00:06:00'}
-    trajectory:
-      synth: {altitude: 900, heading_deg: 120, kind: line, lat: 19.0, lon: -114.0}
-  seconds: 5
-  text: Eroded red uplands of a dry interior
-- id: pivots
-  label: Irrigated desert · 23°S
-  scenario:
-    cameras:
-    - extrinsics: {mount: nadir, pitch_deg: 0}
-    render:
-      lighting: {time_utc: '05:00:00'}
-    trajectory:
-      synth: {altitude: 1400, heading_deg: 30, kind: line, lat: -23.0, lon: 78.08, speed: 60}
-  seconds: 5.5
-  text: Centre-pivot irrigation where farming meets a dry climate
-- id: alpine_south
-  label: Glaciated massif · 33°S
-  scenario:
-    cameras:
-    - extrinsics: {pitch_deg: -30}
-    render:
-      lighting: {time_utc: '02:54:00'}
-    trajectory:
-      synth: {altitude: 1200, heading_deg: 60, kind: line, lat: -33.5, lon: -171.0}
-  seconds: 5
-  text: High ridges, cirques and gullies under snow
+  text: Every pixel comes with depth, optical flow and events — plus IMU and poses
+  extend: 6.6
+- {id: events_mountains, label: Event camera · mountains, text: 'At sunrise every ridge and gully fires: microsecond events, no motion blur',
+  seconds: 6, layout: events, source: modalities_mountains, offset: 6.6}
 - id: golden
   label: Golden hour
   scenario:
@@ -298,6 +149,43 @@ shots:
   text: 'The real sky of 2026-01-10 20:15 UTC: Hipparcos + Tycho-2 stars and JPL DE440 planets (Jupiter, Orion, Sirius), astrometric error < 0.01″'
 - {id: events_stars, label: Event camera · night sky, text: 'The same sky on an event camera: stars and Jupiter fire events as the aircraft vibrates, at their true positions', seconds: 6, layout: events,
   source: stars, offset: 6.6}
+- id: modalities_night
+  label: Ground truth · night
+  layout: modalities
+  scenario:
+    cameras:
+    - depth: {}
+      extrinsics: {mount: forward, pitch_deg: -28}
+      flow: {}
+      intrinsics:
+        model: pinhole
+        width: 1920
+        height: 1080
+        intrinsics: [1371.0, 1371.0, 959.5, 539.5]
+      path: /cam0
+      rgb:
+        sensor:
+          exposure: {max_gain: 64, max_time: 0.008, target: 0.012}
+          noise: {read: 0.04, shot: 0.06}
+          optics: {bloom: 0.02, chromatic_aberration_px: 0.0, defocus_px: 0.0}
+    - path: /events
+      intrinsics:
+        model: pinhole
+        width: 1280
+        height: 720
+        intrinsics: [914.0, 914.0, 639.5, 359.5]
+      extrinsics: {mount: forward, pitch_deg: -28}
+      rgb: null
+      events: {supersample: 1, shot_noise_dark_gain: 3.0}
+    trajectory:
+      synth: {altitude: 1500, heading_deg: 75, kind: line, lat: 41.562, lon: 32.955, speed: 50}
+    render:
+      lighting: {date: '2026-03-19', time_utc: '21:30:00'}
+  seconds: 6
+  text: 'Event cameras at night: street lamps fire bright, sharp events'
+  extend: 6.6
+- {id: events_night, label: Event camera · night, text: 'Street lamps at night: high dynamic range, sharp events in the dark', seconds: 6, layout: events,
+  source: modalities_night, offset: 6.6}
 - id: star_tracker
   label: Star tracker · ground truth
   star_overlay: {mag: 5.0}
@@ -327,50 +215,17 @@ shots:
   text: 'A star tracker on the plane: rings mark the catalogue ground truth (sub-pixel), trails follow the airframe vibration'
 - {id: events_tracker, label: Event camera · star tracker, text: 'The tracker view as events: Orion''s belt and sword, every event at the true star positions', seconds: 6, layout: events,
   source: star_tracker, offset: 6.6}
-- id: cruise
-  label: High altitude · 10 km
+- id: braided
+  label: Rivers converging
+  text: Big rivers meeting in a wooded hill country
+  seconds: 6.5
   scenario:
-    cameras:
-    - extrinsics: {pitch_deg: -22}
-      intrinsics:
-        intrinsics: [960.0, 960.0, 959.5, 539.5]
-    tiles: {max_zoom: 15}
     trajectory:
-      synth: {altitude: 10000, altitude_ref: ellipsoid, heading_deg: 70, kind: line, lat: 39.0, lon: 33.35, speed: 230}
+      synth: {kind: line, lat: -26.00742, lon: 32.99572, heading_deg: 105, altitude: 1300, speed: 60}
     render:
-      lighting: {time_utc: '08:45:00'}
-  seconds: 6
-  text: From cruise altitude, with Earth curvature and aerial perspective …
-- id: low
-  label: Low altitude · 120 m
-  scenario:
+      lighting: {time_utc: '07:20:00'}
     cameras:
-    - extrinsics: {pitch_deg: -35}
-    tiles: {max_zoom: 19}
-    trajectory:
-      synth: {altitude: 120, heading_deg: 75, kind: line, lat: 39.902, lon: 32.785, speed: 55}
-  seconds: 5
-  text: … down to low-level flight, in the same consistent world
-- id: bank
-  label: Steep turns
-  scenario:
-    cameras:
-    - extrinsics: {pitch_deg: -15}
-    trajectory:
-      synth:
-        kind: circle
-        lat: 40.279
-        lon: 36.81
-        heading_deg: 80
-        radius: -450
-        altitude: 700
-        speed: 60
-        response: {max_bank_deg: 60}
-        wind: {speed: 9, turbulence: 1.6, gust_amplitude: 5, gust_rate_per_min: 6}
-    render:
-      lighting: {time_utc: '07:30:00'}
-  seconds: 7
-  text: 'A steep left turn over the coast: bank, pitch, wind gusts and turbulence'
+    - extrinsics: {pitch_deg: -25}
 - id: shake
   label: Engine vibration · motion blur
   scenario:
@@ -405,6 +260,72 @@ shots:
   extend: 6.1
 - {id: events_shake, label: Event camera · vibration, text: The same vibrating flight seen by an event camera, seconds: 5.5, layout: events, source: shake,
   offset: 6.1}
+- id: mountains
+  label: Snow-capped mountains
+  scenario:
+    cameras:
+    - extrinsics: {pitch_deg: -24}
+    render:
+      lighting: {time_utc: '04:45:00'}
+    trajectory:
+      synth: {altitude: 1100, heading_deg: 80, kind: line, lat: 39.17, lon: 33.7, speed: 70}
+  seconds: 6
+  text: Ridged mountains, erosion gullies and a climate-driven snow line
+- id: modalities_rivers
+  label: Ground truth · rivers
+  layout: modalities
+  scenario:
+    cameras:
+    - depth: {}
+      extrinsics: {mount: forward, pitch_deg: -25}
+      flow: {}
+      intrinsics:
+        model: pinhole
+        width: 1920
+        height: 1080
+        intrinsics: [1371.0, 1371.0, 959.5, 539.5]
+      path: /cam0
+      rgb: {}
+    - path: /events
+      intrinsics:
+        model: pinhole
+        width: 1280
+        height: 720
+        intrinsics: [914.0, 914.0, 639.5, 359.5]
+      extrinsics: {mount: forward, pitch_deg: -25}
+      rgb: null
+      events: {supersample: 1}
+    trajectory:
+      synth: {kind: line, lat: -26.00742, lon: 32.99572, heading_deg: 105, altitude: 1300, speed: 60}
+    render:
+      lighting: {time_utc: '07:20:00'}
+  seconds: 6.5
+  text: Depth and flow over the river valleys; events along every edge
+  extend: 6.6
+- {id: events_rivers, label: Event camera · rivers, text: 'Edges of rivers, fields and forest as a stream of events', seconds: 6, layout: events,
+  source: modalities_rivers, offset: 7.1}
+- id: terminal_lake
+  label: River-fed lake
+  text: Rivers draining into a lake in a closed basin
+  seconds: 6
+  scenario:
+    trajectory:
+      synth: {kind: line, lat: 40.95138, lon: 33.88939, heading_deg: 135, altitude: 1500}
+    render:
+      lighting: {time_utc: '07:45:00'}
+    cameras:
+    - extrinsics: {pitch_deg: -35}
+- id: tropics
+  label: Tropics
+  text: Plantations, rainforest and a river delta on a tropical coast
+  seconds: 6.5
+  scenario:
+    trajectory:
+      synth: {kind: line, lat: 3.47675, lon: -103.43456, heading_deg: 215, altitude: 1000, speed: 60}
+    render:
+      lighting: {time_utc: '16:20:00'}
+    cameras:
+    - extrinsics: {pitch_deg: -32}
 - id: fisheye
   label: Fisheye · 200°
   scenario:
@@ -423,6 +344,17 @@ shots:
       lighting: {time_utc: '16:48:00'}
   seconds: 5
   text: 'Kannala–Brandt fisheye: wider than a hemisphere'
+- id: dunes
+  label: Sand sea · 15°N
+  scenario:
+    cameras:
+    - extrinsics: {pitch_deg: -25}
+    render:
+      lighting: {time_utc: '00:55:00', date: '2026-06-22'}
+    trajectory:
+      synth: {altitude: 700, heading_deg: 120, kind: line, lat: 15.0, lon: -111.38, speed: 60}
+  seconds: 6
+  text: 'Sand seas: transverse and star dunes in low evening light'
 - id: models
   label: Camera models
   layout: grid
@@ -473,6 +405,17 @@ shots:
       lighting: {time_utc: '06:00:00'}
   seconds: 5.5
   text: 'Four camera models from the same pose: pinhole, radial distortion, fisheye, omnidirectional'
+- id: boreal
+  label: Boreal · 53°N
+  text: Spruce forest, bogs and a river in the north
+  seconds: 6
+  scenario:
+    trajectory:
+      synth: {kind: line, lat: 52.97924, lon: -16.41426, heading_deg: 60, altitude: 900}
+    render:
+      lighting: {time_utc: '12:00:00'}
+    cameras:
+    - extrinsics: {pitch_deg: -32}
 - id: rig
   label: Multi-camera rig
   layout: grid
@@ -517,110 +460,167 @@ shots:
       lighting: {time_utc: '16:20:00'}
   seconds: 6.5
   text: Any number of cameras, each with its own intrinsics and mounting
-- id: modalities_mountains
-  label: Ground truth · mountains
-  layout: modalities
+- id: alpine_south
+  label: Glaciated massif · 33°S
   scenario:
     cameras:
-    - depth: {}
-      extrinsics: {mount: forward, pitch_deg: -24}
-      flow: {}
-      intrinsics:
-        model: pinhole
-        width: 1920
-        height: 1080
-        intrinsics: [1371.0, 1371.0, 959.5, 539.5]
-      path: /cam0
-      rgb: {}
-    - path: /events
-      intrinsics:
-        model: pinhole
-        width: 1280
-        height: 720
-        intrinsics: [914.0, 914.0, 639.5, 359.5]
-      extrinsics: {mount: forward, pitch_deg: -24}
-      rgb: null
-      events: {supersample: 1}
-    imu: {path: /imu}
-    trajectory:
-      synth: {altitude: 1100, heading_deg: 80, kind: line, lat: 39.17, lon: 33.7, speed: 70}
+    - extrinsics: {pitch_deg: -30}
     render:
-      lighting: {time_utc: '04:45:00'}
+      lighting: {time_utc: '02:54:00'}
+    trajectory:
+      synth: {altitude: 1200, heading_deg: 60, kind: line, lat: -33.5, lon: -171.0}
+  seconds: 5
+  text: High ridges, cirques and gullies under snow
+- id: bank
+  label: Steep turns
+  scenario:
+    cameras:
+    - extrinsics: {pitch_deg: -15}
+    trajectory:
+      synth:
+        kind: circle
+        lat: 40.279
+        lon: 36.81
+        heading_deg: 80
+        radius: -450
+        altitude: 700
+        speed: 60
+        response: {max_bank_deg: 60}
+        wind: {speed: 9, turbulence: 1.6, gust_amplitude: 5, gust_rate_per_min: 6}
+    render:
+      lighting: {time_utc: '07:30:00'}
+  seconds: 7
+  text: 'A steep left turn over the coast: bank, pitch, wind gusts and turbulence'
+- id: pivots
+  label: Irrigated desert · 23°S
+  scenario:
+    cameras:
+    - extrinsics: {mount: nadir, pitch_deg: 0}
+    render:
+      lighting: {time_utc: '05:00:00'}
+    trajectory:
+      synth: {altitude: 1400, heading_deg: 30, kind: line, lat: -23.0, lon: 78.08, speed: 60}
+  seconds: 5.5
+  text: Centre-pivot irrigation where farming meets a dry climate
+- id: cruise
+  label: High altitude · 10 km
+  scenario:
+    cameras:
+    - extrinsics: {pitch_deg: -22}
+      intrinsics:
+        intrinsics: [960.0, 960.0, 959.5, 539.5]
+    tiles: {max_zoom: 15}
+    trajectory:
+      synth: {altitude: 10000, altitude_ref: ellipsoid, heading_deg: 70, kind: line, lat: 39.0, lon: 33.35, speed: 230}
+    render:
+      lighting: {time_utc: '08:45:00'}
   seconds: 6
-  text: Every pixel comes with depth, optical flow and events — plus IMU and poses
-  extend: 6.6
-- {id: events_mountains, label: Event camera · mountains, text: 'At sunrise every ridge and gully fires: microsecond events, no motion blur',
-  seconds: 6, layout: events, source: modalities_mountains, offset: 6.6}
-- id: modalities_night
-  label: Ground truth · night
-  layout: modalities
+  text: From cruise altitude, with Earth curvature and aerial perspective …
+- id: canyon
+  label: Red rock desert
   scenario:
     cameras:
-    - depth: {}
-      extrinsics: {mount: forward, pitch_deg: -28}
-      flow: {}
-      intrinsics:
-        model: pinhole
-        width: 1920
-        height: 1080
-        intrinsics: [1371.0, 1371.0, 959.5, 539.5]
-      path: /cam0
-      rgb:
-        sensor:
-          exposure: {max_gain: 64, max_time: 0.008, target: 0.012}
-          noise: {read: 0.04, shot: 0.06}
-          optics: {bloom: 0.02, chromatic_aberration_px: 0.0, defocus_px: 0.0}
-    - path: /events
-      intrinsics:
-        model: pinhole
-        width: 1280
-        height: 720
-        intrinsics: [914.0, 914.0, 639.5, 359.5]
-      extrinsics: {mount: forward, pitch_deg: -28}
-      rgb: null
-      events: {supersample: 1, shot_noise_dark_gain: 3.0}
-    trajectory:
-      synth: {altitude: 1500, heading_deg: 75, kind: line, lat: 41.562, lon: 32.955, speed: 50}
+    - extrinsics: {pitch_deg: -30}
     render:
-      lighting: {date: '2026-03-19', time_utc: '21:30:00'}
+      lighting: {time_utc: '00:06:00'}
+    trajectory:
+      synth: {altitude: 900, heading_deg: 120, kind: line, lat: 19.0, lon: -114.0}
+  seconds: 5
+  text: Eroded red uplands of a dry interior
+- id: low
+  label: Low altitude · 120 m
+  scenario:
+    cameras:
+    - extrinsics: {pitch_deg: -35}
+    tiles: {max_zoom: 19}
+    trajectory:
+      synth: {altitude: 120, heading_deg: 75, kind: line, lat: 39.902, lon: 32.785, speed: 55}
+  seconds: 5
+  text: … down to low-level flight, in the same consistent world
+- id: town
+  label: Town
+  scenario:
+    cameras:
+    - extrinsics: {pitch_deg: -48}
+    trajectory:
+      synth: {altitude: 500, heading_deg: 115, kind: line, lat: 41.58, lon: 32.976, climb_rate: 14.0, speed: 55}
   seconds: 6
-  text: 'Event cameras at night: street lamps fire bright, sharp events'
-  extend: 6.6
-- {id: events_night, label: Event camera · night, text: 'Street lamps at night: high dynamic range, sharp events in the dark', seconds: 6, layout: events,
-  source: modalities_night, offset: 6.6}
-- id: modalities_rivers
-  label: Ground truth · rivers
-  layout: modalities
+  text: Street grids, parks and buildings — part of the elevation model
+- id: coast
+  label: Coastline
   scenario:
     cameras:
-    - depth: {}
-      extrinsics: {mount: forward, pitch_deg: -25}
-      flow: {}
-      intrinsics:
-        model: pinhole
-        width: 1920
-        height: 1080
-        intrinsics: [1371.0, 1371.0, 959.5, 539.5]
-      path: /cam0
-      rgb: {}
-    - path: /events
-      intrinsics:
-        model: pinhole
-        width: 1280
-        height: 720
-        intrinsics: [914.0, 914.0, 639.5, 359.5]
-      extrinsics: {mount: forward, pitch_deg: -25}
-      rgb: null
-      events: {supersample: 1}
-    trajectory:
-      synth: {kind: line, lat: -26.00742, lon: 32.99572, heading_deg: 105, altitude: 1300, speed: 60}
+    - extrinsics: {pitch_deg: -36}
     render:
-      lighting: {time_utc: '07:20:00'}
-  seconds: 6.5
-  text: Depth and flow over the river valleys; events along every edge
-  extend: 6.6
-- {id: events_rivers, label: Event camera · rivers, text: 'Edges of rivers, fields and forest as a stream of events', seconds: 6, layout: events,
-  source: modalities_rivers, offset: 7.1}
+      lighting: {time_utc: '06:00:00'}
+    trajectory:
+      synth: {altitude: 800, heading_deg: 352, kind: line, lat: 40.276, lon: 36.834}
+  seconds: 5.5
+  text: Shallows, surf and sun glint on open water
+- id: desert_coast
+  label: Desert coast
+  text: Red desert meeting a turquoise sea
+  seconds: 6
+  scenario:
+    trajectory:
+      synth: {kind: line, lat: -21.53612, lon: -45.01476, heading_deg: 255, altitude: 900}
+    render:
+      lighting: {time_utc: '12:30:00'}
+    cameras:
+    - extrinsics: {pitch_deg: -30}
+- id: taiga_river
+  label: Taiga river
+  scenario:
+    cameras:
+    - extrinsics: {pitch_deg: -35}
+    render:
+      lighting: {time_utc: '23:42:00'}
+    trajectory:
+      synth: {altitude: 900, heading_deg: 160, kind: line, lat: 64.0, lon: -160.5}
+  seconds: 5
+  text: A river through boreal forest and lingering snow
+- id: alpine_valley
+  label: Glacial valley
+  scenario:
+    cameras:
+    - extrinsics: {pitch_deg: -28}
+    render:
+      lighting: {time_utc: '05:54:00'}
+    trajectory:
+      synth: {altitude: 1300, heading_deg: 200, kind: line, lat: 38.5, lon: 61.5}
+  seconds: 5
+  text: Frozen rivers and snowfields high in the range
+- id: river
+  label: River valley
+  text: A river winding between forested ridges, carving its valley downhill
+  seconds: 6
+  scenario:
+    trajectory:
+      synth: {kind: line, lat: 49.00184, lon: 10.50018, heading_deg: 70, altitude: 900}
+    render:
+      lighting: {time_utc: '08:20:00'}
+    cameras:
+    - extrinsics: {pitch_deg: -30}
+- id: forest
+  label: Forest
+  scenario:
+    cameras:
+    - extrinsics: {pitch_deg: -45}
+    render:
+      lighting: {time_utc: '05:40:00'}
+    trajectory:
+      synth: {altitude: 900, heading_deg: 68, kind: line, lat: 41.583, lon: 33.175}
+  seconds: 5.5
+  text: Individual tree crowns with cast shadows, and a river winding through
+- id: farmland
+  label: Morning · farmland
+  scenario:
+    cameras:
+    - extrinsics: {pitch_deg: -42}
+    trajectory:
+      synth: {altitude: 700, heading_deg: 65, kind: line, lat: 39.905, lon: 32.775}
+  seconds: 6
+  text: A whole planet, generated procedurally on the WGS84 ellipsoid
 - id: map
   label: Tiles on demand
   layout: map
@@ -641,3 +641,10 @@ shots:
   seconds: 10
   speedup: 8
   text: 'Each flight plans its XYZ tiles: only what the camera sees is generated, at the right zoom'
+outro:
+  lines:
+    - "Procedural, deterministic, lazily generated XYZ tiles"
+    - "Any camera model · any number of cameras"
+    - "RGB · depth · optical flow · events · IMU · poses"
+    - "Day cycle · moon · real stars and planets · city lights"
+  footer: "aerialsynth · github.com/shadymeowy/aerialsynth · Rust · wgpu · HDF5 · reproducible from one YAML"

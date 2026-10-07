@@ -659,7 +659,8 @@ def compose(base, story, out_mp4, shots_scn, preview_seconds=None):
         frames = shot_frames(shot, scn, video, band)
         print(f"composed {shot['id']}: {len(frames)} frames", flush=True)
         segment(frames)
-    segment(outro_frames(video, story["outro"], 6.0))
+    if story.get("outro"):
+        segment(outro_frames(video, story["outro"], 6.0))
     for fr in tail:
         emit(fr)
     ff.stdin.close()
