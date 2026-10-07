@@ -182,9 +182,11 @@ impl Truth<'_> {
     fn window(&self, a: f64, b: f64) -> (DVec3, DVec3, DVec3, DVec3) {
         match self {
             Truth::Records { tr, cum_f, cum_w, centre } => {
-                let (fa, wa) = Self::integral(tr, cum_f, cum_w, a);
-                let (fb, wb) = Self::integral(tr, cum_f, cum_w, b);
-                // instantaneous rate: records interpolated at their interval centres
+                // windows reaching past the records are averaged over their covered part
+                let (t_first, t_last) = (2.0 * tr[0].t - tr[1].t, tr[tr.len() - 1].t);
+                let (ca, cb) = (a.clamp(t_first, t_last), b.clamp(t_first, t_last));
+                let (fa, wa) = Self::integral(tr, cum_f, cum_w, ca);
+                let (fb, wb) = Self::integral(tr, cum_f, cum_w, cb);
                 // instantaneous rate: Catmull-Rom through the records at their interval centres
                 // (linear interpolation cost ~3.5% of the lever term at engine vibration rates)
                 let w_at = |t: f64| {
@@ -195,7 +197,11 @@ impl Truth<'_> {
                     let (u2, u3) = (u * u, u * u * u);
                     0.5 * (2.0 * p1 + (p2 - p0) * u + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * u2 + (3.0 * p1 - p0 - 3.0 * p2 + p3) * u3)
                 };
-                ((fb - fa) / (b - a), (wb - wa) / (b - a), w_at(a), w_at(b))
+                if cb - ca < 1e-9 {
+                    let i = tr.partition_point(|r| r.t < ca).min(tr.len() - 1);
+                    return (tr[i].f, tr[i].w, w_at(a), w_at(b));
+                }
+                ((fb - fa) / (cb - ca), (wb - wa) / (cb - ca), w_at(a), w_at(b))
             }
             Truth::Numeric { poses, ell } => {
                 let h = (b - a).max(0.01);
@@ -211,6 +217,9 @@ impl Truth<'_> {
 pub fn synthesize(cfg: &ImuConfig, poses: &[Pose], truth: Option<&[ImuTruth]>, ell: &Ellipsoid, t0: f64, t1: f64) -> Result<ImuData> {
     if cfg.rate_hz <= 0.0 {
         bail!("imu.rate_hz must be > 0");
+    }
+    if poses.len() < 2 || poses[poses.len() - 1].t - poses[0].t < 1e-3 {
+        bail!("imu: the trajectory must span at least 1 ms (2 poses)");
     }
     let dt = 1.0 / cfg.rate_hz;
     let n = ((t1 - t0) / dt).floor() as usize + 1;

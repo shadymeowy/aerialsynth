@@ -854,13 +854,13 @@ impl Renderer {
                     // sub-sample): footprint / LOD, lighting incl. cast shadow, atmosphere. The
                     // other sub-samples only fetch texture, unless they lie at a clearly different
                     // depth (silhouettes), in which case they get their own context.
-                    let mut order: [(usize, usize); 25] = [(0, 0); 25];
+                    let mut order: [(usize, usize); 81] = [(0, 0); 81];
                     let mut no = 0;
                     order[no] = (cs, cs);
                     no += 1;
                     for sy in 0..ss {
                         for sx in 0..ss {
-                            if (sx, sy) != (cs, cs) && no < 25 {
+                            if (sx, sy) != (cs, cs) && no < 81 {
                                 order[no] = (sx, sy);
                                 no += 1;
                             }

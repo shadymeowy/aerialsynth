@@ -116,10 +116,16 @@ impl Generator {
         let segs = {
             let (lat_c, lon_c) = pixel_to_latlon(DVec2::new(ox + 128.0, oy + 128.0), z, n as u32);
             let c = Ctx::new(lat_c, lon_c, 1.0, &ell);
-            let (lat0, lon0) = pixel_to_latlon(DVec2::new(ox - 2.0, oy - 2.0), z, n as u32);
-            let corner = Ctx::new(lat0, lon0, 1.0, &ell).p;
+            // the farthest apron corner (Mercator tiles are wider on their equator side)
+            let radius = [(ox - 2.0, oy - 2.0), (ox + 258.0, oy - 2.0), (ox - 2.0, oy + 258.0), (ox + 258.0, oy + 258.0)]
+                .iter()
+                .map(|&(px, py)| {
+                    let (la, lo) = pixel_to_latlon(DVec2::new(px, py), z, n as u32);
+                    (Ctx::new(la, lo, 1.0, &ell).p - c.p).length()
+                })
+                .fold(0.0, f64::max);
             let gsd_c = gsd_ew(lat_c, z, n as u32, &ell);
-            self.world.river_segments(c.p, (corner - c.p).length(), gsd_c)
+            self.world.river_segments(c.p, radius, gsd_c)
         };
         let sinks = World::sink_lakes(&segs);
 

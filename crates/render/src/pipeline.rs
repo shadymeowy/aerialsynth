@@ -312,7 +312,7 @@ fn compute_flow(points: &[Option<DVec3>], w: usize, h: usize, cam_b: &CamPose, d
 /// Motion blur: re-project the frame's points with sub-frame poses across the exposure window
 /// and integrate the radiance along the image-space paths.
 #[allow(clippy::too_many_arguments)]
-fn motion_blur(sensor: &Sensor, radiance: Vec<f32>, points: &[Option<DVec3>], cam: &CamPose, poses: &[Pose], spec: &CameraSpec, t: f64, exposure: f64, ell: &Ellipsoid, model: &dyn CameraModel) -> Vec<f32> {
+fn motion_blur(sensor: &Sensor, radiance: Vec<f32>, points: &[Option<DVec3>], sample_offset: f64, cam: &CamPose, poses: &[Pose], spec: &CameraSpec, t: f64, exposure: f64, ell: &Ellipsoid, model: &dyn CameraModel) -> Vec<f32> {
     let Some(rgb) = &spec.rgb else { return radiance };
     let mb = &rgb.sensor.motion_blur;
     if !mb.enabled || exposure <= 0.0 {
@@ -334,7 +334,7 @@ fn motion_blur(sensor: &Sensor, radiance: Vec<f32>, points: &[Option<DVec3>], ca
             }
         }
     }
-    let ksub = ((maxd * 1.5).ceil() as usize + 1).clamp(1, mb.max_samples as usize);
+    let ksub = ((maxd * 1.5).ceil() as usize + 1).clamp(1, (mb.max_samples as usize).max(1));
     if ksub <= 1 || maxd <= 0.25 {
         return radiance;
     }
@@ -343,11 +343,16 @@ fn motion_blur(sensor: &Sensor, radiance: Vec<f32>, points: &[Option<DVec3>], ca
     let mut disp = vec![0f32; w * h * 2 * ksub];
     disp.par_chunks_mut(w * 2 * ksub).enumerate().for_each(|(y, row)| {
         for x in 0..w {
-            let p = points[y * w + x].unwrap_or_else(|| cam.cam_to_world(model.unproject(DVec2::new(x as f64, y as f64)).unwrap_or(DVec3::Z) * far));
+            // terrain points belong to pixel + sample_offset (even supersampling); the sky ray is
+            // taken at the pixel itself
+            let (p, o) = match points[y * w + x] {
+                Some(p) => (p, sample_offset),
+                None => (cam.cam_to_world(model.unproject(DVec2::new(x as f64, y as f64)).unwrap_or(DVec3::Z) * far), 0.0),
+            };
             for (i, c) in sub.iter().enumerate() {
                 if let Some(px) = model.project(c.world_to_cam(p)) {
-                    row[(x * ksub + i) * 2] = (px.x - x as f64) as f32;
-                    row[(x * ksub + i) * 2 + 1] = (px.y - y as f64) as f32;
+                    row[(x * ksub + i) * 2] = (px.x - x as f64 - o) as f32;
+                    row[(x * ksub + i) * 2 + 1] = (px.y - y as f64 - o) as f32;
                 }
             }
         }
@@ -447,7 +452,7 @@ fn render_camera(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], win: Window,
                     s.meter(&frame.radiance); // start converged
                 }
                 let ex = ex_pre.unwrap_or_else(|| s.exposure_for(t));
-                let mut radiance = motion_blur(s, frame.radiance, &frame.points, &cam, poses, spec, t, ex.time, &ell, model.as_ref());
+                let mut radiance = motion_blur(s, frame.radiance, &frame.points, frame.sample_offset, &cam, poses, spec, t, ex.time, &ell, model.as_ref());
                 if sun.stars {
                     let mb = &spec.rgb.as_ref().unwrap().sensor.motion_blur;
                     let span = if mb.enabled { ex.time * mb.shutter } else { 0.0 };

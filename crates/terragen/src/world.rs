@@ -555,7 +555,9 @@ impl World {
         thread_local! {
             static CACHE: std::cell::RefCell<FxHashMap<u64, Option<f64>>> = Default::default();
         }
-        let key = id ^ self.cache_key.rotate_left(29);
+        // the level also depends on `rad` (inflow widths): part of the key, so a cached value
+        // never stands in for a different basin size (thread-order dependence)
+        let key = id ^ self.cache_key.rotate_left(29) ^ rad.to_bits().wrapping_mul(0x9E37_79B9_7F4A_7C15);
         if let Some(v) = CACHE.with(|c| c.borrow().get(&key).copied()) {
             return v;
         }
@@ -579,7 +581,9 @@ impl World {
         thread_local! {
             static CACHE: std::cell::RefCell<FxHashMap<u64, Option<f64>>> = Default::default();
         }
-        let key = id ^ self.cache_key.rotate_left(17);
+        // the level also depends on `rad` (inflow widths): part of the key, so a cached value
+        // never stands in for a different basin size (thread-order dependence)
+        let key = id ^ self.cache_key.rotate_left(17) ^ rad.to_bits().wrapping_mul(0x9E37_79B9_7F4A_7C15);
         if let Some(v) = CACHE.with(|c| c.borrow().get(&key).copied()) {
             return v;
         }

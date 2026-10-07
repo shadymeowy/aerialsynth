@@ -366,6 +366,13 @@ impl Scenario {
             if geometry && c.supersample(&self.render) % 2 == 0 {
                 bail!("camera {}: supersample {} is even; depth / flow / landcover need an odd supersample (pixel-centre sample)", c.path, c.supersample(&self.render));
             }
+            let ss = c.supersample(&self.render);
+            if !(1..=9).contains(&ss) || c.events.as_ref().is_some_and(|e| !(1..=9).contains(&e.supersample)) {
+                bail!("camera {}: supersample must be 1..=9", c.path);
+            }
+            if c.rgb.as_ref().is_some_and(|r| r.sensor.motion_blur.max_samples == 0) {
+                bail!("camera {}: motion_blur.max_samples must be >= 1", c.path);
+            }
             if let Some(e) = &c.events {
                 if e.max_px_per_step <= 0.0 || e.min_rate_hz <= 0.0 || e.max_rate_hz < e.min_rate_hz {
                     bail!("camera {}: events need max_px_per_step > 0 and 0 < min_rate_hz <= max_rate_hz", c.path);

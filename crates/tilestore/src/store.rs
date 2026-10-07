@@ -131,6 +131,11 @@ impl TileStore {
         for name in lg.member_names()? {
             let Ok(z) = name.parse::<u8>() else { continue };
             let g = lg.group(&name)?;
+            if !g.exists("index") || !g.exists("elev_range") {
+                // a level whose creation was interrupted holds no tiles
+                eprintln!("tile store {}: skipping incomplete level {z}", path.display());
+                continue;
+            }
             let idx_ds = g.dataset("index")?;
             let range_ds = g.dataset("elev_range")?;
             let n = idx_ds.shape()?[0];
@@ -173,17 +178,18 @@ impl TileStore {
         self.levels
             .read()
             .get(&z)
-            .map(|l| l.rows.iter().map(|&(x, y)| TileId::new(z, x, y)).collect())
+            .map(|l| l.rows.iter().filter(|k| l.index.contains_key(k)).map(|&(x, y)| TileId::new(z, x, y)).collect())
             .unwrap_or_default()
     }
 
     pub fn tiles(&self) -> Vec<TileId> {
         let lv = self.levels.read();
-        lv.iter().flat_map(|(z, l)| l.rows.iter().map(move |&(x, y)| TileId::new(*z, x, y))).collect()
+        lv.iter().flat_map(|(z, l)| l.rows.iter().filter(|k| l.index.contains_key(k)).map(move |&(x, y)| TileId::new(*z, x, y))).collect()
     }
 
+    /// Number of stored tiles (rows of interrupted writes excluded).
     pub fn len(&self) -> usize {
-        self.levels.read().values().map(|l| l.rows.len()).sum()
+        self.levels.read().values().map(|l| l.index.len()).sum()
     }
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -308,13 +314,8 @@ impl TileStore {
                     level.idx_ds.resize(&[n, 2])?;
                     level.range_ds.resize(&[n, 2])?;
                 }
-                // index / ranges first: a row whose chunks are missing after an interrupted write
-                // then fails loudly instead of aliasing tile (z, 0, 0)
-                let lo = rows.iter().copied().min().unwrap_or(0);
-                let idx: Vec<i32> = level.rows[lo..n].iter().flat_map(|&(x, y)| [x as i32, y as i32]).collect();
-                let rng: Vec<f32> = level.ranges[lo..n].iter().flat_map(|&(a, b)| [a, b]).collect();
-                level.idx_ds.write_slice(&idx, &[lo, 0], &[n - lo, 2])?;
-                level.range_ds.write_slice(&rng, &[lo, 0], &[n - lo, 2])?;
+                // chunks first, the index last: rows of an interrupted or failed write keep the
+                // index fill value (-1) and are skipped on open, so they are regenerated
                 for (k, &i) in idxs.iter().enumerate() {
                     let row = rows[k];
                     for (l, bytes) in &encoded[i] {
@@ -323,10 +324,19 @@ impl TileStore {
                         ds.write_chunk_raw(&off, 0, bytes)?;
                     }
                 }
+                let lo = rows.iter().copied().min().unwrap_or(0);
+                let idx: Vec<i32> = level.rows[lo..n].iter().flat_map(|&(x, y)| [x as i32, y as i32]).collect();
+                let rng: Vec<f32> = level.ranges[lo..n].iter().flat_map(|&(a, b)| [a, b]).collect();
+                level.range_ds.write_slice(&rng, &[lo, 0], &[n - lo, 2])?;
+                level.idx_ds.write_slice(&idx, &[lo, 0], &[n - lo, 2])?;
                 Ok(())
             })();
             if let Err(e) = res {
-                // roll back the in-memory view of this level (new rows are dropped)
+                // roll back the in-memory view of this level (new rows are dropped) and, best
+                // effort, the file's (new index rows back to -1)
+                if n > n0 {
+                    let _ = level.idx_ds.write_slice(&vec![-1i32; (n - n0) * 2], &[n0, 0], &[n - n0, 2]);
+                }
                 for key in level.rows.drain(n0..) {
                     level.index.remove(&key);
                 }
@@ -334,6 +344,8 @@ impl TileStore {
                 return Err(e);
             }
         }
+        // bound what an abrupt end (kill, crash) can lose to the current batch
+        self.file.flush()?;
         Ok(())
     }
 

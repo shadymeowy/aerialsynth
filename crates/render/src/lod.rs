@@ -157,6 +157,12 @@ impl<'a> Selector<'a> {
     }
 
     pub fn visible(&self, id: TileId, range: (f32, f32)) -> Option<(f64, f64)> {
+        self.visible_known(id, range, true)
+    }
+
+    /// `known`: the range is the tile's own (else inherited from an ancestor ± 50 m, which may
+    /// miss tall features: the below-view cull then keeps 300 m more headroom).
+    fn visible_known(&self, id: TileId, range: (f32, f32), known: bool) -> Option<(f64, f64)> {
         let (c, r) = tile_sphere(id, range, &self.ell);
         let d = c - self.cam.pos;
         let dist = d.length();
@@ -167,7 +173,7 @@ impl<'a> Selector<'a> {
         if self.cone_low > -std::f64::consts::FRAC_PI_2 && self.cam_h > range.1 as f64 + 1.0 {
             let b = id.bounds();
             let seg = (b.lon_max - b.lon_min).abs() * self.ell.a / 4.0;
-            let top = range.1 as f64 + seg * seg / (8.0 * self.ell.b) + 10.0;
+            let top = range.1 as f64 + seg * seg / (8.0 * self.ell.b) + if known { 10.0 } else { 300.0 };
             if top < self.cam_h {
                 let emax = tile_points(id, &[top], &self.ell).iter().map(|p| (*p - self.cam.pos).normalize().dot(self.up).asin()).fold(f64::MIN, f64::max);
                 if emax < self.cone_low - 0.01 {
@@ -240,7 +246,7 @@ impl<'a> Selector<'a> {
                 None
             })
             .unwrap_or(self.params.default_range);
-        let Some((dist, r)) = self.visible(id, range) else { return };
+        let Some((dist, r)) = self.visible_known(id, range, own.is_some()) else { return };
         if self.wants_refine(id, dist, r) && (own.is_some() || self.oracle.refine_unknown()) && id.children().iter().any(|c| self.oracle.exists(*c)) {
             for c in id.children() {
                 // children without data are drawn from the nearest ancestor that has data

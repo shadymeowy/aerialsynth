@@ -365,7 +365,17 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
     }
     let pool = c.pools.get_mut(&shading).unwrap();
     let up0 = pool.uploads;
-    let refs: Vec<(TileId, &TileData)> = tiles.iter().map(|(id, t)| (*id, t.as_ref())).collect();
+    let mut refs: Vec<(TileId, &TileData)> = tiles.iter().map(|(id, t)| (*id, t.as_ref())).collect();
+    if refs.len() > pool.slots as usize {
+        // more tiles than slots: keep the units' own data (finest first), then neighbours /
+        // ancestors by zoom; the rest fall back to coarser data in the shader
+        static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            eprintln!("render[gpu]: a frame needs {} tiles, the GPU pool holds {}; the excess is drawn from coarser data (raise gpu::POOL_SLOTS)", refs.len(), pool.slots);
+        }
+        let own: std::collections::HashSet<TileId> = units.iter().map(|u| u.data).collect();
+        refs.sort_by_key(|(id, _)| (!own.contains(id), std::cmp::Reverse(id.z), *id));
+    }
     let resident = pool.ensure(&c.gpu.queue, &refs);
     let uploaded = pool.uploads - up0;
     let (table, mask) = tiles::lookup_table(&resident);
