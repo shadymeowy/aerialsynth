@@ -25,6 +25,11 @@
 //!     flow_valid          u8  [N,H,W]
 //!     landcover           u8  [N,H,W] (255 = sky)              ← landcover
 //!     events/             x, y u16, t i64 µs, p i8 (1 = ON), ms_index u64  ← events (events.rs)
+//!     stars/              catalogue stars per frame: index u64 [N+1] (frame k: [index[k],
+//!                         index[k+1])), id u32 (HIP number; Tycho-2 1<<31|TYC1<<17|TYC2<<3|TYC3),
+//!                         x, y f32 (px, pixel centres at integers), v f32 (catalogue V),
+//!                         irradiance f32 (V band, relative to the Sun outside the atmosphere,
+//!                         after extinction), visible u8 (pixel shows sky)  ← stars
 //! <imu.path>/             t, accel, gyro, gt_*, calib/T_body_imu  (imu.rs)
 //! ```
 //! Frames are stamped at mid-exposure. Camera frame: OpenCV (x right, y down, z forward).
@@ -198,6 +203,7 @@ pub struct Frame<'a> {
     pub depth: Option<&'a [f32]>,
     pub flow: Option<(&'a [f32], &'a [u8])>,
     pub landcover: Option<&'a [u8]>,
+    pub stars: Option<&'a [crate::stars::StarObs]>,
 }
 
 fn luma(rgb: &[u8]) -> Vec<u8> {
@@ -214,6 +220,7 @@ pub struct CameraWriter {
     depth: Option<h5::Dataset>,
     flow: Option<(h5::Dataset, h5::Dataset)>,
     landcover: Option<h5::Dataset>,
+    stars: Option<StarsWriter>,
     t0: f64,
     t: Vec<i64>,
     pos: Vec<f64>,
@@ -254,7 +261,11 @@ impl CameraWriter {
             Some(_) => Some(g.new_dataset::<u8>().shape(&[n, h, w]).chunk(&[1, h, w]).deflate(lvl).create("landcover")?),
             None => None,
         };
-        Ok(CameraWriter { group: g, w, h, gray, rgb, depth, flow, landcover, t0, t: vec![], pos: vec![], q: vec![], exposure: vec![] })
+        let stars = match &spec.stars {
+            Some(_) => Some(StarsWriter::new(&g, lvl)?),
+            None => None,
+        };
+        Ok(CameraWriter { group: g, w, h, gray, rgb, depth, flow, landcover, stars, t0, t: vec![], pos: vec![], q: vec![], exposure: vec![] })
     }
 
     pub fn write(&mut self, fr: &Frame) -> Result<()> {
@@ -276,6 +287,9 @@ impl CameraWriter {
         if let (Some(ds), Some(l)) = (&self.landcover, fr.landcover) {
             ds.write_slice(l, &[k, 0, 0], &[1, h, w])?;
         }
+        if let Some(sw) = self.stars.as_mut() {
+            sw.write(fr.stars.unwrap_or(&[]))?;
+        }
         self.t.push(to_us(fr.t, self.t0));
         self.pos.extend(fr.cam.pos.to_array());
         self.q.extend(q4(fr.cam.q_ecef_cam()));
@@ -295,7 +309,61 @@ impl CameraWriter {
         if self.rgb.is_some() {
             put_f64(g, "exposure", 3, &self.exposure)?;
         }
+        if let Some(sw) = self.stars {
+            sw.finish()?;
+        }
         Ok(self.t.len())
+    }
+}
+
+/// Streaming writer of `<camera>/stars` (frames in order).
+struct StarsWriter {
+    group: h5::Group,
+    ds: [h5::Dataset; 6],
+    n: usize,
+    index: Vec<u64>,
+}
+
+impl StarsWriter {
+    fn new(g: &h5::Group, lvl: u8) -> Result<Self> {
+        let s = g.ensure_group("stars")?;
+        let chunk = 1 << 14;
+        let mk = |name: &str, kind: u8| -> Result<h5::Dataset> {
+            let d = match kind {
+                0 => s.new_dataset::<u32>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).shuffle(true).deflate(lvl).create(name)?,
+                1 => s.new_dataset::<f32>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).shuffle(true).deflate(lvl).create(name)?,
+                _ => s.new_dataset::<u8>().shape(&[0]).max_shape(&[None]).chunk(&[chunk]).deflate(lvl).create(name)?,
+            };
+            Ok(d)
+        };
+        let ds = [mk("id", 0)?, mk("x", 1)?, mk("y", 1)?, mk("v", 1)?, mk("irradiance", 1)?, mk("visible", 2)?];
+        Ok(StarsWriter { group: s, ds, n: 0, index: vec![] })
+    }
+
+    fn write(&mut self, st: &[crate::stars::StarObs]) -> Result<()> {
+        self.index.push(self.n as u64);
+        if st.is_empty() {
+            return Ok(());
+        }
+        let n1 = self.n + st.len();
+        for d in &self.ds {
+            d.resize(&[n1])?;
+        }
+        let (o, c) = (&[self.n][..], &[st.len()][..]);
+        self.ds[0].write_slice(&st.iter().map(|s| s.id).collect::<Vec<_>>(), o, c)?;
+        self.ds[1].write_slice(&st.iter().map(|s| s.x).collect::<Vec<_>>(), o, c)?;
+        self.ds[2].write_slice(&st.iter().map(|s| s.y).collect::<Vec<_>>(), o, c)?;
+        self.ds[3].write_slice(&st.iter().map(|s| s.v).collect::<Vec<_>>(), o, c)?;
+        self.ds[4].write_slice(&st.iter().map(|s| s.irradiance).collect::<Vec<_>>(), o, c)?;
+        self.ds[5].write_slice(&st.iter().map(|s| s.visible as u8).collect::<Vec<_>>(), o, c)?;
+        self.n = n1;
+        Ok(())
+    }
+
+    fn finish(mut self) -> Result<()> {
+        self.index.push(self.n as u64);
+        self.group.new_dataset::<u64>().shape(&[self.index.len()]).create("index")?.write_all(&self.index)?;
+        Ok(())
     }
 }
 

@@ -222,7 +222,12 @@ attribute `t0` holds it in trajectory seconds).
 - **Lighting:**
   - `relit` (albedo + normals + DSM ray-marched cast shadows) or `satellite` (baked imagery)
   - sun fixed or from date/time (NOAA), continuous twilight
-  - moon position and phase with moonlight and the lunar disc, stars
+  - moon position and phase with moonlight and the lunar disc
+  - real stars (Hipparcos + Tycho-2, V ≤ 9) at their apparent positions for the date, time and
+    place (star-tracker accuracy: 0.01″ vs Skyfield), radiometric brightness and colour, per-frame
+    star ground truth; see `docs/stars.md`
+  - `render.backend: gpu`: headless wgpu renderer and event sensor, same output as the CPU
+    reference; see `docs/gpu.md`
   - night lights from the generated emission layer: street lamps (sodium/LED), porch lights,
     farmsteads, lit main roads near towns, plazas and industry
   - light-pollution glow in the haze
@@ -266,6 +271,8 @@ crates/render     camera, trajectories/dynamics, LOD, rasterizer, lighting, sens
 crates/cli        `terrain` binary (the aerialsynth CLI)
 scripts/          contact.py (generator contact sheets), check_gt.py + cammodels.py (camera GT, all models), check_imu.py, check_events.py, seqio.py, view_seq.py, view_events.py
 docs/events.md    event camera modality: options, sensor model, format
+docs/stars.md     star catalogue, astrometry, brightness, star ground truth
+docs/gpu.md       GPU backend (wgpu, headless)
 configs/          example scenarios (quick, dataset, fisheye, events, oblique_sunset, night, night_moon, cruise, imu_check)
 ```
 

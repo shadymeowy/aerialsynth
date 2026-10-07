@@ -15,6 +15,7 @@ pub mod output;
 pub mod pipeline;
 pub mod scenario;
 pub mod sensor;
+pub mod stars;
 pub mod raster;
 pub mod trajectory;
 

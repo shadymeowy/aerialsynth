@@ -362,6 +362,7 @@ struct Pending {
     depth_z: Vec<f32>,
     points: Vec<Option<DVec3>>,
     landcover: Vec<u8>,
+    stars: Vec<crate::stars::StarObs>,
 }
 
 /// The frame modalities of one camera. `progress(done, total)` in frames.
@@ -406,6 +407,7 @@ fn render_camera(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], win: Window,
             depth: depth.as_deref(),
             flow: flow.as_ref().map(|(f, v)| (f.as_slice(), v.as_slice())),
             landcover: spec.landcover.as_ref().map(|_| p.landcover.as_slice()),
+            stars: spec.stars.as_ref().map(|_| p.stars.as_slice()),
         };
         writer.write(&fr)?;
         if let Some(pw) = png.as_mut() {
@@ -446,7 +448,11 @@ fn render_camera(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], win: Window,
             let flow = spec.flow.as_ref().map(|_| compute_flow(&prev.points, w, h, &cam, &frame.depth, model.as_ref()));
             emit(prev, flow)?;
         }
-        pending = Some(Pending { index: k, t, cam, rgb, exposure, depth_z: frame.depth, points: frame.points, landcover: frame.landcover });
+        let stars_gt = match &spec.stars {
+            Some(m) => frame.stars.iter().filter(|s| s.v as f64 <= m.mag_limit).copied().collect(),
+            None => vec![],
+        };
+        pending = Some(Pending { index: k, t, cam, rgb, exposure, depth_z: frame.depth, points: frame.points, landcover: frame.landcover, stars: stars_gt });
         progress(k + 1, n);
     }
     if let Some(prev) = pending.take() {

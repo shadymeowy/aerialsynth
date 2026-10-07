@@ -17,7 +17,7 @@ struct U {
     cam_up: vec4<f32>,   // local up at the camera; w: sub-sample angular size
     sun_dir: vec4<f32>,  // towards the sun (ECEF); w: tan(max(sun elevation, 0.005))
     moon_dir: vec4<f32>, // w: lunar disc radiance
-    sun_col: vec4<f32>,  // w: star visibility
+    sun_col: vec4<f32>,
     moon_col: vec4<f32>, // w: Mie extinction β_m
     ray_col: vec4<f32>,  // w: Rayleigh scale height
     mie_col: vec4<f32>,  // w: Mie scale height
@@ -401,23 +401,6 @@ fn sky(dir: vec3<f32>, up: vec3<f32>) -> vec3<f32> {
             c += vec3<f32>(0.95, 0.95, 1.0) * disc;
         }
         c += vec3<f32>(0.8, 0.85, 1.0) * (disc * 2e-3 * pow(max(cm, 0.0), 512.0));
-    }
-    let star_vis = u.sun_col.w;
-    if star_vis > 0.0 && e > 0.0 {
-        let q = dir * 600.0;
-        let ix = i32(floor(q.x));
-        let iy = i32(floor(q.y));
-        let iz = i32(floor(q.z));
-        var h = mul64(i64of(ix), vec2<u32>(0x7F4A7C15u, 0x9E3779B9u)) ^ mul64(i64of(iy), vec2<u32>(0x27D4EB4Fu, 0xC2B2AE3Du)) ^ mul64(i64of(iz), vec2<u32>(0x9E3779F9u, 0x165667B1u));
-        h = h ^ shr64(h, 31u);
-        h = mul64(h, vec2<u32>(0xed558ccdu, 0xff51afd7u));
-        h = h ^ shr64(h, 29u);
-        let uu = unit64(h);
-        if uu < 0.004 {
-            let mag = f32(h.x & 0xFFFFu) / 65535.0;
-            let b = 4e-5 * pow(10.0, 2.0 * pow(1.0 - mag, 3.0)) * star_vis * min(e, 0.3) / 0.3;
-            c += vec3<f32>(0.9 + 0.2 * mag, 0.95, 1.1 - 0.2 * mag) * b;
-        }
     }
     return c;
 }

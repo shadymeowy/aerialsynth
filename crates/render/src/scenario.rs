@@ -90,6 +90,9 @@ pub struct CameraSpec {
     pub landcover: Option<LandcoverModality>,
     #[serde(default)]
     pub events: Option<EventConfig>,
+    /// Star ground truth (needs `rgb` and `lighting.stars`).
+    #[serde(default)]
+    pub stars: Option<StarsModality>,
 }
 
 fn default_frame_rate() -> f64 {
@@ -109,6 +112,7 @@ impl CameraSpec {
             flow: Some(FlowModality {}),
             landcover: None,
             events: None,
+            stars: None,
         }
     }
 
@@ -182,6 +186,22 @@ pub struct FlowModality {}
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LandcoverModality {}
+
+/// `stars/`: the catalogue stars in each frame (id, sub-pixel position, magnitude, irradiance,
+/// visibility); see output.rs.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct StarsModality {
+    /// Faintest V magnitude recorded (stars fainter than `render.stars.mag_limit` are never
+    /// rendered).
+    pub mag_limit: f64,
+}
+
+impl Default for StarsModality {
+    fn default() -> Self {
+        StarsModality { mag_limit: 99.0 }
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]

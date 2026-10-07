@@ -37,8 +37,6 @@ pub struct Atmosphere {
     pub moon_dir: DVec3,
     pub(crate) moon_col: DVec3,
     pub(crate) moon_disc: f64,
-    /// 0 (day) .. 1 (dark night): visibility of stars
-    pub(crate) star_vis: f64,
 }
 
 impl Atmosphere {
@@ -66,7 +64,6 @@ impl Atmosphere {
             moon_col,
             // lunar disc radiance relative to a sunlit white surface (~2500 cd/m² at full moon)
             moon_disc: 0.03 * sun.moon_phase * if sun.moon_elevation > -0.01 { 1.0 } else { 0.0 },
-            star_vis: if sun.stars { 1.0 - (sky / 1e-3).min(1.0) } else { 0.0 },
             p,
         }
     }
@@ -140,21 +137,6 @@ impl Atmosphere {
                 c += DVec3::new(0.95, 0.95, 1.0) * self.moon_disc;
             }
             c += DVec3::new(0.8, 0.85, 1.0) * (self.moon_disc * 2e-3 * cm.max(0.0).powi(512));
-        }
-        if self.star_vis > 0.0 && e > 0.0 {
-            // stars: hashed points on a fine direction lattice (~0.1°)
-            let q = dir * 600.0;
-            let (ix, iy, iz) = (q.x.floor() as i64, q.y.floor() as i64, q.z.floor() as i64);
-            let mut h = (ix as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (iy as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F) ^ (iz as u64).wrapping_mul(0x1656_67B1_9E37_79F9);
-            h ^= h >> 31;
-            h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
-            h ^= h >> 29;
-            let u = (h >> 11) as f64 / (1u64 << 53) as f64;
-            if u < 0.004 {
-                let mag = (h & 0xffff) as f64 / 65535.0;
-                let b = 4e-5 * 10f64.powf(2.0 * (1.0 - mag).powi(3)) * self.star_vis * e.min(0.3) / 0.3;
-                c += DVec3::new(0.9 + 0.2 * mag, 0.95, 1.1 - 0.2 * mag) * b;
-            }
         }
         c
     }

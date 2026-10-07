@@ -54,6 +54,8 @@ pub struct RenderSettings {
     pub water_glint: bool,
     /// cpu (reference) or gpu (wgpu, headless; needs the `gpu` feature)
     pub backend: Backend,
+    /// Catalogue stars (on with `lighting.stars`).
+    pub stars: crate::stars::StarsConfig,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -78,6 +80,7 @@ impl Default for RenderSettings {
             max_aniso: 8,
             water_glint: true,
             backend: Backend::Cpu,
+            stars: Default::default(),
         }
     }
 }
@@ -105,6 +108,8 @@ pub struct FrameOut {
     /// (instantaneous, no exposure averaging). f32 x3 like `radiance`.
     pub flicker_cos: Vec<f32>,
     pub flicker_sin: Vec<f32>,
+    /// Catalogue stars in the image (positions, magnitudes; see `stars`).
+    pub stars: Vec<crate::stars::StarObs>,
     /// render units used (for statistics / planning feedback)
     pub units: Vec<Unit>,
 }
@@ -490,6 +495,8 @@ pub struct Renderer {
     pub(crate) rays: Vec<[f32; 3]>,
     /// unique id of this renderer (GPU-side caches of its ray table)
     pub(crate) id: u64,
+    /// star catalogue and colours (loaded on the first render with stars)
+    star_field: std::sync::OnceLock<crate::stars::StarField>,
 }
 
 impl Renderer {
@@ -507,7 +514,7 @@ impl Renderer {
             .collect();
         static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Renderer { model, model_ss, settings, ell, cache, geometry_only: false, split_flicker: false, rays, id }
+        Renderer { model, model_ss, settings, ell, cache, geometry_only: false, split_flicker: false, rays, id, star_field: Default::default() }
     }
 
     pub fn select_units(&self, cam: &CamPose) -> Vec<Unit> {
@@ -725,6 +732,16 @@ impl Renderer {
 
     /// Render one frame for camera pose `cam` under the given sun / light state.
     pub fn render(&self, cam: &CamPose, sun_state: &SunState) -> FrameOut {
+        let mut frame = self.render_terrain(cam, sun_state);
+        if sun_state.stars && !self.geometry_only {
+            let field = self.star_field.get_or_init(|| crate::stars::StarField::new(&self.settings.stars).unwrap_or_else(|e| panic!("stars: {e:#}")));
+            field.render(&mut frame, self.model.as_ref(), cam, sun_state.unix, &self.ell, &self.settings.atmosphere);
+        }
+        frame
+    }
+
+    /// Terrain, sky and lights (everything but the stars).
+    fn render_terrain(&self, cam: &CamPose, sun_state: &SunState) -> FrameOut {
         #[cfg(feature = "gpu")]
         if self.settings.backend == Backend::Gpu {
             return crate::gpu::render(self, cam, sun_state);
@@ -930,6 +947,7 @@ impl Renderer {
             sample_offset: (cs as f64 + 0.5) / ss as f64 - 0.5,
             flicker_cos: Vec::with_capacity(if split { ow * oh * 3 } else { 0 }),
             flicker_sin: Vec::with_capacity(if split { ow * oh * 3 } else { 0 }),
+            stars: Vec::new(),
             units,
         };
         for r in rows_out {

@@ -235,6 +235,9 @@ pub struct SunState {
     /// Time (s, trajectory time) and exposure duration (s) of the render, for lamp flicker.
     pub time: f64,
     pub exposure: f64,
+    /// UTC of the render (Unix seconds): the clock in `clock` mode; in `fixed` mode the static
+    /// `date` / `time_utc` (as for the moon).
+    pub unix: f64,
     pub flicker: FlickerConfig,
 }
 
@@ -287,6 +290,7 @@ impl LightingConfig {
             light_pollution: self.light_pollution,
             time: t,
             exposure: 0.0,
+            unix: parse_utc(&self.date, &self.time_utc).unwrap_or(0.0) + t * if self.mode == SunMode::Clock { self.time_scale } else { 0.0 },
             flicker: self.flicker,
         }
     }
