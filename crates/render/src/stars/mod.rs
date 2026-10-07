@@ -12,6 +12,8 @@
 
 pub mod astro;
 pub mod catalog;
+pub mod ephem;
+pub mod planets;
 
 use crate::atmo::AtmoParams;
 use crate::camera::CameraModel;
@@ -45,6 +47,9 @@ pub struct StarsConfig {
     pub dut1_s: f64,
     /// Polar motion x_p, y_p (arcsec, IERS).
     pub polar_motion_arcsec: [f64; 2],
+    /// Planets (Mercury … Neptune, DE440, 1990–2060) as stars or discs; with the Moon in the
+    /// ground truth.
+    pub planets: bool,
 }
 
 impl Default for StarsConfig {
@@ -59,6 +64,7 @@ impl Default for StarsConfig {
             aberration: true,
             dut1_s: 0.0,
             polar_motion_arcsec: [0.0, 0.0],
+            planets: true,
         }
     }
 }
@@ -139,16 +145,36 @@ impl StarField {
                     u = astro::deflect(u, sky.sun_to_earth, sky.sun_dist);
                     u = astro::aberrate(u, vobs, sky.sun_dist);
                 }
-                let d = m * u;
-                if p_hpa > 0.0 {
-                    let el = d.dot(up).clamp(-1.0, 1.0).asin();
-                    let r = astro::refraction(el, p_hpa, t_k);
-                    let tang = up - d * d.dot(up);
-                    if tang.length_squared() > 1e-24 {
-                        return (d * r.cos() + tang.normalize() * r.sin()).normalize();
-                    }
-                }
-                d
+                refract(m * u, up, p_hpa, t_k)
+            })
+            .collect()
+    }
+
+    /// The planets (drawn) and the Moon (ground truth only; the sky draws it) at Unix time
+    /// `unix` for an observer at ECEF `pos`: apparent ITRS directions after refraction. Empty
+    /// outside 1990–2060 or with `planets: false`.
+    pub fn bodies(&self, unix: f64, pos: DVec3, ell: &Ellipsoid) -> Vec<Source> {
+        let c = &self.cfg;
+        if !c.planets {
+            return vec![];
+        }
+        let as2r = std::f64::consts::PI / 180.0 / 3600.0;
+        let sky = Sky::new(unix, c.dut1_s, c.polar_motion_arcsec[0] * as2r, c.polar_motion_arcsec[1] * as2r);
+        let geo = geodesy::frames::ecef2geodetic(pos, ell);
+        let up = DVec3::new(geo.lat.cos() * geo.lon.cos(), geo.lat.cos() * geo.lon.sin(), geo.lat.sin());
+        let (p_hpa, t_k) = if c.refraction { astro::standard_atmosphere(geo.h) } else { (0.0, 288.0) };
+        let mut list = planets::PLANETS.to_vec();
+        list.push(ephem::Body::Moon);
+        let Some(app) = planets::apparent(&sky, pos, &list) else { return vec![] };
+        app.iter()
+            .filter(|a| a.v <= c.mag_limit)
+            .map(|a| Source {
+                id: planets::body_id(a.body),
+                dir: refract(sky.gcrs_to_itrs * a.dir, up, p_hpa, t_k),
+                v: a.v as f32,
+                bv: planets::colour_bv(a.body) as f32,
+                radius: a.radius,
+                draw: a.body != ephem::Body::Moon,
             })
             .collect()
     }
@@ -169,6 +195,8 @@ impl StarField {
     #[allow(clippy::too_many_arguments)]
     pub fn render_track(&self, radiance: &mut [f32], points: &[Option<DVec3>], (w, h): (usize, usize), model: &dyn CameraModel, track: &[CamPose], mid: &CamPose, unix: f64, ell: &Ellipsoid, atmo: &AtmoParams) -> Vec<StarObs> {
         let dirs = self.apparent(unix, mid.pos, ell);
+        let mut sources: Vec<Source> = dirs.iter().zip(&self.cat.stars[..self.n]).map(|(d, s)| Source { id: s.id, dir: *d, v: s.v, bv: s.bv, radius: 0.0, draw: true }).collect();
+        sources.extend(self.bodies(unix, mid.pos, ell));
         let rt = mid.r_ecef_cam.transpose();
         let geo = geodesy::frames::ecef2geodetic(mid.pos, ell);
         let up = DVec3::new(geo.lat.cos() * geo.lon.cos(), geo.lat.cos() * geo.lon.sin(), geo.lat.sin());
@@ -186,10 +214,10 @@ impl StarField {
         let r = if sigma < 0.05 { 0 } else { (3.0 * sigma + 0.5).ceil() as i64 };
         let sky = |x: i64, y: i64| points.get(y as usize * w + x as usize).is_some_and(|q| q.is_none());
         // per star: ground truth at `mid`, and its splat (pixel index, rgb) contributions
-        let found: Vec<StarSplat> = dirs
+        let found: Vec<StarSplat> = sources
             .par_iter()
-            .zip(&self.cat.stars[..self.n])
-            .filter_map(|(d, s)| {
+            .filter_map(|s| {
+                let d = &s.dir;
                 let pm = model.project(rt * *d);
                 // positions along the exposure
                 let pts: Vec<Option<DVec2>> = tracks.iter().map(|m| model.project(*m * *d)).collect();
@@ -208,7 +236,7 @@ impl StarField {
                     let pmean = if seg.is_empty() { p } else { seg.iter().fold(DVec2::ZERO, |a, b| a + *b) / seg.len() as f64 };
                     StarObs { id: s.id, x: p.x as f32, y: p.y as f32, xm: pmean.x as f32, ym: pmean.y as f32, v: s.v, irradiance: (e * t.y) as f32, visible: sky(xi, yi) }
                 });
-                if radiance.is_empty() {
+                if radiance.is_empty() || !s.draw {
                     return obs.map(|o| (Some(o), vec![]));
                 }
                 let col = self.colours[(((s.bv as f64 + 0.5) / 0.01).round() as usize).min(350)];
@@ -237,6 +265,19 @@ impl StarField {
                             samples.extend((0..m).map(|i| (a + (b - a) * ((i as f64 + 0.5) / m as f64), 1.0 / (nseg * m as f64))));
                         }
                     }
+                }
+                // resolved discs (planets): a uniform disc of the apparent radius, sampled on a
+                // grid (≤ ~400 points) around every track sample
+                let rpx = s.radius / omega.sqrt();
+                if rpx > 0.3 {
+                    let step = 0.25f64.max(rpx * (std::f64::consts::PI / 400.0).sqrt());
+                    let k = (rpx / step).ceil() as i64;
+                    let disc: Vec<DVec2> = (-k..=k)
+                        .flat_map(|j| (-k..=k).map(move |i| DVec2::new(i as f64 * step, j as f64 * step)))
+                        .filter(|o| o.length() <= rpx)
+                        .collect();
+                    let nd = disc.len().max(1) as f64;
+                    samples = samples.iter().flat_map(|(p, w)| disc.iter().map(move |o| (*p + *o, *w / nd))).collect();
                 }
                 let mut adds: Vec<(usize, DVec3)> = vec![];
                 for (p, wt) in &samples {
@@ -278,6 +319,49 @@ impl StarField {
             out.extend(o);
         }
         out
+    }
+}
+
+/// Topocentric azimuth (from north, clockwise), elevation (no refraction) and illuminated
+/// fraction of the Moon from DE440 for an observer on the ellipsoid at `lat`, `lon` (rad).
+/// None outside 1990–2060.
+pub fn moon_topocentric(unix: f64, lat: f64, lon: f64) -> Option<(f64, f64, f64)> {
+    let sky = Sky::new(unix, 0.0, 0.0, 0.0);
+    let pos = geodesy::frames::geodetic2ecef(geodesy::Geodetic::new(lat, lon, 0.0), &Ellipsoid::WGS84);
+    let a = planets::apparent(&sky, pos, &[ephem::Body::Moon])?[0];
+    let e = geodesy::frames::ecef2enuv(sky.gcrs_to_itrs * a.dir, lat, lon);
+    let el = e.z.clamp(-1.0, 1.0).asin();
+    let az = e.x.atan2(e.y).rem_euclid(std::f64::consts::TAU);
+    Some((az, el, 0.5 * (1.0 + a.phase.to_radians().cos())))
+}
+
+/// A point or disc source in the sky: a catalogue star or a solar-system body.
+#[derive(Clone, Copy, Debug)]
+pub struct Source {
+    /// HIP number, 1<<31 | Tycho-2, or 1<<30 | NAIF id (planets, Moon)
+    pub id: u32,
+    /// apparent direction (ITRS / ECEF, refracted)
+    pub dir: DVec3,
+    pub v: f32,
+    pub bv: f32,
+    /// apparent radius (rad; 0 for stars)
+    pub radius: f64,
+    /// drawn by the star renderer (the Moon is drawn by the sky)
+    pub draw: bool,
+}
+
+/// Rotate `d` towards the zenith `up` by the refraction at its elevation.
+fn refract(d: DVec3, up: DVec3, p_hpa: f64, t_k: f64) -> DVec3 {
+    if p_hpa <= 0.0 {
+        return d;
+    }
+    let el = d.dot(up).clamp(-1.0, 1.0).asin();
+    let r = astro::refraction(el, p_hpa, t_k);
+    let tang = up - d * d.dot(up);
+    if tang.length_squared() > 1e-24 {
+        (d * r.cos() + tang.normalize() * r.sin()).normalize()
+    } else {
+        d
     }
 }
 
@@ -370,7 +454,7 @@ mod tests {
                 let got = ecef2enuv(dirs[k], la, lo);
                 let sep = got.angle_between(want).to_degrees() * 3600.0;
                 worst = worst.max(sep);
-                assert!(sep < 0.03, "{}: {sep:.4}\\\"", catalog::designation(id));
+                assert!(sep < 0.005, "{}: {sep:.4}\"", catalog::designation(id));
             }
         }
         eprintln!("worst separation from Skyfield: {worst:.4}\"");
@@ -393,6 +477,44 @@ mod tests {
             assert!(r <= prev + 1e-12, "not monotonic at {k}°");
             prev = r;
         }
+    }
+
+    /// Planets and the Moon (system barycentres, no refraction) against Skyfield 1.53 with JPL
+    /// DE440s; magnitudes against skyfield.magnitudelib (Mallama & Hilton 2018).
+    #[test]
+    fn planets_match_skyfield() {
+        // 2026-03-19 21:30 UTC, lat 41.5705 lon 32.97 h 1500 m: (NAIF, az, el, V)
+        let want = [
+            (199, 22.526078691, -53.730670832, 1.1842),
+            (299, 330.545216800, -38.305505284, -3.9177),
+            (499, 13.256217174, -55.207123713, 1.1662),
+            (599, 273.149770103, 32.332391173, -2.2934),
+            (699, 342.643150145, -47.454123280, 0.9292),
+            (799, 302.390759908, -5.481492348, 5.7799),
+            (899, 346.132847664, -48.099017103, 7.8251),
+            (301, 339.866486399, -40.577419047, f64::NAN),
+        ];
+        let (la, lo) = (41.5705f64.to_radians(), 32.97f64.to_radians());
+        let ell = geodesy::Ellipsoid::WGS84;
+        let pos = geodetic2ecef(Geodetic::new(la, lo, 1500.0), &ell);
+        let f = StarField::new(&StarsConfig { refraction: false, dut1_s: 0.051546, ..Default::default() }).unwrap();
+        let bodies = f.bodies(1773955800.0, pos, &ell);
+        assert_eq!(bodies.len(), want.len());
+        for (naif, az, el, v) in want {
+            let b = bodies.iter().find(|b| b.id == (1 << 30) | naif).unwrap();
+            let (sa, ca) = f64::to_radians(az).sin_cos();
+            let (se, ce) = f64::to_radians(el).sin_cos();
+            let sep = ecef2enuv(b.dir, la, lo).angle_between(DVec3::new(ce * sa, ce * ca, se)).to_degrees() * 3600.0;
+            assert!(sep < 0.02, "{naif}: {sep:.4}\"");
+            if v.is_finite() {
+                assert!((b.v as f64 - v).abs() < 0.05, "{naif}: V {} vs {v}", b.v);
+            }
+            assert_eq!(b.draw, naif != 301);
+        }
+        // the lighting Moon uses the same ephemeris (no refraction, observer on the ellipsoid)
+        let (az, el, phase) = crate::lighting::moon_position(1773955800.0, la, lo);
+        assert!((az.to_degrees() - 339.866).abs() < 0.01 && (el.to_degrees() + 40.577).abs() < 0.03, "{az} {el}");
+        assert!(phase < 0.03, "new moon on 2026-03-19: {phase}");
     }
 
     #[test]

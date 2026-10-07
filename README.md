@@ -223,9 +223,10 @@ attribute `t0` holds it in trajectory seconds).
   - `relit` (albedo + normals + DSM ray-marched cast shadows) or `satellite` (baked imagery)
   - sun fixed or from date/time (NOAA), continuous twilight
   - moon position and phase with moonlight and the lunar disc
-  - real stars (Hipparcos + Tycho-2, V ≤ 9) at their apparent positions for the date, time and
-    place (star-tracker accuracy: 0.01″ vs Skyfield), radiometric brightness and colour, per-frame
-    star ground truth; see `docs/stars.md`
+  - real stars (Hipparcos + Tycho-2, V ≤ 9), planets and the Moon (JPL DE440, 1990–2060) at
+    their apparent positions for the date, time and place (≤ 0.01″ vs Skyfield), radiometric
+    brightness and colour, planet discs, trails over the exposure, per-frame ground truth; see
+    `docs/stars.md`
   - `render.backend: gpu`: headless wgpu renderer and event sensor, same output as the CPU
     reference; see `docs/gpu.md`
   - night lights from the generated emission layer: street lamps (sodium/LED), porch lights,

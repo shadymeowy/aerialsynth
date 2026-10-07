@@ -1,6 +1,6 @@
 # Stars
 
-Night skies show the real stars at their apparent positions for the scenario's date, time and
+Night skies show the real stars, the planets and the Moon at their apparent positions for the scenario's date, time and
 the camera's position and attitude. The accuracy is star-tracker grade, the brightness is
 radiometric, and every frame can carry star ground truth.
 
@@ -15,6 +15,7 @@ render:
     refraction: true
     extinction: true
     aberration: true         # also enables light deflection by the Sun
+    planets: true            # Mercury … Neptune (DE440, 1990–2060); Moon in the ground truth
     dut1_s: 0.0              # UT1 − UTC (IERS Bulletin A)
     polar_motion_arcsec: [0, 0]
 cameras:
@@ -54,7 +55,39 @@ A deeper catalogue (all of Tycho-2, about 58 MB) can be built from the CDS files
 python scripts/build_stars.py CATDIR --vmax 12.5 -o tycho2.stars   # see the script for the download
 ```
 
-What the catalogue does not contain: planets, and the unresolved Milky Way glow.
+The catalogue contains stars only; the planets come from the ephemeris (below). It has no
+unresolved Milky Way glow.
+
+## Planets and the Moon (`stars/ephem.rs`, `stars/planets.rs`)
+
+**Ephemeris.** JPL DE440, as its Chebyshev segments, is built into the binary for 1990–2060
+(`crates/render/data/planets.bin`, 2.8 MB, from `scripts/build_planets.py`). It covers the Sun,
+the planet system barycentres, the Earth–Moon barycentre and the Moon; the Earth is −Moon / EMRAT.
+Constant terms are stored as f64 and the others as f32, so rounding is ≤ 2 km for the planets
+(≤ 0.008″ even at Venus's closest) and 8 m for the Moon. The same ephemeris gives the Earth's
+barycentric position and velocity for the star aberration and parallax. Outside 1990–2060 the
+stars fall back to Keplerian elements (≈ 0.01″) and there are no planets.
+
+**Apparent places.** Positions are topocentric, with light time, light deflection by the Sun,
+and aberration from the observer's orbital and diurnal velocity, followed by the same Earth
+rotation, refraction and camera chain as the stars. They are the positions of the planet
+system barycentres: Jupiter's and Saturn's centres lie within ~200–300 km of theirs, ≤ 0.07″.
+
+**Brightness and size.**
+* V magnitudes follow Mallama & Hilton 2018, the formulas used by the Astronomical Almanac and
+  Skyfield. They depend on phase angle, Saturn's ring tilt and Uranus's sub-observer and
+  sub-solar latitudes.
+* Colour comes from each planet's mean B−V.
+* Planets larger than 0.3 px are drawn as uniform discs of their apparent equatorial radius;
+  Jupiter at opposition is 46.6″. They are smeared along the exposure track like the stars.
+* Phases (the crescent Venus, gibbous Mars), Saturn's rings and the Galilean moons are not drawn.
+
+**The Moon.** The Moon is drawn by the sky, as before. Its position and phase, which also drive
+moonlight, now come from DE440 (topocentric) instead of mean elements (~0.5°). It appears in the
+star ground truth.
+
+**Ground-truth ids.** Planets and the Moon have id `1<<30 | NAIF id`: 199 Mercury, 299 Venus,
+499 Mars, 599 Jupiter, 699 Saturn, 799 Uranus, 899 Neptune and 301 the Moon.
 
 ## Astrometry (`stars/astro.rs`)
 
@@ -84,9 +117,13 @@ come from the US standard atmosphere at the observer's altitude, and refraction 
 80 km.
 
 **Validation** (`cargo test -p render stars`, plus `configs/star_tracker.yaml`):
-* Positions were compared against Skyfield 1.53 (JPL DE421, IAU 2000A) for the same catalogue
-  records: 1,600 star/place/time cases, sea level to 10 km, years 2026–2031. The mean
-  separation is 0.006–0.008″ and the worst 0.011″.
+* Star positions were compared against Skyfield 1.53 (JPL DE421, IAU 2000A) for the same
+  catalogue records: 1,600 star/place/time cases, sea level to 10 km, years 2026–2031. The
+  mean separation is 0.0002–0.0005″ and the worst 0.0009″.
+* Planets and the Moon were compared against Skyfield with DE440s over five dates from 1995 to
+  2045. The worst planet separation is 0.007″, the Moon's 0.002″, and magnitudes agree with
+  `skyfield.magnitudelib` to within 0.03.
+* Jupiter's rendered disc centroids to 0.012 px of its ground truth.
 * Refraction matches pyERFA's `refco` to within 0.02″.
 * Centroids measured in the rendered images (`configs/star_tracker.yaml`: 25° field of view,
   100 ms, 8-bit output) against the ground truth:
@@ -148,3 +185,4 @@ of over 5,000.
 
 * Hipparcos and Tycho-2: ESA, via CDS / VizieR (catalogues I/239, I/311, I/259).
 * ERFA: BSD-3 licence, derived from IAU SOFA. The nutation table is taken from ERFA `nut00b.c`.
+* JPL DE440 (Park et al. 2021): public domain.

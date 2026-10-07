@@ -306,6 +306,8 @@ pub struct Sky {
     pub sun_dist: f64,
     /// Julian years since J2000 (TT), for proper motion
     pub years: f64,
+    /// Julian date (TT ≈ TDB)
+    pub jd_tt: f64,
 }
 
 impl Sky {
@@ -317,8 +319,17 @@ impl Sky {
         let (m, ee) = npb(t);
         let gast = gmst(du, t) + ee;
         let w = rx(-yp) * ry(-xp);
-        let (pos, vel, helio) = earth_barycentric(t);
-        Sky { gcrs_to_itrs: w * rz(gast) * m, earth_pos: pos, earth_vel_c: vel / C_AU_DAY, sun_to_earth: helio.normalize(), sun_dist: helio.length(), years: t * 100.0 }
+        let jd_tt = tt / 86400.0 + 2440587.5;
+        // Earth from DE440 when covered (1990–2060), else Keplerian elements
+        let eph = super::ephem::Ephemeris::builtin();
+        let (pos, vel, helio) = match (eph.barycentric(super::ephem::Body::Earth, jd_tt), eph.barycentric(super::ephem::Body::Sun, jd_tt)) {
+            (Some((pe, ve)), Some((ps, _))) => {
+                let au = AU / 1000.0;
+                (pe / au, ve / au, (pe - ps) / au)
+            }
+            _ => earth_barycentric(t),
+        };
+        Sky { gcrs_to_itrs: w * rz(gast) * m, earth_pos: pos, earth_vel_c: vel / C_AU_DAY, sun_to_earth: helio.normalize(), sun_dist: helio.length(), years: t * 100.0, jd_tt }
     }
 
     /// Observer velocity (units of c, GCRS axes) of an Earth-fixed point at ECEF `pos` (m):

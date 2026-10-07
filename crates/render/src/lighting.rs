@@ -296,9 +296,15 @@ impl LightingConfig {
     }
 }
 
-/// Low-precision lunar position (Meeus / Astronomical Almanac mean elements, ~0.5°) and the
-/// illuminated fraction. Returns (azimuth from north clockwise, elevation, phase), radians.
+/// Lunar position (azimuth from north clockwise, elevation; radians) and illuminated fraction:
+/// topocentric from JPL DE440 for 1990–2060 (milliarcseconds), else low-precision mean elements
+/// (Meeus / Astronomical Almanac, ~0.5°).
 pub fn moon_position(unix: f64, lat: f64, lon: f64) -> (f64, f64, f64) {
+    crate::stars::moon_topocentric(unix, lat, lon).unwrap_or_else(|| moon_position_low(unix, lat, lon))
+}
+
+/// Low-precision lunar position (mean elements, ~0.5°) and illuminated fraction.
+pub fn moon_position_low(unix: f64, lat: f64, lon: f64) -> (f64, f64, f64) {
     let deg = std::f64::consts::PI / 180.0;
     let d = unix / 86400.0 + 2440587.5 - 2451545.0;
     let l = (218.316 + 13.176396 * d).rem_euclid(360.0);
