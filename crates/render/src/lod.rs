@@ -35,6 +35,12 @@ pub trait TileOracle {
     fn range(&self, id: TileId) -> Option<(f32, f32)>;
     /// Whether tile data exists (planning: always true).
     fn exists(&self, id: TileId) -> bool;
+    /// Refine tiles whose elevation range is only inherited from an ancestor (or the default).
+    /// The pre-render dry run says no: it descends one level per pass and learns the real
+    /// ranges on the way, instead of refining conservative (huge) volumes to the finest zoom.
+    fn refine_unknown(&self) -> bool {
+        true
+    }
 }
 
 /// Planning oracle: every tile "exists"; elevation ranges come from an estimator (e.g. the
@@ -134,19 +140,41 @@ pub struct Selector<'a> {
     axis: DVec3,
     cos_half: f64,
     half: f64,
+    /// camera height above the ellipsoid, local up, and the lowest elevation angle in the view cone
+    cam_h: f64,
+    up: DVec3,
+    cone_low: f64,
 }
 
 impl<'a> Selector<'a> {
     pub fn new(cam: &'a CamPose, model: &'a dyn CameraModel, ell: Ellipsoid, params: &'a LodParams, oracle: &'a dyn TileOracle) -> Self {
         let axis = cam.r_ecef_cam * DVec3::Z;
         let half = (model.max_half_angle() + params.cone_margin).min(std::f64::consts::PI);
-        Selector { cam, model, ell, params, oracle, axis, cos_half: half.cos(), half }
+        let geo = geodesy::ecef2geodetic(cam.pos, &ell);
+        let up = DVec3::new(geo.lat.cos() * geo.lon.cos(), geo.lat.cos() * geo.lon.sin(), geo.lat.sin());
+        let cone_low = axis.dot(up).clamp(-1.0, 1.0).asin() - half;
+        Selector { cam, model, ell, params, oracle, axis, cos_half: half.cos(), half, cam_h: geo.h, up, cone_low }
     }
 
     pub fn visible(&self, id: TileId, range: (f32, f32)) -> Option<(f64, f64)> {
         let (c, r) = tile_sphere(id, range, &self.ell);
         let d = c - self.cam.pos;
         let dist = d.length();
+        // below the view: with the camera above the tile's top, the tile volume lies below the
+        // highest elevation angle of its top surface (attained on its boundary); cull when that
+        // is under the lowest elevation of the view cone. Matters when the camera is inside the
+        // bounding sphere (low flight, coarse tiles), where the cone test does not apply.
+        if self.cone_low > -std::f64::consts::FRAC_PI_2 && self.cam_h > range.1 as f64 + 1.0 {
+            let b = id.bounds();
+            let seg = (b.lon_max - b.lon_min).abs() * self.ell.a / 4.0;
+            let top = range.1 as f64 + seg * seg / (8.0 * self.ell.b) + 10.0;
+            if top < self.cam_h {
+                let emax = tile_points(id, &[top], &self.ell).iter().map(|p| (*p - self.cam.pos).normalize().dot(self.up).asin()).fold(f64::MIN, f64::max);
+                if emax < self.cone_low - 0.01 {
+                    return None;
+                }
+            }
+        }
         if dist > r {
             // view cone test
             let cosang = d.dot(self.axis) / dist;
@@ -199,7 +227,8 @@ impl<'a> Selector<'a> {
         // elevation range: the tile's own if known, else the nearest ancestor's with a margin
         // (a tile that exists but is not generated yet, or is drawn from ancestor data), else the
         // default. The default (-100..6000 m) makes far tiles look close and over-refines them.
-        let range = (data.is_some().then(|| self.oracle.range(id)).flatten())
+        let own = data.is_some().then(|| self.oracle.range(id)).flatten();
+        let range = own
             .or_else(|| {
                 let mut a = id;
                 while let Some(p) = a.parent() {
@@ -212,7 +241,7 @@ impl<'a> Selector<'a> {
             })
             .unwrap_or(self.params.default_range);
         let Some((dist, r)) = self.visible(id, range) else { return };
-        if self.wants_refine(id, dist, r) && id.children().iter().any(|c| self.oracle.exists(*c)) {
+        if self.wants_refine(id, dist, r) && (own.is_some() || self.oracle.refine_unknown()) && id.children().iter().any(|c| self.oracle.exists(*c)) {
             for c in id.children() {
                 // children without data are drawn from the nearest ancestor that has data
                 let cd = if self.oracle.exists(c) { Some(c) } else { data };

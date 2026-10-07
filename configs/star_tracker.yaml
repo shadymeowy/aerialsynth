@@ -1,0 +1,26 @@
+# Star tracker: a 25° camera looking at Orion from an aircraft at 1.5 km on a winter night,
+# with per-frame star ground truth (catalogue id, sub-pixel position, magnitude). See docs/stars.md.
+#   terrain run -c configs/star_tracker.yaml
+world: { seed: 1 }
+tiles: { file: out/star_tracker/world.h5, max_zoom: 17, lazy: true }
+trajectory:
+  file: out/star_tracker/traj.csv
+  synth: { kind: line, lat: 41.5705, lon: 32.970, heading_deg: 190, altitude: 1500, duration: 4, rate: 100 }
+render:
+  backend: gpu
+  supersample: 2
+  lighting: { mode: clock, date: "2026-01-20", time_utc: "19:30:00" }
+  stars:
+    dut1_s: 0.05            # UT1 − UTC from IERS Bulletin A for arcsecond work
+cameras:
+  - path: /tracker
+    intrinsics: { model: pinhole, width: 1920, height: 1080, intrinsics: [4330, 4330, 959.5, 539.5] }
+    extrinsics: { mount: forward, pitch_deg: 45, yaw_deg: -4 }
+    frame_rate: 10
+    stars: { mag_limit: 9 }
+    rgb:
+      sensor:
+        # fast optics (base_time: light gathering) rather than gain, which amplifies read noise
+        exposure: { mode: manual, ev: 15.29, base_time: 1.0e-5, max_time: 0.1, max_gain: 4 }
+        optics: { defocus_px: 1.0, bloom: 0.0, starburst: 0.0, vignette: 0.0, chromatic_aberration_px: 0.0 }
+output: { file: out/star_tracker/seq.h5, png_dir: out/star_tracker/png, start: 0.5, end: 1.5 }

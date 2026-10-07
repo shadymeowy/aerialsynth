@@ -27,7 +27,8 @@
 //!     events/             x, y u16, t i64 µs, p i8 (1 = ON), ms_index u64  ← events (events.rs)
 //!     stars/              catalogue stars per frame: index u64 [N+1] (frame k: [index[k],
 //!                         index[k+1])), id u32 (HIP number; Tycho-2 1<<31|TYC1<<17|TYC2<<3|TYC3),
-//!                         x, y f32 (px, pixel centres at integers), v f32 (catalogue V),
+//!                         x, y f32 (px at the frame time, pixel centres at integers), xm, ym
+//!                         f32 (averaged over the exposure: the trail centroid), v f32 (catalogue V),
 //!                         irradiance f32 (V band, relative to the Sun outside the atmosphere,
 //!                         after extinction), visible u8 (pixel shows sky)  ← stars
 //! <imu.path>/             t, accel, gyro, gt_*, calib/T_body_imu  (imu.rs)
@@ -319,7 +320,7 @@ impl CameraWriter {
 /// Streaming writer of `<camera>/stars` (frames in order).
 struct StarsWriter {
     group: h5::Group,
-    ds: [h5::Dataset; 6],
+    ds: [h5::Dataset; 8],
     n: usize,
     index: Vec<u64>,
 }
@@ -336,7 +337,7 @@ impl StarsWriter {
             };
             Ok(d)
         };
-        let ds = [mk("id", 0)?, mk("x", 1)?, mk("y", 1)?, mk("v", 1)?, mk("irradiance", 1)?, mk("visible", 2)?];
+        let ds = [mk("id", 0)?, mk("x", 1)?, mk("y", 1)?, mk("v", 1)?, mk("irradiance", 1)?, mk("visible", 2)?, mk("xm", 1)?, mk("ym", 1)?];
         Ok(StarsWriter { group: s, ds, n: 0, index: vec![] })
     }
 
@@ -356,6 +357,8 @@ impl StarsWriter {
         self.ds[3].write_slice(&st.iter().map(|s| s.v).collect::<Vec<_>>(), o, c)?;
         self.ds[4].write_slice(&st.iter().map(|s| s.irradiance).collect::<Vec<_>>(), o, c)?;
         self.ds[5].write_slice(&st.iter().map(|s| s.visible as u8).collect::<Vec<_>>(), o, c)?;
+        self.ds[6].write_slice(&st.iter().map(|s| s.xm).collect::<Vec<_>>(), o, c)?;
+        self.ds[7].write_slice(&st.iter().map(|s| s.ym).collect::<Vec<_>>(), o, c)?;
         self.n = n1;
         Ok(())
     }

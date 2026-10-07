@@ -21,7 +21,7 @@ use anyhow::Result;
 use astro::Sky;
 use catalog::Catalog;
 use geodesy::Ellipsoid;
-use glam::{DVec2, DVec3};
+use glam::{DMat3, DVec2, DVec3};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -67,9 +67,13 @@ impl Default for StarsConfig {
 #[derive(Clone, Copy, Debug)]
 pub struct StarObs {
     pub id: u32,
-    /// sub-pixel position (pixel centres at integer coordinates)
+    /// sub-pixel position at the frame time (pixel centres at integer coordinates)
     pub x: f32,
     pub y: f32,
+    /// position averaged over the exposure (the centroid of the star's trail; = x, y without
+    /// motion)
+    pub xm: f32,
+    pub ym: f32,
     /// catalogue V magnitude
     pub v: f32,
     /// V-band irradiance at the camera relative to the Sun's outside the atmosphere
@@ -84,6 +88,9 @@ const V_SUN: f64 = -26.74;
 /// Renderer radiance of a white Lambertian surface under the Sun outside the atmosphere
 /// (direct sunlight is 1 at one air mass, transmittance 0.9; see lighting.rs).
 const SUN_TOA: f64 = 1.0 / 0.9;
+
+/// A star's ground truth (if in the image at the frame time) and its (pixel, rgb) additions.
+type StarSplat = (Option<StarObs>, Vec<(usize, DVec3)>);
 
 pub struct StarField {
     cat: Arc<Catalog>,
@@ -146,13 +153,24 @@ impl StarField {
             .collect()
     }
 
-    /// Add the stars to `frame` (rendered with camera `cam`, `model` at output resolution) and
-    /// record them in `frame.stars`.
+    /// Add the stars to `frame` (an instantaneous render with camera `cam`; `model` at output
+    /// resolution) and record them in `frame.stars`.
     pub fn render(&self, frame: &mut FrameOut, model: &dyn CameraModel, cam: &CamPose, unix: f64, ell: &Ellipsoid, atmo: &AtmoParams) {
-        let dirs = self.apparent(unix, cam.pos, ell);
         let (w, h) = (frame.width as usize, frame.height as usize);
-        let rt = cam.r_ecef_cam.transpose();
-        let geo = geodesy::frames::ecef2geodetic(cam.pos, ell);
+        frame.stars = self.render_track(&mut frame.radiance, &frame.points, (w, h), model, std::slice::from_ref(cam), cam, unix, ell, atmo);
+    }
+
+    /// Stars over an exposure: `track` holds the camera poses at equal time steps across the
+    /// open shutter (one pose: instantaneous). Each star is splatted along its image track in
+    /// steps of at most 0.25 px with equal energy per unit time, so camera rotation draws
+    /// trails of the right length and brightness. Stars are added to the sky pixels of
+    /// `radiance` (empty: ground truth only). Returns the stars in the image at the pose `mid`
+    /// (the frame time).
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_track(&self, radiance: &mut [f32], points: &[Option<DVec3>], (w, h): (usize, usize), model: &dyn CameraModel, track: &[CamPose], mid: &CamPose, unix: f64, ell: &Ellipsoid, atmo: &AtmoParams) -> Vec<StarObs> {
+        let dirs = self.apparent(unix, mid.pos, ell);
+        let rt = mid.r_ecef_cam.transpose();
+        let geo = geodesy::frames::ecef2geodetic(mid.pos, ell);
         let up = DVec3::new(geo.lat.cos() * geo.lon.cos(), geo.lat.cos() * geo.lon.sin(), geo.lat.sin());
         // vertical optical depth above the camera per channel (the renderer's atmosphere)
         let tau = if self.cfg.extinction && atmo.enabled {
@@ -162,62 +180,104 @@ impl StarField {
         } else {
             DVec3::ZERO
         };
-        let found: Vec<(StarObs, DVec3)> = dirs
+        let inside = |p: DVec2| p.x >= -0.5 && p.y >= -0.5 && p.x <= w as f64 - 0.5 && p.y <= h as f64 - 0.5;
+        let tracks: Vec<DMat3> = track.iter().map(|c| c.r_ecef_cam.transpose()).collect();
+        let sigma = self.cfg.psf_sigma_px.max(0.0);
+        let r = if sigma < 0.05 { 0 } else { (3.0 * sigma + 0.5).ceil() as i64 };
+        let sky = |x: i64, y: i64| points.get(y as usize * w + x as usize).is_some_and(|q| q.is_none());
+        // per star: ground truth at `mid`, and its splat (pixel index, rgb) contributions
+        let found: Vec<StarSplat> = dirs
             .par_iter()
             .zip(&self.cat.stars[..self.n])
             .filter_map(|(d, s)| {
-                let p = model.project(rt * *d)?;
-                if p.x < -0.5 || p.y < -0.5 || p.x > w as f64 - 0.5 || p.y > h as f64 - 0.5 {
+                let pm = model.project(rt * *d);
+                // positions along the exposure
+                let pts: Vec<Option<DVec2>> = tracks.iter().map(|m| model.project(*m * *d)).collect();
+                let gt_in = pm.is_some_and(inside);
+                if !gt_in && !pts.iter().flatten().any(|p| inside(*p)) {
                     return None;
                 }
                 let el = d.dot(up).asin().to_degrees().max(-1.0);
                 let airmass = 1.0 / (el.to_radians().sin().max(0.0) + 0.50572 * (el + 6.07995).powf(-1.6364));
                 let t = (-tau * airmass).exp();
                 let e = 10f64.powf(-0.4 * (s.v as f64 - V_SUN));
+                let obs = pm.filter(|p| inside(*p)).map(|p| {
+                    let (xi, yi) = (p.x.round() as i64, p.y.round() as i64);
+                    // exposure-averaged position: mean of the track at equal time steps
+                    let seg: Vec<DVec2> = pts.windows(2).filter_map(|q| Some((q[0]? + q[1]?) * 0.5)).collect();
+                    let pmean = if seg.is_empty() { p } else { seg.iter().fold(DVec2::ZERO, |a, b| a + *b) / seg.len() as f64 };
+                    StarObs { id: s.id, x: p.x as f32, y: p.y as f32, xm: pmean.x as f32, ym: pmean.y as f32, v: s.v, irradiance: (e * t.y) as f32, visible: sky(xi, yi) }
+                });
+                if radiance.is_empty() {
+                    return obs.map(|o| (Some(o), vec![]));
+                }
                 let col = self.colours[(((s.bv as f64 + 0.5) / 0.01).round() as usize).min(350)];
-                let (xi, yi) = (p.x.round() as usize, p.y.round() as usize);
-                let visible = frame.points.get(yi * w + xi).is_some_and(|q| q.is_none());
-                let obs = StarObs { id: s.id, x: p.x as f32, y: p.y as f32, v: s.v, irradiance: (e * t.y) as f32, visible };
-                Some((obs, col * t * e))
+                let rgb = col * t * e;
+                // solid angle of a pixel at the star (camera model Jacobian)
+                let c0 = pm.or_else(|| pts.iter().flatten().next().copied())?;
+                let un = |dx: f64, dy: f64| model.unproject(DVec2::new(c0.x + dx, c0.y + dy)).map(|v| v.normalize());
+                let omega = match (un(-0.5, 0.0), un(0.5, 0.0), un(0.0, -0.5), un(0.0, 0.5)) {
+                    (Some(a), Some(b), Some(c), Some(d)) => (b - a).cross(d - c).length(),
+                    _ => return obs.map(|o| (Some(o), vec![])),
+                };
+                if omega <= 0.0 {
+                    return obs.map(|o| (Some(o), vec![]));
+                }
+                let scale = std::f64::consts::PI * SUN_TOA * self.cfg.brightness / omega;
+                // sample positions at equal time steps along the track, each weighted by its
+                // share of the exposure
+                let mut samples: Vec<(DVec2, f64)> = vec![];
+                if pts.len() == 1 {
+                    samples.extend(pts[0].map(|p| (p, 1.0)));
+                } else {
+                    let nseg = (pts.len() - 1) as f64;
+                    for seg in pts.windows(2) {
+                        if let (Some(a), Some(b)) = (seg[0], seg[1]) {
+                            let m = (((b - a).length() / 0.25).ceil() as usize).clamp(1, 4096);
+                            samples.extend((0..m).map(|i| (a + (b - a) * ((i as f64 + 0.5) / m as f64), 1.0 / (nseg * m as f64))));
+                        }
+                    }
+                }
+                let mut adds: Vec<(usize, DVec3)> = vec![];
+                for (p, wt) in &samples {
+                    let (cx, cy) = (p.x.round() as i64, p.y.round() as i64);
+                    let wts = |c: f64, i0: i64| -> Vec<f64> {
+                        (i0 - r..=i0 + r)
+                            .map(|i| {
+                                if r == 0 {
+                                    return 1.0;
+                                }
+                                let s = sigma * std::f64::consts::SQRT_2;
+                                0.5 * (erf((i as f64 + 0.5 - c) / s) - erf((i as f64 - 0.5 - c) / s))
+                            })
+                            .collect()
+                    };
+                    let (wx, wy) = (wts(p.x, cx), wts(p.y, cy));
+                    for (jy, y) in (cy - r..=cy + r).enumerate() {
+                        if y < 0 || y >= h as i64 {
+                            continue;
+                        }
+                        for (jx, x) in (cx - r..=cx + r).enumerate() {
+                            if x < 0 || x >= w as i64 || !sky(x, y) {
+                                continue;
+                            }
+                            adds.push((y as usize * w + x as usize, rgb * (wx[jx] * wy[jy] * *wt * scale)));
+                        }
+                    }
+                }
+                Some((obs, adds))
             })
             .collect();
-        let sigma = self.cfg.psf_sigma_px.max(0.0);
-        let r = if sigma < 0.05 { 0 } else { (3.0 * sigma + 0.5).ceil() as i64 };
-        for (o, rgb) in &found {
-            let (x0, y0) = (o.x as f64, o.y as f64);
-            // solid angle of a pixel at the star (camera model Jacobian)
-            let un = |dx: f64, dy: f64| model.unproject(DVec2::new(x0 + dx, y0 + dy)).map(|v| v.normalize());
-            let omega = match (un(-0.5, 0.0), un(0.5, 0.0), un(0.0, -0.5), un(0.0, 0.5)) {
-                (Some(a), Some(b), Some(c), Some(d)) => (b - a).cross(d - c).length(),
-                _ => continue,
-            };
-            if omega <= 0.0 {
-                continue;
+        let mut out = Vec::with_capacity(found.len());
+        for (o, adds) in found {
+            for (k, v) in adds {
+                radiance[3 * k] += v.x as f32;
+                radiance[3 * k + 1] += v.y as f32;
+                radiance[3 * k + 2] += v.z as f32;
             }
-            let scale = std::f64::consts::PI * SUN_TOA * self.cfg.brightness / omega;
-            let (cx, cy) = (x0.round() as i64, y0.round() as i64);
-            let wgt = |i: i64, c: f64| -> f64 {
-                if r == 0 {
-                    return if i == c.round() as i64 { 1.0 } else { 0.0 };
-                }
-                let s = sigma * std::f64::consts::SQRT_2;
-                0.5 * (erf((i as f64 + 0.5 - c) / s) - erf((i as f64 - 0.5 - c) / s))
-            };
-            for y in (cy - r).max(0)..=(cy + r).min(h as i64 - 1) {
-                let wy = wgt(y, y0);
-                for x in (cx - r).max(0)..=(cx + r).min(w as i64 - 1) {
-                    let k = y as usize * w + x as usize;
-                    if frame.points[k].is_some() {
-                        continue; // terrain in front
-                    }
-                    let v = *rgb * (wy * wgt(x, x0) * scale);
-                    frame.radiance[3 * k] += v.x as f32;
-                    frame.radiance[3 * k + 1] += v.y as f32;
-                    frame.radiance[3 * k + 2] += v.z as f32;
-                }
-            }
+            out.extend(o);
         }
-        frame.stars = found.into_iter().map(|(o, _)| o).collect();
+        out
     }
 }
 

@@ -177,6 +177,9 @@ impl TileOracle for DryRunOracle<'_> {
     fn exists(&self, id: TileId) -> bool {
         id.z <= self.max_zoom || self.store.contains(id)
     }
+    fn refine_unknown(&self) -> bool {
+        false
+    }
 }
 
 /// Tiles the renderer will select that the store lacks: a dry run of the renderer's own LOD
@@ -374,6 +377,8 @@ fn render_camera(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], win: Window,
     let n = times.len();
     let mut renderer = renderer(scn, model.clone(), spec.supersample(&scn.render), ell, cache);
     renderer.geometry_only = spec.rgb.is_none();
+    // stars are drawn along the exposure track after motion blur (below)
+    renderer.stars_in_render = false;
     let mut sensor = spec.rgb.as_ref().map(|r| {
         let mut cfg = r.sensor.clone();
         cfg.noise.seed ^= spec.seed_mix();
@@ -430,18 +435,34 @@ fn render_camera(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], win: Window,
             sun.exposure = ex_pre.map(|e| e.time).unwrap_or(r.sensor.exposure.base_time);
         }
         let frame = renderer.render(&cam, &sun);
+        let mut stars_gt = vec![];
+        // camera poses across the open shutter, for star trails
+        let star_track = |span: f64| -> Vec<CamPose> {
+            let k = if span > 0.0 { 17 } else { 1 };
+            (0..k).map(|i| if k == 1 { cam } else { trajectory::interpolate(poses, t + span * (i as f64 / (k - 1) as f64 - 0.5)).camera(&spec.extrinsics, &ell) }).collect()
+        };
         let (rgb, exposure) = match sensor.as_mut() {
             Some(s) => {
                 if !s.has_metering() {
                     s.meter(&frame.radiance); // start converged
                 }
                 let ex = ex_pre.unwrap_or_else(|| s.exposure_for(t));
-                let radiance = motion_blur(s, frame.radiance, &frame.points, &cam, poses, spec, t, ex.time, &ell, model.as_ref());
+                let mut radiance = motion_blur(s, frame.radiance, &frame.points, &cam, poses, spec, t, ex.time, &ell, model.as_ref());
+                if sun.stars {
+                    let mb = &spec.rgb.as_ref().unwrap().sensor.motion_blur;
+                    let span = if mb.enabled { ex.time * mb.shutter } else { 0.0 };
+                    stars_gt = renderer.stars().render_track(&mut radiance, &frame.points, (w, h), model.as_ref(), &star_track(span), &cam, sun.unix, &ell, &scn.render.atmosphere);
+                }
                 let rgb = s.develop(&radiance, &ex, k as u64);
                 s.meter(&radiance);
                 (Some(rgb), Some([ex.time, ex.gain, ex.ev]))
             }
-            None => (None, None),
+            None => {
+                if sun.stars && spec.stars.is_some() {
+                    stars_gt = renderer.stars().render_track(&mut [], &frame.points, (w, h), model.as_ref(), &[cam], &cam, sun.unix, &ell, &scn.render.atmosphere);
+                }
+                (None, None)
+            }
         };
         // flow of the previous frame, now that this frame's depth is known
         if let Some(prev) = pending.take() {
@@ -449,7 +470,7 @@ fn render_camera(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], win: Window,
             emit(prev, flow)?;
         }
         let stars_gt = match &spec.stars {
-            Some(m) => frame.stars.iter().filter(|s| s.v as f64 <= m.mag_limit).copied().collect(),
+            Some(m) => stars_gt.into_iter().filter(|s| s.v as f64 <= m.mag_limit).collect(),
             None => vec![],
         };
         pending = Some(Pending { index: k, t, cam, rgb, exposure, depth_z: frame.depth, points: frame.points, landcover: frame.landcover, stars: stars_gt });

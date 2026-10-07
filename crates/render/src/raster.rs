@@ -495,6 +495,9 @@ pub struct Renderer {
     pub(crate) rays: Vec<[f32; 3]>,
     /// unique id of this renderer (GPU-side caches of its ray table)
     pub(crate) id: u64,
+    /// Add the stars in `render` (instantaneous). The frame pipeline turns this off and adds
+    /// them along the exposure track after motion blur (`stars()`).
+    pub stars_in_render: bool,
     /// star catalogue and colours (loaded on the first render with stars)
     star_field: std::sync::OnceLock<crate::stars::StarField>,
 }
@@ -514,7 +517,7 @@ impl Renderer {
             .collect();
         static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Renderer { model, model_ss, settings, ell, cache, geometry_only: false, split_flicker: false, rays, id, star_field: Default::default() }
+        Renderer { model, model_ss, settings, ell, cache, geometry_only: false, split_flicker: false, rays, id, stars_in_render: true, star_field: Default::default() }
     }
 
     pub fn select_units(&self, cam: &CamPose) -> Vec<Unit> {
@@ -733,11 +736,15 @@ impl Renderer {
     /// Render one frame for camera pose `cam` under the given sun / light state.
     pub fn render(&self, cam: &CamPose, sun_state: &SunState) -> FrameOut {
         let mut frame = self.render_terrain(cam, sun_state);
-        if sun_state.stars && !self.geometry_only {
-            let field = self.star_field.get_or_init(|| crate::stars::StarField::new(&self.settings.stars).unwrap_or_else(|e| panic!("stars: {e:#}")));
-            field.render(&mut frame, self.model.as_ref(), cam, sun_state.unix, &self.ell, &self.settings.atmosphere);
+        if sun_state.stars && !self.geometry_only && self.stars_in_render {
+            self.stars().render(&mut frame, self.model.as_ref(), cam, sun_state.unix, &self.ell, &self.settings.atmosphere);
         }
         frame
+    }
+
+    /// The star field of this renderer's settings (catalogue loaded on first use).
+    pub fn stars(&self) -> &crate::stars::StarField {
+        self.star_field.get_or_init(|| crate::stars::StarField::new(&self.settings.stars).unwrap_or_else(|e| panic!("stars: {e:#}")))
     }
 
     /// Terrain, sky and lights (everything but the stars).

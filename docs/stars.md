@@ -83,11 +83,17 @@ Refraction uses the ERFA `refco` model (Green's A tan z + B tan³ z: dry air, 0.
 come from the US standard atmosphere at the observer's altitude, and refraction vanishes above
 80 km.
 
-**Validation** (`cargo test -p render stars`):
+**Validation** (`cargo test -p render stars`, plus `configs/star_tracker.yaml`):
 * Positions were compared against Skyfield 1.53 (JPL DE421, IAU 2000A) for the same catalogue
   records: 1,600 star/place/time cases, sea level to 10 km, years 2026–2031. The mean
   separation is 0.006–0.008″ and the worst 0.011″.
 * Refraction matches pyERFA's `refco` to within 0.02″.
+* Centroids measured in the rendered images (`configs/star_tracker.yaml`: 25° field of view,
+  100 ms, 8-bit output) against the ground truth:
+  * without motion: 0.02 px for bright stars and 0.06 px at V 4–5.5, limited by noise at
+    fainter magnitudes;
+  * with 2–5 px vibration trails: trail centroids match xm, ym to a median of 0.06–0.13 px,
+    limited by 8-bit quantisation of the dim trail pixels.
 
 **Error budget of the inputs:**
 * `dut1_s`: leaving it at 0 rotates the sky by up to 15″/s × |UT1 − UTC| (≤ 13″). Set it from
@@ -108,6 +114,10 @@ come from the US standard atmosphere at the observer's altitude, and refraction 
   the Sun's white.
 * The image is a Gaussian PSF (`psf_sigma_px`) integrated over the pixels, added to the pixels
   that show sky. Terrain occludes at pixel granularity.
+* **Trails:** frame cameras draw each star along its image track over the open shutter (17
+  camera sub-poses, then steps of at most 0.25 px, equal energy per unit time). Camera rotation
+  (manoeuvres, vibration) smears stars exactly. This happens after the image-space motion blur
+  of the terrain. Event cameras see the stars at each instant.
 * The camera's exposure, noise, optics (defocus, bloom), motion blur and the event sensor all
   apply as to the rest of the scene.
 
@@ -116,12 +126,23 @@ come from the US standard atmosphere at the observer's altitude, and refraction 
 Per frame (the render at mid-exposure), all catalogue stars inside the image down to the
 modality's `mag_limit`. Each star records:
 * the catalogue id: the HIP number, or for Tycho-2 `1<<31 | TYC1<<17 | TYC2<<3 | TYC3`;
-* the sub-pixel position x, y, with pixel centres at integer coordinates;
+* the sub-pixel position x, y at the frame time (mid-exposure), with pixel centres at integer
+  coordinates;
+* the position averaged over the exposure, xm, ym. This is the centroid of the star's trail,
+  which is what a centroiding star tracker measures under motion;
 * V;
 * the irradiance at the camera after extinction;
 * whether the pixel shows sky.
 
 `index[k]..index[k+1]` selects frame k. The camera pose at the frame time is in `pose/`.
+
+## Sky-pointing cameras on a fresh world
+
+The renderer must know that no terrain can rise into the view. While tile elevations are
+unknown it assumes up to 6 km, so the pre-render dry run learns the real heights one zoom level
+per pass instead of refining that conservative volume to the finest zoom. Tiles lying entirely
+below the view cone are also culled. The example's first run generates about 140 tiles instead
+of over 5,000.
 
 ## Data credits
 

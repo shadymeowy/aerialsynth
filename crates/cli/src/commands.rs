@@ -327,7 +327,8 @@ pub fn run(a: RunArgs) -> Result<()> {
 /// generating what they add (with margins), until nothing is missing.
 fn complete_tiles(s: &Scenario, gen: &Generator) -> Result<()> {
     let poses = load_poses(s)?;
-    for pass in 1..=6 {
+    // one zoom level of tiles with unknown elevation per pass (see TileOracle::refine_unknown)
+    for pass in 1..=24 {
         let missing = {
             let store = pipeline::open_or_create_store(s, gen)?;
             pipeline::plan_missing(s, &poses, &store)?

@@ -273,7 +273,7 @@ scripts/          contact.py (generator contact sheets), check_gt.py + cammodels
 docs/events.md    event camera modality: options, sensor model, format
 docs/stars.md     star catalogue, astrometry, brightness, star ground truth
 docs/gpu.md       GPU backend (wgpu, headless)
-configs/          example scenarios (quick, dataset, fisheye, events, oblique_sunset, night, night_moon, cruise, imu_check)
+configs/          example scenarios (quick, dataset, fisheye, events, oblique_sunset, night, night_moon, cruise, imu_check, star_tracker)
 ```
 
 ## Performance (8 cores)
