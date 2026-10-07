@@ -110,7 +110,7 @@ particular dataset layout.
 /levels/<z>/elevation    f32 [N,256,256]    DSM (canopy + buildings), m above ellipsoid
 /levels/<z>/normal       i8  [N,256,256,3]  ENU unit normal * 127
 /levels/<z>/landcover    u8  [N,256,256]    class id (terragen::landcover::NAMES)
-/levels/<z>/emission     u8  [N,256,256,3]  night lights, linear = 4 (v/255)^2.2
+/levels/<z>/emission     u8  [N,256,256,3]  night lights, linear = 16 (v/255)^3
 ```
 
 - **Chunks:** one tile per chunk, compressed with shuffle + deflate. Compression runs in parallel

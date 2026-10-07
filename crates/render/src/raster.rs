@@ -298,7 +298,7 @@ impl TileView {
                 let lut = EMIS_LUT.get_or_init(|| {
                     let mut l = [0.0; 256];
                     for (i, v) in l.iter_mut().enumerate() {
-                        *v = 4.0 * (i as f64 / 255.0).powf(2.2);
+                        *v = 16.0 * (i as f64 / 255.0).powi(3);
                     }
                     l
                 });
@@ -944,7 +944,7 @@ impl Renderer {
             let k = ((25.0 / texel).log2().ceil().max(0.0) as u8).min(z);
             let s = 0.5f64.powi(k as i32);
             if let Some(e) = view.sample3(z - k, gx * s, gy * s, Which::Emission) {
-                mul += e * (0.35 * sun_state.lights);
+                mul += e * (0.2 * sun_state.lights);
             }
         }
         if self.settings.shading == Shading::Relit && self.settings.water_glint && terragen::landcover::is_water(view.landcover(z, gx, gy)) {
@@ -1027,15 +1027,31 @@ impl Renderer {
                 if let Some(c) = view.sample3(zl, sx, sy, which) {
                     col += c * wl;
                     wsum += wl;
-                    if lights_on {
-                        if let Some(e) = view.sample3(zl, sx, sy, Which::Emission) {
-                            emis += e * wl;
-                        }
-                    }
                 }
             }
         }
-        let (c0, e0) = if wsum > 0.0 { (col / wsum, emis / wsum) } else { (DVec3::splat(0.2), DVec3::ZERO) };
+        // lamps: sampled 1.5 levels sharper than the footprint and without the anisotropic taps,
+        // so a lamp stays a point (filtered with the footprint, every lamp was a soft blob of 2–3
+        // pixels); the sub-samples, motion blur and bloom average the residual aliasing
+        let mut ewsum = 0.0;
+        if lights_on {
+            let lam_e = (lam - 1.5).max(0.0);
+            let l0e = lam_e.floor();
+            let te = lam_e - l0e;
+            for (lvl, wl) in [(l0e, 1.0 - te), (l0e + 1.0, te)] {
+                if wl <= 1e-4 {
+                    continue;
+                }
+                let k = (lvl as u8).min(z);
+                let s = 0.5f64.powi(k as i32);
+                if let Some(e) = view.sample3(z - k, gx * s, gy * s, Which::Emission) {
+                    emis += e * wl;
+                    ewsum += wl;
+                }
+            }
+        }
+        let e0 = if ewsum > 0.0 { emis / ewsum } else { DVec3::ZERO };
+        let c0 = if wsum > 0.0 { col / wsum } else { DVec3::splat(0.2) };
         (c0 * ps.mul + ps.add, e0 * ps.emis)
     }
 }

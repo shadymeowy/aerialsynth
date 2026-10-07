@@ -183,7 +183,18 @@ impl Generator {
         let rows_b: Vec<Vec<PixB>> = (0..na)
             .into_par_iter()
             .map(|j| {
-                let mut caches = Caches::default();
+                // one cache per worker thread, kept across rows and tiles (towns and regions are
+                // expensive to set up: a cache per row made town-rich tiles several times slower)
+                thread_local! {
+                    static CACHES: std::cell::RefCell<(u64, Caches)> = std::cell::RefCell::new((0, Caches::default()));
+                }
+                CACHES.with(|cc| {
+                let mut cc = cc.borrow_mut();
+                if cc.0 != self.world.cache_key {
+                    *cc = (self.world.cache_key, Caches::default());
+                }
+                cc.1.trim();
+                let caches = &mut cc.1;
                 let mut row = Vec::with_capacity(na);
                 let gsd = row_gsd[j];
                 let fw = gsd / ss as f64;
@@ -246,7 +257,7 @@ impl Generator {
                             let py = oy + j as f64 - 1.0 + 0.5 + fyo;
                             let (lat, lon) = pixel_to_latlon(DVec2::new(px, py), z, n as u32);
                             let ctx = Ctx::new(lat, lon, gsd, &ell);
-                            let s = self.surface.eval(&self.world, &mut caches, &ctx, &local, &pf);
+                            let s = self.surface.eval(&self.world, caches, &ctx, &local, &pf);
                             acc_a += s.albedo;
                             acc_e += s.emission;
                             acc_h += s.height;
@@ -259,6 +270,7 @@ impl Generator {
                     row.push(PixB { emission: acc_e * inv, albedo: acc_a * inv, height: acc_h * inv, ground: acc_g * inv, lit: acc_l * inv, class });
                 }
                 row
+                })
             })
             .collect();
         let mut pb: Vec<PixB> = rows_b.into_iter().flatten().collect();
@@ -347,7 +359,7 @@ impl Generator {
                 for ch in 0..3 {
                     albedo[3 * k + ch] = (l2s(alb[ch]) * 255.0).round() as u8;
                     rgb[3 * k + ch] = (l2s(c[ch]) * 255.0).round() as u8;
-                    emission[3 * k + ch] = ((px.emission[ch] / 4.0).clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0).round() as u8;
+                    emission[3 * k + ch] = ((px.emission[ch] / 16.0).clamp(0.0, 1.0).powf(1.0 / 3.0) * 255.0).round() as u8;
                 }
             }
         }

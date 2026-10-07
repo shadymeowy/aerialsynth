@@ -150,7 +150,8 @@ shots:
       render: { lighting: { date: "2026-03-19", time_utc: "21:30:00" } }
       cameras:
         - extrinsics: { pitch_deg: -45 }
-          rgb: { sensor: { exposure: { target: 0.05, max_time: 0.033, max_gain: 24 }, optics: { bloom: 0.03 }, noise: { read: 0.05, shot: 0.08 } } }
+          # short exposure (crisp lamp points, no smear), dark target (black roofs, bright lamps)
+          rgb: { sensor: { exposure: { target: 0.012, max_time: 0.008, max_gain: 64 }, optics: { bloom: 0.02, defocus_px: 0.0, chromatic_aberration_px: 0.0 }, noise: { read: 0.04, shot: 0.06 } } }
 
   - id: moon
     label: "Full moon"

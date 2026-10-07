@@ -24,8 +24,10 @@ pub struct Seg {
     pub hw: f64,
     /// valley half width (m)
     pub valley: f64,
-    /// channel half width at `b` (narrower where the channel ends in a sink)
+    /// channel half width at `b` (narrower where a channel starts at a spring)
     pub hw_b: f64,
+    /// the channel ends in a closed basin at `b`, where it feeds a lake
+    pub sink: bool,
 }
 
 /// Closest drainage channel to a point.
@@ -229,7 +231,7 @@ impl World {
                         let Some(tc) = self.flow_target(lvl, c) else { continue };
                         let tp = self.flow_point(lvl, tc);
                         let (hw, valley) = width(c);
-                        let seg = |a: DVec3, b: DVec3, ha: f64, hb: f64, hw: f64, hw_b: f64| Seg { a, b, ha, hb, level: lvl as u8, hw, valley, hw_b };
+                        let seg = |a: DVec3, b: DVec3, ha: f64, hb: f64, hw: f64, hw_b: f64| Seg { a, b, ha, hb, level: lvl as u8, hw, valley, hw_b, sink: false };
                         let mid = 0.5 * (fp.s + tp.s);
                         let hmid = 0.5 * (fp.h + tp.h);
                         // a source (nothing drains into it): straight from the source point to the
@@ -250,18 +252,19 @@ impl World {
                                     let (u, v) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t));
                                     (mid * u + tp.s * v + mid2 * (t * t), hmid * u + tp.h * v + hmid2 * (t * t), hw + (hw2 - hw) * t)
                                 };
-                                const N: usize = 6;
-                                for k in 0..N {
-                                    let (a, ha, wa) = at(k as f64 / N as f64);
-                                    let (b, hb, wb) = at((k + 1) as f64 / N as f64);
+                                // pieces of ~8 pixels at most (fewer at coarse zooms, where every
+                                // pixel tests every piece)
+                                let n = (((mid2 - mid).length() / (8.0 * gsd)).ceil() as usize).clamp(1, 6);
+                                for k in 0..n {
+                                    let (a, ha, wa) = at(k as f64 / n as f64);
+                                    let (b, hb, wb) = at((k + 1) as f64 / n as f64);
                                     out.push(seg(a, b, ha, hb, wa, wb));
                                 }
                             }
-                            // into the sea (full width) or a closed basin (tapering out instead of
-                            // ending in a blunt cap)
+                            // into deep sea, or into a closed basin, where the river feeds a lake
+                            // (it ended there in a blunt cap on land)
                             None => {
-                                let sink = tp.h > 0.0;
-                                out.push(seg(mid, tp.s, hmid, tp.h, hw, if sink { 0.08 * hw } else { hw }));
+                                out.push(Seg { sink: tp.h > 0.0, ..seg(mid, tp.s, hmid, tp.h, hw, hw) });
                             }
                         }
                     }

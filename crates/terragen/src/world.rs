@@ -199,7 +199,7 @@ pub struct World {
     home: Option<(DVec3, f64, f64)>,
     /// Hash of the whole config: key of the thread-local caches, so generators with the same
     /// seed but different settings in one process do not share cached hydrology / lakes.
-    cache_key: u64,
+    pub(crate) cache_key: u64,
 }
 
 const KM: f64 = 1000.0;
@@ -527,6 +527,32 @@ impl World {
 
     /// Lake surface level: the spill height of the basin (lowest rim sample), or None when the
     /// site is on a slope / in the sea. Cached per thread (pure function of the lake).
+    /// Level of a lake that must exist (a river's closed basin): the spill height when the
+    /// basin holds water, else just above the basin floor (a low levee holds it).
+    fn lake_level_forced(&self, id: u64, center: DVec3, rad: f64) -> Option<f64> {
+        thread_local! {
+            static CACHE: std::cell::RefCell<std::collections::HashMap<u64, Option<f64>>> = Default::default();
+        }
+        let key = id ^ self.cache_key.rotate_left(29);
+        if let Some(v) = CACHE.with(|c| c.borrow().get(&key).copied()) {
+            return v;
+        }
+        let v = self.lake_level(id, center, rad).or_else(|| {
+            let g = geodesy::ecef2geodetic(center, &self.ell);
+            let cctx = Ctx::new(g.lat, g.lon, 20.0, &self.ell);
+            let tc = self.terrain_impl(&cctx, &self.macro_at(cctx.p, cctx.gsd), Mode::NoLakes, None);
+            (tc.water_kind == water::NONE && tc.ground > 1.0).then_some(tc.ground + 1.0)
+        });
+        CACHE.with(|c| {
+            let mut c = c.borrow_mut();
+            if c.len() > 100_000 {
+                c.clear();
+            }
+            c.insert(key, v);
+        });
+        v
+    }
+
     fn lake_level(&self, id: u64, center: DVec3, rad: f64) -> Option<f64> {
         thread_local! {
             static CACHE: std::cell::RefCell<std::collections::HashMap<u64, Option<f64>>> = Default::default();
@@ -692,6 +718,7 @@ impl World {
             ..Default::default()
         };
         let mut floodplain: f64 = 0.0;
+        let mut sink_lakes: Vec<(u64, DVec3, f64)> = Vec::new();
         // (no hard land cutoff: switching rivers off at a contour of the smooth continent field
         // left straight cliffs along the coast; the carve fades out towards the open sea instead)
         let land_fade = smoothstep(0.0, 0.1, land);
@@ -704,6 +731,19 @@ impl World {
                     &local[..]
                 }
             };
+            // closed basins fed by rivers near p: (id, centre, radius)
+            // (sized by the total inflow: the sum of the inflowing channel widths)
+            for sg in segs.iter().filter(|sg| sg.sink) {
+                let hh = hash3(0x51A7, (sg.b.x / 10.0) as i64, (sg.b.y / 10.0) as i64, (sg.b.z / 10.0) as i64);
+                match sink_lakes.iter_mut().find(|l| l.0 == hh) {
+                    Some(l) => l.2 += sg.hw,
+                    None => sink_lakes.push((hh, sg.b, sg.hw)),
+                }
+            }
+            for l in sink_lakes.iter_mut() {
+                l.2 = (6.0 * l.2).clamp(200.0, 2500.0) * (0.8 + 0.4 * u01k(l.0, 1));
+            }
+            sink_lakes.retain(|l| (p - l.1).length() < 1.6 * l.2);
             let hits = self.river_query(ctx, segs, h);
             let h0 = h;
             let wn = smoothstep(-0.6, 0.6, m.river_width);
@@ -792,6 +832,37 @@ impl World {
                 } else if de < 1.3 && h < level + 0.8 {
                     // low natural levee keeps the water inside
                     h = lerp(level + 0.8, h, smoothstep(1.0, 1.3, de));
+                }
+            }
+        }
+        // lakes at the end of rivers that drain into a closed basin
+        if with_lakes {
+            for &(id, c, rad) in &sink_lakes {
+                let Some(level) = self.lake_level_forced(id, c, rad) else { continue };
+                let pc = c.normalize() * p.length();
+                // elongated along a random axis, with lobes, bays and a ragged shore at several
+                // scales (a circle with a fine scalloped edge looked artificial)
+                let up = pc.normalize();
+                let ax = up.cross(DVec3::new(u01k(id, 2) - 0.5, u01k(id, 3) - 0.5, u01k(id, 4) - 0.5)).normalize_or_zero();
+                let el = 1.0 + 1.2 * u01k(id, 5);
+                let dv = p - pc;
+                let (da, db) = (dv.dot(ax), (dv - ax * dv.dot(ax)).length());
+                let d = (da * da / el + db * db * el).sqrt();
+                let lw = rad * 0.6;
+                let warpn = perlin3(id, p / (1.4 * lw)) * 0.45
+                    + perlin3(id ^ 7, p / (lw * 0.45)) * 0.18 * band(lw * 0.45, gsd)
+                    + perlin3(id ^ 9, p / (lw * 0.12)) * 0.06 * band(lw * 0.12, gsd);
+                let de = d / rad * (1.0 + warpn);
+                // the whole basin is filled: a bowl below the level, rising to a low shore that
+                // blends into the land (partly flooded basins drew thin crescents of water)
+                let depth = 3.0 + 0.01 * rad;
+                if de < 1.0 {
+                    h = h.min(level - depth * (1.0 - de * de) - 0.3);
+                    t.water = t.water.max(level);
+                    t.water_kind = water::LAKE;
+                } else if de < 1.5 {
+                    let shore = level + 0.4 + 12.0 * (de - 1.0) * (de - 1.0);
+                    h = h.min(lerp(shore, h, smoothstep(1.0, 1.5, de)));
                 }
             }
         }

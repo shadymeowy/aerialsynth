@@ -144,6 +144,23 @@ pub struct Caches {
     town_cands: HashMap<(i64, i64, i64), Vec<TownInfo>>,
 }
 
+impl Caches {
+    /// Bound the memory of a long-lived cache.
+    pub fn trim(&mut self) {
+        if self.regions.len() + self.towns.len() + self.towns_base.len() + self.town_cands.len() > 200_000 {
+            *self = Caches::default();
+        }
+    }
+}
+
+/// A small light source (lamp head) of peak `amp` and radius `sigma` at squared distance `d2`,
+/// widened to the sample spacing `fw` with its energy kept: at coarse zooms it becomes one bright
+/// texel instead of vanishing (band-limiting it away left only the soft pools, every lamp a disc).
+fn point_light(d2: f64, amp: f64, sigma: f64, fw: f64) -> f64 {
+    let s = sigma.max(0.6 * fw);
+    amp * (sigma * sigma) / (s * s) * (-d2 / (2.0 * s * s)).exp()
+}
+
 /// Sampling context at the surface point below a 3D Worley site.
 fn site_ctx(world: &World, pt: DVec3, gsd: f64) -> Ctx {
     let g = geodesy::ecef2geodetic(pt, &world.ell);
@@ -957,14 +974,22 @@ impl SurfaceModel {
                     let ql = (q_loc / sp).round() * sp;
                     let d2 = (q_loc - ql).length_squared();
                     let lh = hash2(town.seed ^ 0x40AD, (ql.x / sp) as i64, (ql.y / sp) as i64);
-                    let lamp_col = if u01k(lh, 1) < 0.5 { DVec3::new(1.0, 0.6, 0.26) } else { DVec3::new(0.88, 0.92, 1.0) };
-                    let pool = 0.3 * (-d2 / (2.0 * 8.0 * 8.0)).exp() * res + 0.04 * (1.0 - res);
+                    let lamp_col = if u01k(lh, 1) < 0.5 { DVec3::new(1.0, 0.48, 0.12) } else { DVec3::new(0.86, 0.92, 1.0) };
+                    let pool = (0.04 * (-d2 / (2.0 * 6.0 * 6.0)).exp() + point_light(d2, 6.0, 0.4, fw)) * res + 0.04 * (1.0 - res);
                     emission += lamp_col * pool * near * road_major_cov;
                 }
             }
         }
 
         // ------------------------------------------------------------- towns
+        // embankment lamps: a string of lights along the banks of rivers through towns (the
+        // river was a long dark gap in the lit town)
+        if town_urban > 0.25 && l.river_hw > 0.0 && t.river_wet > 0.5 {
+            let bank = 2.0 + 0.1 * l.river_hw;
+            let dl = l.river_d.abs() - (l.river_hw + 0.5 * bank);
+            let dots = smoothstep(0.35, 0.6, perlin3(0xE3B, p / 4.0)) * band(4.0, gsd) + 0.3 * (1.0 - band(4.0, gsd));
+            emission += DVec3::new(1.0, 0.80, 0.55) * (4.0 * (-(dl * dl) / (2.0 * 0.5 * 0.5)).exp() * dots * smoothstep(0.25, 0.45, town_urban));
+        }
         if let Some((tcol, th, cov, cls, shadow, em)) = town_px {
             emission += em * cov;
             col = mixc(col, tcol, cov);
@@ -1028,9 +1053,9 @@ impl SurfaceModel {
         // lamp light pool (also lights the surrounding field a little)
         let lamp = rel - DVec2::new(2.0, 6.0);
         let d2 = lamp.length_squared();
-        let lamp_col = if u01k(fid, 9) < 0.6 { DVec3::new(1.0, 0.68, 0.34) } else { DVec3::new(0.9, 0.94, 1.0) };
+        let lamp_col = if u01k(fid, 9) < 0.6 { DVec3::new(1.0, 0.72, 0.38) } else { DVec3::new(0.86, 0.92, 1.0) };
         let res = band(10.0, gsd);
-        let emission = lamp_col * (0.3 * (-d2 / (2.0 * 9.0 * 9.0)).exp() + 3.0 * (-d2 / (2.0 * 0.6 * 0.6)).exp() * band(1.2, gsd)) * res
+        let emission = lamp_col * (0.04 * (-d2 / (2.0 * 7.0 * 7.0)).exp() + point_light(d2, 5.0, 0.4, fw)) * res
             + lamp_col * 0.02 * (1.0 - res) * (1.0 - smoothstep(20.0, 60.0, rel.length()));
         if yard <= 0.0 {
             return if emission.max_element() > 1e-4 { Some((DVec3::ZERO, 0.0, 0.0, lc::CROP, emission)) } else { None };
@@ -1467,8 +1492,6 @@ impl SurfaceModel {
         let (bix, bqx, bsx) = cell(0, q.x);
         let (biy, bqy, bsy) = cell(1, q.y);
         let sw = town.street * 0.7; // lots start beyond the widest street (a verge along narrower ones)
-        // streets exist where the town is dense enough; outskirts keep only some of them
-        let sh = hash2(town.seed ^ 0x57, bix, biy);
         // streets exist where the town is dense enough; outskirts keep only some of them. Decided
         // per street segment (axis, line, and the segment along it), so the blocks on both sides
         // agree, and per axis, so streets end square at a crossing; crisp: a street is there or
@@ -1507,6 +1530,7 @@ impl SurfaceModel {
         let mut cov_lot = 0.0;
         let mut porch = 0.0;
         let mut roof_frac = 0.0; // building roof coverage of this sample
+        let mut win_col = DVec3::new(1.0, 0.74, 0.44);
         let mut windows = 0.0; // lit windows on the walls (the footprint rim, which the renderer
                                // stretches into the facades)
         let inner = DVec2::new(bqx - sw, bqy - sw);
@@ -1584,10 +1608,20 @@ impl SurfaceModel {
                                 let wsp = 2.6;
                                 let wi = (along / wsp).floor();
                                 let wf = along / wsp - wi;
-                                let lit_frac = 0.25 + 0.35 * central + 0.25 * u01k(lh, 15);
+                                let lit_frac = 0.08 + 0.2 * central + 0.12 * u01k(lh, 15);
+                                // incandescent / warm LED in most homes, some neutral and cool
+                                // (offices, screens)
+                                let wc = u01k(lh, 16);
+                                win_col = if wc < 0.6 {
+                                    DVec3::new(1.0, 0.70, 0.40)
+                                } else if wc < 0.85 {
+                                    DVec3::new(1.0, 0.86, 0.66)
+                                } else {
+                                    DVec3::new(0.82, 0.90, 1.0)
+                                };
                                 let lit = u01k(hash2(lh ^ 0x3D0, wi as i64, (ex < ey) as i64), 1) < lit_frac;
                                 let explicit = band(wsp, gsd);
-                                let pane = if lit && (0.2..0.75).contains(&wf) { 1.0 } else { 0.0 };
+                                let pane = if lit && (0.3..0.65).contains(&wf) { 1.0 } else { 0.0 };
                                 windows = rim * (pane * explicit + 0.55 * lit_frac * (1.0 - explicit));
                             }
                             if inside > 0.5 {
@@ -1599,7 +1633,7 @@ impl SurfaceModel {
                             let front_y = if (lj as i64) % 2 == 0 { setb * 0.5 } else { bd / rows - setb * 0.5 };
                             let d2 = (lx - lot_w * 0.5).powi(2) + (ly - front_y).powi(2);
                             // a small bright lamp by the door, not a soft blob over the yard
-                            porch = 1.2 * (-d2 / (2.0 * 0.9 * 0.9)).exp() * band(1.8, gsd);
+                            porch = point_light(d2, 2.0, 0.4, fw);
                         }
                     }
                 }
@@ -1637,18 +1671,33 @@ impl SurfaceModel {
         }
         height *= 1.0 - street;
 
-        // ---- night lights: pools of light under street lamps, lit plazas / industrial yards
+        // ---- night lights: sharp lamp heads with soft pools under them along every street,
+        // lit plazas / industrial yards, windows and porch lights
         let lamp_sp = 18.0 + 8.0 * town.organic;
-        // sodium vs LED lamps: mostly per town, varying per street
-        // one warm palette per town: sodium (orange-yellow) or warm-white LED, ~10% of the
-        // streets on the other type (a saturated orange next to a cold blue-white looked unreal)
-        let led = (u01k(town.seed, 20) < 0.45) != (u01k(sh, 5) < 0.1);
-        let lamp_col = if led { DVec3::new(1.0, 0.84, 0.62) } else { DVec3::new(1.0, 0.64, 0.30) };
+        // lamp types: high-pressure sodium (amber), warm LED (3000 K) and neutral LED (4000 K),
+        // chosen per street with a town-specific mix (main streets lean to neutral LED)
+        const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.48, 0.12), DVec3::new(1.0, 0.72, 0.38), DVec3::new(0.86, 0.92, 1.0)];
+        let mix_sodium = 0.25 + 0.4 * u01k(town.seed, 20);
+        let dominant = if mix_sodium > 0.45 { 0 } else { 1 };
+        let lamp_type = |axis: u64, line: i64| -> DVec3 {
+            let u = u01k(hash2(town.seed ^ 0x1A3C ^ (axis << 40), line, 0), 1);
+            let main = line.rem_euclid(4) == 0;
+            let t = if main && u < 0.45 {
+                2
+            } else if u < mix_sodium {
+                0
+            } else if u < 0.85 {
+                1
+            } else {
+                2
+            };
+            LAMPS[t]
+        };
+        let lamp_col = LAMPS[dominant];
         let lamp_res = band(lamp_sp, gsd);
         let mut emission = DVec3::ZERO;
         if lamp_res > 0.0 && here_x.max(here_y) > 0.0 {
-            // street lamps along every street: for the nearest street line on each axis, lamps
-            // every lamp_sp along it, alternating sides of the carriageway
+            // lamps every lamp_sp along each street, alternating sides of the carriageway
             for axis in 0..2u64 {
                 let (bi, bq, bs, along) = if axis == 0 { (bix, bqx, bsx, q.y) } else { (biy, bqy, bsy, q.x) };
                 // signed offset of the pixel from the nearest street centreline, and that line's index
@@ -1664,12 +1713,13 @@ impl SurfaceModel {
                 let d2 = dp * dp + da * da;
                 let lh = hash2(town.seed ^ 0x1A3B ^ (axis << 40), li, k as i64);
                 if u01k(lh, 1) < 0.93 {
-                    // the pool is stretched along the street (lamps light the carriageway): a
-                    // dotted line of light; the lamp head a bright point (~2 m, visible from height)
                     let sa = 0.28 * lamp_sp;
-                    let pool = 0.32 * (-(dp * dp) / (2.0 * 3.5 * 3.5) - (da * da) / (2.0 * sa * sa)).exp();
-                    let core = 3.0 * (-d2 / (2.0 * 1.0 * 1.0)).exp() * band(2.0, gsd);
-                    emission += lamp_col * (pool + core) * (0.7 + 0.6 * u01k(lh, 2));
+                    // a soft pool on the street and a sharp, bright head (a point from the air)
+                    // (the head carries most of the light seen from the air: with a bright pool
+                    // every lamp was a soft disc)
+                    let pool = 0.03 * (-(dp * dp) / (2.0 * 3.5 * 3.5) - (da * da) / (2.0 * sa * sa)).exp();
+                    let core = point_light(d2, 6.0, 0.4, fw);
+                    emission += lamp_type(axis, li) * (pool + core) * (0.75 + 0.5 * u01k(lh, 2));
                 }
             }
         }
@@ -1679,12 +1729,10 @@ impl SurfaceModel {
         porch *= ground_lit;
         // prefiltered mean when lamps are unresolved (town glow)
         emission = emission * lamp_res + lamp_col * 0.07 * (1.0 - lamp_res) * smoothstep(0.15, 0.4, urban);
-        emission += DVec3::new(1.0, 0.76, 0.48) * (0.55 * windows);
-        // plazas / parking and industrial yards: a dim base (their lamps are the street lamps
-        // around them), not uniformly glowing slabs
-        if urban > 0.45 && (0.07..0.12).contains(&block_kind) {
-            emission += lamp_col * 0.025 * lamp_res;
-        }
+        emission += win_col * (0.55 * windows);
+        // industrial yards: a dim base (plazas and parking have only the street lamps around
+        // them: a lit base drew uniform grey slabs)
+
         if block_kind > 0.92 && central < 0.5 {
             emission += DVec3::new(1.0, 0.88, 0.7) * 0.02 * lamp_res;
         }
