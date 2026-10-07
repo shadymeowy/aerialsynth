@@ -161,6 +161,10 @@ pub struct Pre {
     pub gully: Option<[f64; 2]>,
     pub road_major: Option<[f64; 3]>,
     pub road_minor: Option<[f64; 3]>,
+    /// the long octaves of the relief: ridged (sum, low-passed sum, weight) and hills (sum,
+    /// low-passed sum), split at the wavelengths `relief_cut` (ridged, hills)
+    pub relief: Option<[f64; 5]>,
+    pub relief_cut: [f64; 2],
 }
 
 impl Macro {
@@ -309,57 +313,78 @@ impl World {
 
     /// Ridged multifractal mountains, 0..~1.
     fn ridged(&self, p: DVec3, gsd: f64, sharp: f64) -> (f64, f64) {
+        let st = self.ridged_part(p, gsd, sharp, 0.0, true, [0.0, 0.0, 1.0]);
+        (st[0] * 0.5, st[1] * 0.5)
+    }
+
+    /// The octaves of [`World::ridged`] of wavelength >= `cut` (`low`, from the start) or < `cut`
+    /// (not `low`, continuing from the state `st` of the long ones). State: sum, low-passed sum,
+    /// weight of the next octave (before the final scaling).
+    #[allow(clippy::too_many_arguments)]
+    fn ridged_part(&self, p: DVec3, gsd: f64, sharp: f64, cut: f64, low: bool, st: [f64; 3]) -> [f64; 3] {
+        let [mut sum, mut low_sum, mut weight] = st;
         let mut lam = 14.0 * KM;
         let mut amp = 1.0;
-        let mut weight = 1.0;
-        let mut sum = 0.0;
-        let mut low = 0.0;
-        let mut norm = 0.0;
         for i in 0..self.mtn_frames.rot.len() {
+            if low && lam < cut {
+                break;
+            }
             // ridges contain harmonics above the octave frequency: band-limit more strictly
             let wb = band(lam, 1.6 * gsd);
             if wb <= 0.0 {
                 break;
             }
-            let q = self.mtn_frames.rot[i] * (p / lam) + self.mtn_frames.off[i];
-            let n = perlin3(self.mtn_frames.seeds[i], q);
-            let mut r = (1.0 - n.abs()).max(0.0);
-            r = r.powf(sharp);
-            r *= weight;
-            weight = (r * 1.8).clamp(0.0, 1.0);
-            sum += r * amp * wb;
-            if lam > 6.0 * KM {
-                low += r * amp * wb;
+            if low || lam < cut {
+                let q = self.mtn_frames.rot[i] * (p / lam) + self.mtn_frames.off[i];
+                let n = perlin3(self.mtn_frames.seeds[i], q);
+                let mut r = (1.0 - n.abs()).max(0.0);
+                r = r.powf(sharp);
+                r *= weight;
+                weight = (r * 1.8).clamp(0.0, 1.0);
+                sum += r * amp * wb;
+                if lam > 6.0 * KM {
+                    low_sum += r * amp * wb;
+                }
             }
-            norm += amp;
             lam *= 0.5;
             amp *= if lam > 1.0 * KM { 0.58 } else { 0.42 };
         }
-        let _ = norm;
-        (sum * 0.5, low * 0.5)
+        [sum, low_sum, weight]
     }
 
     /// Band-limited hill fBm with regionally varying roughness. Returns (full, lowpass>=15km).
     fn hills(&self, p: DVec3, gsd: f64, gain: f64) -> (f64, f64) {
+        let [sum, low] = self.hills_part(p, gsd, gain, 0.0, true);
+        (sum * 0.7, low * 0.7)
+    }
+
+    /// The octaves of [`World::hills`] of wavelength >= `cut` (`low`) or < `cut` (not `low`):
+    /// sum and low-passed sum before the final scaling (the two parts add up).
+    fn hills_part(&self, p: DVec3, gsd: f64, gain: f64, cut: f64, low: bool) -> [f64; 2] {
         let mut lam = 9.0 * KM;
         let mut amp = 1.0;
         let mut sum = 0.0;
-        let mut low = 0.0;
+        let mut low_sum = 0.0;
         for i in 0..self.hills.rot.len() {
+            if low && lam < cut {
+                break;
+            }
             let wb = band(lam, gsd);
             if wb <= 0.0 || lam < 20.0 {
                 break;
             }
-            let q = self.hills.rot[i] * (p / lam) + self.hills.off[i];
-            let n = perlin3(self.hills.seeds[i], q);
-            sum += n * amp * wb;
-            if lam >= 4.0 * KM {
-                low += n * amp * wb;
+            if low || lam < cut {
+                let q = self.hills.rot[i] * (p / lam) + self.hills.off[i];
+                let n = perlin3(self.hills.seeds[i], q);
+                sum += n * amp * wb;
+                if lam >= 4.0 * KM {
+                    low_sum += n * amp * wb;
+                }
             }
             lam *= 0.5;
             amp *= gain;
         }
-        (sum * 0.7, low * 0.7)
+        [sum, low_sum]
     }
 
     /// One octave of gradient-aligned gully noise in a 3D jittered lattice (point `q` in lattice
@@ -512,8 +537,16 @@ impl World {
 
     /// The smooth inputs `Pre` at a point (for the coarse grid): the low-passed relief gradient
     /// for the gullies (`gully`), the road networks (`roads`).
-    pub fn pre_at(&self, ctx: &Ctx, m: &Macro, gully: bool, roads: bool) -> Pre {
+    pub fn pre_at(&self, ctx: &Ctx, m: &Macro, gully: bool, roads: bool, relief_cut: Option<[f64; 2]>) -> Pre {
         let mut pre = Pre::default();
+        if let Some(cut) = relief_cut {
+            let wp = DVec2::new(m.mtn_warp[0], m.mtn_warp[1]) * 9.0 * KM;
+            let pw = ctx.p + ctx.east * wp.x + ctx.north * wp.y;
+            let [rs, rl, rw] = self.ridged_part(pw, ctx.gsd, 1.6 + 0.8 * m.style[2], cut[0], true, [0.0, 0.0, 1.0]);
+            let [hs, hl] = self.hills_part(ctx.p, ctx.gsd, 0.47 + 0.08 * m.rough, cut[1], true);
+            pre.relief = Some([rs, rl, rw, hs, hl]);
+            pre.relief_cut = cut;
+        }
         if gully {
             let lam_e = self.cfg.relief.gully_wavelength;
             let (mountain, amp_m) = self.mountain_mask(m);
@@ -780,7 +813,14 @@ impl World {
             let wp = DVec2::new(m.mtn_warp[0], m.mtn_warp[1]) * 9.0 * KM;
             let pw = p + ctx.east * wp.x + ctx.north * wp.y;
             let sharp = 1.6 + 0.8 * m.style[2];
-            self.ridged(pw, gsd, sharp)
+            match m.pre.and_then(|p| p.relief.map(|r| (r, p.relief_cut[0]))) {
+                // the long octaves from the tile's coarse grid
+                Some((r, cut)) => {
+                    let st = self.ridged_part(pw, gsd, sharp, cut, false, [r[0], r[1], r[2].clamp(0.0, 1.0)]);
+                    (st[0] * 0.5, st[1] * 0.5)
+                }
+                None => self.ridged(pw, gsd, sharp),
+            }
         } else {
             (0.0, 0.0)
         };
@@ -791,7 +831,13 @@ impl World {
         let rough = m.rough;
         let hill_amp = self.hill_amplitude(m);
         let gain = 0.47 + 0.08 * rough;
-        let (hl, hl_low) = self.hills(p, gsd, gain);
+        let (hl, hl_low) = match m.pre.and_then(|p| p.relief.map(|r| (r, p.relief_cut[1]))) {
+            Some((r, cut)) => {
+                let [hs, hlow] = self.hills_part(p, gsd, gain, cut, false);
+                ((r[3] + hs) * 0.7, (r[4] + hlow) * 0.7)
+            }
+            None => self.hills(p, gsd, gain),
+        };
         let hills = hill_amp * hl;
 
         // ---- erosion gullies on mountain and hill slopes

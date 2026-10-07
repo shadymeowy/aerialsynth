@@ -112,6 +112,8 @@ impl Generator {
         // the grid too, the rest per pixel; the cut depends on the zoom only (node spacing at the
         // equator), so neighbouring tiles agree
         let pf_cut = 8.0 * G * gsd_ew(0.0, z, n as u32, &ell);
+        // the long octaves of the relief likewise (ridged: 16 spacings, its creases need more)
+        let relief_cut = if use_grid { Some([2.0 * pf_cut, pf_cut]) } else { None };
         let nodes: Vec<(Macro, Pre, [f64; PixFields::N])> = if use_grid {
             (0..ng * ng)
                 .into_par_iter()
@@ -122,7 +124,7 @@ impl Generator {
                     let gsd = gsd_ew(lat, z, n as u32, &ell);
                     let ctx = Ctx::new(lat, lon, gsd, &ell);
                     let m = self.world.macro_at(ctx.p, gsd);
-                    let pre = self.world.pre_at(&ctx, &m, gully_on_grid, roads_on_grid);
+                    let pre = self.world.pre_at(&ctx, &m, gully_on_grid, roads_on_grid, relief_cut);
                     let pf_low = self.surface.pixel_fields_part(ctx.p, gsd, Some((pf_cut, true)));
                     (m, pre, pf_low)
                 })
@@ -157,6 +159,10 @@ impl Generator {
             if roads_on_grid {
                 pre.road_major = Some([0, 1, 2].map(|c| cubic(&|n| n.1.road_major.unwrap()[c])));
                 pre.road_minor = Some([0, 1, 2].map(|c| cubic(&|n| n.1.road_minor.unwrap()[c])));
+            }
+            if let Some(cut) = relief_cut {
+                pre.relief = Some([0, 1, 2, 3, 4].map(|c| cubic(&|n| n.1.relief.unwrap()[c])));
+                pre.relief_cut = cut;
             }
             m.pre = Some(pre);
             m
