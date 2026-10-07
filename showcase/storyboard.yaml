@@ -56,6 +56,26 @@ shots:
       lighting: {time_utc: '12:00:00'}
     cameras:
     - extrinsics: {pitch_deg: -32}
+- id: map
+  label: Tiles on demand
+  layout: map
+  map_zoom: 14
+  scenario:
+    cameras:
+    - depth: {}
+      extrinsics: {mount: forward, pitch_deg: -45}
+      intrinsics:
+        height: 486
+        intrinsics: [617.0, 617.0, 431.5, 242.5]
+        model: pinhole
+        width: 864
+      path: /cam0
+      rgb: {}
+    trajectory:
+      synth: {altitude: 450, heading_deg: 40, kind: random, lat: 39.9, lon: 32.79, radius: 1600, speed: 60}
+  seconds: 10
+  speedup: 8
+  text: 'Each flight plans its XYZ tiles: only what the camera sees is generated, at the right zoom'
 - id: modalities_mountains
   label: Ground truth · mountains
   layout: modalities
@@ -625,26 +645,6 @@ shots:
       synth: {altitude: 700, heading_deg: 65, kind: line, lat: 39.905, lon: 32.775}
   seconds: 6
   text: Fields, hedgerows and farm tracks in the morning light
-- id: map
-  label: Tiles on demand
-  layout: map
-  map_zoom: 14
-  scenario:
-    cameras:
-    - depth: {}
-      extrinsics: {mount: forward, pitch_deg: -45}
-      intrinsics:
-        height: 486
-        intrinsics: [617.0, 617.0, 431.5, 242.5]
-        model: pinhole
-        width: 864
-      path: /cam0
-      rgb: {}
-    trajectory:
-      synth: {altitude: 450, heading_deg: 40, kind: random, lat: 39.9, lon: 32.79, radius: 1600, speed: 60}
-  seconds: 10
-  speedup: 8
-  text: 'Each flight plans its XYZ tiles: only what the camera sees is generated, at the right zoom'
 outro:
   lines:
     - "Procedural, deterministic, lazily generated XYZ tiles"
