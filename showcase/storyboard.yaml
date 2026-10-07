@@ -230,9 +230,10 @@ shots:
     - extrinsics: {pitch_deg: -34}
       rgb:
         sensor:
-          # capped auto exposure (-1.5 EV): a free-running auto exposure would brighten the
-          # night back to day (gain 160 = +10 EV); like a time-lapse photographer, let it darken
-          exposure: {ev: -1.5, max_gain: 3, max_time: 0.04, tau: 0.25}
+          # a slowly ramping, capped auto exposure (as a time-lapse camera): a free-running one
+          # (gain 160, tau 0.25 s) brightened the night back to day. Fitted to the stills'
+          # exposures (within 0.4 EV): tau 2 s, -0.5 EV, gain <= 12.8
+          exposure: {ev: -0.5, max_gain: 12.8, max_time: 0.04, tau: 2.0}
     render:
       lighting: {time_scale: 600, time_utc: '16:50:00'}
     trajectory:
