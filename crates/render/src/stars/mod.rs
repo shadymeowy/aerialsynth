@@ -131,7 +131,7 @@ impl StarField {
         let vobs = sky.observer_vel_c(pos);
         let geo = geodesy::frames::ecef2geodetic(pos, ell);
         let up = DVec3::new(geo.lat.cos() * geo.lon.cos(), geo.lat.cos() * geo.lon.sin(), geo.lat.sin());
-        let (p_hpa, t_k) = if c.refraction { astro::standard_atmosphere(geo.h) } else { (0.0, 288.0) };
+        let hr = c.refraction.then_some(geo.h);
         let dt = sky.years - (self.cat.epoch - 2000.0);
         let m = sky.gcrs_to_itrs;
         self.cat.stars[..self.n]
@@ -145,7 +145,7 @@ impl StarField {
                     u = astro::deflect(u, sky.sun_to_earth, sky.sun_dist);
                     u = astro::aberrate(u, vobs, sky.sun_dist);
                 }
-                refract(m * u, up, p_hpa, t_k)
+                refract(m * u, up, hr)
             })
             .collect()
     }
@@ -162,7 +162,7 @@ impl StarField {
         let sky = Sky::new(unix, c.dut1_s, c.polar_motion_arcsec[0] * as2r, c.polar_motion_arcsec[1] * as2r);
         let geo = geodesy::frames::ecef2geodetic(pos, ell);
         let up = DVec3::new(geo.lat.cos() * geo.lon.cos(), geo.lat.cos() * geo.lon.sin(), geo.lat.sin());
-        let (p_hpa, t_k) = if c.refraction { astro::standard_atmosphere(geo.h) } else { (0.0, 288.0) };
+        let hr = c.refraction.then_some(geo.h);
         let mut list = planets::PLANETS.to_vec();
         list.push(ephem::Body::Moon);
         let Some(app) = planets::apparent(&sky, pos, &list) else { return vec![] };
@@ -170,11 +170,20 @@ impl StarField {
             .filter(|a| a.v <= c.mag_limit)
             .map(|a| Source {
                 id: planets::body_id(a.body),
-                dir: refract(sky.gcrs_to_itrs * a.dir, up, p_hpa, t_k),
+                // the Moon as the sky draws it (lighting::moon_position), so that its ground
+                // truth matches the image
+                dir: if a.body == ephem::Body::Moon {
+                    moon_topocentric(unix, geo.lat, geo.lon).map_or(sky.gcrs_to_itrs * a.dir, |(az, el, _)| enu_dir(az, el, geo.lat, geo.lon))
+                } else {
+                    refract(sky.gcrs_to_itrs * a.dir, up, hr)
+                },
                 v: a.v as f32,
                 bv: planets::colour_bv(a.body) as f32,
                 radius: a.radius,
                 draw: a.body != ephem::Body::Moon,
+                sun: sky.gcrs_to_itrs * a.to_sun,
+                ring_pole: sky.gcrs_to_itrs * a.ring_pole,
+                globe_frac: a.globe_frac as f32,
             })
             .collect()
     }
@@ -187,17 +196,26 @@ impl StarField {
     }
 
     /// Stars over an exposure: `track` holds the camera poses at equal time steps across the
-    /// open shutter (one pose: instantaneous). Each star is splatted along its image track in
+    /// open shutter (one pose: instantaneous). Each source is splatted along its image track in
     /// steps of at most 0.25 px with equal energy per unit time, so camera rotation draws
-    /// trails of the right length and brightness. Stars are added to the sky pixels of
-    /// `radiance` (empty: ground truth only). Returns the stars in the image at the pose `mid`
-    /// (the frame time).
+    /// trails of the right length and brightness; resolved planets are drawn with their phase
+    /// (and Saturn's rings). Sources are added to the sky pixels of `radiance` (empty: ground
+    /// truth only). Returns the sources in the image at the pose `mid` (the frame time).
     #[allow(clippy::too_many_arguments)]
     pub fn render_track(&self, radiance: &mut [f32], points: &[Option<DVec3>], (w, h): (usize, usize), model: &dyn CameraModel, track: &[CamPose], mid: &CamPose, unix: f64, ell: &Ellipsoid, atmo: &AtmoParams) -> Vec<StarObs> {
-        let dirs = self.apparent(unix, mid.pos, ell);
-        let mut sources: Vec<Source> = dirs.iter().zip(&self.cat.stars[..self.n]).map(|(d, s)| Source { id: s.id, dir: *d, v: s.v, bv: s.bv, radius: 0.0, draw: true }).collect();
-        sources.extend(self.bodies(unix, mid.pos, ell));
         let rt = mid.r_ecef_cam.transpose();
+        // view cone (plus the rotation over the exposure) for culling before any allocation
+        let turn = track.iter().map(|c| (c.r_ecef_cam.transpose() * mid.r_ecef_cam * DVec3::Z).angle_between(DVec3::Z)).fold(0.0, f64::max);
+        let half = model.max_half_angle() + turn + 0.02;
+        let cos_lim = if half >= std::f64::consts::PI { -2.0 } else { half.cos() };
+        let dirs = self.apparent(unix, mid.pos, ell);
+        let mut sources: Vec<Source> = dirs
+            .iter()
+            .zip(&self.cat.stars[..self.n])
+            .filter(|(d, _)| (rt * **d).z >= cos_lim)
+            .map(|(d, s)| Source { id: s.id, dir: *d, v: s.v, bv: s.bv, radius: 0.0, draw: true, sun: DVec3::ZERO, ring_pole: DVec3::ZERO, globe_frac: 1.0 })
+            .collect();
+        sources.extend(self.bodies(unix, mid.pos, ell).into_iter().filter(|b| (rt * b.dir).z >= cos_lim));
         let geo = geodesy::frames::ecef2geodetic(mid.pos, ell);
         let up = DVec3::new(geo.lat.cos() * geo.lon.cos(), geo.lat.cos() * geo.lon.sin(), geo.lat.sin());
         // vertical optical depth above the camera per channel (the renderer's atmosphere)
@@ -210,121 +228,117 @@ impl StarField {
         };
         let inside = |p: DVec2| p.x >= -0.5 && p.y >= -0.5 && p.x <= w as f64 - 0.5 && p.y <= h as f64 - 0.5;
         let tracks: Vec<DMat3> = track.iter().map(|c| c.r_ecef_cam.transpose()).collect();
-        let sigma = self.cfg.psf_sigma_px.max(0.0);
+        let sigma = self.cfg.psf_sigma_px.clamp(0.0, 5.0);
         let r = if sigma < 0.05 { 0 } else { (3.0 * sigma + 0.5).ceil() as i64 };
         let sky = |x: i64, y: i64| points.get(y as usize * w + x as usize).is_some_and(|q| q.is_none());
-        // per star: ground truth at `mid`, and its splat (pixel index, rgb) contributions
-        let found: Vec<StarSplat> = sources
-            .par_iter()
-            .filter_map(|s| {
-                let d = &s.dir;
-                let pm = model.project(rt * *d);
-                // positions along the exposure
-                let pts: Vec<Option<DVec2>> = tracks.iter().map(|m| model.project(*m * *d)).collect();
-                let gt_in = pm.is_some_and(inside);
-                if !gt_in && !pts.iter().flatten().any(|p| inside(*p)) {
-                    return None;
-                }
-                let el = d.dot(up).asin().to_degrees().max(-1.0);
-                let airmass = 1.0 / (el.to_radians().sin().max(0.0) + 0.50572 * (el + 6.07995).powf(-1.6364));
-                let t = (-tau * airmass).exp();
-                let e = 10f64.powf(-0.4 * (s.v as f64 - V_SUN));
-                let obs = pm.filter(|p| inside(*p)).map(|p| {
-                    let (xi, yi) = (p.x.round() as i64, p.y.round() as i64);
-                    // exposure-averaged position: mean of the track at equal time steps
-                    let seg: Vec<DVec2> = pts.windows(2).filter_map(|q| Some((q[0]? + q[1]?) * 0.5)).collect();
-                    let pmean = if seg.is_empty() { p } else { seg.iter().fold(DVec2::ZERO, |a, b| a + *b) / seg.len() as f64 };
-                    StarObs { id: s.id, x: p.x as f32, y: p.y as f32, xm: pmean.x as f32, ym: pmean.y as f32, v: s.v, irradiance: (e * t.y) as f32, visible: sky(xi, yi) }
-                });
-                if radiance.is_empty() || !s.draw {
-                    return obs.map(|o| (Some(o), vec![]));
-                }
-                let col = self.colours[(((s.bv as f64 + 0.5) / 0.01).round() as usize).min(350)];
-                let rgb = col * t * e;
-                // solid angle of a pixel at the star (camera model Jacobian)
-                let c0 = pm.or_else(|| pts.iter().flatten().next().copied())?;
-                let un = |dx: f64, dy: f64| model.unproject(DVec2::new(c0.x + dx, c0.y + dy)).map(|v| v.normalize());
-                let omega = match (un(-0.5, 0.0), un(0.5, 0.0), un(0.0, -0.5), un(0.0, 0.5)) {
-                    (Some(a), Some(b), Some(c), Some(d)) => (b - a).cross(d - c).length(),
-                    _ => return obs.map(|o| (Some(o), vec![])),
-                };
-                if omega <= 0.0 {
-                    return obs.map(|o| (Some(o), vec![]));
-                }
-                let scale = std::f64::consts::PI * SUN_TOA * self.cfg.brightness / omega;
-                // sample positions at equal time steps along the track, each weighted by its
-                // share of the exposure
-                let mut samples: Vec<(DVec2, f64)> = vec![];
-                if pts.len() == 1 {
-                    samples.extend(pts[0].map(|p| (p, 1.0)));
-                } else {
-                    let nseg = (pts.len() - 1) as f64;
-                    for seg in pts.windows(2) {
-                        if let (Some(a), Some(b)) = (seg[0], seg[1]) {
-                            let m = (((b - a).length() / 0.25).ceil() as usize).clamp(1, 4096);
-                            samples.extend((0..m).map(|i| (a + (b - a) * ((i as f64 + 0.5) / m as f64), 1.0 / (nseg * m as f64))));
+        let mut out = Vec::new();
+        // in chunks: the per-chunk splat lists stay bounded however long the trails are
+        for chunk in sources.chunks(1024) {
+            let found: Vec<StarSplat> = chunk
+                .par_iter()
+                .filter_map(|s| {
+                    let d = s.dir;
+                    let pm = model.project(rt * d);
+                    // positions along the exposure
+                    let pts: Vec<Option<DVec2>> = tracks.iter().map(|m| model.project(*m * d)).collect();
+                    if !pm.is_some_and(inside) && !pts.iter().flatten().any(|p| inside(*p)) {
+                        return None;
+                    }
+                    let el = d.dot(up).asin().to_degrees().max(-1.0);
+                    let airmass = 1.0 / (el.to_radians().sin().max(0.0) + 0.50572 * (el + 6.07995).powf(-1.6364));
+                    let t = (-tau * airmass).exp();
+                    let e = 10f64.powf(-0.4 * (s.v as f64 - V_SUN));
+                    let obs = pm.filter(|p| inside(*p)).map(|p| {
+                        let (xi, yi) = (p.x.round() as i64, p.y.round() as i64);
+                        // exposure-averaged position: mean of the track at equal time steps
+                        let seg: Vec<DVec2> = pts.windows(2).filter_map(|q| Some((q[0]? + q[1]?) * 0.5)).collect();
+                        let pmean = if seg.is_empty() { p } else { seg.iter().fold(DVec2::ZERO, |a, b| a + *b) / seg.len() as f64 };
+                        StarObs { id: s.id, x: p.x as f32, y: p.y as f32, xm: pmean.x as f32, ym: pmean.y as f32, v: s.v, irradiance: (e * t.y) as f32, visible: sky(xi, yi) }
+                    });
+                    if radiance.is_empty() || !s.draw {
+                        return obs.map(|o| (Some(o), vec![]));
+                    }
+                    let col = self.colours[(((s.bv as f64 + 0.5) / 0.01).round() as usize).min(350)];
+                    let rgb = col * t * e;
+                    // solid angle of a pixel at the source (camera model Jacobian)
+                    let c0 = pm.or_else(|| pts.iter().flatten().next().copied())?;
+                    let un = |dx: f64, dy: f64| model.unproject(DVec2::new(c0.x + dx, c0.y + dy)).map(|v| v.normalize());
+                    let (omega, dx3, dy3) = match (un(-0.5, 0.0), un(0.5, 0.0), un(0.0, -0.5), un(0.0, 0.5)) {
+                        (Some(a), Some(b), Some(c), Some(d)) => ((b - a).cross(d - c).length(), b - a, d - c),
+                        _ => return obs.map(|o| (Some(o), vec![])),
+                    };
+                    if omega <= 0.0 {
+                        return obs.map(|o| (Some(o), vec![]));
+                    }
+                    let scale = std::f64::consts::PI * SUN_TOA * self.cfg.brightness / omega;
+                    // positions at equal time steps along the track, each weighted by its share of
+                    // the exposure (one sample when the track is shorter than 0.25 px)
+                    let valid: Vec<DVec2> = pts.iter().flatten().copied().collect();
+                    let span = valid.windows(2).map(|q| (q[1] - q[0]).length()).sum::<f64>();
+                    let mut samples: Vec<(DVec2, f64)> = vec![];
+                    if pts.len() == 1 || span < 0.25 {
+                        samples.push((pm.unwrap_or(c0), 1.0));
+                    } else {
+                        let nseg = (pts.len() - 1) as f64;
+                        for seg in pts.windows(2) {
+                            if let (Some(a), Some(b)) = (seg[0], seg[1]) {
+                                let m = (((b - a).length() / 0.25).ceil() as usize).clamp(1, 4096);
+                                samples.extend((0..m).map(|i| (a + (b - a) * ((i as f64 + 0.5) / m as f64), 1.0 / (nseg * m as f64))));
+                            }
                         }
                     }
-                }
-                // resolved discs (planets): a uniform disc of the apparent radius, sampled on a
-                // grid (≤ ~400 points) around every track sample
-                let rpx = s.radius / omega.sqrt();
-                if rpx > 0.3 {
-                    let step = 0.25f64.max(rpx * (std::f64::consts::PI / 400.0).sqrt());
-                    let k = (rpx / step).ceil() as i64;
-                    let disc: Vec<DVec2> = (-k..=k)
-                        .flat_map(|j| (-k..=k).map(move |i| DVec2::new(i as f64 * step, j as f64 * step)))
-                        .filter(|o| o.length() <= rpx)
-                        .collect();
-                    let nd = disc.len().max(1) as f64;
-                    samples = samples.iter().flat_map(|(p, w)| disc.iter().map(move |o| (*p + *o, *w / nd))).collect();
-                }
-                let mut adds: Vec<(usize, DVec3)> = vec![];
-                for (p, wt) in &samples {
-                    let (cx, cy) = (p.x.round() as i64, p.y.round() as i64);
-                    let wts = |c: f64, i0: i64| -> Vec<f64> {
-                        (i0 - r..=i0 + r)
-                            .map(|i| {
-                                if r == 0 {
-                                    return 1.0;
-                                }
-                                let s = sigma * std::f64::consts::SQRT_2;
-                                0.5 * (erf((i as f64 + 0.5 - c) / s) - erf((i as f64 - 0.5 - c) / s))
-                            })
-                            .collect()
-                    };
-                    let (wx, wy) = (wts(p.x, cx), wts(p.y, cy));
-                    for (jy, y) in (cy - r..=cy + r).enumerate() {
-                        if y < 0 || y >= h as i64 {
-                            continue;
+                    // resolved planets: the lit part of the globe (and Saturn's rings) around every
+                    // track sample, at most ~60k samples in all
+                    let rpx = s.radius / omega.sqrt();
+                    if rpx > 0.3 {
+                        let dc = (rt * d).normalize();
+                        let ex = (dx3 - dc * dx3.dot(dc)).normalize();
+                        let ey = (dy3 - dc * dy3.dot(dc)).normalize();
+                        let budget = (60_000 / samples.len().max(1)).max(64);
+                        let shape = planet_shape(rpx, dc, ex, ey, rt * s.sun, rt * s.ring_pole, s.globe_frac as f64, budget);
+                        samples = samples.iter().flat_map(|(p, w)| shape.iter().map(move |(o, f)| (*p + *o, *w * f))).collect();
+                    }
+                    let mut adds: Vec<(usize, DVec3)> = Vec::with_capacity(samples.len() * ((2 * r + 1) * (2 * r + 1)) as usize);
+                    let mut wx = [0.0f64; 33];
+                    let mut wy = [0.0f64; 33];
+                    let s2 = sigma * std::f64::consts::SQRT_2;
+                    for (p, wt) in &samples {
+                        let (cx, cy) = (p.x.round() as i64, p.y.round() as i64);
+                        for (k, i) in (-r..=r).enumerate() {
+                            wx[k] = if r == 0 { 1.0 } else { 0.5 * (erf(((cx + i) as f64 + 0.5 - p.x) / s2) - erf(((cx + i) as f64 - 0.5 - p.x) / s2)) };
+                            wy[k] = if r == 0 { 1.0 } else { 0.5 * (erf(((cy + i) as f64 + 0.5 - p.y) / s2) - erf(((cy + i) as f64 - 0.5 - p.y) / s2)) };
                         }
-                        for (jx, x) in (cx - r..=cx + r).enumerate() {
-                            if x < 0 || x >= w as i64 || !sky(x, y) {
+                        for (jy, y) in (cy - r..=cy + r).enumerate() {
+                            if y < 0 || y >= h as i64 {
                                 continue;
                             }
-                            adds.push((y as usize * w + x as usize, rgb * (wx[jx] * wy[jy] * *wt * scale)));
+                            for (jx, x) in (cx - r..=cx + r).enumerate() {
+                                if x < 0 || x >= w as i64 || !sky(x, y) {
+                                    continue;
+                                }
+                                adds.push((y as usize * w + x as usize, rgb * (wx[jx] * wy[jy] * *wt * scale)));
+                            }
                         }
                     }
+                    Some((obs, adds))
+                })
+                .collect();
+            for (o, adds) in found {
+                for (k, v) in adds {
+                    radiance[3 * k] += v.x as f32;
+                    radiance[3 * k + 1] += v.y as f32;
+                    radiance[3 * k + 2] += v.z as f32;
                 }
-                Some((obs, adds))
-            })
-            .collect();
-        let mut out = Vec::with_capacity(found.len());
-        for (o, adds) in found {
-            for (k, v) in adds {
-                radiance[3 * k] += v.x as f32;
-                radiance[3 * k + 1] += v.y as f32;
-                radiance[3 * k + 2] += v.z as f32;
+                out.extend(o);
             }
-            out.extend(o);
         }
         out
     }
 }
 
-/// Topocentric azimuth (from north, clockwise), elevation (no refraction) and illuminated
-/// fraction of the Moon from DE440 for an observer on the ellipsoid at `lat`, `lon` (rad).
-/// None outside 1990–2060.
+/// Topocentric azimuth (from north, clockwise), apparent elevation (refraction at sea level)
+/// and illuminated fraction of the Moon from DE440 for an observer on the ellipsoid at `lat`,
+/// `lon` (rad). None outside 1990–2060.
 pub fn moon_topocentric(unix: f64, lat: f64, lon: f64) -> Option<(f64, f64, f64)> {
     let sky = Sky::new(unix, 0.0, 0.0, 0.0);
     let pos = geodesy::frames::geodetic2ecef(geodesy::Geodetic::new(lat, lon, 0.0), &Ellipsoid::WGS84);
@@ -332,7 +346,12 @@ pub fn moon_topocentric(unix: f64, lat: f64, lon: f64) -> Option<(f64, f64, f64)
     let e = geodesy::frames::ecef2enuv(sky.gcrs_to_itrs * a.dir, lat, lon);
     let el = e.z.clamp(-1.0, 1.0).asin();
     let az = e.x.atan2(e.y).rem_euclid(std::f64::consts::TAU);
-    Some((az, el, 0.5 * (1.0 + a.phase.to_radians().cos())))
+    Some((az, el + astro::refraction_h(el, 0.0), 0.5 * (1.0 + a.phase.to_radians().cos())))
+}
+
+/// ECEF unit vector of azimuth `az` (from north, clockwise) and elevation `el` at `lat`, `lon`.
+fn enu_dir(az: f64, el: f64, lat: f64, lon: f64) -> DVec3 {
+    geodesy::frames::enu2ecefv(DVec3::new(el.cos() * az.sin(), el.cos() * az.cos(), el.sin()), lat, lon)
 }
 
 /// A point or disc source in the sky: a catalogue star or a solar-system body.
@@ -348,15 +367,88 @@ pub struct Source {
     pub radius: f64,
     /// drawn by the star renderer (the Moon is drawn by the sky)
     pub draw: bool,
+    /// planets: unit vector to the Sun (phase), ring pole (Saturn; zero otherwise) and the
+    /// globe's share of the flux (ITRS)
+    pub sun: DVec3,
+    pub ring_pole: DVec3,
+    pub globe_frac: f32,
 }
 
-/// Rotate `d` towards the zenith `up` by the refraction at its elevation.
-fn refract(d: DVec3, up: DVec3, p_hpa: f64, t_k: f64) -> DVec3 {
-    if p_hpa <= 0.0 {
-        return d;
+/// Saturn's rings in units of its equatorial radius (60,268 km): (inner radius, relative
+/// brightness, opacity) of the C ring, B ring, Cassini division and A ring; out to 2.269.
+const RINGS: [(f64, f64, f64); 4] = [(1.239, 0.12, 0.10), (1.527, 1.0, 0.90), (1.951, 0.08, 0.10), (2.027, 0.55, 0.50)];
+const RING_OUT: f64 = 2.269;
+
+/// The image of a resolved planet as offsets (px) from its centre with flux fractions (sum 1):
+/// the globe (radius `rpx` px) Lambert-shaded by the Sun (phases), and for a nonzero `pole`
+/// Saturn's rings (the globe hides the rings behind it, rings in front dim the globe by their
+/// opacity; the unlit face of the rings is dim). `dc`: direction to the planet, `ex`, `ey`: the
+/// image x / y directions at it, `sun`: planet → Sun, all in the camera frame. At most about
+/// `budget` samples.
+fn planet_shape(rpx: f64, dc: DVec3, ex: DVec3, ey: DVec3, sun: DVec3, pole: DVec3, globe_frac: f64, budget: usize) -> Vec<(DVec2, f64)> {
+    let rings = pole.length_squared() > 0.5;
+    let extent = if rings { RING_OUT } else { 1.0 } * rpx;
+    // ≤ 0.25 px between samples (finer than the PSF), coarser only beyond the sample budget
+    let step = 0.25f64.max(2.0 * extent / (budget as f64).sqrt());
+    let k = (extent / step).ceil() as i64;
+    let pd = pole.dot(dc);
+    // the ring face we see is lit when the Sun and the observer are on the same side
+    let ring_lit = if pole.dot(sun) * pole.dot(-dc) > 0.0 { 1.0 } else { 0.15 };
+    let mut globe: Vec<(DVec2, f64)> = vec![];
+    let mut ring: Vec<(DVec2, f64)> = vec![];
+    for j in -k..=k {
+        for i in -k..=k {
+            let o = DVec2::new(i as f64 * step, j as f64 * step);
+            let q = o / rpx;
+            let q2 = q.length_squared();
+            let tang = ex * q.x + ey * q.y;
+            // the front surface of the globe along this ray (depth along dc, radius units)
+            let on_globe = q2 <= 1.0;
+            let t_globe = -(1.0 - q2.min(1.0)).sqrt();
+            let mut veil = 1.0;
+            if rings && pd.abs() > 1e-4 {
+                let t = -pole.dot(tang) / pd;
+                let rho = (tang + dc * t).length();
+                if (RINGS[0].0..RING_OUT).contains(&rho) {
+                    let (_, b, op) = RINGS.iter().rev().find(|z| rho >= z.0).copied().unwrap();
+                    let hidden = on_globe && t > t_globe;
+                    if !hidden {
+                        ring.push((o, b * ring_lit));
+                        if on_globe {
+                            veil = 1.0 - op;
+                        }
+                    }
+                }
+            }
+            if on_globe {
+                let n = tang + dc * t_globe;
+                globe.push((o, n.dot(sun).max(0.0) * veil));
+            }
+        }
     }
+    let (sg, sr) = (globe.iter().map(|g| g.1).sum::<f64>(), ring.iter().map(|r| r.1).sum::<f64>());
+    let (fg, fr) = if sr > 0.0 && sg > 0.0 {
+        (globe_frac, 1.0 - globe_frac)
+    } else if sg > 0.0 {
+        (1.0, 0.0)
+    } else if sr > 0.0 {
+        (0.0, 1.0)
+    } else {
+        return vec![(DVec2::ZERO, 1.0)];
+    };
+    let mut out: Vec<(DVec2, f64)> = globe.into_iter().filter(|g| g.1 > 0.0).map(|(o, w)| (o, w / sg * fg)).collect();
+    if fr > 0.0 {
+        out.extend(ring.into_iter().filter(|r| r.1 > 0.0).map(|(o, w)| (o, w / sr * fr)));
+    }
+    out
+}
+
+/// Rotate `d` towards the zenith `up` by the refraction at its elevation for an observer at
+/// height `h` (m); None: no refraction.
+fn refract(d: DVec3, up: DVec3, h: Option<f64>) -> DVec3 {
+    let Some(h) = h else { return d };
     let el = d.dot(up).clamp(-1.0, 1.0).asin();
-    let r = astro::refraction(el, p_hpa, t_k);
+    let r = astro::refraction_h(el, h);
     let tang = up - d * d.dot(up);
     if tang.length_squared() > 1e-24 {
         (d * r.cos() + tang.normalize() * r.sin()).normalize()
@@ -505,7 +597,10 @@ mod tests {
             let (sa, ca) = f64::to_radians(az).sin_cos();
             let (se, ce) = f64::to_radians(el).sin_cos();
             let sep = ecef2enuv(b.dir, la, lo).angle_between(DVec3::new(ce * sa, ce * ca, se)).to_degrees() * 3600.0;
-            assert!(sep < 0.02, "{naif}: {sep:.4}\"");
+            // the Moon's ground truth is the drawn Moon: observer on the ellipsoid, UT1 = UTC
+            // (1500 m of parallax and dut1 = 0.05 s: ~1.5″)
+            let tol = if naif == 301 { 2.0 } else { 0.02 };
+            assert!(sep < tol, "{naif}: {sep:.4}\"");
             if v.is_finite() {
                 assert!((b.v as f64 - v).abs() < 0.05, "{naif}: V {} vs {v}", b.v);
             }

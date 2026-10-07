@@ -78,13 +78,23 @@ system barycentres: Jupiter's and Saturn's centres lie within ~200–300 km of t
   Skyfield. They depend on phase angle, Saturn's ring tilt and Uranus's sub-observer and
   sub-solar latitudes.
 * Colour comes from each planet's mean B−V.
-* Planets larger than 0.3 px are drawn as uniform discs of their apparent equatorial radius;
-  Jupiter at opposition is 46.6″. They are smeared along the exposure track like the stars.
-* Phases (the crescent Venus, gibbous Mars), Saturn's rings and the Galilean moons are not drawn.
+* Planets larger than 0.3 px are drawn as their globe of apparent equatorial radius, Lambert
+  shaded by the Sun. That gives the real phases: crescent and half Venus, gibbous Mars and
+  Mercury. Jupiter at opposition is 46.6″.
+* Saturn has its rings: the C ring, B ring, Cassini division and A ring, each with its own
+  brightness and opacity, in the ring plane (IAU pole).
+  * The globe hides the rings behind it, and the rings in front veil the globe.
+  * The unlit face of the rings is dim.
+  * The flux splits between globe and rings by the ring term of the magnitude formula, so the
+    rings close up correctly at the ring-plane crossings (2025, 2038–39).
+* Shapes are sampled at ≤ 0.25 px and smeared along the exposure track like the stars.
+* The ground-truth position is the planet's centre, not the light centroid of a phase.
+* Not drawn: the Galilean moons, Saturn's ring shadows, the planets' flattening.
 
 **The Moon.** The Moon is drawn by the sky, as before. Its position and phase, which also drive
-moonlight, now come from DE440 (topocentric) instead of mean elements (~0.5°). It appears in the
-star ground truth.
+moonlight, now come from DE440 (topocentric, with sea-level refraction) instead of mean elements
+(~0.5°). It appears in the star ground truth at exactly the drawn position: observer on the
+ellipsoid, UT1 = UTC, within ~2″ of the camera's true view.
 
 **Ground-truth ids.** Planets and the Moon have id `1<<30 | NAIF id`: 199 Mercury, 299 Venus,
 499 Mars, 599 Jupiter, 699 Saturn, 799 Uranus, 899 Neptune and 301 the Moon.
@@ -115,6 +125,11 @@ Refraction uses the ERFA `refco` model (Green's A tan z + B tan³ z: dry air, 0.
 20° elevation, and Sæmundsson's formula below 10°, blended in between. Pressure and temperature
 come from the US standard atmosphere at the observer's altitude, and refraction vanishes above
 80 km.
+
+From altitude, stars below the horizontal but above the Earth's limb are visible, through a
+ray that dips to its tangent height and back up. Those get twice the horizontal refraction at
+the tangent height, less the part above the observer: about 1° at the limb seen from 10 km.
+Below the limb (hidden) the refraction fades out.
 
 **Validation** (`cargo test -p render stars`, plus `configs/star_tracker.yaml`):
 * Star positions were compared against Skyfield 1.53 (JPL DE421, IAU 2000A) for the same

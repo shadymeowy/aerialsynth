@@ -376,6 +376,30 @@ pub fn refraction(el: f64, p_hpa: f64, t_k: f64) -> f64 {
     }
 }
 
+/// Refraction (rad) for an observer at height `h` (m) in the standard atmosphere, for a
+/// geometric elevation `el` (rad), also below the horizontal: seen from altitude, a ray dips
+/// to its tangent height and climbs out again, bending about twice the horizontal refraction
+/// there, less the part above the observer.
+pub fn refraction_h(el: f64, h: f64) -> f64 {
+    let (p, t) = standard_atmosphere(h);
+    if p <= 0.0 {
+        return 0.0;
+    }
+    if el >= 0.0 {
+        return refraction(el, p, t);
+    }
+    let re = 6_371_000.0;
+    let ht = ((re + h) * el.cos() - re).max(0.0);
+    let hor = |x: f64| {
+        let (p, t) = standard_atmosphere(x);
+        refraction(0.0, p, t)
+    };
+    // below the Earth's limb (dip) the body is hidden: fade out over 2°
+    let dip = (re / (re + h.max(0.0))).acos();
+    let fade = (1.0 - (-el - dip) / 2f64.to_radians()).clamp(0.0, 1.0);
+    (2.0 * hor(ht) - hor(h)) * fade
+}
+
 /// U.S. Standard Atmosphere 1976 (to 47 km): pressure (hPa) and temperature (K) at
 /// geometric height `h` (m); zero pressure above 80 km.
 pub fn standard_atmosphere(h: f64) -> (f64, f64) {

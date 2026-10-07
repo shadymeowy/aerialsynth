@@ -64,6 +64,12 @@ pub struct Apparent {
     /// apparent equatorial radius (rad)
     pub radius: f64,
     pub v: f64,
+    /// unit vector from the body to the Sun (GCRS axes), for the phase
+    pub to_sun: DVec3,
+    /// Saturn: ring-plane pole (GCRS axes; zero for the other bodies) and the globe's share of
+    /// the total flux
+    pub ring_pole: DVec3,
+    pub globe_frac: f64,
 }
 
 /// ERFA ld: deflection of the direction `p` to a body at unit vector `q` from the deflector
@@ -109,7 +115,14 @@ pub fn apparent(sky: &Sky, obs: DVec3, bodies: &[Body]) -> Option<Vec<Apparent>>
         let phase = (-sun_body).angle_between(-rel).to_degrees();
         let radius = (radius_km(b) / rel.length()).asin();
         let v = magnitude(b, r, delta, phase, -rel.normalize(), -sun_body.normalize());
-        out.push(Apparent { body: b, dir: u, delta, r, phase, radius, v });
+        let (ring_pole, globe_frac) = if b == Body::Saturn {
+            // the globe alone: the ring terms of the magnitude vanish for an edge-on ring
+            let vg = 5.0 * (r * delta).log10() - 8.914 + 0.026 * phase;
+            (pole(40.589, 83.537), 10f64.powf(-0.4 * (vg - v)).min(1.0))
+        } else {
+            (DVec3::ZERO, 1.0)
+        };
+        out.push(Apparent { body: b, dir: u, delta, r, phase, radius, v, to_sun: -sun_body.normalize(), ring_pole, globe_frac });
     }
     Some(out)
 }
