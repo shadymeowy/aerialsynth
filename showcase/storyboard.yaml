@@ -154,12 +154,13 @@ shots:
     render:
       lighting: {date: '2026-01-10', time_utc: '20:15:00'}
     trajectory:
-      # a calm flight (no turbulence, gusts or engine vibration): a still sky
-      synth: {altitude: 1500, heading_deg: 140, kind: line, lat: 41.562, lon: 32.955, speed: 50, wind: {turbulence: 0.0, gust_rate_per_min: 0.0}, vibration: {harmonic_deg: 0.0, broadband_deg: 0.0}}
+      # a calm, gentle right turn (0.7 deg/s; no turbulence, gusts or vibration): the stars drift
+      # slowly across the frame, so the event camera sees each one
+      synth: {altitude: 1500, heading_deg: 140, kind: circle, radius: 4000, lat: 41.562, lon: 32.955, speed: 50, wind: {turbulence: 0.0, gust_rate_per_min: 0.0}, vibration: {harmonic_deg: 0.0, broadband_deg: 0.0}}
   seconds: 6
   extend: 6.6
   text: 'The real sky of 2026-01-10 20:15 UTC: Hipparcos + Tycho-2 stars and JPL DE440 planets (Jupiter, Orion, Sirius), astrometric error < 0.01″'
-- {id: events_stars, label: Event camera · night sky, text: 'The same sky on an event camera: stars and Jupiter at their true positions', seconds: 6, layout: events,
+- {id: events_stars, label: Event camera · night sky, text: 'The same sky on an event camera: stars and Jupiter drift through the view as the plane turns, at their true positions', seconds: 6, layout: events,
   source: stars, offset: 6.6}
 - id: modalities_night
   label: Ground truth · night
@@ -221,7 +222,8 @@ shots:
     render:
       lighting: {date: '2026-01-20', time_utc: '19:30:00'}
     trajectory:
-      # a calm flight (no turbulence, gusts or engine vibration): a still sky
+      # a calm, gentle right turn (0.7 deg/s; no turbulence, gusts or vibration): the stars drift
+      # slowly across the frame, so the event camera sees each one
       synth: {altitude: 1500, heading_deg: 190, kind: line, lat: 41.5705, lon: 32.970, speed: 50, wind: {turbulence: 0.0, gust_rate_per_min: 0.0}, vibration: {harmonic_deg: 0.0, broadband_deg: 0.0}}
   seconds: 6
   extend: 6.6
