@@ -368,22 +368,34 @@ impl World {
         out
     }
 
+    /// Wavelength (m) of the meander warp of drainage level `li` (its shorter octave: × 0.37).
+    pub fn meander_wavelength(&self, li: usize) -> f64 {
+        let lc = &self.cfg.hydro.levels[li];
+        lc.meander.max(1e-3) * (lc.cell_km * KM)
+    }
+
+    /// The meander warp (east, north; × 0.22 wavelength) of drainage level `li` at `p`.
+    pub fn meander_warp(&self, li: usize, p: DVec3) -> [f64; 2] {
+        let lam = self.meander_wavelength(li);
+        let k = self.level_key(li);
+        let w1 = perlin3(k ^ 1, p / lam) + 0.45 * perlin3(k ^ 2, p / (0.37 * lam));
+        let w2 = perlin3(k ^ 3, p / lam) + 0.45 * perlin3(k ^ 4, p / (0.37 * lam));
+        [w1, w2]
+    }
+
     /// Channels among `segs` whose valley may reach `ctx` with ground height `h` (meandered by
     /// a domain warp per level). The valley widens with the height above the floor, so the
     /// reach depends on `h`; the caller carves with every hit (min) and takes the channel
     /// attributes from the nearest one.
-    pub fn river_query(&self, ctx: &Ctx, segs: &[Seg], h: f64) -> Vec<RiverHit> {
+    /// `pre_warp`: the meander warps per level where known (from the tile's coarse grid).
+    pub fn river_query(&self, ctx: &Ctx, segs: &[Seg], h: f64, pre_warp: &[Option<[f64; 2]>]) -> Vec<RiverHit> {
         let mut hits = Vec::new();
         let mut warped: Vec<Option<DVec3>> = vec![None; self.cfg.hydro.levels.len()];
         for s in segs {
             let li = s.level as usize;
-            let lc = &self.cfg.hydro.levels[li];
             let pw = *warped[li].get_or_insert_with(|| {
-                let cell = lc.cell_km * KM;
-                let lam = lc.meander.max(1e-3) * cell;
-                let k = self.level_key(li);
-                let w1 = perlin3(k ^ 1, ctx.p / lam) + 0.45 * perlin3(k ^ 2, ctx.p / (0.37 * lam));
-                let w2 = perlin3(k ^ 3, ctx.p / lam) + 0.45 * perlin3(k ^ 4, ctx.p / (0.37 * lam));
+                let lam = self.meander_wavelength(li);
+                let [w1, w2] = pre_warp.get(li).copied().flatten().unwrap_or_else(|| self.meander_warp(li, ctx.p));
                 ctx.p + (ctx.east * w1 + ctx.north * w2) * (0.22 * lam)
             });
             let ab = s.b - s.a;

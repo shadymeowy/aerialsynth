@@ -19,14 +19,40 @@ pub struct Generator {
     pub surface: SurfaceModel,
 }
 
-/// Catmull-Rom interpolation of four equally spaced samples at t in [0, 1] between the middle two.
-#[inline]
-fn catmull_rom(p: [f64; 4], t: f64) -> f64 {
-    let [p0, p1, p2, p3] = p;
-    p1 + 0.5 * t * (p2 - p0 + t * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3 + t * (3.0 * (p1 - p2) + p3 - p0)))
+/// Grid-interpolated inputs of pass A, flattened: mountain warp, gully gradient, roads, relief
+/// octaves, meander warps, region warp.
+const NPRE: usize = 26;
+
+fn pack_pre(m: &Macro, p: &Pre) -> [f64; NPRE] {
+    let mut f = [0.0; NPRE];
+    f[0..2].copy_from_slice(&m.mtn_warp);
+    f[2..4].copy_from_slice(&p.gully.unwrap_or_default());
+    f[4..7].copy_from_slice(&p.road_major.unwrap_or_default());
+    f[7..10].copy_from_slice(&p.road_minor.unwrap_or_default());
+    f[10..15].copy_from_slice(&p.relief.unwrap_or_default());
+    for li in 0..4 {
+        f[15 + 2 * li..17 + 2 * li].copy_from_slice(&p.river_warp[li].unwrap_or_default());
+    }
+    f[23..26].copy_from_slice(&p.region_warp.unwrap_or_default());
+    f
 }
 
-/// The Catmull-Rom weights of the four samples (as in [`catmull_rom`]).
+/// The interpolated `f` with the fields present in `like` (every node has the same).
+fn unpack_pre(f: &[f64; NPRE], like: &Pre) -> ([f64; 2], Pre) {
+    let arr = |a: usize| -> [f64; 3] { [f[a], f[a + 1], f[a + 2]] };
+    let mut p = Pre { relief_cut: like.relief_cut, ..Pre::default() };
+    p.gully = like.gully.map(|_| [f[2], f[3]]);
+    p.road_major = like.road_major.map(|_| arr(4));
+    p.road_minor = like.road_minor.map(|_| arr(7));
+    p.relief = like.relief.map(|_| [f[10], f[11], f[12], f[13], f[14]]);
+    for li in 0..4 {
+        p.river_warp[li] = like.river_warp[li].map(|_| [f[15 + 2 * li], f[16 + 2 * li]]);
+    }
+    p.region_warp = like.region_warp.map(|_| arr(23));
+    ([f[0], f[1]], p)
+}
+
+/// Catmull-Rom weights of four equally spaced samples at t in [0, 1] between the middle two.
 #[inline]
 fn catmull_rom_weights(t: f64) -> [f64; 4] {
     let (t2, t3) = (t * t, t * t * t);
@@ -114,7 +140,7 @@ impl Generator {
         let pf_cut = 8.0 * G * gsd_ew(0.0, z, n as u32, &ell);
         // the long octaves of the relief likewise (ridged: 16 spacings, its creases need more)
         let relief_cut = if use_grid { Some([2.0 * pf_cut, pf_cut]) } else { None };
-        let nodes: Vec<(Macro, Pre, [f64; PixFields::N])> = if use_grid {
+        let nodes: Vec<(Macro, Pre, [f64; PixFields::N], [f64; NPRE])> = if use_grid {
             (0..ng * ng)
                 .into_par_iter()
                 .map(|k| {
@@ -126,7 +152,8 @@ impl Generator {
                     let m = self.world.macro_at(ctx.p, gsd);
                     let pre = self.world.pre_at(&ctx, &m, gully_on_grid, roads_on_grid, relief_cut);
                     let pf_low = self.surface.pixel_fields_part(ctx.p, gsd, Some((pf_cut, true)));
-                    (m, pre, pf_low)
+                    let flat = pack_pre(&m, &pre);
+                    (m, pre, pf_low, flat)
                 })
                 .collect()
         } else {
@@ -142,28 +169,19 @@ impl Generator {
             let (fx, fy) = (u - i0 as f64, v - j0 as f64);
             let g = |i: usize, j: usize| &nodes[j * ng + i];
             let mut m = Macro::bilerp(&g(i0, j0).0, &g(i0 + 1, j0).0, &g(i0, j0 + 1).0, &g(i0 + 1, j0 + 1).0, fx, fy);
-            // Catmull-Rom over the 4x4 nodes around the pixel
-            let cubic = |f: &dyn Fn(&(Macro, Pre, [f64; PixFields::N])) -> f64| -> f64 {
-                let row = |j: usize| catmull_rom([g(i0 - 1, j), g(i0, j), g(i0 + 1, j), g(i0 + 2, j)].map(f), fx);
-                catmull_rom([row(j0 - 1), row(j0), row(j0 + 1), row(j0 + 2)], fy)
-            };
-            m.mtn_warp = if warp_on_grid {
-                [cubic(&|n| n.0.mtn_warp[0]), cubic(&|n| n.0.mtn_warp[1])]
-            } else {
-                self.world.mtn_warp_at(ctx.p, ctx.gsd)
-            };
-            let mut pre = Pre::default();
-            if gully_on_grid {
-                pre.gully = Some([cubic(&|n| n.1.gully.unwrap()[0]), cubic(&|n| n.1.gully.unwrap()[1])]);
+            // the smooth inputs: Catmull-Rom over the 4x4 nodes around the pixel
+            let (wx, wy) = (catmull_rom_weights(fx), catmull_rom_weights(fy));
+            let mut f = [0.0; NPRE];
+            for (b, wyb) in wy.iter().enumerate() {
+                for (a, wxa) in wx.iter().enumerate() {
+                    let w = wxa * wyb;
+                    for (fk, nk) in f.iter_mut().zip(&g(i0 + a - 1, j0 + b - 1).3) {
+                        *fk += w * nk;
+                    }
+                }
             }
-            if roads_on_grid {
-                pre.road_major = Some([0, 1, 2].map(|c| cubic(&|n| n.1.road_major.unwrap()[c])));
-                pre.road_minor = Some([0, 1, 2].map(|c| cubic(&|n| n.1.road_minor.unwrap()[c])));
-            }
-            if let Some(cut) = relief_cut {
-                pre.relief = Some([0, 1, 2, 3, 4].map(|c| cubic(&|n| n.1.relief.unwrap()[c])));
-                pre.relief_cut = cut;
-            }
+            let (mtn_warp, pre) = unpack_pre(&f, &g(i0, j0).1);
+            m.mtn_warp = if warp_on_grid { mtn_warp } else { self.world.mtn_warp_at(ctx.p, ctx.gsd) };
             m.pre = Some(pre);
             m
         };

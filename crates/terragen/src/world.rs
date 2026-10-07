@@ -165,6 +165,9 @@ pub struct Pre {
     /// low-passed sum), split at the wavelengths `relief_cut` (ridged, hills)
     pub relief: Option<[f64; 5]>,
     pub relief_cut: [f64; 2],
+    /// meander warps of the drainage levels, the warp of the region lattice
+    pub river_warp: [Option<[f64; 2]>; 4],
+    pub region_warp: Option<[f64; 3]>,
 }
 
 impl Macro {
@@ -535,6 +538,17 @@ impl World {
         }
     }
 
+    /// Warp (m) of the lookup in the region lattice: curvy borders between field systems.
+    fn region_warp(&self, p: DVec3) -> DVec3 {
+        let region_cell = self.cfg.landuse.region_km * KM;
+        DVec3::new(
+            perlin3(self.seed ^ 0xA1, p / (0.9 * region_cell)),
+            perlin3(self.seed ^ 0xA2, p / (0.9 * region_cell)),
+            perlin3(self.seed ^ 0xA3, p / (0.9 * region_cell)),
+        ) * (0.18 * region_cell)
+            + DVec3::new(perlin3(self.seed ^ 0xA4, p / 1500.0), perlin3(self.seed ^ 0xA5, p / 1500.0), perlin3(self.seed ^ 0xA6, p / 1500.0)) * 120.0
+    }
+
     /// The smooth inputs `Pre` at a point (for the coarse grid): the low-passed relief gradient
     /// for the gullies (`gully`), the road networks (`roads`).
     pub fn pre_at(&self, ctx: &Ctx, m: &Macro, gully: bool, roads: bool, relief_cut: Option<[f64; 2]>) -> Pre {
@@ -546,6 +560,16 @@ impl World {
             let [hs, hl] = self.hills_part(ctx.p, ctx.gsd, 0.47 + 0.08 * m.rough, cut[1], true);
             pre.relief = Some([rs, rl, rw, hs, hl]);
             pre.relief_cut = cut;
+            // smooth warps whose shorter wavelength is >= the cut
+            for li in 0..self.cfg.hydro.levels.len().min(4) {
+                if 0.37 * self.meander_wavelength(li) >= cut[1] {
+                    pre.river_warp[li] = Some(self.meander_warp(li, ctx.p));
+                }
+            }
+            let region_cell = self.cfg.landuse.region_km * KM;
+            if 1500.0f64.min(0.9 * region_cell) >= cut[1] {
+                pre.region_warp = Some(self.region_warp(ctx.p).to_array());
+            }
         }
         if gully {
             let lam_e = self.cfg.relief.gully_wavelength;
@@ -937,7 +961,7 @@ impl World {
                 Some(n) if h <= n.h_max => n.local,
                 _ => segs,
             };
-            let hits = self.river_query(ctx, qsegs, h);
+            let hits = self.river_query(ctx, qsegs, h, m.pre.as_ref().map_or(&[][..], |p| &p.river_warp[..]));
             let h0 = h;
             let wn = smoothstep(-0.6, 0.6, m.river_width);
             for rh in &hits {
@@ -1107,12 +1131,10 @@ impl World {
         let region_cell = self.cfg.landuse.region_km * KM;
         if mode != Mode::Relief && gsd < region_cell * 0.5 {
             // warped lookup → curvy (not straight) borders between field systems
-            let wq = DVec3::new(
-                perlin3(self.seed ^ 0xA1, p / (0.9 * region_cell)),
-                perlin3(self.seed ^ 0xA2, p / (0.9 * region_cell)),
-                perlin3(self.seed ^ 0xA3, p / (0.9 * region_cell)),
-            ) * (0.18 * region_cell)
-                + DVec3::new(perlin3(self.seed ^ 0xA4, p / 1500.0), perlin3(self.seed ^ 0xA5, p / 1500.0), perlin3(self.seed ^ 0xA6, p / 1500.0)) * 120.0;
+            let wq = match m.pre.and_then(|p| p.region_warp) {
+                Some(w) => DVec3::from_array(w),
+                None => self.region_warp(p),
+            };
             let pw = p + wq;
             let wc = worley3(self.seed ^ 0x5E61, pw, region_cell, 0.9);
             t.region = Site { id: wc.id, id2: wc.id2, center: wc.point, dist: wc.f1, edge: worley_edge_dist(&wc, pw) };
