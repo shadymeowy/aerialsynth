@@ -1174,8 +1174,16 @@ impl SurfaceModel {
             let cq = q / layer.cell;
             let cf = cq.floor();
             let (ix, iy) = (cf.x as i64, cf.y as i64);
+            let fq = cq - cf;
+            // crowns of cells farther than the largest crown radius (+ the filter width) cannot
+            // reach the sample: skipped before hashing
+            let reach = (0.6 * 1.55 * layer.scale.max(0.0) + fw / layer.cell) * (1.0 + 1e-9) + 1e-9;
             for dy in -1..=1 {
                 for dx in -1..=1 {
+                    let (gx, gy) = (crate::noise::nb_gap(fq.x, dx, 0.4), crate::noise::nb_gap(fq.y, dy, 0.4));
+                    if gx * gx + gy * gy > reach * reach {
+                        continue;
+                    }
                     let h = hash2(layer.seed, ix + dx, iy + dy);
                     let u = u01k(h, 3);
                     if u >= layer.density {

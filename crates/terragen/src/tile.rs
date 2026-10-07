@@ -5,7 +5,7 @@
 
 use crate::config::Config;
 use crate::surface::{l2s, Caches, Local, SurfaceModel};
-use crate::world::{water, Ctx, Macro, NearSegs, Terrain, World};
+use crate::world::{water, Ctx, Macro, NearSegs, Pre, Terrain, World};
 use geodesy::tiles::{gsd_ew, gsd_ns, pixel_to_latlon, TileId};
 use glam::{DVec2, DVec3};
 use rayon::prelude::*;
@@ -17,6 +17,13 @@ pub use tilestore::TileData;
 pub struct Generator {
     pub world: World,
     pub surface: SurfaceModel,
+}
+
+/// Catmull-Rom interpolation of four equally spaced samples at t in [0, 1] between the middle two.
+#[inline]
+fn catmull_rom(p: [f64; 4], t: f64) -> f64 {
+    let [p0, p1, p2, p3] = p;
+    p1 + 0.5 * t * (p2 - p0 + t * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3 + t * (3.0 * (p1 - p2) + p3 - p0)))
 }
 
 #[inline]
@@ -81,10 +88,19 @@ impl Generator {
         let (lat_c, _) = pixel_to_latlon(DVec2::new(ox + 128.0, oy + 128.0), z, n as u32);
         let use_grid = 16.0 * gsd_ew(lat_c, z, n as u32, &ell) <= 2000.0;
         const G: f64 = 16.0;
-        let gk0x = (ox / G) as i64 - 1;
-        let gk0y = (oy / G) as i64 - 1;
-        let ng = (n as f64 / G) as usize + 3;
-        let macro_grid: Vec<Macro> = if use_grid {
+        // two nodes beyond the 2-px apron on each side: bicubic needs a 4x4 neighbourhood
+        let gk0x = (ox / G) as i64 - 2;
+        let gk0y = (oy / G) as i64 - 2;
+        let ng = (n as f64 / G) as usize + 5;
+        // Smooth per-pixel inputs taken from the grid (bicubic) where its spacing is a small
+        // fraction of their shortest wavelength, else evaluated exactly per pixel: the mountain
+        // domain warp (>= 7.5 km), the low-passed relief gradient for the gullies (>= 700 m) and
+        // the road networks (band-limited at >= 200 m).
+        let g_m = G * gsd_ew(lat_c, z, n as u32, &ell);
+        let warp_on_grid = use_grid && g_m <= 1000.0;
+        let gully_on_grid = use_grid && g_m <= 100.0;
+        let roads_on_grid = use_grid && g_m <= 400.0;
+        let nodes: Vec<(Macro, Pre)> = if use_grid {
             (0..ng * ng)
                 .into_par_iter()
                 .map(|k| {
@@ -92,7 +108,10 @@ impl Generator {
                     let gy = (gk0y + (k / ng) as i64) as f64 * G;
                     let (lat, lon) = pixel_to_latlon(DVec2::new(gx, gy), z, n as u32);
                     let gsd = gsd_ew(lat, z, n as u32, &ell);
-                    self.world.macro_at(Ctx::new(lat, lon, gsd, &ell).p, gsd)
+                    let ctx = Ctx::new(lat, lon, gsd, &ell);
+                    let m = self.world.macro_at(ctx.p, gsd);
+                    let pre = self.world.pre_at(&ctx, &m, gully_on_grid, roads_on_grid);
+                    (m, pre)
                 })
                 .collect()
         } else {
@@ -104,11 +123,29 @@ impl Generator {
             }
             let u = px / G - gk0x as f64;
             let v = py / G - gk0y as f64;
-            let (i0, j0) = ((u.floor() as usize).min(ng - 2), (v.floor() as usize).min(ng - 2));
+            let (i0, j0) = ((u.floor() as usize).clamp(1, ng - 3), (v.floor() as usize).clamp(1, ng - 3));
             let (fx, fy) = (u - i0 as f64, v - j0 as f64);
-            let g = |i: usize, j: usize| &macro_grid[j * ng + i];
-            let mut m = Macro::bilerp(g(i0, j0), g(i0 + 1, j0), g(i0, j0 + 1), g(i0 + 1, j0 + 1), fx, fy);
-            m.mtn_warp = self.world.mtn_warp_at(ctx.p, ctx.gsd);
+            let g = |i: usize, j: usize| &nodes[j * ng + i];
+            let mut m = Macro::bilerp(&g(i0, j0).0, &g(i0 + 1, j0).0, &g(i0, j0 + 1).0, &g(i0 + 1, j0 + 1).0, fx, fy);
+            // Catmull-Rom over the 4x4 nodes around the pixel
+            let cubic = |f: &dyn Fn(&(Macro, Pre)) -> f64| -> f64 {
+                let row = |j: usize| catmull_rom([g(i0 - 1, j), g(i0, j), g(i0 + 1, j), g(i0 + 2, j)].map(f), fx);
+                catmull_rom([row(j0 - 1), row(j0), row(j0 + 1), row(j0 + 2)], fy)
+            };
+            m.mtn_warp = if warp_on_grid {
+                [cubic(&|n| n.0.mtn_warp[0]), cubic(&|n| n.0.mtn_warp[1])]
+            } else {
+                self.world.mtn_warp_at(ctx.p, ctx.gsd)
+            };
+            let mut pre = Pre::default();
+            if gully_on_grid {
+                pre.gully = Some([cubic(&|n| n.1.gully.unwrap()[0]), cubic(&|n| n.1.gully.unwrap()[1])]);
+            }
+            if roads_on_grid {
+                pre.road_major = Some([0, 1, 2].map(|c| cubic(&|n| n.1.road_major.unwrap()[c])));
+                pre.road_minor = Some([0, 1, 2].map(|c| cubic(&|n| n.1.road_minor.unwrap()[c])));
+            }
+            m.pre = Some(pre);
             m
         };
 

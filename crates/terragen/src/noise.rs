@@ -142,9 +142,40 @@ pub fn perlin3_d(seed: u64, p: DVec3) -> (f64, DVec3) {
     (n * 1.1, (gi + dn) * 1.1)
 }
 
+/// 3D gradient noise, value only (bit-identical to `perlin3_d(..).0`, without the gradient).
 #[inline]
 pub fn perlin3(seed: u64, p: DVec3) -> f64 {
-    perlin3_d(seed, p).0
+    let g = GRADS.get();
+    let pf = p.floor();
+    let (ix, iy, iz) = (pf.x as i64, pf.y as i64, pf.z as i64);
+    let f = p - pf;
+    let (u, v, w) = (fade(f.x), fade(f.y), fade(f.z));
+    let hx0 = hash1(seed, ix);
+    let hx1 = hash1(seed, ix + 1);
+    let mut val = [0.0f64; 8];
+    let mut k = 0;
+    for dz in 0..2i64 {
+        let hz = ((iz + dz) as u64).wrapping_mul(0x1656_67B1_9E37_79F9);
+        for dy in 0..2i64 {
+            let hy = ((iy + dy) as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+            for (dx, hx) in [(0i64, hx0), (1, hx1)] {
+                let h = mix64(mix64(hx ^ hy) ^ hz);
+                let gv = g[(h >> 56) as usize];
+                val[k] = gv[0] * (f.x - dx as f64) + gv[1] * (f.y - dy as f64) + gv[2] * (f.z - dz as f64);
+                k += 1;
+            }
+        }
+    }
+    let (a, b, c, d, e, ff, gg, h) = (val[0], val[1], val[2], val[3], val[4], val[5], val[6], val[7]);
+    let k1 = b - a;
+    let k2 = c - a;
+    let k3 = e - a;
+    let k4 = a - b - c + d;
+    let k5 = a - c - e + gg;
+    let k6 = a - b - e + ff;
+    let k7 = -a + b + c - d + e - ff - gg + h;
+    let n = a + k1 * u + k2 * v + k3 * w + k4 * u * v + k5 * v * w + k6 * w * u + k7 * u * v * w;
+    n * 1.1
 }
 
 /// 2D gradient noise (used in local tangent frames).
@@ -252,9 +283,23 @@ impl Fbm {
         1.0 / s.sqrt().max(1e-9) * 0.75
     }
 
+    /// Value only (bit-identical to `eval_d(..).0`, without the gradient).
     #[inline]
     pub fn eval(&self, p: DVec3, gsd: f64) -> f64 {
-        self.eval_d(p, gsd, self.octaves).0
+        let mut lam = self.wavelength;
+        let mut amp = 1.0;
+        let mut sum = 0.0;
+        for i in 0..self.octaves {
+            let w = band(lam, gsd);
+            if w <= 0.0 {
+                break;
+            }
+            let q = self.frames.rot[i] * (p / lam) + self.frames.off[i];
+            sum += amp * w * perlin3(self.frames.seeds[i], q);
+            lam /= self.lacunarity;
+            amp *= self.gain;
+        }
+        sum
     }
 
     /// Evaluate with at most `max_oct` octaves; `gsd` fades out unresolvable octaves.
@@ -321,36 +366,80 @@ pub fn worley3_site(seed: u64, c: (i64, i64, i64), cell: f64, jitter: f64) -> (u
     (h, fp * cell)
 }
 
+/// Neighbour cells of a 3x3x3 block, centre first, then faces, edges and corners (the nearest
+/// candidates first, so the distance bound in [`worley3`] skips most of the far ones).
+const NB3: [(i64, i64, i64); 27] = {
+    let mut out = [(0i64, 0i64, 0i64); 27];
+    let mut n = 0;
+    let mut ring = 0;
+    while ring <= 3 {
+        let mut dz = -1;
+        while dz <= 1 {
+            let mut dy = -1;
+            while dy <= 1 {
+                let mut dx = -1;
+                while dx <= 1 {
+                    if (dx != 0) as i64 + (dy != 0) as i64 + (dz != 0) as i64 == ring {
+                        out[n] = (dx, dy, dz);
+                        n += 1;
+                    }
+                    dx += 1;
+                }
+                dy += 1;
+            }
+            dz += 1;
+        }
+        ring += 1;
+    }
+    out
+};
+
+/// Lower bound per axis (lattice units) of the distance from a point at fraction `f` of its cell
+/// to the feature point of the neighbour at offset `d`, whose point lies within `jitter / 2` of
+/// its cell centre.
+#[inline(always)]
+pub fn nb_gap(f: f64, d: i64, half: f64) -> f64 {
+    match d {
+        -1 => (f + 0.5 - half).max(0.0),
+        1 => (1.5 - half - f).max(0.0),
+        _ => 0.0,
+    }
+}
+
 /// Nearest two feature points of a jittered 3D lattice with cell size `cell` (meters).
 pub fn worley3(seed: u64, p: DVec3, cell: f64, jitter: f64) -> Cell3 {
     let q = p / cell;
     let qf = q.floor();
     let (ix, iy, iz) = (qf.x as i64, qf.y as i64, qf.z as i64);
+    let fq = q - qf;
+    let half = 0.5 * jitter.abs();
     let mut best = Cell3 { id: 0, point: DVec3::ZERO, f1: f64::MAX, f2: f64::MAX, id2: 0, point2: DVec3::ZERO };
-    for dz in -1..=1 {
-        for dy in -1..=1 {
-            for dx in -1..=1 {
-                let (cx, cy, cz) = (ix + dx, iy + dy, iz + dz);
-                let h = hash3(seed, cx, cy, cz);
-                let fp = DVec3::new(
-                    cx as f64 + 0.5 + jitter * (u01k(h, 1) - 0.5),
-                    cy as f64 + 0.5 + jitter * (u01k(h, 2) - 0.5),
-                    cz as f64 + 0.5 + jitter * (u01k(h, 3) - 0.5),
-                );
-                let d = (fp - q).length_squared();
-                if d < best.f1 {
-                    best.f2 = best.f1;
-                    best.id2 = best.id;
-                    best.point2 = best.point;
-                    best.f1 = d;
-                    best.id = h;
-                    best.point = fp;
-                } else if d < best.f2 {
-                    best.f2 = d;
-                    best.id2 = h;
-                    best.point2 = fp;
-                }
-            }
+    for &(dx, dy, dz) in &NB3 {
+        // a cell whose feature point cannot come closer than the second nearest so far is
+        // skipped before hashing (the margin covers rounding; the result is unchanged)
+        let (gx, gy, gz) = (nb_gap(fq.x, dx, half), nb_gap(fq.y, dy, half), nb_gap(fq.z, dz, half));
+        if gx * gx + gy * gy + gz * gz > best.f2 + 1e-6 {
+            continue;
+        }
+        let (cx, cy, cz) = (ix + dx, iy + dy, iz + dz);
+        let h = hash3(seed, cx, cy, cz);
+        let fp = DVec3::new(
+            cx as f64 + 0.5 + jitter * (u01k(h, 1) - 0.5),
+            cy as f64 + 0.5 + jitter * (u01k(h, 2) - 0.5),
+            cz as f64 + 0.5 + jitter * (u01k(h, 3) - 0.5),
+        );
+        let d = (fp - q).length_squared();
+        if d < best.f1 {
+            best.f2 = best.f1;
+            best.id2 = best.id;
+            best.point2 = best.point;
+            best.f1 = d;
+            best.id = h;
+            best.point = fp;
+        } else if d < best.f2 {
+            best.f2 = d;
+            best.id2 = h;
+            best.point2 = fp;
         }
     }
     best.f1 = best.f1.sqrt() * cell;
@@ -384,31 +473,36 @@ pub struct Cell2 {
 }
 
 pub fn worley2(seed: u64, p: DVec2, cell: f64, jitter: f64) -> Cell2 {
+    const NB2: [(i64, i64); 9] = [(0, 0), (0, -1), (-1, 0), (1, 0), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)];
     let q = p / cell;
     let qf = q.floor();
     let (ix, iy) = (qf.x as i64, qf.y as i64);
+    let fq = q - qf;
+    let half = 0.5 * jitter.abs();
     let mut best = Cell2 { id: 0, point: DVec2::ZERO, f1: f64::MAX, f2: f64::MAX, id2: 0, point2: DVec2::ZERO };
-    for dy in -1..=1 {
-        for dx in -1..=1 {
-            let (cx, cy) = (ix + dx, iy + dy);
-            let h = hash2(seed, cx, cy);
-            let fp = DVec2::new(
-                cx as f64 + 0.5 + jitter * (u01k(h, 1) - 0.5),
-                cy as f64 + 0.5 + jitter * (u01k(h, 2) - 0.5),
-            );
-            let d = (fp - q).length_squared();
-            if d < best.f1 {
-                best.f2 = best.f1;
-                best.id2 = best.id;
-                best.point2 = best.point;
-                best.f1 = d;
-                best.id = h;
-                best.point = fp;
-            } else if d < best.f2 {
-                best.f2 = d;
-                best.id2 = h;
-                best.point2 = fp;
-            }
+    for &(dx, dy) in &NB2 {
+        let (gx, gy) = (nb_gap(fq.x, dx, half), nb_gap(fq.y, dy, half));
+        if gx * gx + gy * gy > best.f2 + 1e-6 {
+            continue;
+        }
+        let (cx, cy) = (ix + dx, iy + dy);
+        let h = hash2(seed, cx, cy);
+        let fp = DVec2::new(
+            cx as f64 + 0.5 + jitter * (u01k(h, 1) - 0.5),
+            cy as f64 + 0.5 + jitter * (u01k(h, 2) - 0.5),
+        );
+        let d = (fp - q).length_squared();
+        if d < best.f1 {
+            best.f2 = best.f1;
+            best.id2 = best.id;
+            best.point2 = best.point;
+            best.f1 = d;
+            best.id = h;
+            best.point = fp;
+        } else if d < best.f2 {
+            best.f2 = d;
+            best.id2 = h;
+            best.point2 = fp;
         }
     }
     best.f1 = best.f1.sqrt() * cell;

@@ -149,6 +149,18 @@ pub struct Macro {
     pub style: [f64; 4],
     pub river_width: f64,
     pub mtn_warp: [f64; 2],
+    /// Smooth per-pixel inputs interpolated from a coarse grid (tile generator), or None (exact).
+    pub pre: Option<Pre>,
+}
+
+/// Smooth inputs of `terrain_impl` precomputed on a coarse grid: the gradient (east, north) of
+/// the low-passed relief that steers the erosion gullies, and the road networks' noise value
+/// and gradient (east, north) after the domain warp.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Pre {
+    pub gully: Option<[f64; 2]>,
+    pub road_major: Option<[f64; 3]>,
+    pub road_minor: Option<[f64; 3]>,
 }
 
 impl Macro {
@@ -176,6 +188,7 @@ impl Macro {
             style: [l4(&|m| m.style[0]), l4(&|m| m.style[1]), l4(&|m| m.style[2]), l4(&|m| m.style[3])],
             river_width: l4(&|m| m.river_width),
             mtn_warp: [l4(&|m| m.mtn_warp[0]), l4(&|m| m.mtn_warp[1])],
+            pre: None,
         }
     }
 }
@@ -469,7 +482,53 @@ impl World {
             style: [self.style_n[0].eval(p, gsd), self.style_n[1].eval(p, gsd), self.style_n[2].eval(p, gsd), self.style_n[3].eval(p, gsd)],
             river_width: self.river_width_n.eval(p, gsd),
             mtn_warp: self.mtn_warp_at(p, gsd),
+            pre: None,
         }
+    }
+
+    /// The smooth inputs `Pre` at a point (for the coarse grid): the low-passed relief gradient
+    /// for the gullies (`gully`), the road networks (`roads`).
+    pub fn pre_at(&self, ctx: &Ctx, m: &Macro, gully: bool, roads: bool) -> Pre {
+        let mut pre = Pre::default();
+        if gully {
+            let lam_e = self.cfg.relief.gully_wavelength;
+            let (mountain, amp_m) = self.mountain_mask(m);
+            let hill_amp = self.hill_amplitude(m);
+            let gain = 0.47 + 0.08 * m.rough;
+            pre.gully = Some(self.low_relief_gradient(ctx, m, mountain, amp_m, hill_amp, gain, lam_e));
+        }
+        if roads {
+            let warp = self.network_warp(ctx);
+            let field = |f: &Fbm, amp: f64| -> [f64; 3] {
+                let ([w0, w1], [g0, g1]) = warp;
+                let qw = ctx.p + (ctx.east * w0 + ctx.north * w1) * amp;
+                let (n, g) = f.eval_d(qw, ctx.gsd.max(200.0), 99);
+                let grad = g + (g0 * ctx.east.dot(g) + g1 * ctx.north.dot(g)) * amp;
+                [n, grad.dot(ctx.east), grad.dot(ctx.north)]
+            };
+            pre.road_major = Some(field(&self.road_major, 2500.0));
+            pre.road_minor = Some(field(&self.road_minor, 700.0));
+        }
+        pre
+    }
+
+    /// Gradient (east, north, per meter) of the relief low-passed at half the gully wavelength,
+    /// by finite differences.
+    #[allow(clippy::too_many_arguments)]
+    fn low_relief_gradient(&self, ctx: &Ctx, m: &Macro, mountain: f64, amp_m: f64, hill_amp: f64, gain: f64, lam_e: f64) -> [f64; 2] {
+        let p = ctx.p;
+        let gl = lam_e * 0.5;
+        let low = |q: DVec3| -> f64 {
+            let mut v = hill_amp * self.hills(q, gl, gain).0;
+            if mountain > 1e-3 {
+                let wp = DVec2::new(m.mtn_warp[0], m.mtn_warp[1]) * 9.0 * KM;
+                v += amp_m * self.ridged(q + ctx.east * wp.x + ctx.north * wp.y, gl, 1.6 + 0.8 * m.style[2]).0;
+            }
+            v
+        };
+        let e = lam_e * 0.15;
+        let h0 = low(p);
+        [(low(p + ctx.east * e) - h0) / e, (low(p + ctx.north * e) - h0) / e]
     }
 
     /// Shared domain warp of the river / road networks: values and gradients (per meter).
@@ -717,20 +776,12 @@ impl World {
         let mut gully = 0.0;
         let mut gully_n = 0.0;
         if self.cfg.relief.erosion > 0.0 && relief_amp > 40.0 && gsd < lam_e * 0.5 {
-            // large-scale gradient by finite differences of the low-passed relief
-            let gl = lam_e * 0.5;
-            let low = |q: DVec3| -> f64 {
-                let mut v = hill_amp * self.hills(q, gl, gain).0;
-                if mountain > 1e-3 {
-                    let wp = DVec2::new(m.mtn_warp[0], m.mtn_warp[1]) * 9.0 * KM;
-                    v += amp_m * self.ridged(q + ctx.east * wp.x + ctx.north * wp.y, gl, 1.6 + 0.8 * m.style[2]).0;
-                }
-                v
+            // large-scale gradient by finite differences of the low-passed relief (from the
+            // tile's coarse grid when available)
+            let [ge, gn] = match m.pre.and_then(|p| p.gully) {
+                Some(g) => g,
+                None => self.low_relief_gradient(ctx, m, mountain, amp_m, hill_amp, gain, lam_e),
             };
-            let e = lam_e * 0.15;
-            let h0 = low(p);
-            let ge = (low(p + ctx.east * e) - h0) / e;
-            let gn = (low(p + ctx.north * e) - h0) / e;
             let grad = ctx.east * ge + ctx.north * gn;
             let slope_l = (ge * ge + gn * gn).sqrt();
             let mask = smoothstep(0.03, 0.25, slope_l) * smoothstep(40.0, 140.0, relief_amp);
@@ -1007,10 +1058,21 @@ impl World {
         t.road_minor = f64::MAX;
         // (roads are drawn by pixel coverage: 12 m at 400 m/px or 6 m at 200 m/px is ~3%)
         if mode != Mode::Relief && self.cfg.landuse.roads > 0.0 && habit > 0.02 && gsd < 400.0 {
-            let warp = self.network_warp(ctx);
-            t.road_major = self.network_dist(&self.road_major, ctx, &warp, 2500.0);
-            if gsd < 200.0 {
-                t.road_minor = self.network_dist(&self.road_minor, ctx, &warp, 700.0);
+            let dist = |v: [f64; 3]| v[0] / DVec2::new(v[1], v[2]).length().max(1e-12);
+            match m.pre.and_then(|p| p.road_major.zip(p.road_minor)) {
+                Some((major, minor)) => {
+                    t.road_major = dist(major);
+                    if gsd < 200.0 {
+                        t.road_minor = dist(minor);
+                    }
+                }
+                None => {
+                    let warp = self.network_warp(ctx);
+                    t.road_major = self.network_dist(&self.road_major, ctx, &warp, 2500.0);
+                    if gsd < 200.0 {
+                        t.road_minor = self.network_dist(&self.road_minor, ctx, &warp, 700.0);
+                    }
+                }
             }
         }
 
