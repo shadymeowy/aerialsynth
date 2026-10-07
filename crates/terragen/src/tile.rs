@@ -171,7 +171,7 @@ impl Generator {
                     let ctx = Ctx::new(lat, lon, gsd, &ell);
                     let m = self.world.macro_at(ctx.p, gsd);
                     let pre = self.world.pre_at(&ctx, &m, gully_on_grid, roads_on_grid, relief_cut);
-                    let pf_low = self.surface.pixel_fields_part(ctx.p, gsd, Some((pf_cut, true)));
+                    let pf_low = self.surface.pixel_fields_part(ctx.p, gsd, Some((pf_cut, true)), true);
                     let flat = pack_pre(&m, &pre);
                     let stand = self.surface.stand_id(ctx.p, None);
                     Node { m, pre, pf_low, flat, stand }
@@ -349,7 +349,7 @@ impl Generator {
                         let (lat, lon) = pixel_to_latlon(DVec2::new(px, py), z, n as u32);
                         let p = Ctx::new(lat, lon, gsd, &ell).p;
                         if use_grid {
-                            let mut f = self.surface.pixel_fields_part(p, gsd, Some((pf_cut, false)));
+                            let mut f = self.surface.pixel_fields_part(p, gsd, Some((pf_cut, false)), false);
                             let u = px / G - gk0x as f64;
                             let v = py / G - gk0y as f64;
                             let (i0, j0) = ((u.floor() as usize).clamp(1, ng - 3), (v.floor() as usize).clamp(1, ng - 3));
@@ -363,7 +363,7 @@ impl Generator {
                                     }
                                 }
                             }
-                            let mut pf = PixFields::from_array(f);
+                            let mut pf = PixFields::from_parts(f, p, gsd, Some(pf_cut));
                             // the forest stand: known when the four nodes around agree
                             let st = nodes[j0 * ng + i0].stand;
                             if nodes[j0 * ng + i0 + 1].stand == st && nodes[(j0 + 1) * ng + i0].stand == st && nodes[(j0 + 1) * ng + i0 + 1].stand == st {

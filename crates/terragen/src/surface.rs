@@ -71,33 +71,60 @@ pub struct Surface {
     pub emission: DVec3,
 }
 
-/// Smooth noise fields evaluated once per pixel and shared by its sub-samples.
-#[derive(Clone, Copy, Debug, Default)]
+/// Smooth noise fields evaluated once per pixel and shared by its sub-samples. The fields that
+/// only some surfaces need (rock strata, forest stands, fields, water) are completed on first use
+/// (see [`SurfaceModel::pf_lazy`]).
+#[derive(Clone, Debug, Default)]
 pub struct PixFields {
     pub detail: f64,
     pub patch: f64,
     pub land: f64,
-    pub strata: f64,
-    pub strata2: f64,
     pub snow: f64,
     pub forest: f64,
-    pub stand: f64,
-    pub field_var: f64,
-    pub field_var2: f64,
-    pub field_var3: f64,
     pub warp2: f64,
-    pub water: f64,
     /// domain warp of the forest-stand lattice (×70 m)
     pub stand_warp: [f64; 3],
     /// the forest stand, where known for the whole pixel
     pub stand_id: Option<u64>,
+    /// the fields `LAZY`: the part known so far, and which are still to be completed (their short
+    /// octaves at `p`, `gsd`, below `cut`, or all octaves without a cut)
+    lazy: [std::cell::Cell<f64>; 7],
+    pending: std::cell::Cell<u8>,
+    p: DVec3,
+    gsd: f64,
+    cut: Option<f64>,
 }
+
+/// Indices of the pixel fields in [`SurfaceModel::pixel_fields_part`].
+const PF_STRATA: usize = 3;
+const PF_STRATA2: usize = 4;
+const PF_STAND: usize = 7;
+const PF_FIELD_VAR: usize = 8;
+const PF_FIELD_VAR2: usize = 9;
+const PF_FIELD_VAR3: usize = 10;
+const PF_WATER: usize = 12;
+const LAZY: [usize; 7] = [PF_STRATA, PF_STRATA2, PF_STAND, PF_FIELD_VAR, PF_FIELD_VAR2, PF_FIELD_VAR3, PF_WATER];
 
 impl PixFields {
     pub const N: usize = 16;
-    pub fn from_array(a: [f64; Self::N]) -> Self {
-        let [detail, patch, land, strata, strata2, snow, forest, stand, field_var, field_var2, field_var3, warp2, water, w0, w1, w2] = a;
-        PixFields { detail, patch, land, strata, strata2, snow, forest, stand, field_var, field_var2, field_var3, warp2, water, stand_warp: [w0, w1, w2], stand_id: None }
+    /// From the values of [`SurfaceModel::pixel_fields_part`] at `p`; the lazy fields hold the
+    /// part that is known (the long octaves below `cut`, or nothing without a cut).
+    pub fn from_parts(a: [f64; Self::N], p: DVec3, gsd: f64, cut: Option<f64>) -> Self {
+        PixFields {
+            detail: a[0],
+            patch: a[1],
+            land: a[2],
+            snow: a[5],
+            forest: a[6],
+            warp2: a[11],
+            stand_warp: [a[13], a[14], a[15]],
+            stand_id: None,
+            lazy: LAZY.map(|i| std::cell::Cell::new(a[i])),
+            pending: std::cell::Cell::new((1 << LAZY.len()) - 1),
+            p,
+            gsd,
+            cut,
+        }
     }
 }
 
@@ -402,13 +429,19 @@ impl SurfaceModel {
 
     /// Per-pixel smooth fields (band-limited at the pixel GSD).
     pub fn pixel_fields(&self, p: DVec3, gsd: f64) -> PixFields {
-        PixFields::from_array(self.pixel_fields_part(p, gsd, None))
+        PixFields::from_parts(self.pixel_fields_part(p, gsd, None, false), p, gsd, None)
     }
 
     /// The pixel fields, all octaves (`split` None) or only those of wavelength >= `cut` (`split`
     /// Some((cut, true))) or < `cut` (Some((cut, false))); the two parts sum to the whole. The
-    /// smooth part is interpolated from a coarse grid by the tile generator.
-    pub fn pixel_fields_part(&self, p: DVec3, gsd: f64, split: Option<(f64, bool)>) -> [f64; PixFields::N] {
+    /// smooth part is interpolated from a coarse grid by the tile generator. The `LAZY` fields
+    /// are 0 unless `lazy_too`.
+    pub fn pixel_fields_part(&self, p: DVec3, gsd: f64, split: Option<(f64, bool)>, lazy_too: bool) -> [f64; PixFields::N] {
+        std::array::from_fn(|i| if lazy_too || !LAZY.contains(&i) { self.pixel_field(i, p, gsd, split) } else { 0.0 })
+    }
+
+    /// Pixel field `i` (or a part of it, see [`SurfaceModel::pixel_fields_part`]).
+    fn pixel_field(&self, i: usize, p: DVec3, gsd: f64, split: Option<(f64, bool)>) -> f64 {
         // a field evaluated at p·k sees a sample spacing of gsd·k (and wavelengths ·k) in its own
         // domain
         let f = |n: &Fbm, k: f64| -> f64 {
@@ -424,26 +457,37 @@ impl SurfaceModel {
                 _ => f(),
             }
         };
-        let stand_lf = single(1200.0, &|| 0.5 * perlin3(0x57A, p / 1200.0) * crate::noise::band(1200.0, gsd));
         let stand_warp = |seed: u64| single(180.0, &|| perlin3(seed, p / 180.0));
-        [
-            f(&self.detail, 1.0),
-            f(&self.patch, 1.0),
-            f(&self.land_n, 1.0) * self.land_n.norm() * 1.8,
-            f(&self.strata, 1.0),
-            f(&self.strata, 1.7),
-            f(&self.snow_n, 1.0),
-            f(&self.forest, 1.0) * self.forest.norm() * 1.8,
-            f(&self.patch, 0.3) + stand_lf,
-            f(&self.field_var, 1.0),
-            f(&self.field_var, 1.7),
-            f(&self.field_var, 3.0),
-            f(&self.warp2, 1.0),
-            f(&self.patch, 0.37),
-            stand_warp(0x57A1),
-            stand_warp(0x57A2),
-            stand_warp(0x57A3),
-        ]
+        match i {
+            0 => f(&self.detail, 1.0),
+            1 => f(&self.patch, 1.0),
+            2 => f(&self.land_n, 1.0) * self.land_n.norm() * 1.8,
+            PF_STRATA => f(&self.strata, 1.0),
+            PF_STRATA2 => f(&self.strata, 1.7),
+            5 => f(&self.snow_n, 1.0),
+            6 => f(&self.forest, 1.0) * self.forest.norm() * 1.8,
+            PF_STAND => f(&self.patch, 0.3) + single(1200.0, &|| 0.5 * perlin3(0x57A, p / 1200.0) * crate::noise::band(1200.0, gsd)),
+            PF_FIELD_VAR => f(&self.field_var, 1.0),
+            PF_FIELD_VAR2 => f(&self.field_var, 1.7),
+            PF_FIELD_VAR3 => f(&self.field_var, 3.0),
+            11 => f(&self.warp2, 1.0),
+            PF_WATER => f(&self.patch, 0.37),
+            13 => stand_warp(0x57A1),
+            14 => stand_warp(0x57A2),
+            15 => stand_warp(0x57A3),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Lazy pixel field `i` (one of `LAZY`), completed on first use.
+    fn pf_lazy(&self, pf: &PixFields, i: usize) -> f64 {
+        let k = LAZY.iter().position(|&l| l == i).expect("a lazy pixel field");
+        if pf.pending.get() & (1 << k) != 0 {
+            let rest = self.pixel_field(i, pf.p, pf.gsd, pf.cut.map(|c| (c, false)));
+            pf.lazy[k].set(pf.lazy[k].get() + rest);
+            pf.pending.set(pf.pending.get() & !(1 << k));
+        }
+        pf.lazy[k].get()
     }
 
     fn region_info(&self, world: &World, cache: &mut Caches, t: &Terrain) -> RegionInfo {
@@ -647,7 +691,7 @@ impl SurfaceModel {
                 _ => mixc(mixc(pal.river, pal.ocean_shallow, 0.25), pal.lake_deep, smoothstep(0.0, 5.0, depth)),
             };
             // sediment / plankton variation
-            let v = pf.water;
+            let v = self.pf_lazy(pf, PF_WATER);
             col *= 1.0 + 0.06 * v;
             if l.water_kind == water::OCEAN && depth < 3.0 {
                 // the sandy bottom shows through clear shallow water
@@ -733,9 +777,9 @@ impl SurfaceModel {
             // bands along the contours: their horizontal wavelength shrinks with the slope (a
             // fixed band limit aliased them into hairlines on steep valley walls)
             let strata_h = 6.0 + 10.0 * st[3];
-            let strata = (l.ground / strata_h + 3.0 * pf.strata).sin();
+            let strata = (l.ground / strata_h + 3.0 * self.pf_lazy(pf, PF_STRATA)).sin();
             let strata_w = std::f64::consts::TAU * strata_h / slope.max(0.05);
-            rc *= 1.0 + 0.06 * strata * band(strata_w, 1.5 * gsd) + 0.25 * detail + 0.12 * pf.strata2;
+            rc *= 1.0 + 0.06 * strata * band(strata_w, 1.5 * gsd) + 0.25 * detail + 0.12 * self.pf_lazy(pf, PF_STRATA2);
             col = mixc(col, rc, rock);
             if rock > 0.5 {
                 class = lc::ROCK;
@@ -964,7 +1008,7 @@ impl SurfaceModel {
                 let (mut tc, th, tcov) = self.trees(&layers, q_loc, gsd, fw, p);
                 if tcov > 0.0 {
                     // forest stands of different age / species composition
-                    let stand = pf.stand;
+                    let stand = self.pf_lazy(pf, PF_STAND);
                     tc *= DVec3::new(1.0 + 0.10 * stand, 1.0 + 0.14 * stand, 1.0 + 0.05 * stand);
                     col = mixc(col, tc, tcov);
                     if veg.trees_in_dsm {
@@ -1303,7 +1347,7 @@ impl SurfaceModel {
         let fsize = if r.fh > 0.0 { r.fw.min(r.fh) } else { r.fw };
         let k = fsize / (fsize * fsize + 4.0 * gsd * gsd).sqrt();
         let tropic = smoothstep(19.0, 25.0, t.temp) * smoothstep(0.5, 0.7, t.moist);
-        let mean = mixc(pal.crop_mean, srgb(78.0, 100.0, 58.0), tropic) * tint * (1.0 + 0.10 * pf.field_var);
+        let mean = mixc(pal.crop_mean, srgb(78.0, 100.0, 58.0), tropic) * tint * (1.0 + 0.10 * self.pf_lazy(pf, PF_FIELD_VAR));
         let fwe = fw.max(0.6 * gsd); // edge filter never sharper than ~half a pixel
         let (c, h, cov, kind) = self.field_explicit(cache, r, t, q, p, gsd, fwe, cult, tint, pf).unwrap_or((mean, 0.0, 0.0, 0));
         let cult_mean = cult * 0.9;
@@ -1463,7 +1507,7 @@ impl SurfaceModel {
             col *= 0.94 + 0.12 * u01k(id, 8);
             col *= tint;
             // within-field variation (soil moisture, growth, management) at several scales
-            col *= 1.0 + 0.10 * pf.field_var
+            col *= 1.0 + 0.10 * self.pf_lazy(pf, PF_FIELD_VAR)
                 + 0.12 * perlin3(id, p / 35.0) * band(35.0, gsd)
                 + 0.08 * perlin3(id ^ 1, p / (0.8 * r.fw));
             // growth zones (soil, moisture): greener / yellower patches of tens of metres
@@ -1506,7 +1550,7 @@ impl SurfaceModel {
                 4 => {
                     let sp = 0.45;
                     col *= 1.0 + 0.15 * (along * std::f64::consts::TAU / sp).sin() * band(sp, gsd);
-                    col *= 1.0 - 0.15 * smoothstep(0.2, 0.6, pf.field_var2);
+                    col *= 1.0 - 0.15 * smoothstep(0.2, 0.6, self.pf_lazy(pf, PF_FIELD_VAR2));
                 }
                 8 => {
                     // orchard: rows of small trees
@@ -1537,7 +1581,7 @@ impl SurfaceModel {
         if bcov > 0.0 {
             let hb = mix64(id ^ 0xED6E);
             if u01k(hb, 1) < r.hedge {
-                let hc = pal.crown_decid * (0.8 + 0.3 * pf.field_var3);
+                let hc = pal.crown_decid * (0.8 + 0.3 * self.pf_lazy(pf, PF_FIELD_VAR3));
                 col = mixc(col, hc, bcov);
                 // rounded cross-section and a height varying along the hedge (a row of shrubs and
                 // small trees, not a flat-topped wall)
