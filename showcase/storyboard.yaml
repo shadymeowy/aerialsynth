@@ -472,7 +472,7 @@ shots:
     render:
       lighting: {time_utc: '06:00:00'}
   seconds: 5.5
-  text: camodocal's camera models, from the same pose
+  text: 'Four camera models from the same pose: pinhole, radial distortion, fisheye, omnidirectional'
 - id: rig
   label: Multi-camera rig
   layout: grid
