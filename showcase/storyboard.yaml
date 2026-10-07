@@ -298,6 +298,35 @@ shots:
   text: 'The real sky of 2026-01-10 20:15 UTC: Hipparcos + Tycho-2 stars and JPL DE440 planets (Jupiter, Orion, Sirius), astrometric error < 0.01″'
 - {id: events_stars, label: Event camera · night sky, text: 'The same sky on an event camera: stars and Jupiter fire events as the aircraft vibrates, at their true positions', seconds: 6, layout: events,
   source: stars, offset: 6.6}
+- id: star_tracker
+  label: Star tracker · ground truth
+  star_overlay: {mag: 5.0}
+  scenario:
+    cameras:
+    - path: /cam0
+      intrinsics: {model: pinhole, width: 1920, height: 1080, intrinsics: [4330.0, 4330.0, 959.5, 539.5]}
+      extrinsics: {mount: forward, pitch_deg: 45, yaw_deg: -4}
+      stars: {mag_limit: 9}
+      rgb:
+        sensor:
+          # a star tracker: 25 deg lens, fast optics (base_time), 40 ms, gain 4, slightly defocused
+          exposure: {mode: manual, ev: 13.97, base_time: 1.0e-5, max_time: 0.04, max_gain: 4}
+          noise: {read: 0.03, shot: 0.05}
+          optics: {bloom: 0.0, defocus_px: 1.0, starburst: 0.0, vignette: 0.0, chromatic_aberration_px: 0.0}
+    - path: /events
+      intrinsics: {model: pinhole, width: 1280, height: 720, intrinsics: [2887.0, 2887.0, 639.5, 359.5]}
+      extrinsics: {mount: forward, pitch_deg: 45, yaw_deg: -4}
+      rgb: null
+      events: {supersample: 1, shot_noise_dark_gain: 3.0}
+    render:
+      lighting: {date: '2026-01-20', time_utc: '19:30:00'}
+    trajectory:
+      synth: {altitude: 1500, heading_deg: 190, kind: line, lat: 41.5705, lon: 32.970, speed: 50}
+  seconds: 6
+  extend: 6.6
+  text: 'A star tracker on the plane: rings mark the catalogue ground truth (sub-pixel), trails follow the airframe vibration'
+- {id: events_tracker, label: Event camera · star tracker, text: 'The tracker view as events: Orion''s belt and sword, every event at the true star positions', seconds: 6, layout: events,
+  source: star_tracker, offset: 6.6}
 - id: cruise
   label: High altitude · 10 km
   scenario:

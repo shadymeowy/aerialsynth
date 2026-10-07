@@ -289,11 +289,50 @@ def fit(img, w, h):
     return np.asarray(out)
 
 
+# catalogue ids (HIP; planets 1<<30 | NAIF) of the named objects drawn by `star_overlay`
+STAR_NAMES = {32349: "Sirius", 24436: "Rigel", 27989: "Betelgeuse", 25336: "Bellatrix", 26311: "Alnilam",
+              26727: "Alnitak", 25930: "Mintaka", 27366: "Saiph", 26207: "Meissa", 37279: "Procyon", 37826: "Pollux",
+              36850: "Castor", 21421: "Aldebaran", 24608: "Capella", 30438: "Canopus", 91262: "Vega", 97649: "Altair",
+              102098: "Deneb", 11767: "Polaris", 69673: "Arcturus", 65474: "Spica", 49669: "Regulus", 80763: "Antares",
+              (1 << 30) | 199: "Mercury", (1 << 30) | 299: "Venus", (1 << 30) | 499: "Mars", (1 << 30) | 599: "Jupiter",
+              (1 << 30) | 699: "Saturn", (1 << 30) | 799: "Uranus", (1 << 30) | 899: "Neptune"}
+
+
+def star_overlay(img, g, k, mag, scale):
+    """Ground truth of frame k drawn on the image: a ring around every catalogue star brighter
+    than `mag` (and every planet) at its recorded position, names for the bright ones."""
+    st = g["stars"]
+    i0, i1 = st["index"][k], st["index"][k + 1]
+    ids, x, y, v, vis = st["id"][i0:i1], st["x"][i0:i1], st["y"][i0:i1], st["v"][i0:i1], st["visible"][i0:i1]
+    im = Image.fromarray(img).convert("RGBA")
+    ring = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(ring)
+    labels = []
+    for j in np.argsort(v):
+        planet = (int(ids[j]) >> 30) == 1
+        if not vis[j] or (v[j] > mag and not planet):
+            continue
+        r = (6 + 2.2 * max(0.0, mag - v[j])) * scale
+        col = (255, 200, 90, 230) if planet else (120, 220, 255, 200)
+        d.ellipse([x[j] * scale - r, y[j] * scale - r, x[j] * scale + r, y[j] * scale + r], outline=col, width=max(1, round(1.5 * scale)))
+        name = STAR_NAMES.get(int(ids[j]))
+        if name:
+            labels.append(((round(x[j] * scale + r + 4 * scale), round(y[j] * scale - 8 * scale)), name, FONTS.get("medium", u(15)), 0.9, "la"))
+    im = Image.alpha_composite(im, ring)
+    if labels:
+        im = Image.alpha_composite(im, text_layer(im.size, labels))
+    return np.asarray(im.convert("RGB"))
+
+
 def single_frames(shot, f, video):
     g, n = cam_frames(f, shot.get("camera", "/cam0"))
     W, H = video["width"], video["height"]
+    overlay = shot.get("star_overlay")
     for k in range(n):
-        yield fit(g["rgb"][k], W, H)
+        img = g["rgb"][k]
+        if overlay and "stars" in g:
+            img = star_overlay(img, g, k, overlay.get("mag", 4.5), 1.0)
+        yield fit(img, W, H)
 
 
 def grid_frames(shot, f, video, scn):
