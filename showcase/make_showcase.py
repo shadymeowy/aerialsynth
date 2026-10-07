@@ -91,7 +91,10 @@ def render_shot(base, shot, video, stills=False, force=False):
     tag = "stills" if stills else "scenario"
     path = os.path.join(d, f"{tag}.yaml")
     stamp = os.path.join(d, f"{tag}.done")
-    digest = hashlib.sha1(text.encode()).hexdigest()
+    # the render backend (cpu / gpu) gives the same output: not part of the up-to-date check
+    keyed = copy.deepcopy(scn)
+    keyed.get("render", {}).pop("backend", None)
+    digest = hashlib.sha1(yaml.safe_dump(keyed, sort_keys=False).encode()).hexdigest()
     if not force and os.path.exists(stamp) and open(stamp).read() == digest and os.path.exists(scn["output"]["file"]):
         print(f"[{sid}] up to date")
         return scn
