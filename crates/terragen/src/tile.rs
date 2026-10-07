@@ -20,8 +20,8 @@ pub struct Generator {
 }
 
 /// Grid-interpolated inputs of pass A, flattened: mountain warp, gully gradient, roads, relief
-/// octaves, meander warps, region warp, gully octaves.
-const NPRE: usize = 30;
+/// octaves, meander warps, region warp, gully octaves, floodplain-edge noise.
+const NPRE: usize = 34;
 
 fn pack_pre(m: &Macro, p: &Pre) -> [f64; NPRE] {
     let mut f = [0.0; NPRE];
@@ -35,6 +35,9 @@ fn pack_pre(m: &Macro, p: &Pre) -> [f64; NPRE] {
     }
     f[23..26].copy_from_slice(&p.region_warp.unwrap_or_default());
     f[26..30].copy_from_slice(&p.gully_oct.unwrap_or_default());
+    for li in 0..4 {
+        f[30 + li] = p.floodplain[li].unwrap_or_default();
+    }
     f
 }
 
@@ -51,6 +54,9 @@ fn unpack_pre(f: &[f64; NPRE], like: &Pre) -> ([f64; 2], Pre) {
     }
     p.region_warp = like.region_warp.map(|_| arr(23));
     p.gully_oct = like.gully_oct.map(|_| [f[26], f[27], f[28], f[29]]);
+    for li in 0..4 {
+        p.floodplain[li] = like.floodplain[li].map(|_| f[30 + li]);
+    }
     ([f[0], f[1]], p)
 }
 

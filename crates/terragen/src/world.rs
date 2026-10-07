@@ -170,6 +170,8 @@ pub struct Pre {
     pub region_warp: Option<[f64; 3]>,
     /// the long gully octaves (state of `gullies_part`, split at `relief_cut[1]`)
     pub gully_oct: Option<[f64; 4]>,
+    /// floodplain-edge noise per drainage level
+    pub floodplain: [Option<f64>; 4],
 }
 
 impl Macro {
@@ -551,6 +553,18 @@ impl World {
         }
     }
 
+    /// Wavelength (m) of the floodplain-edge noise of drainage level `li`.
+    fn floodplain_wavelength(&self, li: usize) -> f64 {
+        let lc = &self.cfg.hydro.levels[li];
+        400.0 + 0.75 * (lc.width_m[0] + lc.width_m[1])
+    }
+
+    /// Noise of the floodplain edge of drainage level `li` (a constant wavelength per level: one
+    /// following the channel width sheared the noise into streaks).
+    fn floodplain_noise(&self, li: usize, p: DVec3) -> f64 {
+        perlin3(0xF10D ^ li as u64, p / self.floodplain_wavelength(li))
+    }
+
     /// Warp (m) of the lookup in the region lattice: curvy borders between field systems.
     fn region_warp(&self, p: DVec3) -> DVec3 {
         let region_cell = self.cfg.landuse.region_km * KM;
@@ -577,6 +591,9 @@ impl World {
             for li in 0..self.cfg.hydro.levels.len().min(4) {
                 if 0.37 * self.meander_wavelength(li) >= cut[1] {
                     pre.river_warp[li] = Some(self.meander_warp(li, ctx.p));
+                }
+                if self.floodplain_wavelength(li) >= cut[1] {
+                    pre.floodplain[li] = Some(self.floodplain_noise(li, ctx.p));
                 }
             }
             let region_cell = self.cfg.landuse.region_km * KM;
@@ -988,6 +1005,9 @@ impl World {
             let hits = self.river_query(ctx, qsegs, h, m.pre.as_ref().map_or(&[][..], |p| &p.river_warp[..]));
             let h0 = h;
             let wn = smoothstep(-0.6, 0.6, m.river_width);
+            // the floodplain-edge noise depends on the level only: once per level (from the
+            // tile's coarse grid when there)
+            let mut fp_noise: [Option<f64>; 4] = m.pre.map_or([None; 4], |p| p.floodplain);
             for rh in &hits {
                 let lc = &self.cfg.hydro.levels[rh.level as usize];
                 let ad = rh.d.abs();
@@ -998,8 +1018,18 @@ impl World {
                 // (a constant wavelength per level: one following the channel width sheared the
                 // noise into streaks — absolute ECEF coordinates turn a tiny wavelength change into
                 // a large phase shift)
-                let fp_lam = 400.0 + 0.75 * (lc.width_m[0] + lc.width_m[1]);
-                let fp_w = (hw + width * (1.0 + 3.0 * wn)) * (1.0 + 0.25 * perlin3(0xF10D ^ rh.level as u64, p / fp_lam));
+                let li = rh.level as usize;
+                let fpn = match fp_noise.get(li).copied().flatten() {
+                    Some(v) => v,
+                    None => {
+                        let v = self.floodplain_noise(li, p);
+                        if li < 4 {
+                            fp_noise[li] = Some(v);
+                        }
+                        v
+                    }
+                };
+                let fp_w = (hw + width * (1.0 + 3.0 * wn)) * (1.0 + 0.25 * fpn);
                 let incision = 1.0 + 0.02 * width;
                 let floor = rh.floor.max(1.0) - incision;
                 // valley profile: bed, floodplain, walls kept below ~30° (V shape); every channel

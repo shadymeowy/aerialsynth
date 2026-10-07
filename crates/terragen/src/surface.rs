@@ -87,13 +87,15 @@ pub struct PixFields {
     pub field_var3: f64,
     pub warp2: f64,
     pub water: f64,
+    /// domain warp of the forest-stand lattice (×70 m)
+    pub stand_warp: [f64; 3],
 }
 
 impl PixFields {
-    pub const N: usize = 13;
+    pub const N: usize = 16;
     pub fn from_array(a: [f64; Self::N]) -> Self {
-        let [detail, patch, land, strata, strata2, snow, forest, stand, field_var, field_var2, field_var3, warp2, water] = a;
-        PixFields { detail, patch, land, strata, strata2, snow, forest, stand, field_var, field_var2, field_var3, warp2, water }
+        let [detail, patch, land, strata, strata2, snow, forest, stand, field_var, field_var2, field_var3, warp2, water, w0, w1, w2] = a;
+        PixFields { detail, patch, land, strata, strata2, snow, forest, stand, field_var, field_var2, field_var3, warp2, water, stand_warp: [w0, w1, w2] }
     }
 }
 
@@ -405,10 +407,15 @@ impl SurfaceModel {
                 Some((cut, low)) => n.eval_part(p * k, gsd * k, cut * k, low),
             }
         };
-        let stand_lf = match split {
-            Some((cut, low)) if (1200.0 >= cut) != low => 0.0,
-            _ => 0.5 * perlin3(0x57A, p / 1200.0) * crate::noise::band(1200.0, gsd),
+        // single-octave terms of wavelength `lam`
+        let single = |lam: f64, f: &dyn Fn() -> f64| -> f64 {
+            match split {
+                Some((cut, low)) if (lam >= cut) != low => 0.0,
+                _ => f(),
+            }
         };
+        let stand_lf = single(1200.0, &|| 0.5 * perlin3(0x57A, p / 1200.0) * crate::noise::band(1200.0, gsd));
+        let stand_warp = |seed: u64| single(180.0, &|| perlin3(seed, p / 180.0));
         [
             f(&self.detail, 1.0),
             f(&self.patch, 1.0),
@@ -423,6 +430,9 @@ impl SurfaceModel {
             f(&self.field_var, 3.0),
             f(&self.warp2, 1.0),
             f(&self.patch, 0.37),
+            stand_warp(0x57A1),
+            stand_warp(0x57A2),
+            stand_warp(0x57A3),
         ]
     }
 
@@ -901,7 +911,8 @@ impl SurfaceModel {
             // forest stands (~240 m, irregular borders): each of its own age (crown size, height),
             // tone and conifer / broadleaf mix, with small canopy gaps; one lattice of identical
             // crowns read as a uniform camouflage texture
-            let sp = p + DVec3::new(perlin3(0x57A1, p / 180.0), perlin3(0x57A2, p / 180.0), perlin3(0x57A3, p / 180.0)) * 70.0;
+            // (the warp per pixel, not per sample: it is smooth at the scale of a pixel)
+            let sp = p + DVec3::from_array(pf.stand_warp) * 70.0;
             let stand_id = worley3(0x57A4, sp, 240.0, 0.9).id;
             let age = u01k(stand_id, 1);
             let tone_u = u01k(stand_id, 2);
