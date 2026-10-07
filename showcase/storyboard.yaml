@@ -170,7 +170,7 @@ shots:
       intrinsics: {model: pinhole, width: 1280, height: 720, intrinsics: [640.0, 640.0, 639.5, 359.5]}
       extrinsics: {mount: forward, pitch_deg: 38}
       rgb: null
-      events: {supersample: 1, shot_noise_hz: 0.003, leak_hz: 0.002, shot_noise_dark_gain: 3.0}  # a very low-noise sensor
+      events: {supersample: 1, log_eps: 1.0e-7, shot_noise_hz: 0.003, leak_hz: 0.002, shot_noise_dark_gain: 3.0}  # sensitive (low dark current), low noise
     render:
       lighting: {date: '2026-01-10', time_utc: '20:15:00'}
     trajectory:
@@ -238,7 +238,7 @@ shots:
       intrinsics: {model: pinhole, width: 1280, height: 720, intrinsics: [2887.0, 2887.0, 639.5, 359.5]}
       extrinsics: {mount: forward, pitch_deg: 45, yaw_deg: -4}
       rgb: null
-      events: {supersample: 1, shot_noise_hz: 0.003, leak_hz: 0.002, shot_noise_dark_gain: 3.0}  # a very low-noise sensor
+      events: {supersample: 1, log_eps: 1.0e-7, shot_noise_hz: 0.003, leak_hz: 0.002, shot_noise_dark_gain: 3.0}  # sensitive (low dark current), low noise
     render:
       lighting: {date: '2026-01-20', time_utc: '19:30:00'}
     trajectory:
