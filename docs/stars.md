@@ -196,6 +196,64 @@ per pass instead of refining that conservative volume to the finest zoom. Tiles 
 below the view cone are also culled. The example's first run generates about 140 tiles instead
 of over 5,000.
 
+## Limitations (known, not modelled)
+
+**Catalogue**
+* Built in to V = 9; a Tycho-2 file goes deeper. There is no unresolved background (Milky Way
+  glow, zodiacal light, airglow structure) beyond the renderer's uniform night-sky floor.
+* Stars are points at mean catalogue values: no variability, no orbital motion of binaries, no
+  radial velocity (perspective acceleration, sub-mas for decades).
+* Tycho-2 stars without a mean position (flag X, a few thousand) carry no proper motion.
+* V and B−V of Tycho-only stars come from the BT/VT conversion (≈ 0.05 mag).
+
+**Astrometry**
+* UT1 − UTC (`dut1_s`) and polar motion are constants given per scenario (default 0: up to 13″
+  and 0.5″), not interpolated from IERS tables.
+* Aberration uses the Earth's orbital velocity and the observer's diurnal velocity, but not the
+  vehicle's: ≈ 0.17″ at 250 m/s, 5″ at orbital speed.
+* Light deflection is by the Sun only. Jupiter's limb would add up to 16 mas.
+* Refraction:
+  * It comes from the standard atmosphere at the camera's altitude at one wavelength
+    (0.574 µm): no weather, humidity or chromatic refraction (stars are not dispersed into
+    spectra near the horizon).
+  * Below the horizontal, seen from altitude, it is a simplified tangent-height model.
+* No scintillation (twinkling) and no seeing: the PSF is a fixed Gaussian, the same across the
+  field.
+
+**Ephemeris and planets**
+* JPL DE440 covers 1990–2060 only. Outside that range there are no planets, the Earth's motion
+  comes from Keplerian elements (≈ 0.01″ for stars) and the Moon from mean elements (≈ 0.5°).
+* Positions are planet system barycentres: Jupiter's and Saturn's centres are within
+  ≈ 0.07″. TDB is taken equal to TT (≤ 1.7 ms).
+* Globes are Lambert-shaded spheres: no limb darkening beyond Lambert, no albedo features
+  (Jupiter's bands, Mars's markings), no flattening.
+* Saturn's rings are 4 uniform zones: no ring shadow on the globe and no globe shadow on the
+  rings.
+* No moons other than ours: the Galilean moons (V 4.6–5.7) are visible to star trackers and are
+  missing.
+* Magnitudes follow Mallama & Hilton 2018 within their phase-angle ranges. Colours use mean B−V.
+* The ground-truth position of a planet is its centre, not the photocentre of a phase.
+
+**The Moon**
+* The sky draws it as a uniform disc scaled by the illuminated fraction, not as a shaded
+  crescent, and without earthshine.
+* Its ground truth matches the drawn disc: observer on the ellipsoid, UT1 = UTC, refraction at
+  sea level. That is within ~2″, plus the refraction difference for high cameras near the
+  horizon.
+
+**Photometry and rendering**
+* The V band stands in for luminance, and colours are blackbodies from B−V; neither is a
+  spectral integration over the sensor's channels.
+* Extinction uses the renderer's two-layer atmosphere with the Kasten–Young air mass, which is
+  approximate for elevated observers and near or below the horizon.
+* Stars are added only to pixels that show sky: terrain occludes at pixel granularity, with no
+  partial occlusion at silhouettes.
+* Trails sample the exposure with 17 camera poses (linear in between). Event cameras see the
+  stars at the render instants, interpolated between keyframes like the rest of the image.
+* The sensor writes 8-bit images, which limits faint-star and trail centroiding (≈ 0.1 px).
+* The leap-second table ends at 2017-01-01 (none announced since); before 1972 TAI − UTC is
+  approximated.
+
 ## Data credits
 
 * Hipparcos and Tycho-2: ESA, via CDS / VizieR (catalogues I/239, I/311, I/259).
