@@ -313,6 +313,16 @@ pub struct SurfaceModel {
     /// Horizontal direction to the sun (ENU) and tan(elevation).
     sun_h: DVec2,
     sun_tan: f64,
+    /// Site data shared by all worker threads (each site is computed once; the per-thread
+    /// `Caches` in front of it avoid the lock on most lookups).
+    shared: std::sync::RwLock<SharedSites>,
+}
+
+#[derive(Default)]
+struct SharedSites {
+    regions: FxHashMap<u64, RegionInfo>,
+    towns: FxHashMap<u64, TownInfo>,
+    towns_base: FxHashMap<u64, TownInfo>,
 }
 
 /// One tree layer (crowns on a jittered grid).
@@ -352,7 +362,20 @@ impl SurfaceModel {
             land_n: Fbm::new(k(9), 9000.0, 5, 2.0, 0.55),
             sun_h: DVec2::new(az.sin(), az.cos()),
             sun_tan: el.tan(),
+            shared: Default::default(),
         }
+    }
+
+    fn shared_get<T: Copy>(&self, f: impl Fn(&SharedSites) -> Option<T>) -> Option<T> {
+        f(&self.shared.read().unwrap())
+    }
+
+    fn shared_put(&self, f: impl FnOnce(&mut SharedSites)) {
+        let mut g = self.shared.write().unwrap();
+        if g.regions.len() + g.towns.len() + g.towns_base.len() > 500_000 {
+            *g = SharedSites::default();
+        }
+        f(&mut g);
     }
 
     /// Per-pixel smooth fields (band-limited at the pixel GSD).
@@ -378,6 +401,10 @@ impl SurfaceModel {
     fn region_info(&self, world: &World, cache: &mut Caches, t: &Terrain) -> RegionInfo {
         if let Some(r) = cache.regions.get(&t.region.id) {
             return *r;
+        }
+        if let Some(r) = self.shared_get(|sh| sh.regions.get(&t.region.id).copied()) {
+            cache.regions.insert(t.region.id, r);
+            return r;
         }
         let id = t.region.id;
         let cctx = site_ctx(world, t.region.center, 400.0);
@@ -424,6 +451,9 @@ impl SurfaceModel {
             season: (tc.style[3] * 0.7 + 0.3 * u01k(id, 12)).clamp(0.0, 1.0),
         };
         cache.regions.insert(id, info);
+        self.shared_put(|sh| {
+            sh.regions.insert(id, info);
+        });
         info
     }
 
@@ -467,6 +497,10 @@ impl SurfaceModel {
         if let Some(r) = cache.towns.get(&id) {
             return *r;
         }
+        if let Some(r) = self.shared_get(|sh| sh.towns.get(&id).copied()) {
+            cache.towns.insert(id, r);
+            return r;
+        }
         let mut info = self.town_base(world, cache, id, center);
         if info.exists {
             let cell = world.cfg.landuse.town_cell_km * 1000.0;
@@ -492,12 +526,19 @@ impl SurfaceModel {
             }
         }
         cache.towns.insert(id, info);
+        self.shared_put(|sh| {
+            sh.towns.insert(id, info);
+        });
         info
     }
 
     fn town_base(&self, world: &World, cache: &mut Caches, id: u64, center: DVec3) -> TownInfo {
         if let Some(r) = cache.towns_base.get(&id) {
             return *r;
+        }
+        if let Some(r) = self.shared_get(|sh| sh.towns_base.get(&id).copied()) {
+            cache.towns_base.insert(id, r);
+            return r;
         }
         let ctx = site_ctx(world, center, 300.0);
         let (east, north) = (ctx.east, ctx.north);
@@ -532,6 +573,9 @@ impl SurfaceModel {
             sun: east * self.sun_h.x + north * self.sun_h.y,
         };
         cache.towns_base.insert(id, info);
+        self.shared_put(|sh| {
+            sh.towns_base.insert(id, info);
+        });
         info
     }
 

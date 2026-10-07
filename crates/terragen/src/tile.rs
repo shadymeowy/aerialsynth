@@ -5,7 +5,7 @@
 
 use crate::config::Config;
 use crate::surface::{l2s, Caches, Local, SurfaceModel};
-use crate::world::{water, Ctx, Macro, Terrain, World};
+use crate::world::{water, Ctx, Macro, NearSegs, Terrain, World};
 use geodesy::tiles::{gsd_ew, gsd_ns, pixel_to_latlon, TileId};
 use glam::{DVec2, DVec3};
 use rayon::prelude::*;
@@ -121,6 +121,7 @@ impl Generator {
             let gsd_c = gsd_ew(lat_c, z, n as u32, &ell);
             self.world.river_segments(c.p, (corner - c.p).length(), gsd_c)
         };
+        let sinks = World::sink_lakes(&segs);
 
         // ---------------- pass A on pixel centres incl. 2px apron
         let rows_a: Vec<Vec<Terrain>> = (0..na2)
@@ -130,12 +131,41 @@ impl Generator {
                 let py = oy + j as f64 - 2.0 + 0.5;
                 let (lat, _) = pixel_to_latlon(DVec2::new(ox, py), z, n as u32);
                 let gsd = gsd_ew(lat, z, n as u32, &ell);
-                for i in 0..na2 {
-                    let px = ox + i as f64 - 2.0 + 0.5;
+                // channel pieces prefiltered per chunk of the row (coarse tiles hold tens of
+                // thousands of pieces, most of them far from any given pixel); exact, see
+                // `World::local_segments`
+                const CHUNK: usize = 32;
+                let pt = |i: f64| {
+                    let px = ox + i - 2.0 + 0.5;
                     let (lat, lon) = pixel_to_latlon(DVec2::new(px, py), z, n as u32);
                     let ctx = Ctx::new(lat, lon, gsd, &ell);
                     let m = macro_at(px, py, &ctx);
-                    row.push(self.world.terrain_with(&ctx, &m, &segs));
+                    (ctx, m)
+                };
+                // per chunk: centre, radius, bound of the ground before carving
+                let chunks: Vec<(usize, usize, DVec3, f64, f64)> = (0..na2)
+                    .step_by(CHUNK)
+                    .map(|i0| {
+                        let i1 = (i0 + CHUNK).min(na2);
+                        let probes = [pt(i0 as f64), pt(0.5 * (i0 + i1 - 1) as f64), pt((i1 - 1) as f64)];
+                        let center = probes[1].0.p;
+                        let radius = (probes[0].0.p - center).length().max((probes[2].0.p - center).length()) + gsd;
+                        let h_max = probes.iter().map(|(c, m)| self.world.relief_height(c, m)).fold(f64::MIN, f64::max) + 150.0 + 0.1 * 2.0 * radius;
+                        (i0, i1, center, radius, h_max)
+                    })
+                    .collect();
+                // the row's pieces first (a superset of every chunk's), then each chunk's
+                let row_c = pt(0.5 * (na2 - 1) as f64).0.p;
+                let row_r = chunks.iter().map(|c| (c.2 - row_c).length() + c.3).fold(0.0, f64::max);
+                let row_h = chunks.iter().map(|c| c.4).fold(f64::MIN, f64::max);
+                let row_segs = self.world.local_segments(&segs, row_c, row_r, row_h);
+                for &(i0, i1, center, radius, h_max) in &chunks {
+                    let local = self.world.local_segments(&row_segs, center, radius, h_max);
+                    for i in i0..i1 {
+                        let (ctx, m) = pt(i as f64);
+                        let near = NearSegs { local: &local, h_max, sinks: &sinks };
+                        row.push(self.world.terrain_with_near(&ctx, &m, &segs, &near));
+                    }
                 }
                 row
             })

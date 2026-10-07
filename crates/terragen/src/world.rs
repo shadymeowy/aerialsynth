@@ -12,6 +12,17 @@ use glam::{DVec2, DVec3};
 mod hydro;
 pub use hydro::{RiverHit, Seg};
 
+/// Drainage data precomputed for an area (a tile, a chunk of a row): exact shortcuts for
+/// `terrain_impl`.
+pub struct NearSegs<'a> {
+    /// pieces that can reach the area where the ground before carving is ≤ `h_max`
+    /// (`World::local_segments`)
+    pub local: &'a [Seg],
+    pub h_max: f64,
+    /// `World::sink_lakes` of the full piece list
+    pub sinks: &'a [(u64, DVec3, f64)],
+}
+
 /// What `terrain_impl` evaluates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Mode {
@@ -549,7 +560,7 @@ impl World {
         let v = self.lake_level(id, center, rad).or_else(|| {
             let g = geodesy::ecef2geodetic(center, &self.ell);
             let cctx = Ctx::new(g.lat, g.lon, 20.0, &self.ell);
-            let tc = self.terrain_impl(&cctx, &self.macro_at(cctx.p, cctx.gsd), Mode::NoLakes, None);
+            let tc = self.terrain_impl(&cctx, &self.macro_at(cctx.p, cctx.gsd), Mode::NoLakes, None, None);
             (tc.water_kind == water::NONE && tc.ground > 1.0).then_some(tc.ground + 1.0)
         });
         CACHE.with(|c| {
@@ -572,7 +583,7 @@ impl World {
         }
         let g = geodesy::ecef2geodetic(center, &self.ell);
         let cctx = Ctx::new(g.lat, g.lon, 20.0, &self.ell);
-        let tc = self.terrain_impl(&cctx, &self.macro_at(cctx.p, cctx.gsd), Mode::NoLakes, None);
+        let tc = self.terrain_impl(&cctx, &self.macro_at(cctx.p, cctx.gsd), Mode::NoLakes, None, None);
         let v = if tc.water_kind != water::NONE || tc.ground < 1.0 {
             None
         } else {
@@ -582,7 +593,7 @@ impl World {
                 let q = cctx.offset(rad * a.cos(), rad * a.sin());
                 let gq = geodesy::ecef2geodetic(q, &self.ell);
                 let qctx = Ctx::new(gq.lat, gq.lon, 20.0, &self.ell);
-                let tq = self.terrain_impl(&qctx, &self.macro_at(qctx.p, qctx.gsd), Mode::NoLakes, None);
+                let tq = self.terrain_impl(&qctx, &self.macro_at(qctx.p, qctx.gsd), Mode::NoLakes, None, None);
                 rim = rim.min(tq.ground);
             }
             if rim < tc.ground - 4.0 {
@@ -604,16 +615,63 @@ impl World {
     /// Pass A at one point (macro fields and drainage evaluated exactly).
     pub fn terrain(&self, ctx: &Ctx) -> Terrain {
         let m = self.macro_at(ctx.p, ctx.gsd);
-        self.terrain_impl(ctx, &m, Mode::Full, None)
+        self.terrain_impl(ctx, &m, Mode::Full, None, None)
     }
 
     /// Pass A with given (e.g. interpolated) macro fields and the drainage segments near the
     /// point (see `river_segments`).
     pub fn terrain_with(&self, ctx: &Ctx, m: &Macro, segs: &[Seg]) -> Terrain {
-        self.terrain_impl(ctx, m, Mode::Full, Some(segs))
+        self.terrain_impl(ctx, m, Mode::Full, Some(segs), None)
     }
 
-    fn terrain_impl(&self, ctx: &Ctx, m: &Macro, mode: Mode, segs: Option<&[Seg]>) -> Terrain {
+    /// [`terrain_with`] with precomputed per-area drainage data (identical results).
+    pub fn terrain_with_near(&self, ctx: &Ctx, m: &Macro, segs: &[Seg], near: &NearSegs) -> Terrain {
+        self.terrain_impl(ctx, m, Mode::Full, Some(segs), Some(near))
+    }
+
+    /// Closed basins fed by the channels in `segs`: (id, centre, radius), sized by the total
+    /// inflow (the sum of the inflowing channel widths), in the order of `segs`.
+    pub fn sink_lakes(segs: &[Seg]) -> Vec<(u64, DVec3, f64)> {
+        let mut lakes: Vec<(u64, DVec3, f64)> = Vec::new();
+        for sg in segs.iter().filter(|sg| sg.sink) {
+            let hh = hash3(0x51A7, (sg.b.x / 10.0) as i64, (sg.b.y / 10.0) as i64, (sg.b.z / 10.0) as i64);
+            match lakes.iter_mut().find(|l| l.0 == hh) {
+                Some(l) => l.2 += sg.hw,
+                None => lakes.push((hh, sg.b, sg.hw)),
+            }
+        }
+        for l in lakes.iter_mut() {
+            l.2 = (6.0 * l.2).clamp(200.0, 2500.0) * (0.8 + 0.4 * u01k(l.0, 1));
+        }
+        lakes
+    }
+
+    /// Ground height before rivers, lakes and the sea (cheap; for bounds).
+    pub fn relief_height(&self, ctx: &Ctx, m: &Macro) -> f64 {
+        self.terrain_impl(ctx, m, Mode::Relief, None, None).ground
+    }
+
+    /// The pieces of `segs` that can reach any point within `radius` of `center` whose ground
+    /// before carving is at most `h_max`: rejected only where the distance minus the radius and
+    /// the largest meander warp exceeds the largest query reach (see `river_query`). Keeps the
+    /// order of `segs`.
+    pub fn local_segments(&self, segs: &[Seg], center: DVec3, radius: f64, h_max: f64) -> Vec<Seg> {
+        segs.iter()
+            .filter(|s| {
+                let lc = &self.cfg.hydro.levels[s.level as usize];
+                // |perlin3| ≤ 1.1·√3: warp ≤ 0.22·λ·2.76·√2 < 0.9·λ
+                let warp = 0.9 * lc.meander.max(1e-3) * lc.cell_km * KM;
+                let floor_min = s.ha.min(s.hb);
+                let reach = (s.valley * 1.5 + s.hw + 200.0).max(11.3 * s.hw + 6.0 * (h_max - floor_min + 2.0 + 0.04 * s.hw) + 50.0);
+                let ab = s.b - s.a;
+                let u = ((center - s.a).dot(ab) / ab.length_squared().max(1e-9)).clamp(0.0, 1.0);
+                (center - (s.a + ab * u)).length() - radius - warp <= reach + 1.0
+            })
+            .copied()
+            .collect()
+    }
+
+    fn terrain_impl(&self, ctx: &Ctx, m: &Macro, mode: Mode, segs: Option<&[Seg]>, near_segs: Option<&NearSegs>) -> Terrain {
         let with_lakes = mode == Mode::Full;
         let p = ctx.p;
         let gsd = ctx.gsd;
@@ -741,19 +799,18 @@ impl World {
                 }
             };
             // closed basins fed by rivers near p: (id, centre, radius)
-            // (sized by the total inflow: the sum of the inflowing channel widths)
-            for sg in segs.iter().filter(|sg| sg.sink) {
-                let hh = hash3(0x51A7, (sg.b.x / 10.0) as i64, (sg.b.y / 10.0) as i64, (sg.b.z / 10.0) as i64);
-                match sink_lakes.iter_mut().find(|l| l.0 == hh) {
-                    Some(l) => l.2 += sg.hw,
-                    None => sink_lakes.push((hh, sg.b, sg.hw)),
+            match near_segs {
+                Some(n) => sink_lakes.extend(n.sinks.iter().filter(|l| (p - l.1).length() < 1.6 * l.2)),
+                None => {
+                    sink_lakes = Self::sink_lakes(segs);
+                    sink_lakes.retain(|l| (p - l.1).length() < 1.6 * l.2);
                 }
             }
-            for l in sink_lakes.iter_mut() {
-                l.2 = (6.0 * l.2).clamp(200.0, 2500.0) * (0.8 + 0.4 * u01k(l.0, 1));
-            }
-            sink_lakes.retain(|l| (p - l.1).length() < 1.6 * l.2);
-            let hits = self.river_query(ctx, segs, h);
+            let qsegs = match near_segs {
+                Some(n) if h <= n.h_max => n.local,
+                _ => segs,
+            };
+            let hits = self.river_query(ctx, qsegs, h);
             let h0 = h;
             let wn = smoothstep(-0.6, 0.6, m.river_width);
             for rh in &hits {

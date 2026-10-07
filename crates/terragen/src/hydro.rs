@@ -77,7 +77,7 @@ impl World {
             let gsd = cell / 4.0;
             let ctx = Ctx::new(g.lat, g.lon, gsd, &self.ell);
             let m = self.macro_at(ctx.p, gsd);
-            let t = self.terrain_impl(&ctx, &m, Mode::Relief, None);
+            let t = self.terrain_impl(&ctx, &m, Mode::Relief, None, None);
             FlowPt { s: ctx.p, h: t.ground, active: true }
         } else {
             FlowPt { s: DVec3::ZERO, h: 0.0, active: false }
