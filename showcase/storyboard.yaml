@@ -230,7 +230,9 @@ shots:
     - extrinsics: {pitch_deg: -34}
       rgb:
         sensor:
-          exposure: {max_gain: 160, max_time: 0.04, tau: 0.25}
+          # capped auto exposure (-1.5 EV): a free-running auto exposure would brighten the
+          # night back to day (gain 160 = +10 EV); like a time-lapse photographer, let it darken
+          exposure: {ev: -1.5, max_gain: 3, max_time: 0.04, tau: 0.25}
     render:
       lighting: {time_scale: 600, time_utc: '16:50:00'}
     trajectory:
@@ -269,6 +271,33 @@ shots:
       synth: {altitude: 1300, heading_deg: 95, kind: line, lat: 39.17, lon: 33.62}
   seconds: 6
   text: Moonlight and the lunar disc from the true lunar position and phase
+- id: stars
+  label: Night sky · real stars and planets
+  scenario:
+    cameras:
+    - path: /cam0
+      intrinsics: {model: pinhole, width: 1920, height: 1080, intrinsics: [960.0, 960.0, 959.5, 539.5]}
+      extrinsics: {mount: forward, pitch_deg: 38}
+      rgb:
+        sensor:
+          # a sensitive night camera: fast optics (base_time), 40 ms, gain 4
+          exposure: {mode: manual, ev: 14.97, base_time: 5.0e-6, max_time: 0.04, max_gain: 4}
+          noise: {read: 0.03, shot: 0.05}
+          optics: {bloom: 0.03, defocus_px: 0.9, starburst: 0.25}
+    - path: /events
+      intrinsics: {model: pinhole, width: 1280, height: 720, intrinsics: [640.0, 640.0, 639.5, 359.5]}
+      extrinsics: {mount: forward, pitch_deg: 38}
+      rgb: null
+      events: {supersample: 1, shot_noise_dark_gain: 3.0}
+    render:
+      lighting: {date: '2026-01-10', time_utc: '20:15:00'}
+    trajectory:
+      synth: {altitude: 1500, heading_deg: 140, kind: line, lat: 41.562, lon: 32.955, speed: 50}
+  seconds: 6
+  extend: 6.6
+  text: 'The real sky of 2026-01-10 20:15 UTC: Hipparcos + Tycho-2 stars and JPL DE440 planets (Jupiter, Orion, Sirius), astrometric error < 0.01″'
+- {id: events_stars, label: Event camera · night sky, text: 'The same sky on an event camera: stars and Jupiter fire events as the aircraft vibrates, at their true positions', seconds: 6, layout: events,
+  source: stars, offset: 6.6}
 - id: cruise
   label: High altitude · 10 km
   scenario:
