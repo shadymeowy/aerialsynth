@@ -42,10 +42,12 @@ def shot_scenario(base, shot, video, stills=False):
     scn = deep_merge(base, over)
     # cameras: every camera of the shot is merged onto the base camera (sensor look etc.)
     template = base["cameras"][0]
-    scn["cameras"] = [deep_merge(template, c) for c in cams_over]
+    # (a key set to null removes the template's value, e.g. `rgb: null` for an event-only camera)
+    scn["cameras"] = [{k: v for k, v in deep_merge(template, c).items() if v is not None} for c in cams_over]
     fps = video["fps"]
     speedup = shot.get("speedup", 1)
-    span = (shot["seconds"] + video["crossfade"]) * speedup      # flight time shown
+    # flight time shown (+ `extend`: a continuation shown by another shot, e.g. its event camera)
+    span = (shot["seconds"] + video["crossfade"] + shot.get("extend", 0.0)) * speedup
     start = scn["output"]["start"]
     sid = shot["id"]
     d = os.path.join(OUT, sid)
@@ -55,9 +57,15 @@ def shot_scenario(base, shot, video, stills=False):
     scn["output"]["end"] = start + span
     for c in scn["cameras"]:
         c["frame_rate"] = fps / speedup
+    if not stills and any(k in c for c in scn["cameras"] for k in ("depth", "flow", "landcover")):
+        # geometry ground truth needs an odd supersample; at 1080p one sample per pixel (the
+        # panels show it downscaled)
+        scn["render"]["supersample"] = 1
     if stills:
         # look check: 3 frames, half resolution, light supersampling, no events
         scn["output"]["file"] = os.path.join(d, "stills.h5")
+        # event-only cameras have nothing to show in stills
+        scn["cameras"] = [c for c in scn["cameras"] if any(k in c for k in ("rgb", "depth", "flow", "landcover"))]
         # (geometry ground truth needs an odd supersample)
         ss = 3 if any(k in c for c in scn["cameras"] for k in ("depth", "flow", "landcover")) else 2
         scn["render"]["supersample"] = ss
@@ -118,6 +126,13 @@ class Fonts:
 
 FONTS = Fonts()
 
+# UI scale: layouts are designed for 1280x720 and scaled to the video width
+UI = 1.0
+
+
+def u(x):
+    return int(round(x * UI))
+
 
 def text_layer(size, items):
     """RGBA overlay with soft-shadowed text. items: (xy, text, font, alpha, anchor)."""
@@ -135,6 +150,7 @@ def text_layer(size, items):
 
 def bottom_band(w, h, height=110, strength=0.55):
     """Vertical gradient that darkens the bottom of the frame for legible captions."""
+    height = u(height)
     a = np.zeros((h, w), np.float32)
     y = np.arange(height, dtype=np.float32) / height
     a[h - height:, :] = (strength * y ** 1.6)[:, None]
@@ -153,15 +169,17 @@ def caption(frame, label, text, t, dur, w, h, band):
         return frame
     f = frame.astype(np.float32) * (1 - band * a)
     img = Image.fromarray(np.clip(f, 0, 255).astype(np.uint8)).convert("RGBA")
-    m = 36
-    items = [((m, h - m), label, FONTS.get("medium", 24), a, "ls"), ((w - m, h - m), text, FONTS.get("light", 22), a * 0.95, "rs")]
+    m = u(36)
+    items = [((m, h - m), label, FONTS.get("medium", u(24)), a, "ls"), ((w - m, h - m), text, FONTS.get("light", u(22)), a * 0.95, "rs")]
     img = Image.alpha_composite(img, text_layer(img.size, items))
     return np.asarray(img.convert("RGB"))
 
 
-def panel_label(img, txt, xy=(14, 12), size=18):
+def panel_label(img, txt, xy=None, size=18, scale=None):
     """Small label at the top-left of a panel (PIL image, in place)."""
-    lay = text_layer(img.size, [(xy, txt, FONTS.get("medium", size), 1.0, "la")])
+    k = UI if scale is None else scale
+    xy = (round(14 * k), round(12 * k)) if xy is None else xy
+    lay = text_layer(img.size, [(xy, txt, FONTS.get("medium", round(size * k)), 1.0, "la")])
     return Image.alpha_composite(img.convert("RGBA"), lay).convert("RGB")
 
 
@@ -209,15 +227,15 @@ def depth_to_rgb(depth, cmap):
 
 
 def events_to_rgb(ev, t_us, window_us, w, h, ptr):
-    """Events in (t - window, t]: ON red, OFF blue on white."""
+    """Events in (t - window, t]: ON red, OFF blue on a dark background (captions stay legible)."""
     x, y, t, p = ev
     i1 = np.searchsorted(t, t_us, "right")
     i0 = np.searchsorted(t, t_us - window_us, "right")
-    img = np.full((h, w, 3), 255, np.uint8)
+    img = np.full((h, w, 3), (16, 18, 22), np.uint8)
     xs, ys, ps = x[i0:i1], y[i0:i1], p[i0:i1]
     on = ps > 0
-    img[ys[~on], xs[~on]] = (40, 80, 220)
-    img[ys[on], xs[on]] = (225, 45, 45)
+    img[ys[~on], xs[~on]] = (70, 150, 255)
+    img[ys[on], xs[on]] = (255, 70, 60)
     return img, i1 - i0
 
 
@@ -287,8 +305,8 @@ def grid_frames(shot, f, video, scn):
             im = panel_label(im, labels[i])
             canvas.paste(im, ((i % 2) * W // 2, (i // 2) * H // 2))
         d = ImageDraw.Draw(canvas)
-        d.line([(W // 2, 0), (W // 2, H)], fill=(0, 0, 0), width=2)
-        d.line([(0, H // 2), (W, H // 2)], fill=(0, 0, 0), width=2)
+        d.line([(W // 2, 0), (W // 2, H)], fill=(0, 0, 0), width=u(2))
+        d.line([(0, H // 2), (W, H // 2)], fill=(0, 0, 0), width=u(2))
         yield np.asarray(canvas)
 
 
@@ -300,8 +318,10 @@ def modality_frames(shot, f, video):
     n = g["rgb"].shape[0]
     w, h = g["rgb"].shape[2], g["rgb"].shape[1]
     ts = g["t"][:]
-    ev = g["events"]
+    ge = f[shot.get("events_camera", "/events")] if shot.get("events_camera", "/events") in f else g
+    ev = ge["events"]
     evs = (ev["x"][:], ev["y"][:], ev["t"][:], ev["p"][:])
+    ew, eh = (int(v) for v in ge["calib/resolution"][:])
     # flow scale: robust maximum over the shot (stable colours)
     fl = g["flow"]
     rad_max = np.percentile(np.hypot(fl[n // 2][..., 0], fl[n // 2][..., 1]), 99)
@@ -310,7 +330,7 @@ def modality_frames(shot, f, video):
         dep, dmax = depth_to_rgb(g["depth"][k], cmap)
         fk = fl[min(k, n - 2)]
         flo = flow_to_rgb(fk, rad_max)
-        evi, ne = events_to_rgb(evs, ts[k], 10_000, w, h, None)
+        evi, ne = events_to_rgb(evs, ts[k], 10_000, ew, eh, None)
         tiles = [(rgb, "RGB"), (dep, f"Depth · 0 – {dmax / 1000:.1f} km" if dmax >= 1000 else f"Depth · 0 – {dmax:.0f} m"),
                  (flo, "Optical flow"), (evi, "Events · 10 ms · ON red / OFF blue")]
         canvas = Image.new("RGB", (W, H))
@@ -318,9 +338,24 @@ def modality_frames(shot, f, video):
             pim = panel_label(Image.fromarray(fit(im, W // 2, H // 2)), lab)
             canvas.paste(pim, ((i % 2) * W // 2, (i // 2) * H // 2))
         d = ImageDraw.Draw(canvas)
-        d.line([(W // 2, 0), (W // 2, H)], fill=(0, 0, 0), width=2)
-        d.line([(0, H // 2), (W, H // 2)], fill=(0, 0, 0), width=2)
+        d.line([(W // 2, 0), (W // 2, H)], fill=(0, 0, 0), width=u(2))
+        d.line([(0, H // 2), (W, H // 2)], fill=(0, 0, 0), width=u(2))
         yield np.asarray(canvas)
+
+
+def events_frames(shot, f, video):
+    """Full-frame event camera view (10 ms windows, ON red / OFF blue), starting `offset` seconds
+    into the source shot's flight (the continuation after the source's own segment)."""
+    W, H, fps = video["width"], video["height"], video["fps"]
+    g = f[shot.get("camera", "/events")]
+    ts = f["/cam0"]["t"][:]  # the frame clock of the source shot
+    ev = g["events"]
+    evs = (ev["x"][:], ev["y"][:], ev["t"][:], ev["p"][:])
+    w, h = (int(v) for v in g["calib/resolution"][:])
+    k0 = int(round(shot.get("offset", 0.0) * fps))
+    for k in range(k0, len(ts)):
+        evi, _ = events_to_rgb(evs, ts[k], shot.get("window_ms", 10) * 1000, w, h, None)
+        yield fit(evi, W, H)
 
 
 def read_tile_mosaic(store, z, x0, y0, x1, y1):
@@ -343,7 +378,7 @@ def map_frames(shot, f, video, scn):
     """Camera view + 2D tile map with the whole flight, the current position, the camera footprint
     and the tiles planned for the flight (outlines coloured by zoom); altitude profile below."""
     import matplotlib
-    W, H = video["width"], video["height"]
+    W, H = 1280, 720  # laid out at 1280x720, upscaled in shot_stream
     z = shot.get("map_zoom", 14)
     d = os.path.join(OUT, shot["id"])
     g = f["/cam0"]
@@ -431,7 +466,7 @@ def map_frames(shot, f, video, scn):
         px, py = tx_[j], ty_[j]
         md.ellipse([px - 6, py - 6, px + 6, py + 6], fill=(255, 210, 60, 255), outline=(0, 0, 0, 255), width=2)
         m = m.convert("RGB")
-        m = panel_label(m, f"XYZ tiles · z{z} mosaic · planned LOD tiles z{zs[0]}–z{zs[-1]}", size=15)
+        m = panel_label(m, f"XYZ tiles · z{z} mosaic · planned LOD tiles z{zs[0]}–z{zs[-1]}", size=15, scale=1.0)
         canvas.paste(m, (mx, my))
         # altitude profile
         ap_y, ap_h = my + mp + 16, 120
@@ -443,8 +478,8 @@ def map_frames(shot, f, video, scn):
         ad.line(prof, fill=(150, 160, 175), width=2)
         ad.ellipse([prof[min(j // 20, len(prof) - 1)][0] - 4, prof[min(j // 20, len(prof) - 1)][1] - 4,
                     prof[min(j // 20, len(prof) - 1)][0] + 4, prof[min(j // 20, len(prof) - 1)][1] + 4], fill=(255, 210, 60))
-        canvas = panel_label(canvas, f"Altitude above the ellipsoid · {alt[j]:.0f} m", xy=(mx + 10, ap_y + 6), size=14)
-        canvas = panel_label(canvas, f"Flight time {(ts[k] - ts[0]) * 1e-6:5.1f} s  (×{shot.get('speedup', 1)})", xy=(50, 50 + cam.height - 30), size=16)
+        canvas = panel_label(canvas, f"Altitude above the ellipsoid · {alt[j]:.0f} m", xy=(mx + 10, ap_y + 6), size=14, scale=1.0)
+        canvas = panel_label(canvas, f"Flight time {(ts[k] - ts[0]) * 1e-6:5.1f} s  (×{shot.get('speedup', 1)})", xy=(50, 50 + cam.height - 30), size=16, scale=1.0)
         yield np.asarray(canvas)
 
 
@@ -453,7 +488,7 @@ def collage_sources(shots_scn, video):
     """One striking frame per shot (the middle one of its first camera) for the title collage."""
     ims = []
     for shot, scn in shots_scn:
-        if shot.get("layout") in ("modalities", "map"):
+        if shot.get("layout") in ("modalities", "map", "events"):
             continue
         with h5py.File(scn["output"]["file"], "r") as f:
             rgb = f[scn["cameras"][0]["path"]]["rgb"]
@@ -465,7 +500,7 @@ def title_frames(video, seconds, sources):
     """Title over a drifting, tilted collage of frames from the whole video: tiles fade in one by
     one, the collage slowly zooms and pans, blurred and darkened under the title."""
     W, H, fps = video["width"], video["height"], video["fps"]
-    tw, th, gap = 384, 216, 10
+    tw, th, gap = u(384), u(216), u(10)
     cols, rows = 6, 5
     big = Image.new("RGB", (cols * (tw + gap), rows * (th + gap)), (8, 9, 11))
     rng = np.random.default_rng(7)
@@ -481,6 +516,8 @@ def title_frames(video, seconds, sources):
             src = src[(ih - chh) // 2:(ih - chh) // 2 + chh]
         return Image.fromarray(np.ascontiguousarray(src)).resize((w, h), Image.LANCZOS)
 
+    if not sources:
+        sources = [np.zeros((th, tw, 3), np.uint8)]
     cells = [cover(sources[(c * 7) % len(sources)], tw, th) for c in range(cols * rows)]
     n = int(seconds * fps)
     yy, xx = np.mgrid[0:H, 0:W]
@@ -499,17 +536,17 @@ def title_frames(video, seconds, sources):
         z = 1.18 - 0.10 * ease(t / seconds)
         rot = frame.rotate(-7, resample=Image.BICUBIC, expand=False, fillcolor=(8, 9, 11))
         cw, ch = W * z * 1.05, H * z * 1.05
-        cx = rot.width / 2 + 60 * (t / seconds - 0.5)
-        cy = rot.height / 2 - 25 * (t / seconds - 0.5)
+        cx = rot.width / 2 + u(60) * (t / seconds - 0.5)
+        cy = rot.height / 2 - u(25) * (t / seconds - 0.5)
         crop = rot.crop((int(cx - cw / 2), int(cy - ch / 2), int(cx + cw / 2), int(cy + ch / 2))).resize((W, H), Image.BICUBIC)
-        blur = 5.0 - 2.5 * ease((t - 1.2) / 2.0)
+        blur = (5.0 - 2.5 * ease((t - 1.2) / 2.0)) * UI
         crop = crop.filter(ImageFilter.GaussianBlur(blur))
         f = np.asarray(crop).astype(np.float32) * 0.5 * vign
         img = Image.fromarray(np.clip(f, 0, 255).astype(np.uint8)).convert("RGBA")
         a1, a2, a3 = ease((t - 0.6) / 0.9), ease((t - 1.3) / 0.8), ease((t - 2.0) / 0.8)
-        items = [((W // 2, H // 2 - 34), video["title"], FONTS.get("light", 104), a1, "ms"),
-                 ((W // 2, H // 2 + 20), video["subtitle"], FONTS.get("light", 32), a2, "ms"),
-                 ((W // 2, H // 2 + 70), video["tagline"], FONTS.get("light", 20), a3 * 0.85, "ms")]
+        items = [((W // 2, H // 2 - u(34)), video["title"], FONTS.get("light", u(104)), a1, "ms"),
+                 ((W // 2, H // 2 + u(20)), video["subtitle"], FONTS.get("light", u(32)), a2, "ms"),
+                 ((W // 2, H // 2 + u(70)), video["tagline"], FONTS.get("light", u(20)), a3 * 0.85, "ms")]
         img = Image.alpha_composite(img, text_layer(img.size, items))
         yield np.asarray(img.convert("RGB"))
 
@@ -521,10 +558,10 @@ def outro_frames(video, outro, seconds=6.0):
         t = k / fps
         img = Image.new("RGBA", (W, H), (10, 11, 14, 255))
         items = []
-        y0 = H // 2 - 30 * len(lines)
+        y0 = H // 2 - u(30) * len(lines)
         for i, l in enumerate(lines):
-            items.append(((W // 2, y0 + 56 * i), l, FONTS.get("light", 30), ease((t - 0.3 - 0.45 * i) / 0.6), "ms"))
-        items.append(((W // 2, H - 70), outro["footer"], FONTS.get("medium", 20), ease((t - 0.4 - 0.45 * len(lines)) / 0.6) * 0.8, "ms"))
+            items.append(((W // 2, y0 + u(56) * i), l, FONTS.get("light", u(30)), ease((t - 0.3 - 0.45 * i) / 0.6), "ms"))
+        items.append(((W // 2, H - u(70)), outro["footer"], FONTS.get("medium", u(20)), ease((t - 0.4 - 0.45 * len(lines)) / 0.6) * 0.8, "ms"))
         img = Image.alpha_composite(img, text_layer(img.size, items))
         yield np.asarray(img.convert("RGB"))
 
@@ -538,7 +575,9 @@ def shot_stream(shot, scn, video):
     elif lay == "modalities":
         gen = modality_frames(shot, f, video)
     elif lay == "map":
-        gen = map_frames(shot, f, video, scn)
+        gen = (np.asarray(Image.fromarray(fr).resize((video["width"], video["height"]), Image.LANCZOS)) for fr in map_frames(shot, f, video, scn))
+    elif lay == "events":
+        gen = events_frames(shot, f, video)
     else:
         gen = single_frames(shot, f, video)
     return gen
@@ -575,12 +614,7 @@ def compose(base, story, out_mp4, shots_scn, preview_seconds=None):
     # title over a collage of the whole video
     segment(title_frames(video, 5.0 + xf / fps, collage_sources(shots_scn, video)))
     for shot, scn in shots_scn:
-        dur = shot["seconds"] + video["crossfade"]
-        frames = []
-        for k, fr in enumerate(shot_stream(shot, scn, video)):
-            if k >= int(round(dur * fps)):
-                break
-            frames.append(caption(fr, shot["label"], shot["text"], k / fps, dur, W, H, band))
+        frames = shot_frames(shot, scn, video, band)
         print(f"composed {shot['id']}: {len(frames)} frames", flush=True)
         segment(frames)
     segment(outro_frames(video, story["outro"], 6.0))
@@ -589,6 +623,44 @@ def compose(base, story, out_mp4, shots_scn, preview_seconds=None):
     ff.stdin.close()
     ff.wait()
     print(f"wrote {out_mp4}: {written} frames, {written / fps:.1f} s")
+
+
+def shot_frames(shot, scn, video, band):
+    W, H, fps = video["width"], video["height"], video["fps"]
+    dur = shot["seconds"] + video["crossfade"]
+    frames = []
+    for k, fr in enumerate(shot_stream(shot, scn, video)):
+        if k >= int(round(dur * fps)):
+            break
+        frames.append(caption(fr, shot["label"], shot["text"], k / fps, dur, W, H, band))
+    return frames
+
+
+def ffmpeg_writer(path, video):
+    W, H, fps = video["width"], video["height"], video["fps"]
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(fps), "-i", "-",
+           "-c:v", "libx264", "-preset", "slow", "-crf", "16", "-pix_fmt", "yuv420p", "-movflags", "+faststart", path]
+    return subprocess.Popen(cmd, stdin=subprocess.PIPE)
+
+
+def write_clip(index, shot, scn, video):
+    """The shot as its own captioned clip (out/showcase/clips/NN_<id>.mp4), and all clips so far
+    joined into out/showcase/showcase_so_far.mp4, for review while the rest renders."""
+    d = os.path.join(OUT, "clips")
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, f"{index:02d}_{shot['id']}.mp4")
+    ff = ffmpeg_writer(path, video)
+    for fr in shot_frames(shot, scn, video, bottom_band(video["width"], video["height"])):
+        ff.stdin.write(np.ascontiguousarray(fr, dtype=np.uint8).tobytes())
+    ff.stdin.close()
+    ff.wait()
+    clips = sorted(c for c in os.listdir(d) if c.endswith(".mp4"))
+    lst = os.path.join(d, "list.txt")
+    with open(lst, "w") as fh:
+        fh.writelines(f"file '{c}'\n" for c in clips)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy",
+                    os.path.join(OUT, "showcase_so_far.mp4")], check=True)
+    print(f"[{shot['id']}] clip {path}", flush=True)
 
 
 def export_stills(shot, scn):
@@ -643,6 +715,8 @@ def main():
         raise SystemExit("build terrain first: cargo build --release")
     base = yaml.safe_load(open(os.path.join(HERE, "base.yaml")))
     story = yaml.safe_load(open(a.story))
+    global UI
+    UI = story["video"]["width"] / 1280
     shots = story["shots"]
     if a.only:
         shots = [s for s in shots if s["id"] in a.only]
@@ -656,14 +730,31 @@ def main():
         print("wrote title previews")
         return
     done = []
-    for s in shots:
-        if a.compose_only:
+    by_id = {}
+    all_ids = [s["id"] for s in story["shots"]]
+    # event simulation is the slowest part: shots with event cameras (and the shots shown from
+    # them) are rendered last; the video keeps the storyboard order
+    has_events = lambda s: "source" in s or any("events" in c for c in s.get("scenario", {}).get("cameras", []))
+    order = [s for s in shots if not has_events(s)] + [s for s in shots if has_events(s)]
+    for s in order:
+        if "source" in s:
+            # shown from another shot's sequence (e.g. its event camera, later in the same flight)
+            src = next(x for x in story["shots"] if x["id"] == s["source"])
+            scn = by_id.get(s["source"]) or (shot_scenario(base, src, story["video"], a.stills) if a.compose_only or a.stills
+                                             else render_shot(base, src, story["video"], a.stills, a.force))
+            if a.stills:
+                continue
+        elif a.compose_only:
             scn = shot_scenario(base, s, story["video"], a.stills)
         else:
             scn = render_shot(base, s, story["video"], a.stills, a.force)
             if a.stills:
                 export_stills(s, scn)  # PNGs per shot as soon as it is done, for feedback
+        by_id[s["id"]] = scn
+        if not a.stills and not a.compose_only:
+            write_clip(all_ids.index(s["id"]) + 1, s, scn, story["video"])
         done.append((s, scn))
+    done.sort(key=lambda x: all_ids.index(x[0]["id"]))
     if a.stills:
         name = os.path.splitext(os.path.basename(a.story))[0]
         stills_sheet(base, story, done, os.path.join(OUT, "stills.png" if name == "storyboard" else f"stills_{name}.png"))

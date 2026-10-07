@@ -9,8 +9,8 @@
 # Times are UTC; local solar time here (33°E) is UTC + 2h12.
 
 video:
-  width: 1280
-  height: 720
+  width: 1920
+  height: 1080
   fps: 25
   crossfade: 0.6
   title: "aerialsynth"
@@ -275,7 +275,7 @@ shots:
     cameras:
     - extrinsics: {pitch_deg: -22}
       intrinsics:
-        intrinsics: [640.0, 640.0, 639.5, 359.5]
+        intrinsics: [960.0, 960.0, 959.5, 539.5]
     tiles: {max_zoom: 15}
     trajectory:
       synth: {altitude: 10000, altitude_ref: ellipsoid, heading_deg: 70, kind: line, lat: 39.0, lon: 33.35, speed: 230}
@@ -322,6 +322,16 @@ shots:
         sensor:
           exposure: {max_time: 0.03, target: 0.19}
           motion_blur: {max_samples: 48}
+      path: /cam0
+    - path: /events
+      intrinsics:
+        model: pinhole
+        width: 1280
+        height: 720
+        intrinsics: [914.0, 914.0, 639.5, 359.5]
+      extrinsics: {pitch_deg: -14}
+      rgb: null
+      events: {supersample: 1}
     render:
       lighting: {time_utc: '16:08:00'}
     trajectory:
@@ -334,6 +344,9 @@ shots:
         vibration: {broadband_deg: 0.3, harmonic_deg: 0.35, harmonic_hz: 24}
   seconds: 5.5
   text: Vibration and exposure time produce physically based motion blur
+  extend: 6.1
+- {id: events_shake, label: Event camera · vibration, text: The same vibrating flight seen by an event camera, seconds: 5.5, layout: events, source: shake,
+  offset: 6.1}
 - id: fisheye
   label: Fisheye · 200°
   scenario:
@@ -341,11 +354,11 @@ shots:
     - extrinsics: {mount: nadir, pitch_deg: 35}
       intrinsics:
         distortion: [0.0, 0.0, 0.0, 0.0]
-        height: 720
-        intrinsics: [205.0, 205.0, 359.5, 359.5]
+        height: 1080
+        intrinsics: [307.5, 307.5, 539.5, 539.5]
         max_fov_deg: 200
         model: kannala_brandt
-        width: 720
+        width: 1080
     trajectory:
       synth: {altitude: 1400, heading_deg: 90, kind: line, lat: 7.0, lon: -102.0}
     render:
@@ -360,39 +373,39 @@ shots:
     cameras:
     - extrinsics: {mount: forward, pitch_deg: -40}
       intrinsics:
-        height: 360
-        intrinsics: [457.0, 457.0, 319.5, 179.5]
+        height: 540
+        intrinsics: [685.5, 685.5, 479.5, 269.5]
         model: pinhole
-        width: 640
+        width: 960
       path: /pinhole
       rgb: {}
     - extrinsics: {mount: forward, pitch_deg: -40}
       intrinsics:
         distortion: [-0.32, 0.09, 0.0, 0.0]
-        height: 360
-        intrinsics: [300.0, 300.0, 319.5, 179.5]
+        height: 540
+        intrinsics: [450.0, 450.0, 479.5, 269.5]
         model: pinhole
-        width: 640
+        width: 960
       path: /barrel
       rgb: {}
     - extrinsics: {mount: forward, pitch_deg: -40}
       intrinsics:
         distortion: [0.0, 0.0, 0.0, 0.0]
-        height: 360
-        intrinsics: [125.0, 125.0, 319.5, 179.5]
+        height: 540
+        intrinsics: [187.5, 187.5, 479.5, 269.5]
         max_fov_deg: 190
         model: kannala_brandt
-        width: 640
+        width: 960
       path: /kb
       rgb: {}
     - extrinsics: {mount: forward, pitch_deg: -40}
       intrinsics:
         distortion: [0.0, 0.0, 0.0, 0.0]
-        height: 360
-        intrinsics: [230.0, 230.0, 319.5, 179.5]
+        height: 540
+        intrinsics: [345.0, 345.0, 479.5, 269.5]
         max_fov_deg: 200
         model: mei
-        width: 640
+        width: 960
         xi: 1.3
       path: /mei
       rgb: {}
@@ -410,34 +423,34 @@ shots:
     cameras:
     - extrinsics: {mount: nadir}
       intrinsics:
-        height: 360
-        intrinsics: [457.0, 457.0, 319.5, 179.5]
+        height: 540
+        intrinsics: [685.5, 685.5, 479.5, 269.5]
         model: pinhole
-        width: 640
+        width: 960
       path: /nadir
       rgb: {}
     - extrinsics: {mount: forward, pitch_deg: -15}
       intrinsics:
-        height: 360
-        intrinsics: [457.0, 457.0, 319.5, 179.5]
+        height: 540
+        intrinsics: [685.5, 685.5, 479.5, 269.5]
         model: pinhole
-        width: 640
+        width: 960
       path: /forward
       rgb: {}
     - extrinsics: {mount: forward, pitch_deg: -35, yaw_deg: -90}
       intrinsics:
-        height: 360
-        intrinsics: [457.0, 457.0, 319.5, 179.5]
+        height: 540
+        intrinsics: [685.5, 685.5, 479.5, 269.5]
         model: pinhole
-        width: 640
+        width: 960
       path: /left
       rgb: {}
     - extrinsics: {mount: forward, pitch_deg: -35, yaw_deg: 90}
       intrinsics:
-        height: 360
-        intrinsics: [457.0, 457.0, 319.5, 179.5]
+        height: 540
+        intrinsics: [685.5, 685.5, 479.5, 269.5]
         model: pinhole
-        width: 640
+        width: 960
       path: /right
       rgb: {}
     trajectory:
@@ -452,16 +465,24 @@ shots:
   scenario:
     cameras:
     - depth: {}
-      events: {supersample: 2}
       extrinsics: {mount: forward, pitch_deg: -24}
       flow: {}
       intrinsics:
-        height: 360
-        intrinsics: [457.0, 457.0, 319.5, 179.5]
         model: pinhole
-        width: 640
+        width: 1920
+        height: 1080
+        intrinsics: [1371.0, 1371.0, 959.5, 539.5]
       path: /cam0
       rgb: {}
+    - path: /events
+      intrinsics:
+        model: pinhole
+        width: 1280
+        height: 720
+        intrinsics: [914.0, 914.0, 639.5, 359.5]
+      extrinsics: {mount: forward, pitch_deg: -24}
+      rgb: null
+      events: {supersample: 1}
     imu: {path: /imu}
     trajectory:
       synth: {altitude: 1100, heading_deg: 80, kind: line, lat: 39.17, lon: 33.7, speed: 70}
@@ -469,54 +490,79 @@ shots:
       lighting: {time_utc: '04:45:00'}
   seconds: 6
   text: Every pixel comes with depth, optical flow and events — plus IMU and poses
+  extend: 6.6
+- {id: events_mountains, label: Event camera · mountains, text: 'At sunrise every ridge and gully fires: microsecond events, no motion blur',
+  seconds: 6, layout: events, source: modalities_mountains, offset: 6.6}
 - id: modalities_night
   label: Ground truth · night
   layout: modalities
   scenario:
     cameras:
     - depth: {}
-      events: {supersample: 2, shot_noise_dark_gain: 3.0}
       extrinsics: {mount: forward, pitch_deg: -28}
       flow: {}
       intrinsics:
-        height: 360
-        intrinsics: [457.0, 457.0, 319.5, 179.5]
         model: pinhole
-        width: 640
+        width: 1920
+        height: 1080
+        intrinsics: [1371.0, 1371.0, 959.5, 539.5]
       path: /cam0
       rgb:
         sensor:
           exposure: {max_gain: 64, max_time: 0.008, target: 0.012}
           noise: {read: 0.04, shot: 0.06}
           optics: {bloom: 0.02, chromatic_aberration_px: 0.0, defocus_px: 0.0}
+    - path: /events
+      intrinsics:
+        model: pinhole
+        width: 1280
+        height: 720
+        intrinsics: [914.0, 914.0, 639.5, 359.5]
+      extrinsics: {mount: forward, pitch_deg: -28}
+      rgb: null
+      events: {supersample: 1, shot_noise_dark_gain: 3.0}
     trajectory:
       synth: {altitude: 1500, heading_deg: 75, kind: line, lat: 41.562, lon: 32.955, speed: 50}
     render:
       lighting: {date: '2026-03-19', time_utc: '21:30:00'}
   seconds: 6
   text: 'Event cameras at night: street lamps fire bright, sharp events'
+  extend: 6.6
+- {id: events_night, label: Event camera · night, text: 'Street lamps at night: high dynamic range, sharp events in the dark', seconds: 6, layout: events,
+  source: modalities_night, offset: 6.6}
 - id: modalities_rivers
   label: Ground truth · rivers
   layout: modalities
   scenario:
     cameras:
     - depth: {}
-      events: {supersample: 2}
       extrinsics: {mount: forward, pitch_deg: -25}
       flow: {}
       intrinsics:
-        height: 360
-        intrinsics: [457.0, 457.0, 319.5, 179.5]
         model: pinhole
-        width: 640
+        width: 1920
+        height: 1080
+        intrinsics: [1371.0, 1371.0, 959.5, 539.5]
       path: /cam0
       rgb: {}
+    - path: /events
+      intrinsics:
+        model: pinhole
+        width: 1280
+        height: 720
+        intrinsics: [914.0, 914.0, 639.5, 359.5]
+      extrinsics: {mount: forward, pitch_deg: -25}
+      rgb: null
+      events: {supersample: 1}
     trajectory:
       synth: {kind: line, lat: -26.00742, lon: 32.99572, heading_deg: 105, altitude: 1300, speed: 60}
     render:
       lighting: {time_utc: '07:20:00'}
   seconds: 6.5
   text: Depth and flow over the river valleys; events along every edge
+  extend: 6.6
+- {id: events_rivers, label: Event camera · rivers, text: 'Edges of rivers, fields and forest as a stream of events', seconds: 6, layout: events,
+  source: modalities_rivers, offset: 7.1}
 - id: map
   label: Tiles on demand
   layout: map

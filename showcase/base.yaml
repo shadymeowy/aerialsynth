@@ -13,7 +13,7 @@ trajectory:
     rate: 400          # high-rate record: sub-frame poses for motion blur and vibration
     speed: 50
 render:
-  supersample: 3
+  supersample: 2        # 1080p; geometry-GT shots use 1 (see make_showcase.py)
   shading: relit
   lighting:
     mode: clock
@@ -28,9 +28,9 @@ cameras:
   - path: /cam0
     intrinsics:
       model: pinhole
-      width: 1280
-      height: 720
-      intrinsics: [914.0, 914.0, 639.5, 359.5]   # 70° horizontal FOV
+      width: 1920
+      height: 1080
+      intrinsics: [1371.0, 1371.0, 959.5, 539.5]   # 70° horizontal FOV
     extrinsics: { mount: forward, pitch_deg: -25 }
     frame_rate: 25
     rgb:
