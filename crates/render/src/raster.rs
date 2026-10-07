@@ -234,6 +234,10 @@ impl TileView {
         let ty = gy.div_euclid(256);
         if ty >= 0 && ty < n {
             let id = TileId::new(z, tx as u32, ty as u32);
+            // most texels are in the tile being meshed itself (no lookup)
+            if fallback.id == id && !fallback.elevation.is_empty() {
+                return fallback.elevation[(gy.rem_euclid(256) * 256 + gx.rem_euclid(256)) as usize];
+            }
             if let Some(t) = self.tiles.get(&id) {
                 if !t.elevation.is_empty() {
                     return t.elevation[(gy.rem_euclid(256) * 256 + gx.rem_euclid(256)) as usize];
@@ -262,11 +266,31 @@ impl TileView {
             let mut acc = DVec3::ZERO;
             let mut wsum = 0.0;
             let mut found_any = false;
-            for (dx, dy, w) in [(0, 0, (1.0 - fx) * (1.0 - fy)), (1, 0, fx * (1.0 - fy)), (0, 1, (1.0 - fx) * fy), (1, 1, fx * fy)] {
-                if let Some(c) = self.texel(z, x0 + dx, y0 + dy, which) {
-                    acc += c * w;
-                    wsum += w;
-                    found_any = true;
+            let taps = [(0, 0, (1.0 - fx) * (1.0 - fy)), (1, 0, fx * (1.0 - fy)), (0, 1, (1.0 - fx) * fy), (1, 1, fx * fy)];
+            // fast path: all four texels in one tile (one tile lookup instead of four; same sums)
+            let (lx, ly) = (x0.rem_euclid(256), y0.rem_euclid(256));
+            let n = 1i64 << z;
+            let ty = y0.div_euclid(256);
+            let tile = if lx < 255 && ly < 255 && ty >= 0 && ty < n {
+                self.tiles.get(&TileId::new(z, x0.div_euclid(256).rem_euclid(n) as u32, ty as u32))
+            } else {
+                None
+            };
+            if let Some(t) = tile {
+                for (dx, dy, w) in taps {
+                    if let Some(c) = Self::texel_of(t, ((ly + dy) * 256 + lx + dx) as usize, which) {
+                        acc += c * w;
+                        wsum += w;
+                        found_any = true;
+                    }
+                }
+            } else {
+                for (dx, dy, w) in taps {
+                    if let Some(c) = self.texel(z, x0 + dx, y0 + dy, which) {
+                        acc += c * w;
+                        wsum += w;
+                        found_any = true;
+                    }
                 }
             }
             if found_any && wsum > 1e-6 {
@@ -291,6 +315,12 @@ impl TileView {
         let tx = gx.div_euclid(256).rem_euclid(n);
         let t = self.tiles.get(&TileId::new(z, tx as u32, ty as u32))?;
         let k = (gy.rem_euclid(256) * 256 + gx.rem_euclid(256)) as usize;
+        Self::texel_of(t, k, which)
+    }
+
+    /// Texel `k` (row-major index within the tile) of layer `which`.
+    #[inline]
+    fn texel_of(t: &TileData, k: usize, which: Which) -> Option<DVec3> {
         match which {
             Which::Rgb if !t.rgb.is_empty() => Some(srgb3(&t.rgb[3 * k..3 * k + 3])),
             Which::Albedo if !t.albedo.is_empty() => Some(srgb3(&t.albedo[3 * k..3 * k + 3])),
@@ -324,7 +354,31 @@ impl TileView {
             let (x0, y0) = (x0 as i64, y0 as i64);
             let mut acc = 0.0;
             let mut ws = 0.0;
-            for (dx, dy, w) in [(0, 0, (1.0 - fx) * (1.0 - fy)), (1, 0, fx * (1.0 - fy)), (0, 1, (1.0 - fx) * fy), (1, 1, fx * fy)] {
+            let taps = [(0, 0, (1.0 - fx) * (1.0 - fy)), (1, 0, fx * (1.0 - fy)), (0, 1, (1.0 - fx) * fy), (1, 1, fx * fy)];
+            // fast path: all four texels in one tile (one lookup; same sums)
+            let (lx, ly) = (x0.rem_euclid(256), y0.rem_euclid(256));
+            let ty0 = y0.div_euclid(256);
+            if lx < 255 && ly < 255 && ty0 >= 0 && ty0 < n {
+                if let Some(t) = self.tiles.get(&TileId::new(z, x0.div_euclid(256).rem_euclid(n) as u32, ty0 as u32)) {
+                    if !t.elevation.is_empty() {
+                        for (dx, dy, w) in taps {
+                            acc += w * t.elevation[((ly + dy) * 256 + lx + dx) as usize] as f64;
+                            ws += w;
+                        }
+                    }
+                    if ws > 1e-6 {
+                        return Some(acc / ws);
+                    }
+                    if z == 0 {
+                        return None;
+                    }
+                    z -= 1;
+                    gx *= 0.5;
+                    gy *= 0.5;
+                    continue;
+                }
+            }
+            for (dx, dy, w) in taps {
                 let (px, py) = (x0 + dx, y0 + dy);
                 let ty = py.div_euclid(256);
                 if ty < 0 || ty >= n {
@@ -850,8 +904,10 @@ impl Renderer {
             }
             if let Some(bm) = view.block_max(zl, px.x, px.y) {
                 if ray_here > bm as f64 + 0.01 {
-                    let fx = px.x.rem_euclid(16.0);
-                    let fy = px.y.rem_euclid(16.0);
+                    // (x − 16⌊x/16⌋ is exact for a power-of-two divisor and avoids libm's fmod,
+                    // ~9% of the render time)
+                    let fx = px.x - 16.0 * (px.x * 0.0625).floor();
+                    let fy = px.y - 16.0 * (px.y * 0.0625).floor();
                     let tx = if dir.x > 1e-9 { (16.0 - fx) / dir.x } else if dir.x < -1e-9 { fx / -dir.x } else { f64::MAX };
                     let ty = if dir.y > 1e-9 { (16.0 - fy) / dir.y } else if dir.y < -1e-9 { fy / -dir.y } else { f64::MAX };
                     let adv = tx.min(ty) + 0.05;
