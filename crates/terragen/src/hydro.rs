@@ -205,6 +205,7 @@ impl World {
             return out;
         }
         for (lvl, lc) in self.cfg.hydro.levels.iter().enumerate() {
+            let first = out.len();
             let cell = lc.cell_km * KM;
             // skip levels far below the resolution (the carve fades out per pixel before that,
             // see `World::terrain_impl`, so tiles at slightly different GSD agree)
@@ -273,6 +274,22 @@ impl World {
                     }
                 }
             }
+            // keep only the pieces that can reach the area: as conservative as selecting by the
+            // owning node within radius + 2.2 cells + valley with ≤ 1.8-cell edges (every piece within
+            // radius + 0.4 cell + valley of the centre), plus the meander warp; the far pieces of the
+            // wide node search cost most of the river queries
+            let keep = radius + 0.4 * cell + 1.4 * lc.valley_m + 0.35 * lc.meander * cell;
+            let mut k = first;
+            for i in first..out.len() {
+                let s = out[i];
+                let ab = s.b - s.a;
+                let u = ((center - s.a).dot(ab) / ab.length_squared().max(1e-9)).clamp(0.0, 1.0);
+                if (center - (s.a + ab * u)).length() <= keep {
+                    out[k] = s;
+                    k += 1;
+                }
+            }
+            out.truncate(k);
         }
         out
     }
