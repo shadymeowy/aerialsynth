@@ -540,7 +540,7 @@ impl World {
     /// basin holds water, else just above the basin floor (a low levee holds it).
     fn lake_level_forced(&self, id: u64, center: DVec3, rad: f64) -> Option<f64> {
         thread_local! {
-            static CACHE: std::cell::RefCell<std::collections::HashMap<u64, Option<f64>>> = Default::default();
+            static CACHE: std::cell::RefCell<FxHashMap<u64, Option<f64>>> = Default::default();
         }
         let key = id ^ self.cache_key.rotate_left(29);
         if let Some(v) = CACHE.with(|c| c.borrow().get(&key).copied()) {
@@ -564,7 +564,7 @@ impl World {
 
     fn lake_level(&self, id: u64, center: DVec3, rad: f64) -> Option<f64> {
         thread_local! {
-            static CACHE: std::cell::RefCell<std::collections::HashMap<u64, Option<f64>>> = Default::default();
+            static CACHE: std::cell::RefCell<FxHashMap<u64, Option<f64>>> = Default::default();
         }
         let key = id ^ self.cache_key.rotate_left(17);
         if let Some(v) = CACHE.with(|c| c.borrow().get(&key).copied()) {

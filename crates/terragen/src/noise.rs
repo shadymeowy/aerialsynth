@@ -470,3 +470,37 @@ mod tests {
         assert!((g.x - fd).abs() < 1e-6 + 1e-3 * fd.abs(), "{} {}", g.x, fd);
     }
 }
+
+/// FxHash (rustc's): a fast, non-cryptographic hasher for the generator's internal caches (std's
+/// SipHash cost more than the cached computations in the drainage lookups).
+#[derive(Default, Clone, Copy)]
+pub struct FxHasher(u64);
+
+impl std::hash::Hasher for FxHasher {
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.write_u64(b as u64);
+        }
+    }
+    #[inline]
+    fn write_u64(&mut self, v: u64) {
+        self.0 = (self.0.rotate_left(5) ^ v).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+    #[inline]
+    fn write_i64(&mut self, v: i64) {
+        self.write_u64(v as u64);
+    }
+    #[inline]
+    fn write_usize(&mut self, v: usize) {
+        self.write_u64(v as u64);
+    }
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+pub type FxBuild = std::hash::BuildHasherDefault<FxHasher>;
+/// HashMap with [`FxHasher`].
+pub type FxHashMap<K, V> = std::collections::HashMap<K, V, FxBuild>;

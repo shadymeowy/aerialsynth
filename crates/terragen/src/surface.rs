@@ -9,7 +9,6 @@ use crate::landcover as lc;
 use crate::noise::*;
 use crate::world::{water, Ctx, Terrain, World};
 use glam::{DVec2, DVec3};
-use std::collections::HashMap;
 
 /// Linear-light colour from sRGB 0..255.
 #[inline]
@@ -136,12 +135,12 @@ pub struct TownInfo {
 /// optimization, so results are deterministic regardless of evaluation order).
 #[derive(Default)]
 pub struct Caches {
-    regions: HashMap<u64, RegionInfo>,
-    towns: HashMap<u64, TownInfo>,
+    regions: FxHashMap<u64, RegionInfo>,
+    towns: FxHashMap<u64, TownInfo>,
     /// towns before resolving overlaps
-    towns_base: HashMap<u64, TownInfo>,
+    towns_base: FxHashMap<u64, TownInfo>,
     /// existing towns around each cell of the town lattice
-    town_cands: HashMap<(i64, i64, i64), Vec<TownInfo>>,
+    town_cands: FxHashMap<(i64, i64, i64), Vec<TownInfo>>,
 }
 
 impl Caches {

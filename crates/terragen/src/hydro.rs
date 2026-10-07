@@ -10,7 +10,6 @@
 
 use super::*;
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 /// One drainage edge (channel segment), surface points in ECEF.
 #[derive(Clone, Copy, Debug)]
@@ -50,9 +49,9 @@ struct FlowPt {
 }
 
 thread_local! {
-    static PTS: RefCell<HashMap<(u64, i64, i64, i64), FlowPt>> = RefCell::new(HashMap::new());
-    static TGT: RefCell<HashMap<(u64, i64, i64, i64), Option<(i64, i64, i64)>>> = RefCell::new(HashMap::new());
-    static SRC: RefCell<HashMap<(u64, i64, i64, i64), bool>> = RefCell::new(HashMap::new());
+    static PTS: RefCell<FxHashMap<(u64, i64, i64, i64), FlowPt>> = RefCell::new(FxHashMap::default());
+    static TGT: RefCell<FxHashMap<(u64, i64, i64, i64), Option<(i64, i64, i64)>>> = RefCell::new(FxHashMap::default());
+    static SRC: RefCell<FxHashMap<(u64, i64, i64, i64), bool>> = RefCell::new(FxHashMap::default());
 }
 
 impl World {
@@ -169,6 +168,79 @@ impl World {
         best
     }
 
+    /// Lattice cells of the box [lo, hi] (cell coordinates) that the ellipsoid shell of possibly
+    /// active points (radius within [b − m, a + m], see `maybe_active`) can pass through, in the
+    /// order of a z, y, x loop over the box. Columns run along the axis closest to the surface
+    /// normal at `center`; per column only the few cells the shell crosses are visited.
+    fn shell_cells(&self, center: DVec3, lo: DVec3, hi: DVec3, cell: f64) -> Vec<(i64, i64, i64)> {
+        let m = 0.5 * cell + 200.0;
+        // local geocentric radius range over the box: the ellipsoid radius changes by at most
+        // (a − b)·|sin 2φ|·Δφ ≤ 2 (a − b) Δφ over the box's latitude span
+        let half = ((hi - lo) + DVec3::ONE).max_element() * cell * 0.5 * 3f64.sqrt();
+        let r = center.length();
+        let sz = center.z / r.max(1.0);
+        let (a, b) = (self.ell.a, self.ell.b);
+        let r_gc = a * b / ((b * b * (1.0 - sz * sz)) + (a * a * sz * sz)).sqrt();
+        let dr = 2.0 * (a - b) * (half / b) + 100.0;
+        let (r_lo, r_hi) = (r_gc - dr - m, r_gc + dr + m);
+        let c = center.to_array();
+        let ax = (0..3).max_by(|&i, &j| c[i].abs().total_cmp(&c[j].abs())).unwrap();
+        let (ua, va) = ((ax + 1) % 3, (ax + 2) % 3);
+        let (lo, hi) = (lo.to_array(), hi.to_array());
+        let sign = c[ax].signum();
+        // squared extent of a cell interval [i, i+1] * cell: (min, max) of x²
+        let sq = |i: i64| -> (f64, f64) {
+            let (x0, x1) = (i as f64 * cell, (i + 1) as f64 * cell);
+            let mx = (x0 * x0).max(x1 * x1);
+            let mn = if x0 <= 0.0 && x1 >= 0.0 { 0.0 } else { (x0 * x0).min(x1 * x1) };
+            (mn, mx)
+        };
+        let mut out = Vec::new();
+        for iu in lo[ua] as i64..=hi[ua] as i64 {
+            let (u2lo, u2hi) = sq(iu);
+            for iv in lo[va] as i64..=hi[va] as i64 {
+                let (v2lo, v2hi) = sq(iv);
+                let dmax2 = r_hi * r_hi - u2lo - v2lo;
+                if dmax2 <= 0.0 {
+                    continue;
+                }
+                let dmin = (r_lo * r_lo - u2hi - v2hi).max(0.0).sqrt();
+                let dmax = dmax2.sqrt();
+                let (a0, a1) = if sign >= 0.0 { (dmin, dmax) } else { (-dmax, -dmin) };
+                let k0 = ((a0 / cell).floor() as i64).max(lo[ax] as i64);
+                let k1 = ((a1 / cell).floor() as i64).min(hi[ax] as i64);
+                for k in k0..=k1 {
+                    let mut idx = [0i64; 3];
+                    idx[ax] = k;
+                    idx[ua] = iu;
+                    idx[va] = iv;
+                    out.push((idx[0], idx[1], idx[2]));
+                }
+            }
+        }
+        out.sort_unstable_by_key(|&(x, y, z)| (z, y, x));
+        out
+    }
+
+    /// Cheap test without the cache: false only for lattice points certainly not active (far
+    /// from the surface by a geocentric height estimate; `flow_point` decides with the geodetic
+    /// height |h| < cell / 2, which differs from the estimate by far less than the margin).
+    #[inline]
+    fn maybe_active(&self, lvl: usize, c: (i64, i64, i64), cell: f64) -> bool {
+        let hh = hash3(self.level_key(lvl), c.0, c.1, c.2);
+        let p = DVec3::new(
+            c.0 as f64 + 0.5 + 0.8 * (u01k(hh, 1) - 0.5),
+            c.1 as f64 + 0.5 + 0.8 * (u01k(hh, 2) - 0.5),
+            c.2 as f64 + 0.5 + 0.8 * (u01k(hh, 3) - 0.5),
+        ) * cell;
+        let r = p.length();
+        let (a, b) = (self.ell.a, self.ell.b);
+        let sz = p.z / r.max(1.0);
+        let cz2 = 1.0 - sz * sz;
+        let r_gc = a * b / ((b * b * cz2) + (a * a * sz * sz)).sqrt();
+        (r - r_gc).abs() < 0.5 * cell + 200.0
+    }
+
     /// No other point drains into `c` (cached).
     fn is_source(&self, lvl: usize, c: (i64, i64, i64)) -> bool {
         let key = (self.level_key(lvl) ^ self.cache_key ^ 0x50C, c.0, c.1, c.2);
@@ -223,10 +295,12 @@ impl World {
                 let hh = hash3(self.level_key(lvl) ^ 0x51DE, c.0, c.1, c.2);
                 (0.5 * (lc.width_m[0] + (lc.width_m[1] - lc.width_m[0]) * u01k(hh, 1)), lc.valley_m * (0.6 + 0.8 * u01k(hh, 2)))
             };
-            for cz in lo.z as i64..=hi.z as i64 {
-                for cy in lo.y as i64..=hi.y as i64 {
-                    for cx in lo.x as i64..=hi.x as i64 {
-                        let c = (cx, cy, cz);
+            for c in self.shell_cells(center, lo, hi, cell) {
+                {
+                    {
+                        if !self.maybe_active(lvl, c, cell) {
+                            continue;
+                        }
                         let fp = self.flow_point(lvl, c);
                         if !fp.active || (fp.s - center).length() > reach {
                             continue;
