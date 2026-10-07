@@ -224,7 +224,7 @@ shots:
     trajectory:
       # a calm, gentle right turn (0.7 deg/s; no turbulence, gusts or vibration): the stars drift
       # slowly across the frame, so the event camera sees each one
-      synth: {altitude: 1500, heading_deg: 190, kind: line, lat: 41.5705, lon: 32.970, speed: 50, wind: {turbulence: 0.0, gust_rate_per_min: 0.0}, vibration: {harmonic_deg: 0.0, broadband_deg: 0.0}}
+      synth: {altitude: 1500, heading_deg: 190, kind: circle, radius: 4000, lat: 41.5705, lon: 32.970, speed: 50, wind: {turbulence: 0.0, gust_rate_per_min: 0.0}, vibration: {harmonic_deg: 0.0, broadband_deg: 0.0}}
   seconds: 6
   extend: 6.6
   text: 'A star tracker on the plane: rings mark every catalogue star''s ground-truth position (sub-pixel)'
