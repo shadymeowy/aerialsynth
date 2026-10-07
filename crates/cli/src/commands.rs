@@ -304,12 +304,48 @@ pub fn run(a: RunArgs) -> Result<()> {
     let gen = Generator::new(s.world.clone());
     let tiles = plan_tiles(&s, &gen)?;
     gen_tiles(&s, &gen, tiles.into_iter().collect(), false)?;
+    complete_tiles(&s, &gen)?;
+    let before = stored_tiles(&s, &gen)?;
     drop(gen);
     do_render(&s)?;
     if s.cameras.iter().any(|c| c.events.is_some()) {
         do_events(&s)?;
     }
+    // tiles generated lazily while rendering (event steps between the planned samples) get
+    // their neighbourhood too
+    let gen = Generator::new(s.world.clone());
+    let mut lazy: BTreeSet<TileId> = stored_tiles(&s, &gen)?.difference(&before).copied().collect();
+    if !lazy.is_empty() {
+        pipeline::with_margin_and_ancestors(&s, &mut lazy);
+        eprintln!("neighbourhood of the lazily generated tiles:");
+        gen_tiles(&s, &gen, lazy.into_iter().collect(), false)?;
+    }
     Ok(())
+}
+
+/// Dry runs of the renderer's tile selection with the generated tiles' real elevation ranges,
+/// generating what they add (with margins), until nothing is missing.
+fn complete_tiles(s: &Scenario, gen: &Generator) -> Result<()> {
+    let poses = load_poses(s)?;
+    for pass in 1..=6 {
+        let missing = {
+            let store = pipeline::open_or_create_store(s, gen)?;
+            pipeline::plan_missing(s, &poses, &store)?
+        };
+        if missing.is_empty() {
+            eprintln!("dry run {pass}: all tiles the renderer selects are stored");
+            return Ok(());
+        }
+        eprintln!("dry run {pass}: {} more tiles", missing.len());
+        gen_tiles(s, gen, missing.into_iter().collect(), false)?;
+    }
+    eprintln!("dry runs did not converge; the rest is generated lazily");
+    Ok(())
+}
+
+fn stored_tiles(s: &Scenario, gen: &Generator) -> Result<BTreeSet<TileId>> {
+    let store = pipeline::open_or_create_store(s, gen)?;
+    Ok(store.zooms().into_iter().flat_map(|z| store.tiles_at(z)).collect())
 }
 
 #[derive(Args)]

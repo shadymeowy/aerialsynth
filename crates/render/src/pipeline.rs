@@ -3,7 +3,7 @@
 
 use crate::cache::TileCache;
 use crate::camera::CameraModel;
-use crate::lod::{LodParams, PlanOracle, Selector};
+use crate::lod::{LodParams, PlanOracle, Selector, TileOracle};
 use crate::output::{self, BodySample, CameraWriter, Frame, PngWriter};
 use crate::raster::Renderer;
 use crate::scenario::{CameraSpec, DepthKind, Scenario};
@@ -133,7 +133,12 @@ pub fn plan(scn: &Scenario, poses: &[Pose], gen: Option<&Generator>) -> Result<B
             set.extend(Selector::new(&cam, model.as_ref(), ell, &params, &oracle).select().into_iter().map(|u| u.id));
         }
     }
-    // neighbours (margin) at each zoom
+    with_margin_and_ancestors(scn, &mut set);
+    Ok(set)
+}
+
+/// Margin rings (`tiles.margin` neighbours at each zoom) and all ancestors of a tile set.
+pub fn with_margin_and_ancestors(scn: &Scenario, set: &mut BTreeSet<TileId>) {
     let m = scn.tiles.margin as i32;
     let base: Vec<TileId> = set.iter().copied().collect();
     for id in base {
@@ -145,7 +150,6 @@ pub fn plan(scn: &Scenario, poses: &[Pose], gen: Option<&Generator>) -> Result<B
             }
         }
     }
-    // all ancestors down to the coarsest level
     let base: Vec<TileId> = set.iter().copied().collect();
     for id in base {
         let mut a = id;
@@ -157,7 +161,59 @@ pub fn plan(scn: &Scenario, poses: &[Pose], gen: Option<&Generator>) -> Result<B
             }
         }
     }
-    Ok(set)
+}
+
+/// Dry-run oracle: what the renderer sees with lazy generation — every tile up to the maximum
+/// zoom exists, elevation ranges are known for stored tiles only (the selector falls back to the
+/// nearest stored ancestor's, exactly as when rendering).
+struct DryRunOracle<'a> {
+    store: &'a TileStore,
+    max_zoom: u8,
+}
+impl TileOracle for DryRunOracle<'_> {
+    fn range(&self, id: TileId) -> Option<(f32, f32)> {
+        self.store.elev_range(id)
+    }
+    fn exists(&self, id: TileId) -> bool {
+        id.z <= self.max_zoom || self.store.contains(id)
+    }
+}
+
+/// Tiles the renderer will select that the store lacks: a dry run of the renderer's own LOD
+/// selection (its zoom limits and texel threshold) at every frame of every camera (event cameras
+/// at 4× their frame rate), plus margins and ancestors. Run after generating a plan, it finds
+/// the tiles that the plan's estimated elevation ranges missed; repeated until empty, the render
+/// needs no lazy generation.
+pub fn plan_missing(scn: &Scenario, poses: &[Pose], store: &TileStore) -> Result<BTreeSet<TileId>> {
+    let ell = store.meta().ellipsoid();
+    let win = Window::new(scn, poses)?;
+    let max_zoom = scn.render.max_zoom.min(scn.tiles.max_zoom);
+    let params = LodParams {
+        min_zoom: scn.render.min_zoom.max(scn.tiles.min_zoom),
+        max_zoom,
+        texel_px: scn.render.texel_px,
+        ..Default::default()
+    };
+    let oracle = DryRunOracle { store, max_zoom };
+    let mut want: BTreeSet<TileId> = BTreeSet::new();
+    for spec in &scn.cameras {
+        let model = spec.intrinsics.build()?;
+        let mut times = frame_times(scn, spec, win);
+        if spec.events.is_some() {
+            times.extend(uniform_times(win, 0.0, 4.0 * spec.frame_rate, None));
+        }
+        let sel: Vec<Vec<TileId>> = times
+            .par_iter()
+            .map(|t| {
+                let cam = trajectory::interpolate(poses, *t).camera(&spec.extrinsics, &ell);
+                Selector::new(&cam, model.as_ref(), ell, &params, &oracle).select().into_iter().map(|u| u.id).collect()
+            })
+            .collect();
+        want.extend(sel.into_iter().flatten());
+    }
+    with_margin_and_ancestors(scn, &mut want);
+    want.retain(|id| !store.contains(*id));
+    Ok(want)
 }
 
 /// Generate tiles into the store (skipping existing ones unless `force`). Calls `progress(done, total)`.

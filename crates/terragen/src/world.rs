@@ -353,7 +353,15 @@ impl World {
                     let h = hash3(seed, ix + dx, iy + dy, iz + dz);
                     let jit = DVec3::new(u01k(h, 1), u01k(h, 2), u01k(h, 3)) * 0.5;
                     let pp = f - DVec3::new(dx as f64, dy as f64, dz as f64) - jit;
-                    let w = (-2.0 * pp.length_squared()).exp();
+                    // compact support (zero beyond one cell): every point outside the 3×3×3
+                    // window is at least one cell away, so the sum is continuous (a Gaussian was
+                    // still ~1% at the window edge: creases along the lattice planes, a grid of
+                    // straight lines on the slopes)
+                    let d2 = pp.length_squared();
+                    if d2 >= 1.0 {
+                        continue;
+                    }
+                    let w = (1.0 - d2).powi(3);
                     wt += w;
                     let mag = pp.dot(dir) * std::f64::consts::TAU;
                     let (s, c) = mag.sin_cos();
@@ -362,7 +370,8 @@ impl World {
                 }
             }
         }
-        (v / wt, d / wt)
+        // (a small constant keeps the ratio continuous where no point is near)
+        (v / (wt + 0.02), d / (wt + 0.02))
     }
 
     /// Erosion-like gullies: stripes running down the large-scale slope `grad` (m/m, tangent),
