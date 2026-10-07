@@ -4,7 +4,7 @@
 //! pixel further out; the normals of the edge pixels use pass B's apron.
 
 use crate::config::Config;
-use crate::surface::{l2s, Caches, Local, Surface, SurfaceModel};
+use crate::surface::{l2s, Caches, Local, PixFields, Surface, SurfaceModel};
 use crate::world::{water, Ctx, Macro, NearSegs, Pre, Terrain, World};
 use geodesy::tiles::{gsd_ew, gsd_ns, pixel_to_latlon, TileId};
 use glam::{DVec2, DVec3};
@@ -24,6 +24,13 @@ pub struct Generator {
 fn catmull_rom(p: [f64; 4], t: f64) -> f64 {
     let [p0, p1, p2, p3] = p;
     p1 + 0.5 * t * (p2 - p0 + t * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3 + t * (3.0 * (p1 - p2) + p3 - p0)))
+}
+
+/// The Catmull-Rom weights of the four samples (as in [`catmull_rom`]).
+#[inline]
+fn catmull_rom_weights(t: f64) -> [f64; 4] {
+    let (t2, t3) = (t * t, t * t * t);
+    [0.5 * (-t3 + 2.0 * t2 - t), 0.5 * (3.0 * t3 - 5.0 * t2 + 2.0), 0.5 * (-3.0 * t3 + 4.0 * t2 + t), 0.5 * (t3 - t2)]
 }
 
 #[inline]
@@ -101,7 +108,11 @@ impl Generator {
         let warp_on_grid = use_grid && g_m <= 1000.0;
         let gully_on_grid = use_grid && g_m <= 100.0;
         let roads_on_grid = use_grid && g_m <= 400.0;
-        let nodes: Vec<(Macro, Pre)> = if use_grid {
+        // the octaves of the pixel fields (surface) with wavelengths >= 8 node spacings come from
+        // the grid too, the rest per pixel; the cut depends on the zoom only (node spacing at the
+        // equator), so neighbouring tiles agree
+        let pf_cut = 8.0 * G * gsd_ew(0.0, z, n as u32, &ell);
+        let nodes: Vec<(Macro, Pre, [f64; PixFields::N])> = if use_grid {
             (0..ng * ng)
                 .into_par_iter()
                 .map(|k| {
@@ -112,7 +123,8 @@ impl Generator {
                     let ctx = Ctx::new(lat, lon, gsd, &ell);
                     let m = self.world.macro_at(ctx.p, gsd);
                     let pre = self.world.pre_at(&ctx, &m, gully_on_grid, roads_on_grid);
-                    (m, pre)
+                    let pf_low = self.surface.pixel_fields_part(ctx.p, gsd, Some((pf_cut, true)));
+                    (m, pre, pf_low)
                 })
                 .collect()
         } else {
@@ -129,7 +141,7 @@ impl Generator {
             let g = |i: usize, j: usize| &nodes[j * ng + i];
             let mut m = Macro::bilerp(&g(i0, j0).0, &g(i0 + 1, j0).0, &g(i0, j0 + 1).0, &g(i0 + 1, j0 + 1).0, fx, fy);
             // Catmull-Rom over the 4x4 nodes around the pixel
-            let cubic = |f: &dyn Fn(&(Macro, Pre)) -> f64| -> f64 {
+            let cubic = |f: &dyn Fn(&(Macro, Pre, [f64; PixFields::N])) -> f64| -> f64 {
                 let row = |j: usize| catmull_rom([g(i0 - 1, j), g(i0, j), g(i0 + 1, j), g(i0 + 2, j)].map(f), fx);
                 catmull_rom([row(j0 - 1), row(j0), row(j0 + 1), row(j0 + 2)], fy)
             };
@@ -277,7 +289,26 @@ impl Generator {
                         let px = ox + i as f64 - 1.0 + 0.5;
                         let py = oy + j as f64 - 1.0 + 0.5;
                         let (lat, lon) = pixel_to_latlon(DVec2::new(px, py), z, n as u32);
-                        self.surface.pixel_fields(Ctx::new(lat, lon, gsd, &ell).p, gsd)
+                        let p = Ctx::new(lat, lon, gsd, &ell).p;
+                        if use_grid {
+                            let mut f = self.surface.pixel_fields_part(p, gsd, Some((pf_cut, false)));
+                            let u = px / G - gk0x as f64;
+                            let v = py / G - gk0y as f64;
+                            let (i0, j0) = ((u.floor() as usize).clamp(1, ng - 3), (v.floor() as usize).clamp(1, ng - 3));
+                            let (wx, wy) = (catmull_rom_weights(u - i0 as f64), catmull_rom_weights(v - j0 as f64));
+                            for (b, wyb) in wy.iter().enumerate() {
+                                for (a, wxa) in wx.iter().enumerate() {
+                                    let w = wxa * wyb;
+                                    let node = &nodes[(j0 + b - 1) * ng + i0 + a - 1].2;
+                                    for (fk, nk) in f.iter_mut().zip(node) {
+                                        *fk += w * nk;
+                                    }
+                                }
+                            }
+                            PixFields::from_array(f)
+                        } else {
+                            self.surface.pixel_fields(p, gsd)
+                        }
                     };
                     // one sample at sub-pixel (sx, sy): the surface and the bare ground
                     let sample = |sx: usize, sy: usize, caches: &mut Caches| -> (Surface, f64) {

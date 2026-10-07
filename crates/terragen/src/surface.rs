@@ -89,6 +89,14 @@ pub struct PixFields {
     pub water: f64,
 }
 
+impl PixFields {
+    pub const N: usize = 13;
+    pub fn from_array(a: [f64; Self::N]) -> Self {
+        let [detail, patch, land, strata, strata2, snow, forest, stand, field_var, field_var2, field_var3, warp2, water] = a;
+        PixFields { detail, patch, land, strata, strata2, snow, forest, stand, field_var, field_var2, field_var3, warp2, water }
+    }
+}
+
 /// Field system of a land-use region.
 #[derive(Clone, Copy, Debug)]
 pub struct RegionInfo {
@@ -141,12 +149,14 @@ pub struct Caches {
     towns_base: FxHashMap<u64, TownInfo>,
     /// existing towns around each cell of the town lattice
     town_cands: FxHashMap<(i64, i64, i64), Vec<TownInfo>>,
+    /// per field (by its centre): cultivation mask value and crop-cluster id
+    fields: FxHashMap<[u64; 4], (f64, u64)>,
 }
 
 impl Caches {
     /// Bound the memory of a long-lived cache.
     pub fn trim(&mut self) {
-        if self.regions.len() + self.towns.len() + self.towns_base.len() + self.town_cands.len() > 200_000 {
+        if self.regions.len() + self.towns.len() + self.towns_base.len() + self.town_cands.len() + self.fields.len() > 200_000 {
             *self = Caches::default();
         }
     }
@@ -380,22 +390,40 @@ impl SurfaceModel {
 
     /// Per-pixel smooth fields (band-limited at the pixel GSD).
     pub fn pixel_fields(&self, p: DVec3, gsd: f64) -> PixFields {
-        // a field evaluated at p·k sees a sample spacing of gsd·k in its own domain
-        PixFields {
-            detail: self.detail.eval(p, gsd),
-            patch: self.patch.eval(p, gsd),
-            land: self.land_n.eval(p, gsd) * self.land_n.norm() * 1.8,
-            strata: self.strata.eval(p, gsd),
-            strata2: self.strata.eval(p * 1.7, gsd * 1.7),
-            snow: self.snow_n.eval(p, gsd),
-            forest: self.forest.eval(p, gsd) * self.forest.norm() * 1.8,
-            stand: self.patch.eval(p * 0.3, gsd * 0.3) + 0.5 * perlin3(0x57A, p / 1200.0) * crate::noise::band(1200.0, gsd),
-            field_var: self.field_var.eval(p, gsd),
-            field_var2: self.field_var.eval(p * 1.7, gsd * 1.7),
-            field_var3: self.field_var.eval(p * 3.0, gsd * 3.0),
-            warp2: self.warp2.eval(p, gsd),
-            water: self.patch.eval(p * 0.37, gsd * 0.37),
-        }
+        PixFields::from_array(self.pixel_fields_part(p, gsd, None))
+    }
+
+    /// The pixel fields, all octaves (`split` None) or only those of wavelength >= `cut` (`split`
+    /// Some((cut, true))) or < `cut` (Some((cut, false))); the two parts sum to the whole. The
+    /// smooth part is interpolated from a coarse grid by the tile generator.
+    pub fn pixel_fields_part(&self, p: DVec3, gsd: f64, split: Option<(f64, bool)>) -> [f64; PixFields::N] {
+        // a field evaluated at p·k sees a sample spacing of gsd·k (and wavelengths ·k) in its own
+        // domain
+        let f = |n: &Fbm, k: f64| -> f64 {
+            match split {
+                None => n.eval(p * k, gsd * k),
+                Some((cut, low)) => n.eval_part(p * k, gsd * k, cut * k, low),
+            }
+        };
+        let stand_lf = match split {
+            Some((cut, low)) if (1200.0 >= cut) != low => 0.0,
+            _ => 0.5 * perlin3(0x57A, p / 1200.0) * crate::noise::band(1200.0, gsd),
+        };
+        [
+            f(&self.detail, 1.0),
+            f(&self.patch, 1.0),
+            f(&self.land_n, 1.0) * self.land_n.norm() * 1.8,
+            f(&self.strata, 1.0),
+            f(&self.strata, 1.7),
+            f(&self.snow_n, 1.0),
+            f(&self.forest, 1.0) * self.forest.norm() * 1.8,
+            f(&self.patch, 0.3) + stand_lf,
+            f(&self.field_var, 1.0),
+            f(&self.field_var, 1.7),
+            f(&self.field_var, 3.0),
+            f(&self.warp2, 1.0),
+            f(&self.patch, 0.37),
+        ]
     }
 
     fn region_info(&self, world: &World, cache: &mut Caches, t: &Terrain) -> RegionInfo {
@@ -793,7 +821,7 @@ impl SurfaceModel {
         let mut field_cov = 0.0;
         if let Some(r) = &region {
             if t.agri > 0.02 && natural_ok * flat_ok > 0.3 && world.cfg.landuse.agriculture > 0.0 {
-                if let Some((fcol, fh, cov, edge_kind)) = self.field(r, t, q_rot, p, gsd, fw, pf) {
+                if let Some((fcol, fh, cov, edge_kind)) = self.field(cache, r, t, q_rot, p, gsd, fw, pf) {
                     // a field is there or not: a crisp (noisy) cutoff instead of fading fields out
                     // over gentle valley sides, which left washed, half-transparent bands
                     let keep = natural_ok * flat_ok * (1.0 - riparian) * (1.0 - woodlot) * shore_keep;
@@ -1243,7 +1271,7 @@ impl SurfaceModel {
     /// Agricultural field at rotated local coords. Returns (colour, extra height, coverage, kind)
     /// where kind 0 = crop, 1 = hedge, 2 = track.
     #[allow(clippy::too_many_arguments)]
-    fn field(&self, r: &RegionInfo, t: &Terrain, q: DVec2, p: DVec3, gsd: f64, fw: f64, pf: &PixFields) -> Option<(DVec3, f64, f64, u8)> {
+    fn field(&self, cache: &mut Caches, r: &RegionInfo, t: &Terrain, q: DVec2, p: DVec3, gsd: f64, fw: f64, pf: &PixFields) -> Option<(DVec3, f64, f64, u8)> {
         let pal = &self.pal;
         let cult = smoothstep(0.02, 0.45, t.agri);
         let tint = DVec3::new(1.0 + 0.08 * (r.palette - 0.5), 1.0, 1.0 - 0.06 * (r.palette - 0.5));
@@ -1254,7 +1282,7 @@ impl SurfaceModel {
         let tropic = smoothstep(19.0, 25.0, t.temp) * smoothstep(0.5, 0.7, t.moist);
         let mean = mixc(pal.crop_mean, srgb(78.0, 100.0, 58.0), tropic) * tint * (1.0 + 0.10 * pf.field_var);
         let fwe = fw.max(0.6 * gsd); // edge filter never sharper than ~half a pixel
-        let (c, h, cov, kind) = self.field_explicit(r, t, q, p, gsd, fwe, cult, tint, pf).unwrap_or((mean, 0.0, 0.0, 0));
+        let (c, h, cov, kind) = self.field_explicit(cache, r, t, q, p, gsd, fwe, cult, tint, pf).unwrap_or((mean, 0.0, 0.0, 0));
         let cult_mean = cult * 0.9;
         let cov_m = lerp(cult_mean, cov, k);
         if cov_m <= 0.0 {
@@ -1264,14 +1292,13 @@ impl SurfaceModel {
         Some((col, h * k, cov_m, kind))
     }
 
-    /// Contiguous cultivation zones: a smooth mask compared with the cultivated fraction.
-    fn cultivated(&self, c3: DVec3, frac: f64, gsd: f64) -> bool {
-        let m = 0.5 + 0.5 * self.cult_n.eval(c3, gsd.min(100.0)) * self.cult_n.norm() * 2.2;
-        m < frac
+    /// Contiguous cultivation zones: a smooth mask (compared with the cultivated fraction).
+    fn cultivated_mask(&self, c3: DVec3, gsd: f64) -> f64 {
+        0.5 + 0.5 * self.cult_n.eval(c3, gsd.min(100.0)) * self.cult_n.norm() * 2.2
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn field_explicit(&self, r: &RegionInfo, t: &Terrain, q: DVec2, p: DVec3, gsd: f64, fw: f64, cult: f64, tint: DVec3, pf: &PixFields) -> Option<(DVec3, f64, f64, u8)> {
+    fn field_explicit(&self, cache: &mut Caches, r: &RegionInfo, t: &Terrain, q: DVec2, p: DVec3, gsd: f64, fw: f64, cult: f64, tint: DVec3, pf: &PixFields) -> Option<(DVec3, f64, f64, u8)> {
         let pal = &self.pal;
         // field id, within-field coords (along, across), distance to boundary
         let (id, fx, fy, edge, inside, fc) = match r.style {
@@ -1350,11 +1377,15 @@ impl SurfaceModel {
         }
         // is this field cultivated?
         let c3 = r.center + r.ex * fc.x + r.ey * fc.y;
-        if !self.cultivated(c3, cult, gsd) || u01k(id, 5) < 0.06 {
+        // both depend on the field only (the mask's shortest octave is resolved at any gsd ≤
+        // 100 m), so they are kept per field instead of being evaluated for every sample;
+        // neighbouring fields often grow the same crop: drawn from a coarse crop-cluster cell
+        let (mask, cluster) = *cache.fields.entry([c3.x.to_bits(), c3.y.to_bits(), c3.z.to_bits(), r.split.to_bits()]).or_insert_with(|| {
+            (self.cultivated_mask(c3, gsd), worley2(r.split.to_bits() ^ 0xC1C, fc, 700.0, 1.0).id)
+        });
+        if mask >= cult || u01k(id, 5) < 0.06 {
             return None;
         }
-        // neighbouring fields often grow the same crop: draw from a coarse crop-cluster cell
-        let cluster = worley2(r.split.to_bits() ^ 0xC1C, fc, 700.0, 1.0).id;
         let u_crop = if u01k(id, 16) < 0.5 { u01k(cluster, 6) } else { u01k(id, 6) };
         let kind = crop_kind(r.season, u_crop, t.moist < 0.33 && r.style != 2);
         // hot, wet climates grow other crops: rice paddies, oil-palm plantations, sugarcane and

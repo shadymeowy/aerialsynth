@@ -302,6 +302,31 @@ impl Fbm {
         sum
     }
 
+    /// The octaves of wavelength >= `cut` (`low`) or < `cut` (not `low`); the two parts sum to
+    /// [`Fbm::eval`].
+    #[inline]
+    pub fn eval_part(&self, p: DVec3, gsd: f64, cut: f64, low: bool) -> f64 {
+        let mut lam = self.wavelength;
+        let mut amp = 1.0;
+        let mut sum = 0.0;
+        for i in 0..self.octaves {
+            if low && lam < cut {
+                break;
+            }
+            let w = band(lam, gsd);
+            if w <= 0.0 {
+                break;
+            }
+            if low || lam < cut {
+                let q = self.frames.rot[i] * (p / lam) + self.frames.off[i];
+                sum += amp * w * perlin3(self.frames.seeds[i], q);
+            }
+            lam /= self.lacunarity;
+            amp *= self.gain;
+        }
+        sum
+    }
+
     /// Evaluate with at most `max_oct` octaves; `gsd` fades out unresolvable octaves.
     pub fn eval_d(&self, p: DVec3, gsd: f64, max_oct: usize) -> (f64, DVec3) {
         let mut lam = self.wavelength;
