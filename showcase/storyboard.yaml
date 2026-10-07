@@ -159,8 +159,8 @@ shots:
       synth: {altitude: 1500, heading_deg: 140, kind: circle, radius: 4000, lat: 41.562, lon: 32.955, speed: 50, wind: {turbulence: 0.0, gust_rate_per_min: 0.0}, vibration: {harmonic_deg: 0.0, broadband_deg: 0.0}}
   seconds: 6
   extend: 6.6
-  text: 'The real sky of 2026-01-10 20:15 UTC: Hipparcos + Tycho-2 stars and JPL DE440 planets (Jupiter, Orion, Sirius), astrometric error < 0.01″'
-- {id: events_stars, label: Event camera · night sky, text: 'The same sky on an event camera: stars and Jupiter drift through the view as the plane turns, at their true positions', seconds: 6, layout: events,
+  text: 'Real stars and planets at their true positions (error < 0.01″)'
+- {id: events_stars, label: Event camera · night sky, text: 'The same sky as events: stars drift through the view as the plane turns', seconds: 6, layout: events,
   source: stars, offset: 6.6}
 - id: modalities_night
   label: Ground truth · night
@@ -227,8 +227,8 @@ shots:
       synth: {altitude: 1500, heading_deg: 190, kind: circle, radius: 4000, lat: 41.5705, lon: 32.970, speed: 50, wind: {turbulence: 0.0, gust_rate_per_min: 0.0}, vibration: {harmonic_deg: 0.0, broadband_deg: 0.0}}
   seconds: 6
   extend: 6.6
-  text: 'A star tracker on the plane: rings mark every catalogue star''s ground-truth position (sub-pixel)'
-- {id: events_tracker, label: Event camera · star tracker, text: 'The tracker view as events: Orion''s belt and sword, every event at the true star positions', seconds: 6, layout: events,
+  text: 'Rings mark each catalogue star''s ground-truth position (sub-pixel)'
+- {id: events_tracker, label: Event camera · star tracker, text: 'The tracker as events: Orion''s belt and sword at their true positions', seconds: 6, layout: events,
   source: star_tracker, offset: 6.6}
 - id: braided
   label: Rivers converging
