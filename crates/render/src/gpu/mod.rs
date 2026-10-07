@@ -1,15 +1,19 @@
 //! Headless wgpu backend of the renderer (see docs/gpu.md).
 //!
-//! The CPU still selects the LOD units and builds the meshes (f64 geometry, per-vertex camera
-//! model: exactly the CPU renderer's code). The GPU rasterizes the meshes into a supersampled
-//! G-buffer and shades it in a compute pass that ports the CPU shading. Tiles live in a GPU slot
-//! pool across frames, so a flight uploads each tile once. One device for the whole process.
+//! The CPU selects the LOD units and, once per unit and vertex stride, builds the unit's mesh
+//! geometry (f64, the CPU renderer's code); meshes stay on the GPU relative to a per-unit origin.
+//! Per frame the GPU projects them through the camera model (vertex shader), rasterizes a
+//! supersampled G-buffer and shades it in a compute pass that ports the CPU shading. Tiles live in
+//! a GPU slot pool. Over a flight each tile and each mesh crosses the bus once; per frame only
+//! small per-unit transforms and tables are uploaded. One device for the whole process.
 
 pub mod device;
 pub mod tiles;
 
 use crate::lighting::SunState;
-use crate::raster::{FrameOut, Mesh, Renderer, Shading, TileView, Vert};
+use crate::lod::Unit;
+use crate::raster::{FrameOut, Renderer, Shading, TileView};
+use rayon::prelude::*;
 use crate::trajectory::CamPose;
 use bytemuck::{Pod, Zeroable};
 use device::Gpu;
@@ -22,15 +26,50 @@ use tiles::TilePool;
 use tilestore::TileData;
 use wgpu::util::DeviceExt;
 
-/// Tile slots of the GPU pool (≈1.1 MB of VRAM each).
-pub const POOL_SLOTS: u32 = 1024;
+/// Tile slots of the GPU pool (≈1.1 MB of VRAM each): as many as a texture array can hold, at
+/// most 2048 (≈2.2 GB). A frame never needs more than a few hundred to ~1500 tiles.
+pub const POOL_SLOTS: u32 = 2048;
+
+/// Budget of GPU memory for cached meshes (bytes).
+pub const MESH_BUDGET: u64 = 1536 << 20;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Vertex {
+    /// relative to the unit's origin (ECEF axes)
     pos: [f32; 3],
     uv: [f32; 2],
-    unit: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct MeshUniforms {
+    rt0: [f32; 4],
+    rt1: [f32; 4],
+    rt2: [f32; 4],
+    p: [[f32; 4]; 4],
+    lim: [f32; 4],
+    kind: [u32; 4],
+}
+
+/// A unit's mesh is fixed by the unit, its vertex stride and which neighbour tiles exist (corner
+/// heights average neighbouring pixels, falling back to the tile itself where one is missing).
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct MeshKey {
+    id: TileId,
+    data: TileId,
+    rect: [u32; 4],
+    stride: u32,
+    neighbours: u16,
+}
+
+struct CachedMesh {
+    vb: wgpu::Buffer,
+    origin: DVec3,
+    nx: usize,
+    ny: usize,
+    bytes: u64,
+    last: u64,
 }
 
 #[repr(C)]
@@ -82,6 +121,11 @@ struct Targets {
 
 struct Ctx {
     gpu: Gpu,
+    meshes: HashMap<MeshKey, CachedMesh>,
+    mesh_bytes: u64,
+    /// grid + skirt index buffers by mesh size (nx, ny): (buffer, index count)
+    indices: HashMap<(usize, usize), (wgpu::Buffer, u32)>,
+    frame: u64,
     gbuf_pipe: wgpu::RenderPipeline,
     shade_pipe: wgpu::ComputePipeline,
     pools: HashMap<Shading, TilePool>,
@@ -100,7 +144,7 @@ impl Ctx {
     fn new() -> anyhow::Result<Ctx> {
         let gpu = Gpu::new()?;
         let d = &gpu.device;
-        let gmod = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("gbuf"), source: wgpu::ShaderSource::Wgsl(include_str!("gbuf.wgsl").into()) });
+        let gmod = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("mesh"), source: wgpu::ShaderSource::Wgsl(include_str!("mesh.wgsl").into()) });
         let gbuf_pipe = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("gbuf"),
             layout: None,
@@ -111,7 +155,7 @@ impl Ctx {
                 buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Uint32],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2],
                 })],
             },
             primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: None, ..Default::default() },
@@ -141,7 +185,7 @@ impl Ctx {
             compilation_options: Default::default(),
             cache: None,
         });
-        Ok(Ctx { gpu, gbuf_pipe, shade_pipe, pools: HashMap::new(), targets: None, rays: Vec::new() })
+        Ok(Ctx { gpu, meshes: HashMap::new(), mesh_bytes: 0, indices: HashMap::new(), frame: 0, gbuf_pipe, shade_pipe, pools: HashMap::new(), targets: None, rays: Vec::new() })
     }
 
     fn ensure_targets(&mut self, w: u32, h: u32, ow: u32, oh: u32) {
@@ -184,50 +228,54 @@ fn v4(v: DVec3, w: f64) -> [f32; 4] {
     [v.x as f32, v.y as f32, v.z as f32, w as f32]
 }
 
-/// Vertices and indices of the meshes: valid triangles only (all vertices projected, not huge),
-/// as filtered by the CPU rasterizer (`raster_tri`).
-fn geometry(meshes: &[Mesh], w: u32) -> (Vec<Vertex>, Vec<u32>) {
-    let mut verts = Vec::new();
-    let mut idx = Vec::new();
-    let max_area = (w as f64) * (w as f64) * 4.0;
-    let tri = |idx: &mut Vec<u32>, k: [u32; 3], v: [&Vert; 3]| {
-        if !(v[0].ok && v[1].ok && v[2].ok) {
-            return;
-        }
-        let (minx, maxx) = (v[0].sx.min(v[1].sx).min(v[2].sx), v[0].sx.max(v[1].sx).max(v[2].sx));
-        let (miny, maxy) = (v[0].sy.min(v[1].sy).min(v[2].sy), v[0].sy.max(v[1].sy).max(v[2].sy));
-        if (maxx - minx) * (maxy - miny) > max_area {
-            return;
-        }
-        idx.extend_from_slice(&k);
-    };
-    for m in meshes {
-        let base = verts.len() as u32;
-        let vtx = |v: &Vert| Vertex { pos: [v.sx as f32, v.sy as f32, v.z as f32], uv: [v.u, v.v], unit: m.unit_idx };
-        verts.extend(m.verts.iter().map(vtx));
-        let sbase = verts.len() as u32;
-        verts.extend(m.skirt.iter().map(|(_, v)| vtx(v)));
-        let nx = m.nx;
-        for j in 0..m.ny - 1 {
-            for i in 0..nx - 1 {
-                let (ka, kb, kc, kd) = (j * nx + i, j * nx + i + 1, (j + 1) * nx + i, (j + 1) * nx + i + 1);
-                let (a, b, c, d) = (&m.verts[ka], &m.verts[kb], &m.verts[kc], &m.verts[kd]);
-                let g = |k: usize| base + k as u32;
-                tri(&mut idx, [g(ka), g(kb), g(kd)], [a, b, d]);
-                tri(&mut idx, [g(ka), g(kd), g(kc)], [a, d, c]);
-            }
-        }
-        let n = m.skirt.len();
-        for s in 0..n {
-            let (ka, sa) = &m.skirt[s];
-            let (kb, sb) = &m.skirt[(s + 1) % n];
-            let (a, b) = (&m.verts[*ka], &m.verts[*kb]);
-            let (isa, isb) = (sbase + s as u32, sbase + ((s + 1) % n) as u32);
-            tri(&mut idx, [base + *ka as u32, base + *kb as u32, isb], [a, b, sb]);
-            tri(&mut idx, [base + *ka as u32, isb, isa], [a, sb, sa]);
+/// Index buffer of a grid mesh of nx × ny vertices followed by its skirt ring (the vertex layout
+/// of `Renderer::unit_geometry`): two triangles per quad, two per skirt segment.
+fn grid_indices(nx: usize, ny: usize) -> Vec<u32> {
+    let mut idx = Vec::with_capacity(6 * (nx - 1) * (ny - 1) + 12 * (nx + ny));
+    for j in 0..ny - 1 {
+        for i in 0..nx - 1 {
+            let (a, b, c, d) = (j * nx + i, j * nx + i + 1, (j + 1) * nx + i, (j + 1) * nx + i + 1);
+            idx.extend([a, b, d, a, d, c].map(|k| k as u32));
         }
     }
-    (verts, idx)
+    let mut ring = Vec::new();
+    for i in 0..nx {
+        ring.push(i);
+    }
+    for j in 1..ny {
+        ring.push(j * nx + nx - 1);
+    }
+    for i in (0..nx - 1).rev() {
+        ring.push((ny - 1) * nx + i);
+    }
+    for j in (1..ny - 1).rev() {
+        ring.push(j * nx);
+    }
+    let n = ring.len();
+    let sb = nx * ny;
+    for s in 0..n {
+        let (ka, kb) = (ring[s], ring[(s + 1) % n]);
+        let (sa, sbk) = (sb + s, sb + (s + 1) % n);
+        idx.extend([ka, kb, sbk, ka, sbk, sa].map(|k| k as u32));
+    }
+    idx
+}
+
+/// Bits of the 3x3 tile neighbourhood of `t` present in the view with elevation.
+fn neighbour_mask(t: TileId, view: &TileView) -> u16 {
+    let mut m = 0u16;
+    let mut b = 0;
+    for dy in -1..=1 {
+        for dx in -1..=1 {
+            if let Some(n) = t.neighbor(dx, dy) {
+                if view.get(n).is_some_and(|d| !d.elevation.is_empty()) {
+                    m |= 1 << b;
+                }
+            }
+            b += 1;
+        }
+    }
+    m
 }
 
 /// Render one frame on the GPU (same output as the CPU path).
@@ -244,17 +292,74 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
     r.cache.prefetch(&need);
     let tiles: Vec<(TileId, Arc<TileData>)> = need.iter().filter_map(|id| r.cache.get(*id).map(|t| (*id, t))).collect();
     let view = TileView::new(tiles.iter().cloned().collect(), false);
-    let meshes = r.build_meshes(cam, &units, &view);
-    let (verts, idx) = geometry(&meshes, w);
-    let t_cpu = t0.elapsed().as_secs_f64();
+    // the units' mesh keys (stride from the camera distance)
+    let items: Vec<(usize, MeshKey, f64)> = units
+        .iter()
+        .enumerate()
+        .filter_map(|(ui, u)| {
+            let data = view.get(u.data)?;
+            if data.elevation.is_empty() {
+                return None;
+            }
+            let (stride, texel) = r.unit_stride(cam, u, data);
+            Some((ui, MeshKey { id: u.id, data: u.data, rect: u.rect, stride, neighbours: neighbour_mask(u.data, &view) }, texel))
+        })
+        .collect();
 
     let mut guard = ctx().lock();
     let c = &mut *guard;
+    c.frame += 1;
+    let frame = c.frame;
     c.ensure_targets(w, h, ow, oh);
+    // ---------------- meshes: build (CPU, parallel) and upload the ones not cached on the GPU
+    let missing: Vec<&(usize, MeshKey, f64)> = items.iter().filter(|(_, k, _)| !c.meshes.contains_key(k)).collect();
+    let built: Vec<(MeshKey, Vec<Vertex>, DVec3, usize, usize)> = missing
+        .par_iter()
+        .map(|(ui, key, texel)| {
+            let u: &Unit = &units[*ui];
+            let data = view.get(u.data).unwrap();
+            let g = r.unit_geometry(u, data, key.stride, *texel, &view);
+            let o = g.ecef[0];
+            let rel = |p: DVec3| [(p.x - o.x) as f32, (p.y - o.y) as f32, (p.z - o.z) as f32];
+            let mut v: Vec<Vertex> = g.ecef.iter().zip(&g.uv).map(|(p, uv)| Vertex { pos: rel(*p), uv: *uv }).collect();
+            v.extend(g.ring.iter().zip(&g.skirt).map(|(&k, p)| Vertex { pos: rel(*p), uv: g.uv[k] }));
+            (*key, v, o, g.nx, g.ny)
+        })
+        .collect();
+    let mut mesh_uploads = 0;
+    for (key, v, origin, nx, ny) in built {
+        let bytes = (v.len() * std::mem::size_of::<Vertex>()) as u64;
+        let vb = c.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("mesh"), contents: bytemuck::cast_slice(&v), usage: wgpu::BufferUsages::VERTEX });
+        c.mesh_bytes += bytes;
+        c.meshes.insert(key, CachedMesh { vb, origin, nx, ny, bytes, last: frame });
+        mesh_uploads += 1;
+        if !c.indices.contains_key(&(nx, ny)) {
+            let ix = grid_indices(nx, ny);
+            let ib = c.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("grid idx"), contents: bytemuck::cast_slice(&ix), usage: wgpu::BufferUsages::INDEX });
+            c.indices.insert((nx, ny), (ib, ix.len() as u32));
+        }
+    }
+    for (_, k, _) in &items {
+        c.meshes.get_mut(k).unwrap().last = frame;
+    }
+    // LRU eviction beyond the budget (never this frame's meshes)
+    if c.mesh_bytes > MESH_BUDGET {
+        let mut old: Vec<(u64, MeshKey)> = c.meshes.iter().filter(|(_, m)| m.last != frame).map(|(k, m)| (m.last, *k)).collect();
+        old.sort_unstable_by_key(|x| x.0);
+        for (_, k) in old {
+            if c.mesh_bytes <= MESH_BUDGET * 3 / 4 {
+                break;
+            }
+            let m = c.meshes.remove(&k).unwrap();
+            c.mesh_bytes -= m.bytes;
+        }
+    }
+    let t_cpu = t0.elapsed().as_secs_f64();
     // ---------------- tiles: resident slots and the frame's lookup table
     let shading = r.settings.shading;
     if !c.pools.contains_key(&shading) {
-        let p = TilePool::new(&c.gpu.device, POOL_SLOTS, shading);
+        let slots = POOL_SLOTS.min(c.gpu.device.limits().max_texture_array_layers);
+        let p = TilePool::new(&c.gpu.device, slots, shading);
         c.pools.insert(shading, p);
     }
     let pool = c.pools.get_mut(&shading).unwrap();
@@ -335,7 +440,29 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
     let queue = &c.gpu.queue;
     let tg = c.targets.as_ref().unwrap();
     let mk = |label: &str, contents: &[u8], usage| d.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents, usage });
-    let gu = mk("gbuf u", bytemuck::cast_slice(&[w as f32, h as f32, 0.0, 0.0]), wgpu::BufferUsages::UNIFORM);
+    let rt = cam.r_ecef_cam.transpose();
+    let gc = ms.gpu();
+    let half_lim = (ms.max_half_angle() * 1.35 + 0.05).min(std::f64::consts::PI - 0.03);
+    let mu = MeshUniforms {
+        rt0: [rt.x_axis.x as f32, rt.y_axis.x as f32, rt.z_axis.x as f32, 0.0],
+        rt1: [rt.x_axis.y as f32, rt.y_axis.y as f32, rt.z_axis.y as f32, 0.0],
+        rt2: [rt.x_axis.z as f32, rt.y_axis.z as f32, rt.z_axis.z as f32, 0.0],
+        p: [[gc.p[0], gc.p[1], gc.p[2], gc.p[3]], [gc.p[4], gc.p[5], gc.p[6], gc.p[7]], [gc.p[8], gc.p[9], gc.p[10], gc.p[11]], [gc.p[12], gc.p[13], gc.p[14], gc.p[15]]],
+        lim: [gc.angle_limit.cos() as f32, half_lim.cos() as f32, w as f32, h as f32],
+        kind: [gc.kind, 0, 0, 0],
+    };
+    let gu = mk("mesh u", bytemuck::bytes_of(&mu), wgpu::BufferUsages::UNIFORM);
+    let mut draw_data: Vec<[f32; 4]> = items
+        .iter()
+        .map(|(ui, k, _)| {
+            let o = c.meshes[k].origin - cam.pos;
+            [o.x as f32, o.y as f32, o.z as f32, f32::from_bits(*ui as u32)]
+        })
+        .collect();
+    if draw_data.is_empty() {
+        draw_data.push([0.0; 4]);
+    }
+    let draws_b = mk("draws", bytemuck::cast_slice(&draw_data), wgpu::BufferUsages::STORAGE);
     let ub = mk("shade u", bytemuck::bytes_of(&un), wgpu::BufferUsages::UNIFORM);
     let units_b = mk("units", bytemuck::cast_slice(&unit_data), wgpu::BufferUsages::STORAGE);
     let table_b = mk("table", bytemuck::cast_slice(&table), wgpu::BufferUsages::STORAGE);
@@ -362,19 +489,21 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        if !idx.is_empty() {
-            let vb = mk("verts", bytemuck::cast_slice(&verts), wgpu::BufferUsages::VERTEX);
-            let ib = mk("idx", bytemuck::cast_slice(&idx), wgpu::BufferUsages::INDEX);
+        if !items.is_empty() {
             let bg = d.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
                 layout: &c.gbuf_pipe.get_bind_group_layout(0),
-                entries: &[wgpu::BindGroupEntry { binding: 0, resource: gu.as_entire_binding() }],
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: gu.as_entire_binding() }, wgpu::BindGroupEntry { binding: 1, resource: draws_b.as_entire_binding() }],
             });
             rp.set_pipeline(&c.gbuf_pipe);
             rp.set_bind_group(0, &bg, &[]);
-            rp.set_vertex_buffer(0, vb.slice(..));
-            rp.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-            rp.draw_indexed(0..idx.len() as u32, 0, 0..1);
+            for (i, (_, k, _)) in items.iter().enumerate() {
+                let m = &c.meshes[k];
+                let (ib, n) = &c.indices[&(m.nx, m.ny)];
+                rp.set_vertex_buffer(0, m.vb.slice(..));
+                rp.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+                rp.draw_indexed(0..*n, 0, i as u32..i as u32 + 1);
+            }
         }
     }
     // ---------------- shading
@@ -467,11 +596,13 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
     }
     if prof {
         eprintln!(
-            "render[gpu]: {} units, {} tiles ({} uploaded), {} tris | cpu {:.3}s gpu {:.3}s readback {:.3}s",
+            "render[gpu]: {} units, {} tiles ({} uploaded), {} meshes ({} built, {} MB cached) | cpu {:.3}s gpu {:.3}s readback {:.3}s",
             out.units.len(),
             tiles.len(),
             uploaded,
-            idx.len() / 3,
+            items.len(),
+            mesh_uploads,
+            c.mesh_bytes >> 20,
             t_cpu,
             t_gpu - t_cpu,
             t0.elapsed().as_secs_f64() - t_gpu

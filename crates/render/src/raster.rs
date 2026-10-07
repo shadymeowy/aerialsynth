@@ -142,6 +142,17 @@ pub(crate) struct Vert {
     pub ok: bool,
 }
 
+/// Camera-independent geometry of a unit's mesh (see `Renderer::unit_geometry`).
+pub(crate) struct UnitGeom {
+    pub nx: usize,
+    pub ny: usize,
+    pub ecef: Vec<DVec3>,
+    pub uv: Vec<[f32; 2]>,
+    /// border ring (indices into `ecef`) and the matching skirt vertices
+    pub ring: Vec<usize>,
+    pub skirt: Vec<DVec3>,
+}
+
 pub(crate) struct Mesh {
     pub unit_idx: u32,
     pub nx: usize,
@@ -233,7 +244,7 @@ impl TileView {
         Some(b[((py.rem_euclid(256) / 16) * 16 + px.rem_euclid(256) / 16) as usize])
     }
 
-    fn get(&self, id: TileId) -> Option<&Arc<TileData>> {
+    pub(crate) fn get(&self, id: TileId) -> Option<&Arc<TileData>> {
         self.tiles.get(&id)
     }
 
@@ -552,15 +563,94 @@ impl Renderer {
     }
 
     /// Grid meshes of the units (camera-model projected vertices, skirts), f64 throughout.
+    /// Vertex stride (texels) of a unit's mesh from the projected texel size at its nearest
+    /// point, and the texel size (m).
+    pub(crate) fn unit_stride(&self, cam: &CamPose, u: &Unit, data: &TileData) -> (u32, f64) {
+        let ss = self.settings.supersample.max(1) as f64;
+        let focal = self.model_ss.focal_px();
+        let [x0, _, x1, _] = u.rect;
+        let (c, r) = crate::lod::tile_sphere(u.id, (data.elev_min, data.elev_max), &self.ell);
+        let dmin = ((c - cam.pos).length() - r).max(1.0);
+        let texel = gsd_ew(u.id.center().0, u.data.z, 256, &self.ell);
+        let proj = texel / dmin * focal / ss; // output px per texel
+        let mut stride = 1u32;
+        while stride < 32 && (stride * 2) as f64 * proj <= self.settings.mesh_px && (x1 - x0) / (stride * 2) >= 2 {
+            stride *= 2;
+        }
+        (stride, texel)
+    }
+
+    /// World geometry of a unit's mesh at a stride (independent of the camera): ECEF vertices on
+    /// pixel corners (height = mean of the four surrounding pixel centres), their tile coordinates,
+    /// and the skirt ring (border vertices pushed down).
+    pub(crate) fn unit_geometry(&self, u: &Unit, data: &TileData, stride: u32, texel: f64, view: &TileView) -> UnitGeom {
+        let e2 = self.ell.e2();
+        let z = u.data.z;
+        let [x0, y0, x1, y1] = u.rect;
+        let nx = ((x1 - x0) / stride) as usize + 1;
+        let ny = ((y1 - y0) / stride) as usize + 1;
+        let gx0 = u.data.x as i64 * 256 + x0 as i64;
+        let gy0 = u.data.y as i64 * 256 + y0 as i64;
+        // separable trig
+        let cols: Vec<(f64, f64)> = (0..nx).map(|i| lon_of((gx0 + (i as i64) * stride as i64) as f64, z).sin_cos()).collect();
+        let rows: Vec<(f64, f64, f64)> = (0..ny)
+            .map(|j| {
+                let lat = lat_of((gy0 + (j as i64) * stride as i64) as f64, z);
+                let (s, c) = lat.sin_cos();
+                let nrad = self.ell.a / (1.0 - e2 * s * s).sqrt();
+                (s, c, nrad)
+            })
+            .collect();
+        let pos = |i: usize, j: usize, hgt: f64| -> DVec3 {
+            let (so, co) = cols[i];
+            let (s, c, nrad) = rows[j];
+            DVec3::new((nrad + hgt) * c * co, (nrad + hgt) * c * so, (nrad * (1.0 - e2) + hgt) * s)
+        };
+        let corner_h = |i: usize, j: usize| -> f64 {
+            let gx = gx0 + (i as i64) * stride as i64;
+            let gy = gy0 + (j as i64) * stride as i64;
+            let a = view.elev_px(z, gx - 1, gy - 1, data);
+            let b = view.elev_px(z, gx, gy - 1, data);
+            let c = view.elev_px(z, gx - 1, gy, data);
+            let d = view.elev_px(z, gx, gy, data);
+            0.25 * (a + b + c + d) as f64
+        };
+        let mut ecef = Vec::with_capacity(nx * ny);
+        let mut uv = Vec::with_capacity(nx * ny);
+        let mut heights = Vec::with_capacity(nx * ny);
+        for j in 0..ny {
+            for i in 0..nx {
+                let hh = corner_h(i, j);
+                heights.push(hh);
+                ecef.push(pos(i, j, hh));
+                uv.push([(x0 + i as u32 * stride) as f32, (y0 + j as u32 * stride) as f32]);
+            }
+        }
+        let skirt_depth = (4.0 * texel * stride as f64 + 2.0).min(800.0);
+        let mut ring = Vec::new();
+        for i in 0..nx {
+            ring.push((i, 0));
+        }
+        for j in 1..ny {
+            ring.push((nx - 1, j));
+        }
+        for i in (0..nx - 1).rev() {
+            ring.push((i, ny - 1));
+        }
+        for j in (1..ny - 1).rev() {
+            ring.push((0, j));
+        }
+        let skirt = ring.iter().map(|&(i, j)| pos(i, j, heights[j * nx + i] - skirt_depth)).collect();
+        UnitGeom { nx, ny, ecef, uv, ring: ring.iter().map(|&(i, j)| j * nx + i).collect(), skirt }
+    }
+
+    /// Grid meshes of the units (camera-model projected vertices, skirts), f64 throughout.
     pub(crate) fn build_meshes(&self, cam: &CamPose, units: &[Unit], view: &TileView) -> Vec<Mesh> {
-        let ss = self.settings.supersample.max(1) as usize;
         let ms = &self.model_ss;
         let (w, h) = (ms.width() as usize, ms.height() as usize);
         let rt = cam.r_ecef_cam.transpose();
         let half_lim = (ms.max_half_angle() * 1.35 + 0.05).min(PI - 0.03);
         let cos_lim = half_lim.cos();
-        let focal = ms.focal_px();
-        let e2 = self.ell.e2();
         units
             .par_iter()
             .enumerate()
@@ -569,42 +659,16 @@ impl Renderer {
                 if data.elevation.is_empty() {
                     return None;
                 }
-                let z = u.data.z;
-                let [x0, y0, x1, y1] = u.rect;
-                // vertex stride from the projected texel size at the unit's nearest point
-                let (c, r) = crate::lod::tile_sphere(u.id, (data.elev_min, data.elev_max), &self.ell);
-                let dmin = ((c - cam.pos).length() - r).max(1.0);
-                let lat_c = u.id.center().0;
-                let texel = gsd_ew(lat_c, z, 256, &self.ell);
-                let proj = texel / dmin * focal / ss as f64; // output px per texel
-                let mut stride = 1u32;
-                while stride < 32 && (stride * 2) as f64 * proj <= self.settings.mesh_px && (x1 - x0) / (stride * 2) >= 2 {
-                    stride *= 2;
-                }
-                let nx = ((x1 - x0) / stride) as usize + 1;
-                let ny = ((y1 - y0) / stride) as usize + 1;
-                let gx0 = u.data.x as i64 * 256 + x0 as i64;
-                let gy0 = u.data.y as i64 * 256 + y0 as i64;
-                // separable trig
-                let cols: Vec<(f64, f64)> = (0..nx).map(|i| lon_of((gx0 + (i as i64) * stride as i64) as f64, z).sin_cos()).collect();
-                let rows: Vec<(f64, f64, f64)> = (0..ny)
-                    .map(|j| {
-                        let lat = lat_of((gy0 + (j as i64) * stride as i64) as f64, z);
-                        let (s, c) = lat.sin_cos();
-                        let nrad = self.ell.a / (1.0 - e2 * s * s).sqrt();
-                        (s, c, nrad)
-                    })
-                    .collect();
-                let to_vert = |i: usize, j: usize, hgt: f64| -> Vert {
-                    let (so, co) = cols[i];
-                    let (s, c, nrad) = rows[j];
-                    let p = DVec3::new((nrad + hgt) * c * co, (nrad + hgt) * c * so, (nrad * (1.0 - e2) + hgt) * s);
+                let (stride, texel) = self.unit_stride(cam, u, &data);
+                let g = self.unit_geometry(u, &data, stride, texel, view);
+                let (nx, ny) = (g.nx, g.ny);
+                let to_vert = |p: DVec3, uv: [f32; 2]| -> Vert {
                     let pc = rt * (p - cam.pos);
                     let mut v = Vert {
                         // range (not z): valid for wide-angle models beyond 90°
                         z: pc.length(),
-                        u: (x0 + i as u32 * stride) as f32,
-                        v: (y0 + j as u32 * stride) as f32,
+                        u: uv[0],
+                        v: uv[1],
                         ..Default::default()
                     };
                     let len = pc.length();
@@ -617,46 +681,8 @@ impl Renderer {
                     }
                     v
                 };
-                let corner_h = |i: usize, j: usize| -> f64 {
-                    let gx = gx0 + (i as i64) * stride as i64;
-                    let gy = gy0 + (j as i64) * stride as i64;
-                    let a = view.elev_px(z, gx - 1, gy - 1, &data);
-                    let b = view.elev_px(z, gx, gy - 1, &data);
-                    let c = view.elev_px(z, gx - 1, gy, &data);
-                    let d = view.elev_px(z, gx, gy, &data);
-                    0.25 * (a + b + c + d) as f64
-                };
-                let mut verts = Vec::with_capacity(nx * ny);
-                let mut heights = Vec::with_capacity(nx * ny);
-                for j in 0..ny {
-                    for i in 0..nx {
-                        let hh = corner_h(i, j);
-                        heights.push(hh);
-                        verts.push(to_vert(i, j, hh));
-                    }
-                }
-                // skirts along the border ring
-                let skirt_depth = (4.0 * texel * stride as f64 + 2.0).min(800.0);
-                let mut ring = Vec::new();
-                for i in 0..nx {
-                    ring.push((i, 0));
-                }
-                for j in 1..ny {
-                    ring.push((nx - 1, j));
-                }
-                for i in (0..nx - 1).rev() {
-                    ring.push((i, ny - 1));
-                }
-                for j in (1..ny - 1).rev() {
-                    ring.push((0, j));
-                }
-                let skirt: Vec<(usize, Vert)> = ring
-                    .iter()
-                    .map(|&(i, j)| {
-                        let k = j * nx + i;
-                        (k, to_vert(i, j, heights[k] - skirt_depth))
-                    })
-                    .collect();
+                let verts: Vec<Vert> = g.ecef.iter().zip(&g.uv).map(|(p, uv)| to_vert(*p, *uv)).collect();
+                let skirt: Vec<(usize, Vert)> = g.ring.iter().zip(&g.skirt).map(|(&k, p)| (k, to_vert(*p, g.uv[k]))).collect();
                 let mut bbox = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
                 let mut any = false;
                 let mut row_y = Vec::with_capacity(ny.saturating_sub(1));

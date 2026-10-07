@@ -36,6 +36,20 @@ pub trait CameraModel: Send + Sync + std::fmt::Debug {
     fn scaled(&self, s: u32) -> Arc<dyn CameraModel>;
     /// Serializable description (camodocal YAML schema).
     fn config(&self) -> CameraConfig;
+    /// Projection parameters for the GPU vertex shader (see `GpuCamera`).
+    fn gpu(&self) -> GpuCamera;
+}
+
+/// A camera model's projection in a flat form for the GPU (`project` in mesh.wgsl):
+/// kind 0 pinhole [fx fy cx cy k1 k2 p1 p2], 1 pinhole_full [fx fy cx cy k1 k2 p1 p2 k3 k4 k5 k6],
+/// 2 kannala_brandt [mu mv u0 v0 k2 k3 k4 k5 max_theta], 3 mei [g1 g2 u0 v0 xi k1 k2 p1 p2],
+/// 4 scaramuzza [C D E cx cy n c0 .. c(n-1)] (n ≤ 10); rays beyond `angle_limit` from +z are
+/// not imageable.
+#[derive(Clone, Copy, Debug)]
+pub struct GpuCamera {
+    pub kind: u32,
+    pub p: [f32; 16],
+    pub angle_limit: f64,
 }
 
 fn is_zero(v: &f64) -> bool {
@@ -178,6 +192,8 @@ trait Proj: Clone + Send + Sync + std::fmt::Debug + 'static {
     fn cfg(&self, w: u32, h: u32) -> CameraConfig;
     /// Principal point (where the optical axis lands), for domain / focal estimates.
     fn principal(&self) -> DVec2;
+    /// (kind, parameters) for `GpuCamera`.
+    fn gpu(&self) -> (u32, Vec<f64>);
 }
 
 /// Gauss–Newton inversion of a 2D map with a numeric Jacobian.
@@ -256,6 +272,9 @@ impl Proj for Pinhole {
         c.distortion = vec![self.k1, self.k2, self.p1, self.p2];
         c
     }
+    fn gpu(&self) -> (u32, Vec<f64>) {
+        (0, vec![self.fx, self.fy, self.cx, self.cy, self.k1, self.k2, self.p1, self.p2])
+    }
     fn principal(&self) -> DVec2 {
         DVec2::new(self.cx, self.cy)
     }
@@ -313,6 +332,9 @@ impl Proj for PinholeFull {
         c.intrinsics = vec![self.fx, self.fy, self.cx, self.cy];
         c.distortion = vec![self.k1, self.k2, self.p1, self.p2, self.k3, self.k4, self.k5, self.k6];
         c
+    }
+    fn gpu(&self) -> (u32, Vec<f64>) {
+        (1, vec![self.fx, self.fy, self.cx, self.cy, self.k1, self.k2, self.p1, self.p2, self.k3, self.k4, self.k5, self.k6])
     }
     fn principal(&self) -> DVec2 {
         DVec2::new(self.cx, self.cy)
@@ -394,6 +416,9 @@ impl Proj for KannalaBrandt {
         c.max_fov_deg = self.max_fov_deg;
         c
     }
+    fn gpu(&self) -> (u32, Vec<f64>) {
+        (2, vec![self.mu, self.mv, self.u0, self.v0, self.k2, self.k3, self.k4, self.k5, self.max_theta])
+    }
     fn principal(&self) -> DVec2 {
         DVec2::new(self.u0, self.v0)
     }
@@ -446,6 +471,9 @@ impl Proj for Mei {
         c.distortion = vec![self.k1, self.k2, self.p1, self.p2];
         c.xi = self.xi;
         c
+    }
+    fn gpu(&self) -> (u32, Vec<f64>) {
+        (3, vec![self.gamma1, self.gamma2, self.u0, self.v0, self.xi, self.k1, self.k2, self.p1, self.p2])
     }
     fn principal(&self) -> DVec2 {
         DVec2::new(self.u0, self.v0)
@@ -528,6 +556,11 @@ impl Proj for Scaramuzza {
         c.affine = vec![self.c, self.d, self.e];
         c.center = vec![self.center_x, self.center_y];
         c
+    }
+    fn gpu(&self) -> (u32, Vec<f64>) {
+        let mut v = vec![self.c, self.d, self.e, self.center_x, self.center_y, self.inv_poly.len() as f64];
+        v.extend(&self.inv_poly);
+        (4, v)
     }
     fn principal(&self) -> DVec2 {
         DVec2::new(self.center_x, self.center_y)
@@ -638,6 +671,15 @@ impl<M: Proj> CameraModel for Cam<M> {
     }
     fn config(&self) -> CameraConfig {
         self.m.cfg(self.w, self.h)
+    }
+    fn gpu(&self) -> GpuCamera {
+        let (kind, v) = self.m.gpu();
+        assert!(v.len() <= 16, "camera model has too many parameters for the GPU (scaramuzza: at most 10 coefficients)");
+        let mut p = [0f32; 16];
+        for (d, x) in p.iter_mut().zip(&v) {
+            *d = *x as f32;
+        }
+        GpuCamera { kind, p, angle_limit: self.angle_limit }
     }
 }
 
