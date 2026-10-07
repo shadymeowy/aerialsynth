@@ -13,6 +13,7 @@ video:
   height: 1080
   fps: 25
   crossfade: 0.6
+  coords: true        # small lat / lon / height / UTC readout on every shot
   title: "aerialsynth"
   subtitle: "A procedural planet for aerial vision"
   tagline: "Every frame below is rendered from generated tiles — no imagery, no elevation data."

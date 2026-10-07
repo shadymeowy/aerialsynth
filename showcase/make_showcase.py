@@ -739,13 +739,50 @@ def compose(base, story, out_mp4, shots_scn, preview_seconds=None):
     print(f"wrote {out_mp4}: {written} frames, {written / fps:.1f} s")
 
 
+def geo_readout(scn, shot, video):
+    """Per output frame k: 'lat, lon · height · UTC' of the flight at that frame (pose of the
+    sequence, the scenario's clock incl. its time-lapse factor), or None."""
+    import datetime
+    f = h5py.File(scn["output"]["file"], "r")
+    if "/cam0" not in f or "pose" not in f:
+        return lambda k: None
+    ts = f["/cam0"]["t"][:]
+    pt, lla = f["pose/t"][:], f["pose/lla"][:]
+    t0 = float(f.attrs.get("t0", 0.0))
+    light = yaml.safe_load(f.attrs["scenario"])["render"]["lighting"]
+    day = light["date"] if isinstance(light["date"], datetime.date) else datetime.date.fromisoformat(str(light["date"]))
+    tu = light["time_utc"]
+    if not isinstance(tu, (int, float)):
+        hh, mm, *ss = (float(v) for v in str(tu).split(":"))
+        tu = hh * 3600 + mm * 60 + (ss[0] if ss else 0.0)
+    base = datetime.datetime.combine(day, datetime.time()) + datetime.timedelta(seconds=float(tu))
+    scale = float(light.get("time_scale", 1.0)) if light.get("mode", "fixed") == "clock" else 0.0
+    k0 = int(round(shot.get("offset", 0.0) * video["fps"])) if shot.get("layout") == "events" else 0
+
+    def text(k):
+        t = ts[min(k0 + k, len(ts) - 1)]
+        lat, lon, h = (np.interp(t, pt, lla[:, i]) for i in range(3))
+        utc = base + datetime.timedelta(seconds=(t0 + t / 1e6) * scale)
+        return (f"{abs(lat):.4f}°{'N' if lat >= 0 else 'S'}  {abs(lon):.4f}°{'E' if lon >= 0 else 'W'}  ·  {h:,.0f} m  ·  "
+                f"{utc:%Y-%m-%d %H:%M:%S} UTC")
+    return text
+
+
 def shot_frames(shot, scn, video, band):
     W, H, fps = video["width"], video["height"], video["fps"]
     dur = shot["seconds"] + video["crossfade"]
+    geo = geo_readout(scn, shot, video) if video.get("coords") else (lambda k: None)
     frames = []
     for k, fr in enumerate(shot_stream(shot, scn, video)):
         if k >= int(round(dur * fps)):
             break
+        txt = geo(k)
+        if txt:
+            # small readout, top right, fading with the caption
+            a = ease((k / fps - 0.35) / 0.45) * ease((dur - k / fps - 0.15) / 0.45)
+            if a > 0:
+                lay = text_layer((W, H), [((W - u(14), u(12)), txt, FONTS.get("medium", u(13)), 0.85 * a, "ra")])
+                fr = np.asarray(Image.alpha_composite(Image.fromarray(fr).convert("RGBA"), lay).convert("RGB"))
         frames.append(caption(fr, shot["label"], shot["text"], k / fps, dur, W, H, band))
     return frames
 
