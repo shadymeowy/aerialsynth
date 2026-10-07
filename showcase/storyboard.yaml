@@ -42,8 +42,8 @@ shots:
           optics: {bloom: 0.03}
     render:
       lighting: {date: '2026-03-03', moon_intensity: 40.0, time_utc: '17:40:00'}
-      # the real sky, but stars drawn brighter (as the moonlight, which is 40x): the shot's look
-      stars: {brightness: 60.0}
+      # the real sky exposed like a long night photograph (stars 400x, moonlight 40x): the shot's look
+      stars: {brightness: 400.0}
     trajectory:
       synth: {altitude: 1300, heading_deg: 95, kind: line, lat: 39.17, lon: 33.62}
   seconds: 6
