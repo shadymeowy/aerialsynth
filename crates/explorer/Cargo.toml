@@ -1,0 +1,25 @@
+[package]
+name = "explorer"
+version.workspace = true
+edition.workspace = true
+description = "Interactive globe tile explorer: browse a tile store, generate tiles as you go"
+
+[[bin]]
+name = "terrain-explorer"
+path = "src/main.rs"
+
+[dependencies]
+geodesy.workspace = true
+tilestore.workspace = true
+terragen.workspace = true
+glam.workspace = true
+anyhow.workspace = true
+rayon.workspace = true
+clap.workspace = true
+serde_yaml.workspace = true
+parking_lot.workspace = true
+bytemuck.workspace = true
+eframe = { version = "0.36", default-features = false, features = ["wgpu", "default_fonts", "x11", "wayland"] }
+half = { version = "2", features = ["bytemuck"] }
+pollster.workspace = true
+image.workspace = true

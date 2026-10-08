@@ -42,6 +42,34 @@ python scripts/view_seq.py out/quick/seq.h5 view.png  # rgb | depth | flow | val
 | `info`    | summarize a tile store / sequence file |
 | `preview` | generate tiles straight into a PNG mosaic (`--layers rgb,albedo,elevation,normal,landcover,hillshade`) |
 
+### Globe explorer
+
+`terrain-explorer` (crate `explorer`, wgpu + egui) shows a tile store as a globe you can fly
+over:
+
+```
+cargo run --release -p explorer -- --store out/explorer/world.h5 --seed 1 --dynamic
+```
+
+- **On start:** levels 0..=`--base-zoom` (default 4) are generated for the whole planet if they
+  are missing (z0–z4: 341 tiles, ~4 min on 8 threads).
+- **Streaming:** the view loads the tiles it needs from the store, choosing the level by
+  on-screen texel size.
+- **Dynamic generation:** with *Generate missing tiles as you fly* on (`--dynamic`), missing
+  tiles down to `--max-zoom` are generated and written to the store. With it off, only stored
+  tiles are shown.
+- **Store and world:** an existing store keeps its own world config, and opening it with a
+  different `--config`/`--seed` is refused, so worlds never mix.
+- **View modes:** surface (albedo, lit), elevation, land cover, relief. Further controls:
+  relief exaggeration, tile borders coloured by level, and level-of-detail bias.
+- **Controls:** drag to move, right drag to turn and tilt, scroll to zoom, double click to fly
+  to a point.
+- **Headless snapshot:** `--snapshot out.png --view lat,lon,km,heading,tilt [--exag 2 --mode
+  relief --size 1280x800]` renders one view without a window, once its tiles are in.
+
+Run it on the machine's own display. Over SSH X forwarding, every frame goes through the
+forwarded X server and is slow.
+
 All subcommands read **one scenario YAML** (`-c`) with the sections `world`, `tiles`,
 `trajectory`, `render`, `cameras`, `imu` and `output`. See `configs/*.yaml`, or run
 `terrain config` for the complete list with defaults.
@@ -270,6 +298,7 @@ crates/tilestore  HDF5 tile pyramid (layout above), parallel codec
 crates/terragen   procedural terrain generator
 crates/render     camera, trajectories/dynamics, LOD, rasterizer, lighting, sensor, writers, pipeline
 crates/cli        `terrain` binary (the aerialsynth CLI)
+crates/explorer   `terrain-explorer`: interactive globe of a tile store (wgpu + egui), generates as you go
 scripts/          contact.py (generator contact sheets), check_gt.py + cammodels.py (camera GT, all models), check_imu.py, check_events.py, seqio.py, view_seq.py, view_events.py
 docs/events.md    event camera modality: options, sensor model, format
 docs/stars.md     star catalogue, astrometry, brightness, star ground truth
