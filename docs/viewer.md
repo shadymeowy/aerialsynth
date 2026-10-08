@@ -61,7 +61,7 @@ forwarding it runs, but slowly.
 | `--exag`, `--mode` | 1, surface | map relief exaggeration and shading |
 | `--gpu-tiles` | 1536 | map tiles on the GPU (768 KB each) |
 | `--snapshot PNG --view … --wait S --size WxH` | | a headless map view into a PNG (below) |
-| `--record DIR --path FILE --fps N` | 25 fps | a headless keyframed map flight into PNG frames (below) |
+| `--record DIR --path FILE --fps N --until S` | 25 fps | a headless keyframed map flight into PNG frames (below) |
 
 ## How it works
 
@@ -133,7 +133,8 @@ seconds). `DIR/frames.csv` gives each frame's time, the camera pose as a traject
 `lon`, `h`, and `roll`, `pitch`, `yaw` of a forward-looking body, the columns `terrain run`
 reads), the distance to the target and the finest zoom level drawn: the dataset renderer can fly
 the same path. The showcase opens with one (`showcase/globe/dive.yaml`), handed over to the
-dataset renderer 6 km above the ground.
+dataset renderer 6 km above the ground. `--until S` saves the frames up to S seconds only; the
+camera path in `frames.csv` goes on to the last key.
 
 ```yaml
 keys:     # the orbit camera: target lat / lon (deg), distance (km), heading / tilt / fov (deg), exag

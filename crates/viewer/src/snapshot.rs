@@ -185,8 +185,8 @@ pub(crate) fn headless_device() -> Result<(wgpu::Device, wgpu::Queue)> {
     })
 }
 
-/// Record a keyframed map flight into `dir/frame_00000.png`, … at `fps`: every frame is
-/// captured once its tiles are in (or after `args.wait` seconds). `dir/frames.csv` gives each
+/// Record a keyframed map flight into `dir/frame_00000.png`, … at `fps` (up to `args.until`):
+/// every frame is captured once its tiles are in (or after `args.wait` seconds). `dir/frames.csv` gives each
 /// frame's time, the camera pose as a trajectory (position in deg / m above the ellipsoid;
 /// roll / pitch / yaw in deg of a forward-looking FRD body, as `terrain run` reads them), the
 /// distance to the target (km), the shading mode and the finest zoom level drawn.
@@ -228,10 +228,13 @@ pub(crate) fn record(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Generat
         let (mut cam, exag) = at_time(&keys, t);
         let now = look_at(&look, t, true);
         let mode = now.0.clone().unwrap_or_else(|| args.mode.clone());
+        // after --until: the camera path only
+        let saved = args.until.is_none_or(|u| t <= u + 1e-9);
+        let wait = if saved { args.wait } else { args.wait.min(3.0) };
         // the frame (and while a switch dissolves, the frame in the look before it)
         let layers = match fading(&look, t) {
-            Some((before, a)) => vec![(settings(before, exag), 1.0 - a), (settings(now, exag), a)],
-            None => vec![(settings(now, exag), 1.0)],
+            Some((before, a)) if saved => vec![(settings(before, exag), 1.0 - a), (settings(now, exag), a)],
+            _ => vec![(settings(now, exag), 1.0)],
         };
         let mut px = vec![0f32; (w * h * 4) as usize];
         let mut max_zoom = 0;
@@ -242,19 +245,24 @@ pub(crate) fn record(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Generat
                 cam.target_h = globe.height_at(cam.lat, cam.lon, 22).unwrap_or(0.0).max(0.0) * exag;
                 globe.render(&cam.frame(&ell, w as f64 / h as f64), s, &svc, w, h, None);
                 calm = if globe.settled(&svc) { calm + 1 } else { 0 };
-                if calm >= 3 || tf.elapsed().as_secs_f64() > args.wait {
+                if calm >= 3 || tf.elapsed().as_secs_f64() > wait {
                     break;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            max_zoom = max_zoom.max(globe.stats.max_zoom_drawn);
+            if !saved {
+                break;
             }
             let (_, _, img) = globe.read_image().context("reading the image back")?;
             for (o, &v) in px.iter_mut().zip(&img) {
                 *o += v as f32 * *weight as f32;
             }
-            max_zoom = max_zoom.max(globe.stats.max_zoom_drawn);
         }
-        let img: Vec<u8> = px.iter().map(|v| v.round().clamp(0.0, 255.0) as u8).collect();
-        image::save_buffer(dir.join(format!("frame_{k:05}.png")), &img, w, h, image::ExtendedColorType::Rgba8)?;
+        if saved {
+            let img: Vec<u8> = px.iter().map(|v| v.round().clamp(0.0, 255.0) as u8).collect();
+            image::save_buffer(dir.join(format!("frame_{k:05}.png")), &img, w, h, image::ExtendedColorType::Rgba8)?;
+        }
         let f = cam.frame(&ell, w as f64 / h as f64);
         let eye = ecef2geodetic(f.eye, &ell);
         let (roll, pitch, yaw) = attitude(&f, eye.lat, eye.lon);

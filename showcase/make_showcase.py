@@ -103,18 +103,25 @@ def render_globe(base, shot, video, force=False):
     path = os.path.join(HERE, shot["path"])
     size = f"{video['width']}x{video['height']}"
     text = yaml.safe_dump(scn, sort_keys=False)
-    digest = hashlib.sha1((text + open(path).read() + f"{size} {video['fps']}").encode()).hexdigest()
+    # (the frames shown; the camera path goes on to the end of the flight, for a `follows` shot)
+    until = shot["seconds"] + video["crossfade"]
+    digest = hashlib.sha1((text + open(path).read() + f"{size} {video['fps']} {until}").encode()).hexdigest()
     stamp = os.path.join(d, "scenario.done")
     if not force and os.path.exists(stamp) and open(stamp).read() == digest and os.path.exists(scn["output"]["file"]):
         print(f"[{sid}] up to date")
         return scn
     with open(os.path.join(d, "scenario.yaml"), "w") as f:
         f.write(text)
+    frames = os.path.dirname(scn["output"]["file"])
+    if os.path.isdir(frames):
+        for n in os.listdir(frames):  # (a shorter recording leaves no stale frames)
+            if n.startswith("frame_") and n.endswith(".png") or n == "frames.csv":
+                os.remove(os.path.join(frames, n))
     t0 = time.time()
     print(f"[{sid}] recording the globe flight …", flush=True)
     log = open(os.path.join(d, "scenario.log"), "w")
-    cmd = [TERRAIN, "view", "-c", os.path.join(d, "scenario.yaml"), "--record", os.path.dirname(scn["output"]["file"]),
-           "--path", path, "--fps", str(video["fps"]), "--size", size, "--wait", "120"]
+    cmd = [TERRAIN, "view", "-c", os.path.join(d, "scenario.yaml"), "--record", frames,
+           "--path", path, "--fps", str(video["fps"]), "--size", size, "--wait", "120", "--until", f"{until:.3f}"]
     if subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT).returncode != 0:
         raise SystemExit(f"[{sid}] terrain view failed, see {log.name}")
     with open(stamp, "w") as f:
