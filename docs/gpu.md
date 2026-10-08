@@ -101,7 +101,8 @@ writes CPU | GPU | |difference| side by side.
 ## Tile generation
 
 `tiles.generator: auto` (default) generates tiles on the GPU when it has 64-bit float and
-integer shaders (`SHADER_F64`, `SHADER_INT64`: Vulkan on NVIDIA and AMD), else on the CPU;
+integer shaders with 64-bit atomics (`SHADER_F64`, `SHADER_INT64`,
+`SHADER_INT64_ATOMIC_ALL_OPS`: Vulkan on NVIDIA and recent AMD), else on the CPU;
 `gpu` / `cpu` force one. The GPU generator (`terragen::gpu`) is the CPU generator ported to WGSL
 and builds the same world:
 
@@ -116,8 +117,9 @@ and builds the same world:
   coarse grid, relief, river carving, lakes, land use, the surface with its trees, fields, towns
   and lights, the canopy opening and the output layers.
   * **Drainage network** (`drain.wgsl`): the jittered lattice points of every level live in a
-    GPU hash table kept across batches. The table holds their heights, flow targets (steepest
-    descent), sources, and each query's channel pieces, gathered in the CPU's lattice order.
+    GPU hash table kept across batches (8M points, ~0.5 GB, emptied when 60% full). The table
+    holds their heights, flow targets (steepest descent) and sources; each query's channel
+    pieces are gathered from it in the CPU's lattice order.
   * **Host** (`gpu/host.rs`): only site lists remain: lake levels (minimum over the rim), sink
     lakes, land-use regions, towns and their overlaps. Their inputs come from batched GPU point
     evaluations, cached across batches. The GPU reports which lakes, regions and town cells a
