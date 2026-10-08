@@ -375,7 +375,9 @@ pub fn view(a: ViewArgs) -> Result<()> {
 pub struct ConfigArgs {
     #[command(flatten)]
     pub common: Common,
-    /// Every setting with its default (without -c: the short template of the main ones).
+    /// Every setting with its default instead of the short template (with -c the whole resolved
+    /// scenario is printed anyway). Sections that are off by default (a camera's events, stars)
+    /// show their settings only when turned on, e.g. `events: {}` in a scenario given with -c.
     #[arg(long)]
     pub all: bool,
 }

@@ -12,6 +12,15 @@ independently of the simulator:
 The truth rebuild needs /pose finer than the IMU window (e.g. output.pose.rate_hz: 1000 with a
 1 kHz trajectory); at the IMU rate it is only approximate under engine vibration.
 
+Tolerances (exit 1 if one fails; measured with configs/examples/imu_check.yaml, 1 kHz /pose):
+* gyro truth: RMS ≤ 1e-6 rad/s (measured 3e-10); with /pose coarser than 4 samples per IMU
+  window, ≤ 1e-6 + 1% of the dynamic rate (measured 3e-5 at 200 Hz),
+* accel truth: RMS ≤ 2e-3 m/s² + 10% of the lever-arm term (the simulation step discretizes
+  it: ~5% at 1 ms; measured 1e-4 without, 0.27 m/s² with the example's lever arm under engine
+  vibration); with a coarse /pose, + 0.02 m/s² + 5% of the dynamic part (measured 5e-3 at
+  200 Hz: the unresolved vibration),
+* white noise and bias walk per sample: 0.8 to 1.25 times the configured σ.
+
 usage: check_imu.py SEQ.h5
 """
 import os, sys
@@ -59,20 +68,37 @@ T = I["calib/T_body_imu"][:]
 R_bi, lever = T[:3, :3], T[:3, 3]
 print(f"{imu_cfg['path']}: {len(ti)} samples at {1/dt:.1f} Hz (configured {imu_cfg['rate_hz']}); "
       f"/pose at {1/np.median(np.diff(tp)):.0f} Hz; lever arm {lever} m")
-assert np.all(np.diff(ti) > 0), "IMU timestamps not increasing"
-assert np.allclose(np.diff(ti), dt, atol=2e-6), "IMU timestamps not uniform"
+failures, checked = [], 0
+
+
+def verdict(name, ok, detail):
+    global checked
+    checked += 1
+    print(f"  {'PASS' if ok else 'FAIL'} {name}: {detail}")
+    if not ok:
+        failures.append(name)
+
+
+verdict("timestamps", bool(np.all(np.diff(ti) > 0) and np.allclose(np.diff(ti), dt, atol=2e-6)), "increasing and uniform")
 
 # ---- truth per /pose interval (τ[j-1], τ[j]] (the IMU semantics: means over intervals)
 h = np.median(np.diff(tp))
-p_imu = pos + np.einsum("nij,j->ni", R_eb, lever)          # IMU point (lever arm)
 Om = np.array([0, 0, EARTH_RATE])
-# instantaneous specific force at the interior samples (ECEF → body)
-v = (p_imu[2:] - p_imu[:-2]) / (2 * h)
-a = (p_imu[2:] - 2 * p_imu[1:-1] + p_imu[:-2]) / h ** 2
 lat, lon, hgt = lla[1:-1, 0], lla[1:-1, 1], P["lla"][1:-1, 2]
-f_e = a + 2 * np.cross(Om, v) + normal_gravity(lat, hgt)[:, None] * up_vector(lat, lon)
-f_s = np.einsum("nji,nj->ni", R_eb[1:-1], f_e)              # samples 1..n-2
-f_int = 0.5 * (f_s[1:] + f_s[:-1])                           # intervals (2..n-2]
+
+
+def specific_force(p):
+    """Specific force of the ECEF track p per /pose interval, in the body frame (instantaneous
+    at the interior samples, then averaged over the intervals)."""
+    v = (p[2:] - p[:-2]) / (2 * h)
+    a = (p[2:] - 2 * p[1:-1] + p[:-2]) / h ** 2
+    f_e = a + 2 * np.cross(Om, v) + normal_gravity(lat, hgt)[:, None] * up_vector(lat, lon)
+    f_s = np.einsum("nji,nj->ni", R_eb[1:-1], f_e)          # samples 1..n-2
+    return 0.5 * (f_s[1:] + f_s[:-1])                        # intervals (2..n-2]
+
+
+f_int = specific_force(pos + np.einsum("nij,j->ni", R_eb, lever))   # the IMU point (lever arm)
+f_int0 = specific_force(pos)                                          # the body origin
 # body rate: attitude difference over each interval + Earth rate
 w_all = rot_log(np.einsum("nji,njk->nik", R_eb[:-1], R_eb[1:])) / h + np.einsum("nji,j->ni", R_eb[1:], Om)
 w_int = w_all[1:-1]                                          # same intervals as f_int
@@ -87,22 +113,28 @@ def window_mean(x, t):
 
 rows = []
 for k, t in enumerate(ti):
-    fw, ww = window_mean(f_int, t), window_mean(w_int, t)
+    fw, ww, f0 = window_mean(f_int, t), window_mean(w_int, t), window_mean(f_int0, t)
     if fw is not None:
-        rows.append((k, R_bi.T @ fw, R_bi.T @ ww))
+        rows.append((k, R_bi.T @ fw, R_bi.T @ ww, R_bi.T @ (fw - f0)))
 if not rows:
     raise SystemExit("/pose too coarse for windowed truth (need several samples per IMU window)")
 k = np.array([r[0] for r in rows])
 f_ref = np.array([r[1] for r in rows])
 w_ref = np.array([r[2] for r in rows])
+lever_term = np.array([r[3] for r in rows])
 ga, gg = I["gt_accel"][:][k], I["gt_gyro"][:][k]
 rms = lambda x: float(np.sqrt(np.mean(np.sum(x ** 2, -1))))
 dyn = lambda x: x - x.mean(0)
 pose_rate = 1 / np.median(np.diff(tp))
 coarse = pose_rate < 4 / dt
 print(f"truth over {len(k)} samples:" + (f"  [/pose at {pose_rate:.0f} Hz is too coarse for an exact rebuild (want ≥ {4 / dt:.0f} Hz): indicative only under vibration]" if coarse else ""))
-print(f"  gt_accel - rebuilt: RMS {rms(ga - f_ref):.4f} m/s²  (signal RMS {rms(f_ref):.3f}, dynamic part {rms(dyn(f_ref)):.3f})")
-print(f"  gt_gyro  - rebuilt: RMS {rms(gg - w_ref):.2e} rad/s (signal RMS {rms(w_ref):.2e}, dynamic part {rms(dyn(w_ref)):.2e})")
+tol_a = 2e-3 + 0.10 * rms(lever_term) + (0.02 + 0.05 * rms(dyn(f_ref)) if coarse else 0.0)
+tol_w = 1e-6 + (0.01 * rms(dyn(w_ref)) if coarse else 0.0)
+verdict("gt_accel vs rebuilt", rms(ga - f_ref) <= tol_a,
+        f"RMS {rms(ga - f_ref):.4f} m/s² (≤ {tol_a:.4f}; signal RMS {rms(f_ref):.3f}, dynamic part {rms(dyn(f_ref)):.3f}, "
+        f"lever-arm term {rms(lever_term):.3f})")
+verdict("gt_gyro vs rebuilt", rms(gg - w_ref) <= tol_w,
+        f"RMS {rms(gg - w_ref):.2e} rad/s (≤ {tol_w:.1e}; signal RMS {rms(w_ref):.2e}, dynamic part {rms(dyn(w_ref)):.2e})")
 g_norm = np.linalg.norm(f_ref, axis=1).mean()
 print(f"  mean |f| {g_norm:.4f} m/s² (normal gravity {normal_gravity(lla[:, 0].mean(), P['lla'][:, 2].mean()):.4f})")
 
@@ -115,4 +147,10 @@ for name, meas, gt, bias, c in [("accel", "accel", "gt_accel", "gt_bias_accel", 
     want = c["noise_density"] / np.sqrt(dt)
     rw = np.diff(b, axis=0).std(0)
     want_rw = c["random_walk"] * np.sqrt(dt)
-    print(f"{name}: white noise σ {wn.mean():.3e} (configured {want:.3e}); bias walk per sample σ {rw.mean():.3e} (configured {want_rw:.3e})")
+    verdict(f"{name} white noise", 0.8 <= wn.mean() / want <= 1.25, f"σ {wn.mean():.3e} (configured {want:.3e})")
+    if want_rw > 0:
+        verdict(f"{name} bias walk", 0.8 <= rw.mean() / want_rw <= 1.25, f"per sample σ {rw.mean():.3e} (configured {want_rw:.3e})")
+if failures:
+    print(f"FAIL: {len(failures)} of {checked} checks failed")
+    sys.exit(1)
+print(f"PASS: {checked} checks")

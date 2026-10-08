@@ -4,7 +4,9 @@
 #   label:    small caption, bottom left          text: feature description, bottom right
 #   seconds:  shown duration (shots cross-fade by `video.crossfade` seconds)
 #   layout:   single (default) | grid (2x2 of four cameras) | modalities | map | globe (a map
-#             flight recorded by `terrain view --record`: `path` is its keyframes file)
+#             flight recorded by `terrain view --record`: `path` is its keyframes file) |
+#             events (another shot's event camera full screen: `source` that shot, `offset`
+#             seconds into its flight, `window_ms`; the source renders `extend` s more for it)
 #   notes:    time-coded remarks, top left: [{t, until, text}]
 #   follows:  a globe shot: fly its recorded camera path on from its end, with the dataset
 #             renderer and the globe's tile store (the hand-off from map to camera)

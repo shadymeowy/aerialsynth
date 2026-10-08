@@ -17,9 +17,9 @@ plus a per-millisecond index; we use the same data types.
 | **A. Adaptive re-rendering (ESIM)**, *implemented* | render log intensity at times chosen so image motion between renders ≤ `max_px_per_step`; interpolate per pixel between renders | exact geometry, occlusions and lighting; any camera model; the trajectory's vibration is handled naturally (dense sampling only where the image moves) | cost ∝ image motion (~0.2 s per internal render) |
 | B. Frame interpolation (v2e style), *tried and rejected* | render keyframes every few px of motion, reproject them with the exact per-pixel geometry for the steps in between | 5–7x faster | ~37% fewer events than A in textured terrain, also with 2x-resolution keyframes (see below) |
 | C. Linearized brightness constancy | `dL/dt = −∇L · flow` from one render + exact flow | very cheap | ignores occlusions and non-linear changes; poor for large motion |
-| D. GPU renderer at kHz | same as A on the GPU | real-time-ish | needs the GPU renderer (planned by the user) |
+| D. A on the GPU, *implemented* | A with the keyframes rendered and the pixel model run on the GPU (`render.backend: gpu`, the default `auto` when there is a GPU; `docs/gpu.md`) | ~11–15x faster than A on the CPU; same events statistically | random numbers not bit-identical to the CPU |
 
-A is the implementation. B was implemented and measured (commit 3138801): the reprojection
+A is the implementation, on the CPU or (D) the GPU. B was implemented and measured (commit 3138801): the reprojection
 itself is exact (image shifts match the geometric flow, identity warps are exact), but a
 pixel is a box integral of texture with detail near its Nyquist frequency, and under a
 sub-pixel shift that integral changes in ways no interpolation of the integrated image can
@@ -62,8 +62,9 @@ Unit tests (`cargo test -p render events`):
 
 ## Using it
 
-Any camera becomes an event camera by giving it an `events` subsection (all fields optional,
-see `terrain config`). It keeps its own intrinsics and extrinsics, and can carry `depth` and
+Any camera becomes an event camera by giving it an `events` subsection (all fields optional;
+`terrain config -c FILE` on a scenario with `events: {}` shows them with their defaults, since
+`terrain config --all` lists only the sections that are on by default). It keeps its own intrinsics and extrinsics, and can carry `depth` and
 `flow` ground truth at its `frame_rate` as well:
 
 ```yaml
@@ -97,10 +98,12 @@ The depth / flow of an event camera come from a separate geometry-only render at
 hot pixels, background activity) is seeded from `seed` mixed with the camera path, so two event
 cameras with the same settings get independent noise.
 
-Performance on 8 cores (VGA, supersample 2, `max_px_per_step` 0.5, ~1000 m AGL flight with
-engine vibration): about 100 s of compute per simulated second, at ~520 renders/s; the
-The events step prints renders, sensor steps and their times. The sensor model runs
-in parallel (~3 ms per step) and is not the bottleneck. Two knobs trade fidelity for speed:
+Performance of the CPU backend on 8 cores (VGA, supersample 2, `max_px_per_step` 0.5,
+~1000 m AGL flight with engine vibration): about 100 s of compute per simulated second, for
+~520 renders per simulated second; the sensor model runs in parallel (~3 ms per step) and is
+not the bottleneck. The GPU backend renders the keyframes ~15x and runs the sensor steps ~11x
+faster (`docs/gpu.md`). The events step prints renders, sensor steps and their times. Two
+knobs trade fidelity for speed:
 
 - **`max_px_per_step`:** step size limit; larger is faster and less exact.
 - **`supersample`:** 1 is faster but adds aliasing events.
@@ -117,5 +120,5 @@ direct renders to 1e-11), so only image motion triggers renders.
 
 ## Possible next steps
 
-- **GPU renderer** (option D): the only route to much faster event simulation that keeps the
-  fidelity of A.
+- **Cheaper keyframes:** with the GPU backend (option D, done) the cost is still the keyframe
+  renders, which scale with image motion; reprojecting keyframes (B) lost too many events.

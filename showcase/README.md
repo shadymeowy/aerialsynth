@@ -9,7 +9,7 @@ python showcase/make_showcase.py          # renders every shot, writes out/showc
 
 | file | what |
 |------|------|
-| `base.yaml` | base scenario of every shot: one world (seed 1), one shared tile store, 1280×720 camera, sensor look |
+| `base.yaml` | base scenario of every shot: one world (seed 1), one shared tile store, 1920×1080 camera, sensor look |
 | `storyboard.yaml` | the shots: caption (bottom left), description (bottom right), duration, layout and the scenario overrides (deep-merged onto `base.yaml`) |
 | `make_showcase.py` | renders the shots with `terrain run`, composes the video (captions, cross-fades, title collage, 2×2 panels, tile map, outro) and pipes it into ffmpeg (H.264) |
 | `fonts/` | Noto Sans Light / Medium (SIL Open Font License, `fonts/OFL.txt`) |
@@ -22,9 +22,10 @@ All shots share one planet: the places (farmland at 39.9°N 32.8°E, the snow-ca
 
 | layout | shows |
 |--------|-------|
-| single | farmland, river valley, mountains, town, coast, forest, golden hour, day→night time-lapse, night towns, full moon, 10 km cruise, 60 m treetop flight, steep turns, vibration motion blur, 200° fisheye |
+| single | farmland, river valley, mountains, town, coast, forest, golden hour, day→night time-lapse, night towns, full moon, 10 km cruise, 120 m low flight, steep turns, vibration motion blur, 200° fisheye |
 | grid | camera models from one pose (pinhole, distorted pinhole, Kannala–Brandt 190°, Mei 200°); a four-camera rig (nadir, forward, left / right oblique) |
-| modalities | RGB, depth (normalised to the frame's maximum), optical flow (Middlebury colour wheel), events (10 ms, ON red / OFF blue) of one camera |
+| modalities | RGB, depth (normalised to the frame's 98th percentile), optical flow (Middlebury colour wheel), events (10 ms, ON red / OFF blue) of one camera |
+| events | the event camera of another shot full screen (`source`: that shot; `offset`: seconds into its flight, i.e. the continuation after the source's own segment, which renders `extend` seconds more for it; `window_ms`, `camera`) |
 | globe | the opening: the planet turning through its map layers (surface, elevation, land cover), then a dive through the tile pyramid (borders coloured by zoom) down to the first shot; a keyframed map flight (`globe/dive.yaml`) recorded by `terrain view --record` into its own tile store |
 | follows | the globe's recorded camera path flown on by the dataset renderer (`descent`): the hand-off from the map to the camera, 6 km above the ground |
 | map | a sped-up flight next to a 2D mosaic of its XYZ tiles: whole trajectory, current position, camera footprint (from depth), the planned LOD tiles coloured by zoom, altitude profile |
@@ -32,15 +33,22 @@ All shots share one planet: the places (farmland at 39.9°N 32.8°E, the snow-ca
 ## Options
 
 ```
-python showcase/make_showcase.py --stills          # framing check: 3 small frames per shot → out/showcase/stills.png
-python showcase/make_showcase.py --only coast      # (re)render one shot
-python showcase/make_showcase.py --compose-only    # re-compose from rendered shots (captions, timing)
+python showcase/make_showcase.py --stills          # framing check: small frames per shot → out/showcase/stills.png
+python showcase/make_showcase.py --only coast      # (re)render one shot and its clip (no final video)
+python showcase/make_showcase.py --compose-only    # no rendering: re-compose changed clips, assemble the video
+python showcase/make_showcase.py --only coast --compose-only   # the same for one shot's clip
+python showcase/make_showcase.py --full-compose    # compose every frame from the sequences instead of joining clips
+python showcase/make_showcase.py --force           # re-render even if up to date
+python showcase/make_showcase.py --story showcase/scout.yaml --stills   # another storyboard (candidate places)
 python showcase/make_showcase.py --title-preview   # title-card frames from the stills
 ```
 
 Each shot is rendered into `out/showcase/<id>/` (`scenario.yaml`, `traj.csv`, `seq.h5`, log) and
-is re-rendered only when its resolved scenario changes, so editing a caption only needs
-`--compose-only`.
+is re-rendered only when its resolved scenario changes. Its captioned clip
+(`out/showcase/clips/NN_<id>.mp4`) is re-composed only when the shot's entry or the video
+settings change; the video joins the clips with cross-fades. So editing a caption, a note or a
+duration only needs `--compose-only`. (`scout.yaml` reuses some storyboard ids, and the output
+directory is `out/showcase/<id>` for either storyboard: a scout run overwrites those shots.)
 
 Requirements: Python 3 with numpy, h5py, pyyaml, pillow, matplotlib; ffmpeg with libx264.
 Rendering everything takes a few hours on 8 cores, most of it generating the tiles of the

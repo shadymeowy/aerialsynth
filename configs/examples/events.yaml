@@ -4,7 +4,9 @@
 # flow ground truth at 20 Hz on its own intrinsics / mounting.
 world: { seed: 1 }
 tiles: { file: out/quick/world.h5, max_zoom: 17, lazy: true }
-trajectory: { file: out/quick/traj.csv }
+trajectory:   # its own flight (sharing the quick one let either scenario overwrite the other's)
+  file: out/events/traj.csv
+  synth: { kind: random, altitude_m: 1000, speed_mps: 50, duration_s: 2 }
 cameras:
   - path: /cam0
     intrinsics: { model: pinhole, width: 640, height: 480, intrinsics: [420.0, 420.0, 319.5, 239.5], distortion: [-0.05, 0.01, 0.0, 0.0] }

@@ -1,6 +1,6 @@
 # Scenarios
 
-One YAML file drives everything (`-c` of every command). `terrain config` prints a commented
+One YAML file drives everything (`-c` of `run`, `tiles`, `view` and `config`). `terrain config` prints a commented
 template of the main settings; `terrain config --all` lists every setting with its default;
 `terrain config -c my.yaml` shows a scenario with its defaults filled in (and checks it).
 
@@ -14,7 +14,8 @@ imu          an IMU (omit for none)
 output       the sequence file: body pose rate, time window, PNG export, compression
 ```
 
-- **Optional:** every section and key is optional. Unknown keys are errors, so a typo is not
+- **Optional:** every section and nearly every key is optional; a camera needs its `path` and
+  `intrinsics` (model, width, height, intrinsics). Unknown keys are errors, so a typo is not
   silently ignored.
 - **Units** are in the key: `altitude_m`, `speed_mps`, `duration_s`, `rate_hz`, `tau_s`,
   `visibility_km`, `sun_elevation_deg`, … The exceptions are `lat` / `lon` (degrees) and
