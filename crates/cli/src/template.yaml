@@ -1,6 +1,6 @@
-# A scenario: one file drives `terrain run`, `tiles` and `view`. Every section and key is
-# optional (defaults shown); `terrain config --all` lists every setting, docs/scenario.md
-# explains them.
+# A scenario: one file drives `terrain run`, `tiles` and `view`. Every section is optional
+# (defaults shown), and so is every key except a camera's path and intrinsics;
+# `terrain config --all` lists every setting, docs/scenario.md explains them.
 
 world:                         # the planet: a pure function of these settings
   seed: 1

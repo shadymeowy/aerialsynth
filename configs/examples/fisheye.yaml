@@ -1,4 +1,5 @@
-# Nadir fisheye (Kannala-Brandt, ~180° diagonal) at 800 m AGL; reuses the quick tile store lazily.
+# Nadir fisheye (Kannala-Brandt: ~175° across the width, ~260° across the diagonal, so the
+# corners see above the horizon) at 800 m AGL; reuses the quick tile store lazily.
 world: { seed: 1 }
 tiles: { file: out/quick/world.h5, max_zoom: 17, lazy: true }
 trajectory:

@@ -20,6 +20,8 @@ render:
     polar_motion_arcsec: [0, 0]
 cameras:
   - path: /cam0
+    intrinsics: { model: pinhole, width: 1024, height: 1024, intrinsics: [1200.0, 1200.0, 511.5, 511.5] }
+    extrinsics: { mount: forward, pitch_deg: 60 }   # looking up at the sky
     rgb: {}
     stars: { mag_limit: 9 }  # ground truth: catalogue stars in each frame
 ```

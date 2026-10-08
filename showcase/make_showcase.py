@@ -2,9 +2,9 @@
 """Render and compose the terrain showcase video.
 
     python showcase/make_showcase.py                  # render every shot, compose out/showcase/showcase.mp4
-    python showcase/make_showcase.py --only coast     # (re)render one shot
-    python showcase/make_showcase.py --compose-only   # compose from already rendered shots
-    python showcase/make_showcase.py --stills         # quick framing check: 3 small frames per shot
+    python showcase/make_showcase.py --only coast     # (re)render one shot and its clip
+    python showcase/make_showcase.py --compose-only   # no rendering: re-compose changed clips, assemble
+    python showcase/make_showcase.py --stills         # quick framing check: small frames per shot
 
 Shots are described in storyboard.yaml (scenario overrides on base.yaml). Each shot is rendered
 by `terrain run` into out/showcase/<id>/ (scenario.yaml, traj.csv, seq.h5) — the globe shot by
@@ -150,6 +150,21 @@ def follow_trajectory(base, lead, start):
     for r in rows:
         out.append(f"{float(r['t']) - t0:.4f}," + ",".join(r[c] for c in cols))
     return "\n".join(out) + "\n"
+
+
+def shot_by_id(story, sid):
+    return next(x for x in story["shots"] if x["id"] == sid)
+
+
+def planned_scenario(base, story, shot, stills=False):
+    """A shot's resolved scenario (where its output is or will be), without rendering."""
+    if shot.get("layout") == "globe":
+        return globe_scenario(base, shot)
+    if "follows" in shot:
+        return follow_scenario(base, shot, story["video"], shot_by_id(story, shot["follows"]))
+    if "source" in shot:
+        return shot_scenario(base, shot_by_id(story, shot["source"]), story["video"], stills)
+    return shot_scenario(base, shot, story["video"], stills)
 
 
 def render_shot(base, shot, video, stills=False, force=False, scn=None, traj=None):
@@ -910,15 +925,17 @@ def ffmpeg_writer(path, video):
     return subprocess.Popen(cmd, stdin=subprocess.PIPE)
 
 
-def write_clip(index, shot, scn, video):
-    """The shot as its own captioned clip (out/showcase/clips/NN_<id>.mp4), and all clips so far
-    joined into out/showcase/showcase_so_far.mp4, for review while the rest renders."""
+def write_clip(index, shot, scn, video, so_far=True):
+    """The shot as its own captioned clip (out/showcase/clips/NN_<id>.mp4), and (`so_far`) all
+    clips so far joined into out/showcase/showcase_so_far.mp4, for review while the rest renders."""
     d = os.path.join(OUT, "clips")
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, f"{index:02d}_{shot['id']}.mp4")
     # reuse the shot's clip (also from another position) when the shot, the video settings and
     # the rendered sequence are unchanged
     digest = hashlib.sha1(yaml.safe_dump([shot, video], sort_keys=True).encode()).hexdigest()
+    if not os.path.exists(scn["output"]["file"]):
+        raise SystemExit(f"[{shot['id']}] not rendered yet ({scn['output']['file']}): run without --compose-only")
     src_mtime = os.path.getmtime(scn["output"]["file"])
     old = [c for c in os.listdir(d) if c[:2].isdigit() and c[2:3] == "_" and c[3:] == f"{shot['id']}.mp4"]
     reused = False
@@ -944,12 +961,13 @@ def write_clip(index, shot, scn, video):
         ff.wait()
         with open(path[:-4] + ".done", "w") as fh:
             fh.write(digest)
-    clips = sorted(c for c in os.listdir(d) if c.endswith(".mp4"))
-    lst = os.path.join(d, "list.txt")
-    with open(lst, "w") as fh:
-        fh.writelines(f"file '{c}'\n" for c in clips)
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy",
-                    os.path.join(OUT, "showcase_so_far.mp4")], check=True)
+    if so_far:
+        clips = sorted(c for c in os.listdir(d) if c.endswith(".mp4"))
+        lst = os.path.join(d, "list.txt")
+        with open(lst, "w") as fh:
+            fh.writelines(f"file '{c}'\n" for c in clips)
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy",
+                        os.path.join(OUT, "showcase_so_far.mp4")], check=True)
     print(f"[{shot['id']}] clip {path}" + (" (reused)" if reused else ""), flush=True)
 
 
@@ -994,7 +1012,8 @@ def stills_sheet(base, story, shots_scn, path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--only", nargs="*", help="render only these shot ids")
-    ap.add_argument("--compose-only", action="store_true")
+    ap.add_argument("--compose-only", action="store_true",
+                    help="render nothing: re-compose the clips whose shot or video settings changed, then assemble")
     ap.add_argument("--full-compose", action="store_true", help="re-compose every frame from the sequences instead of joining the clips")
     ap.add_argument("--stills", action="store_true", help="framing check (3 small frames per shot) → out/showcase/stills.png")
     ap.add_argument("--force", action="store_true", help="re-render even if up to date")
@@ -1028,44 +1047,44 @@ def main():
     has_events = lambda s: "source" in s or any("events" in c for c in s.get("scenario", {}).get("cameras", []))
     order = [s for s in shots if not has_events(s)] + [s for s in shots if has_events(s)]
     for s in order:
-        if s.get("layout") == "globe":
-            if a.stills:
-                continue  # (no sequence; preview it with `terrain view --record` at a small --size)
-            scn = globe_scenario(base, s) if a.compose_only else render_globe(base, s, story["video"], a.force)
+        if a.stills and (s.get("layout") == "globe" or "follows" in s or "source" in s):
+            # (no stills: a map recording, or the flight of another shot; preview a globe with
+            # `terrain view --record` at a small --size)
+            continue
+        if a.compose_only:
+            scn = planned_scenario(base, story, s, a.stills)
+        elif s.get("layout") == "globe":
+            scn = render_globe(base, s, story["video"], a.force)
         elif "follows" in s:
-            if a.stills:
-                continue  # (flies a globe shot's recording)
-            lead = next(x for x in story["shots"] if x["id"] == s["follows"])
+            lead = shot_by_id(story, s["follows"])
             scn = follow_scenario(base, s, story["video"], lead)
-            if not a.compose_only:
-                traj = follow_trajectory(base, lead, scn["output"]["start"])
-                scn = render_shot(base, s, story["video"], force=a.force, scn=scn, traj=traj)
+            scn = render_shot(base, s, story["video"], force=a.force, scn=scn,
+                              traj=follow_trajectory(base, lead, scn["output"]["start"]))
         elif "source" in s:
             # shown from another shot's sequence (e.g. its event camera, later in the same flight)
-            src = next(x for x in story["shots"] if x["id"] == s["source"])
-            scn = by_id.get(s["source"]) or (shot_scenario(base, src, story["video"], a.stills) if a.compose_only or a.stills
-                                             else render_shot(base, src, story["video"], a.stills, a.force))
-            if a.stills:
-                continue
-        elif a.compose_only:
-            scn = shot_scenario(base, s, story["video"], a.stills)
+            scn = by_id.get(s["source"]) or render_shot(base, shot_by_id(story, s["source"]), story["video"], force=a.force)
         else:
             scn = render_shot(base, s, story["video"], a.stills, a.force)
             if a.stills:
                 export_stills(s, scn)  # PNGs per shot as soon as it is done, for feedback
         by_id[s["id"]] = scn
-        if not a.stills and not a.compose_only:
-            write_clip(all_ids.index(s["id"]) + 1, s, scn, story["video"])
+        if not a.stills and not (a.compose_only and a.full_compose):
+            # (compose-only: nothing is rendered, but clips whose shot or video settings changed
+            # are re-composed from their sequences; unchanged ones are reused)
+            write_clip(all_ids.index(s["id"]) + 1, s, scn, story["video"], so_far=not a.compose_only)
         done.append((s, scn))
     done.sort(key=lambda x: all_ids.index(x[0]["id"]))
     if a.stills:
         name = os.path.splitext(os.path.basename(a.story))[0]
         stills_sheet(base, story, done, os.path.join(OUT, "stills.png" if name == "storyboard" else f"stills_{name}.png"))
     elif not a.only or a.compose_only:
+        # the whole storyboard (with --only: the other shots as rendered before), so the title
+        # collage always samples every shot
+        every = [(s, by_id.get(s["id"]) or planned_scenario(base, story, s)) for s in story["shots"]]
         if a.full_compose:
-            compose(base, story, a.out, done)
+            compose(base, story, a.out, every)
         else:
-            assemble(base, story, a.out, done)
+            assemble(base, story, a.out, every)
 
 
 if __name__ == "__main__":

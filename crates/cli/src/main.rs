@@ -1,7 +1,7 @@
 //! `terrain` — procedural aerial-odometry dataset toolchain.
 //!
-//! Every subcommand reads one scenario YAML (`-c` / `--config`); see `terrain config` for all
-//! options.
+//! `run`, `tiles`, `view` and `config` read one scenario YAML (`-c` / `--config`; `terrain
+//! config` prints a template); `info` takes a tile store or sequence file.
 
 mod commands;
 mod preview;
@@ -18,7 +18,7 @@ struct Cli {
 
 #[derive(clap::Args, Clone, Debug)]
 pub struct Common {
-    /// Scenario YAML (all sections optional).
+    /// Scenario YAML (every section optional; a camera needs its path and intrinsics).
     #[arg(long, short)]
     pub config: Option<PathBuf>,
     /// Override world.seed.

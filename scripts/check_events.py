@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Validate the event streams of a sequence file: per camera with `events/`, check the format
 invariants (coordinates inside the sensor, binary polarity, sorted timestamps inside the
-sequence, ms_index consistent with t) and print rate / polarity / hot-pixel statistics.
+sequence, ms_index consistent with t) and print rate / polarity / hot-pixel statistics. Exits
+non-zero if an invariant fails or the file has no event stream to check.
 
 usage: check_events.py SEQ.h5 [--camera /dvs]
 """
@@ -16,7 +17,12 @@ f = h5py.File(a.seq, "r")
 pose_path = (scenario(f).get("output") or {}).get("pose", {}).get("path", "/pose")
 t_end = int(f[pose_path]["t"][-1])
 ok = True
-for path in [a.camera] if a.camera else [c for c in cameras(f) if "events" in f[c]]:
+paths = [a.camera] if a.camera else [c for c in cameras(f) if c in f and "events" in f[c]]
+if not paths:
+    raise SystemExit(f"FAIL: no camera with events/ in {a.seq} (cameras: {cameras(f)})")
+for path in paths:
+    if path not in f or "events" not in f[path]:
+        raise SystemExit(f"FAIL: no {path}/events in {a.seq}")
     g = f[path]["events"]
     W, H = f[path]["calib/resolution"][:]
     x, y, t, p, mi = g["x"][:], g["y"][:], g["t"][:], g["p"][:], g["ms_index"][:]
@@ -41,5 +47,6 @@ for path in [a.camera] if a.camera else [c for c in cameras(f) if "events" in f[
           f"active pixels {len(active) / (W * H) * 100:.1f}%; per ms p50/p99/max {np.percentile(per_ms, 50):.0f}/{np.percentile(per_ms, 99):.0f}/{per_ms.max()}; "
           f"hot-like pixels {hot}")
     for k, v in checks.items():
-        print(f"  {'ok  ' if v else 'FAIL'} {k}")
+        print(f"  {'PASS' if v else 'FAIL'} {k}")
+print("PASS: every invariant holds" if ok else "FAIL: an invariant failed")
 sys.exit(0 if ok else 1)

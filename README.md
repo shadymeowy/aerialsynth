@@ -41,8 +41,8 @@ fisheye, a 10 km cruise, a sunset and an IMU check.
 | `terrain info FILE` | summarize a tile store or a sequence file |
 | `terrain config` | the scenario template; `--all` every setting; `-c my.yaml` a scenario with its defaults filled in |
 
-Every command reads one scenario (`-c`), and takes `--seed` (a different world) and `-j`
-(threads).
+`run`, `tiles`, `view` and `config` read one scenario (`-c`) and take `--seed` (a different
+world) and `-j` (threads); `info` takes just the file.
 
 ## Outputs
 
