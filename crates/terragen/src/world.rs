@@ -216,30 +216,30 @@ pub struct World {
     pub cfg: Config,
     pub ell: Ellipsoid,
     pub(crate) seed: u64,
-    cont: Fbm,
-    cont_warp: [Fbm; 3],
-    belt: Fbm,
-    belt2: Fbm,
-    belt_var: Fbm,
-    mtn_frames: OctaveFrames,
-    mtn_warp: [Fbm; 2],
-    plateau: Fbm,
-    hills: OctaveFrames,
-    hill_amp: Fbm,
-    rough: Fbm,
-    micro: Fbm,
-    temp_n: Fbm,
-    moist_n: Fbm,
-    river_warp: [Fbm; 2],
-    river_width_n: Fbm,
-    mesa_n: Fbm,
-    dune_frames: OctaveFrames,
-    sand_n: Fbm,
-    agri_n: Fbm,
-    style_n: [Fbm; 4],
-    road_major: Fbm,
-    road_minor: Fbm,
-    home: Option<(DVec3, f64, f64)>,
+    pub(crate) cont: Fbm,
+    pub(crate) cont_warp: [Fbm; 3],
+    pub(crate) belt: Fbm,
+    pub(crate) belt2: Fbm,
+    pub(crate) belt_var: Fbm,
+    pub(crate) mtn_frames: OctaveFrames,
+    pub(crate) mtn_warp: [Fbm; 2],
+    pub(crate) plateau: Fbm,
+    pub(crate) hills: OctaveFrames,
+    pub(crate) hill_amp: Fbm,
+    pub(crate) rough: Fbm,
+    pub(crate) micro: Fbm,
+    pub(crate) temp_n: Fbm,
+    pub(crate) moist_n: Fbm,
+    pub(crate) river_warp: [Fbm; 2],
+    pub(crate) river_width_n: Fbm,
+    pub(crate) mesa_n: Fbm,
+    pub(crate) dune_frames: OctaveFrames,
+    pub(crate) sand_n: Fbm,
+    pub(crate) agri_n: Fbm,
+    pub(crate) style_n: [Fbm; 4],
+    pub(crate) road_major: Fbm,
+    pub(crate) road_minor: Fbm,
+    pub(crate) home: Option<(DVec3, f64, f64)>,
     /// Hash of the whole config: key of the thread-local caches, so generators with the same
     /// seed but different settings in one process do not share cached hydrology / lakes.
     pub(crate) cache_key: u64,
@@ -404,7 +404,7 @@ impl World {
 
     /// One octave of gradient-aligned gully noise in a 3D jittered lattice (point `q` in lattice
     /// units). Returns the stripe value and its derivative (lattice units).
-    fn gully_octave(seed: u64, q: DVec3, dir: DVec3) -> (f64, DVec3) {
+    pub(crate) fn gully_octave(seed: u64, q: DVec3, dir: DVec3) -> (f64, DVec3) {
         let qf = q.floor();
         let (ix, iy, iz) = (qf.x as i64, qf.y as i64, qf.z as i64);
         let f = q - qf;

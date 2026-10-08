@@ -43,6 +43,11 @@ pub fn u01k(h: u64, k: u64) -> f64 {
 /// 256 pseudo-random unit gradients (fibonacci sphere, shuffled), shared by all noise instances.
 static GRADS: once_cell_grads::Grads = once_cell_grads::Grads::new();
 
+/// The gradient table of [`perlin3`] (the GPU generator uploads it).
+pub fn gradient_table() -> &'static [[f64; 3]; 256] {
+    GRADS.get()
+}
+
 mod once_cell_grads {
     use std::sync::OnceLock;
     pub struct Grads(OnceLock<[[f64; 3]; 256]>);

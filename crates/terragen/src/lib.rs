@@ -4,6 +4,8 @@
 //! zoom can be generated independently, and coarse zooms approximate the average of finer ones.
 
 pub mod config;
+#[cfg(feature = "gpu")]
+pub mod gpu;
 pub mod landcover;
 pub mod noise;
 pub mod store;

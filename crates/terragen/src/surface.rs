@@ -342,18 +342,18 @@ fn band_cov(d: f64, hw: f64, fw: f64) -> f64 {
 
 pub struct SurfaceModel {
     pub pal: Palette,
-    detail: Fbm,
-    patch: Fbm,
-    forest: Fbm,
-    field_var: Fbm,
-    warp2: Fbm,
-    strata: Fbm,
-    snow_n: Fbm,
-    cult_n: Fbm,
-    land_n: Fbm,
+    pub(crate) detail: Fbm,
+    pub(crate) patch: Fbm,
+    pub(crate) forest: Fbm,
+    pub(crate) field_var: Fbm,
+    pub(crate) warp2: Fbm,
+    pub(crate) strata: Fbm,
+    pub(crate) snow_n: Fbm,
+    pub(crate) cult_n: Fbm,
+    pub(crate) land_n: Fbm,
     /// Horizontal direction to the sun (ENU) and tan(elevation).
-    sun_h: DVec2,
-    sun_tan: f64,
+    pub(crate) sun_h: DVec2,
+    pub(crate) sun_tan: f64,
     /// Site data shared by all worker threads (each site is computed once; the per-thread
     /// `Caches` in front of it avoid the lock on most lookups).
     shared: std::sync::RwLock<SharedSites>,

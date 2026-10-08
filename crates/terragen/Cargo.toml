@@ -11,6 +11,14 @@ serde.workspace = true
 serde_yaml.workspace = true
 anyhow.workspace = true
 rayon.workspace = true
+wgpu = { workspace = true, optional = true }
+pollster = { workspace = true, optional = true }
+bytemuck = { workspace = true, optional = true }
+
+[features]
+default = ["gpu"]
+# tile generation on the GPU (wgpu compute; needs 64-bit float and integer shader support)
+gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
 
 [dev-dependencies]
 image.workspace = true
