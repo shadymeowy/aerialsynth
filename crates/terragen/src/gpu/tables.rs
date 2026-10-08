@@ -129,3 +129,40 @@ pub(crate) fn wgsl_consts() -> String {
 pub(crate) fn grads() -> Vec<[f32; 4]> {
     crate::noise::gradient_table().iter().map(|g| [g[0] as f32, g[1] as f32, g[2] as f32, 0.0]).collect()
 }
+
+/// The surface palette (linear RGB) as a table, and `const PAL_<name>: u32` indices into it.
+pub(crate) fn palette(p: &crate::surface::Palette) -> (Vec<[f32; 4]>, String) {
+    let mut table: Vec<[f32; 4]> = Vec::new();
+    let mut consts = String::new();
+    let mut add = |name: &str, cols: &[glam::DVec3]| {
+        consts.push_str(&format!("const PAL_{name}: u32 = {}u;\n", table.len()));
+        table.extend(cols.iter().map(|c| [c.x as f32, c.y as f32, c.z as f32, 0.0]));
+    };
+    add("SOIL", &p.soil);
+    add("GRASS_WET", &[p.grass_wet]);
+    add("GRASS_DRY", &[p.grass_dry]);
+    add("GRASS_COLD", &[p.grass_cold]);
+    add("ROCK", &p.rock);
+    add("SNOW", &[p.snow]);
+    add("SAND", &p.sand);
+    add("BEACH", &[p.beach]);
+    add("WET_SAND", &[p.wet_sand]);
+    add("TUNDRA", &[p.tundra]);
+    add("MARSH", &[p.marsh]);
+    add("CROWN_CONIFER", &[p.crown_conifer]);
+    add("CROWN_DECID", &[p.crown_decid]);
+    add("CROWN_TROPIC", &[p.crown_tropic]);
+    add("CROWN_DRY", &[p.crown_dry]);
+    add("SHRUB", &[p.shrub]);
+    add("CROP", &p.crop);
+    add("CROP_MEAN", &[p.crop_mean]);
+    add("ASPHALT", &[p.asphalt]);
+    add("GRAVEL", &[p.gravel]);
+    add("CONCRETE", &[p.concrete]);
+    add("ROOFS", &p.roofs);
+    add("OCEAN_DEEP", &[p.ocean_deep]);
+    add("OCEAN_SHALLOW", &[p.ocean_shallow]);
+    add("LAKE_DEEP", &[p.lake_deep]);
+    add("RIVER", &[p.river]);
+    (table, consts)
+}

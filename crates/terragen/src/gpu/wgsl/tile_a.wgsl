@@ -436,7 +436,9 @@ fn pass_a1(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocat
 struct LakeReq {
     pt: vec4<f64>,
     id: u64,
-    _p: u64,
+    _p0: u64,
+    _p1: u64,
+    _p2: u64,
 }
 
 @group(2) @binding(11) var<storage, read_write> lake_req: array<LakeReq>;

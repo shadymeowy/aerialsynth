@@ -17,6 +17,7 @@ use crate::world::{Ctx, World};
 use crate::Config;
 use anyhow::{bail, Result};
 use geodesy::tiles::{gsd_ew, gsd_ns, pixel_to_latlon, TileId};
+use tilestore::TileData;
 use glam::{DVec2, DVec3};
 use host::{gsink, point_in, Cache, Prep, PointKey, PointReq};
 use std::sync::{Arc, Mutex};
@@ -29,10 +30,15 @@ const WORLD_WGSL: &str = include_str!("wgsl/world.wgsl");
 const POINTS_WGSL: &str = include_str!("wgsl/points.wgsl");
 const TILE_A_WGSL: &str = include_str!("wgsl/tile_a.wgsl");
 const SURFACE_WGSL: &str = include_str!("wgsl/surface.wgsl");
+const TILE_B_WGSL: &str = include_str!("wgsl/tile_b.wgsl");
 
 const N: usize = 256;
+/// pass-B grid side (tile + 1-pixel apron)
+const NA: usize = N + 2;
 /// pass-A grid side (tile + 2-pixel apron)
 const NA2: usize = N + 4;
+const PB_F: usize = 12;
+const OUT_U: usize = 6;
 const NBIN: usize = 17;
 const NODE_F: usize = 72;
 const NODE_IDS: usize = 8;
@@ -119,6 +125,7 @@ fn bind(d: &wgpu::Device, l: &wgpu::BindGroupLayout, bufs: &[&wgpu::Buffer]) -> 
 
 struct Kernels {
     l_drain: wgpu::BindGroupLayout,
+    l_tables: wgpu::BindGroupLayout,
     l_points: wgpu::BindGroupLayout,
     l_tile: wgpu::BindGroupLayout,
     points: wgpu::ComputePipeline,
@@ -126,6 +133,15 @@ struct Kernels {
     a1: wgpu::ComputePipeline,
     bins: wgpu::ComputePipeline,
     a2: wgpu::ComputePipeline,
+    region_req: wgpu::ComputePipeline,
+    town_req: wgpu::ComputePipeline,
+    pass_b: wgpu::ComputePipeline,
+    open_min_x: wgpu::ComputePipeline,
+    open_min_y: wgpu::ComputePipeline,
+    open_max_x: wgpu::ComputePipeline,
+    open_max_y: wgpu::ComputePipeline,
+    open_apply: wgpu::ComputePipeline,
+    finish: wgpu::ComputePipeline,
 }
 
 /// The GPU tile generator of one world.
@@ -141,8 +157,10 @@ pub struct GpuGenerator {
 /// The WGSL of the point kernels and of the tile kernels.
 fn sources() -> (String, String) {
     let consts = tables::wgsl_consts();
+    let w = World::new(Config::default());
+    let (_, pal) = tables::palette(&SurfaceModel::new(&w).pal);
     let points = format!("{consts}{NOISE_WGSL}{WORLD_WGSL}{POINTS_WGSL}");
-    let tile = format!("{consts}{NOISE_WGSL}{WORLD_WGSL}{TILE_A_WGSL}{SURFACE_WGSL}");
+    let tile = format!("{consts}{pal}{NOISE_WGSL}{WORLD_WGSL}{TILE_A_WGSL}{SURFACE_WGSL}{TILE_B_WGSL}");
     (points, tile)
 }
 
@@ -162,24 +180,47 @@ impl GpuGenerator {
         let g_octs = storage(d, "octs", &octs);
         let g_fbms = storage(d, "fbms", &fbms);
         use Bind::*;
-        let l_globals = layout(d, "globals", &[Uniform, Ro, Ro, Ro]);
+        let (pal, _) = tables::palette(&surface.pal);
+        let g_pal = storage(d, "palette", &pal);
+        let l_globals = layout(d, "globals", &[Uniform, Ro, Ro, Ro, Ro]);
         let l_drain = layout(d, "drain", &[Ro, Ro, Ro, Ro, Ro]);
+        let l_tables = layout(d, "tables", &[Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro]);
         let l_points = layout(d, "points", &[Ro, Rw]);
-        let l_tile = layout(d, "tile", &[Ro, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw]);
-        let globals = bind(d, &l_globals, &[&g_cfg, &g_grads, &g_octs, &g_fbms]);
+        let l_tile = layout(d, "tile", &[Ro, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw]);
+        let globals = bind(d, &l_globals, &[&g_cfg, &g_grads, &g_octs, &g_fbms, &g_pal]);
         let (src_points, src_tile) = sources();
-        let pipe = |label: &str, src: &str, l2: &wgpu::BindGroupLayout, entry: &str| {
-            let module = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some(label), source: wgpu::ShaderSource::Wgsl(src.into()) });
-            let pl = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some(label), bind_group_layouts: &[Some(&l_globals), Some(&l_drain), Some(l2)], immediate_size: 0 });
-            d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some(label), layout: Some(&pl), module: &module, entry_point: Some(entry), compilation_options: Default::default(), cache: None })
+        let m_points = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("points"), source: wgpu::ShaderSource::Wgsl(src_points.into()) });
+        let m_tile = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("tile"), source: wgpu::ShaderSource::Wgsl(src_tile.into()) });
+        let pl_points = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("points"), bind_group_layouts: &[Some(&l_globals), Some(&l_drain), Some(&l_points)], immediate_size: 0 });
+        let pl_tile = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("tile"), bind_group_layouts: &[Some(&l_globals), Some(&l_tables), Some(&l_tile)], immediate_size: 0 });
+        let pipe = |module: &wgpu::ShaderModule, pl: &wgpu::PipelineLayout, entry: &str| {
+            d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some(entry), layout: Some(pl), module, entry_point: Some(entry), compilation_options: Default::default(), cache: None })
         };
+        // (the driver compiles each pipeline on its own: in parallel)
+        let names = ["grid_nodes", "pass_a1", "bin_segments", "pass_a2", "region_requests", "town_requests", "pass_b", "open_min_x", "open_min_y", "open_max_x", "open_max_y", "open_apply", "finish"];
+        let (points, mut tile): (wgpu::ComputePipeline, Vec<wgpu::ComputePipeline>) = std::thread::scope(|s| {
+            let hs: Vec<_> = names.iter().map(|n| s.spawn(|| pipe(&m_tile, &pl_tile, n))).collect();
+            let points = pipe(&m_points, &pl_points, "eval_points");
+            (points, hs.into_iter().map(|h| h.join().expect("pipeline")).collect())
+        });
+        let mut t = || tile.remove(0);
         let k = Kernels {
-            points: pipe("points", &src_points, &l_points, "eval_points"),
-            nodes: pipe("grid nodes", &src_tile, &l_tile, "grid_nodes"),
-            a1: pipe("pass a1", &src_tile, &l_tile, "pass_a1"),
-            bins: pipe("bins", &src_tile, &l_tile, "bin_segments"),
-            a2: pipe("pass a2", &src_tile, &l_tile, "pass_a2"),
+            points,
+            nodes: t(),
+            a1: t(),
+            bins: t(),
+            a2: t(),
+            region_req: t(),
+            town_req: t(),
+            pass_b: t(),
+            open_min_x: t(),
+            open_min_y: t(),
+            open_max_x: t(),
+            open_max_y: t(),
+            open_apply: t(),
+            finish: t(),
             l_drain,
+            l_tables,
             l_points,
             l_tile,
         };
@@ -256,9 +297,23 @@ impl GpuGenerator {
 
     /// Pass A of tiles: the terrain per pass-A pixel centre (tile + 2-pixel apron, 260 x 260).
     pub fn pass_a(&self, ids: &[TileId]) -> Result<Vec<Vec<GTerrain>>> {
+        Ok(self.run(ids, false)?.0)
+    }
+
+    /// Generate tiles (one batch on the GPU).
+    pub fn tiles(&self, ids: &[TileId]) -> Result<Vec<TileData>> {
+        Ok(self.run(ids, true)?.1)
+    }
+
+    /// The tile pipeline: pass A (and with `full` pass B and the output layers).
+    fn run(&self, ids: &[TileId], full: bool) -> Result<(Vec<Vec<GTerrain>>, Vec<TileData>)> {
         let d = &self.gpu.device;
         let ell = self.world.ell;
         let nt = ids.len();
+        if nt == 0 {
+            return Ok((vec![], vec![]));
+        }
+        let ss = self.world.cfg.tile_supersample.max(1) as usize;
         // ---- drainage pieces and sink lakes per tile
         struct TileDrain {
             segs: Vec<crate::world::Seg>,
@@ -350,7 +405,7 @@ impl GpuGenerator {
                 nseg: drains[t].segs.len() as u32,
                 sink0: sinks.len() as u32,
                 nsink: drains[t].sinks.len() as u32,
-                ss: self.world.cfg.tile_supersample.max(1),
+                ss: ss as u32,
                 ..Default::default()
             };
             for j in 0..NA2 {
@@ -365,11 +420,25 @@ impl GpuGenerator {
                 rows.push(row((gk0y + k as i64) as f64 * G));
                 cols.push(col((gk0x + k as i64) as f64 * G));
             }
+            // pass-B sub-samples
+            info.row_b = rows.len() as u32;
+            info.col_b = cols.len() as u32;
+            let sub = |s: usize| (s as f64 + 0.5) / ss as f64 - 0.5;
+            for j in 0..NA {
+                for sy in 0..ss {
+                    rows.push(row(oy + j as f64 - 1.0 + 0.5 + sub(sy)));
+                }
+            }
+            for i in 0..NA {
+                for sx in 0..ss {
+                    cols.push(col(ox + i as f64 - 1.0 + 0.5 + sub(sx)));
+                }
+            }
             segs.extend(drains[t].segs.iter().map(GSeg::from));
             sinks.extend_from_slice(&drains[t].sinks);
             infos.push(info);
         }
-        // ---- GPU: grid nodes, relief (lake requests), bins, rest of pass A
+        // ---- GPU buffers
         let b_tiles = storage(d, "tiles", &infos);
         let b_rows = storage(d, "rows", &rows);
         let b_cols = storage(d, "cols", &cols);
@@ -381,80 +450,232 @@ impl GpuGenerator {
         let b_bins = output(d, "bins", (nt * NBIN * NBIN * 16) as u64);
         let b_segs = storage(d, "segs", &segs);
         let b_sinks = storage(d, "sinks", &sinks);
-        let empty_list = storage::<u32>(d, "empty", &[0]);
+        // stand-ins for unused bindings (read-only in group 1, writable in group 2)
+        let empty = output(d, "empty", 256);
+        let unused = output(d, "unused", 256);
         let lake_cap = 4096usize;
-        let b_lake_req = output(d, "lake requests", (lake_cap * 48) as u64);
-        let b_counters = output(d, "counters", 16);
+        let site_cap = 1 << 16;
+        let b_lake_req = output(d, "lake requests", (lake_cap * 64) as u64);
+        let b_region_req = output(d, "region requests", (site_cap * 64) as u64);
+        let b_town_req = output(d, "town requests", (site_cap * 16) as u64);
+        let b_counters = output(d, "counters", 32);
+        let (b_pixb, b_scr_a, b_scr_b, b_out, b_ranges) = if full {
+            (
+                output(d, "pass b", (nt * NA2 * NA2 * PB_F * 4) as u64),
+                output(d, "scratch a", (nt * NA2 * NA2 * 4) as u64),
+                output(d, "scratch b", (nt * NA2 * NA2 * 4) as u64),
+                output(d, "tile out", (nt * N * N * OUT_U * 4) as u64),
+                output(d, "ranges", (nt * 8) as u64),
+            )
+        } else {
+            (output(d, "-", 256), output(d, "-", 256), output(d, "-", 256), output(d, "-", 256), output(d, "-", 256))
+        };
         let wg = |n: usize| n.div_ceil(16) as u32;
-        // relief first: it reports the lattice lakes whose levels are still unknown
+        let group2 = |list: &wgpu::Buffer| {
+            bind(
+                d,
+                &self.k.l_tile,
+                &[&b_tiles, &b_rows, &b_cols, &b_node_f, &b_node_ids, &b_node_pts, &b_pix, &b_terr, &b_bins, list, &b_counters, &b_lake_req, &b_pixb, &b_scr_a, &b_scr_b, &b_out, &b_ranges, &b_region_req, &b_town_req],
+            )
+        };
+        let run_passes = |g1: &wgpu::BindGroup, g2: &wgpu::BindGroup, passes: &[(&wgpu::ComputePipeline, [u32; 3])], clear: bool| {
+            let mut enc = d.create_command_encoder(&Default::default());
+            if clear {
+                enc.clear_buffer(&b_counters, 0, None);
+            }
+            {
+                let mut cp = enc.begin_compute_pass(&Default::default());
+                cp.set_bind_group(0, &self.globals, &[]);
+                cp.set_bind_group(1, g1, &[]);
+                cp.set_bind_group(2, g2, &[]);
+                for (p, n) in passes {
+                    cp.set_pipeline(p);
+                    cp.dispatch_workgroups(n[0], n[1], n[2]);
+                }
+            }
+            self.gpu.queue.submit([enc.finish()]);
+        };
+        // ---- grid nodes and relief (reporting the lattice lakes whose levels are unknown), bins
         let mut bin_cap = (segs.len() * NBIN * NBIN / 4).clamp(1 << 16, 1 << 24);
-        loop {
+        let (b_list, b_keys, b_vals) = loop {
             let (keys, vals) = lake_table(&cache.lattice_lakes);
             let b_keys = storage(d, "lake keys", &keys);
             let b_vals = storage(d, "lake levels", &vals);
             let b_list = output(d, "bin list", (bin_cap * 4) as u64);
-            let g1 = bind(d, &self.k.l_drain, &[&b_segs, &empty_list, &b_sinks, &b_keys, &b_vals]);
-            let g2 = bind(d, &self.k.l_tile, &[&b_tiles, &b_rows, &b_cols, &b_node_f, &b_node_ids, &b_node_pts, &b_pix, &b_terr, &b_bins, &b_list, &b_counters, &b_lake_req]);
-            let mut enc = d.create_command_encoder(&Default::default());
-            enc.clear_buffer(&b_counters, 0, None);
-            {
-                let mut cp = enc.begin_compute_pass(&Default::default());
-                cp.set_bind_group(0, &self.globals, &[]);
-                cp.set_bind_group(1, &g1, &[]);
-                cp.set_bind_group(2, &g2, &[]);
-                cp.set_pipeline(&self.k.nodes);
-                cp.dispatch_workgroups(((NG * NG) as u32).div_ceil(64), nt as u32, 1);
-                cp.set_pipeline(&self.k.a1);
-                cp.dispatch_workgroups(wg(NA2), wg(NA2), nt as u32);
-                cp.set_pipeline(&self.k.bins);
-                cp.dispatch_workgroups((NBIN * NBIN) as u32, nt as u32, 1);
-            }
-            self.gpu.queue.submit([enc.finish()]);
-            let counters: Vec<u32> = read_back(&self.gpu, &b_counters, 4)?;
+            let g1 = bind(d, &self.k.l_tables, &[&b_segs, &empty, &b_sinks, &b_keys, &b_vals, &empty, &empty, &empty, &empty, &empty, &empty, &empty]);
+            let g2 = group2(&b_list);
+            run_passes(
+                &g1,
+                &g2,
+                &[(&self.k.nodes, [((NG * NG) as u32).div_ceil(64), nt as u32, 1]), (&self.k.a1, [wg(NA2), wg(NA2), nt as u32]), (&self.k.bins, [(NBIN * NBIN) as u32, nt as u32, 1])],
+                true,
+            );
+            let counters: Vec<u32> = read_back(&self.gpu, &b_counters, 8)?;
             if counters[1] != 0 {
                 bin_cap = counters[0] as usize + 1024;
                 continue;
             }
             let nreq = counters[2] as usize;
-            if nreq > 0 {
-                #[repr(C)]
-                #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-                struct LakeReq {
-                    pt: [f64; 4],
-                    id: u64,
-                    _p: u64,
-                }
-                let reqs: Vec<LakeReq> = read_back(&self.gpu, &b_lake_req, nreq.min(lake_cap))?;
-                let reqs: Vec<(u64, DVec3)> = reqs.iter().map(|r| (r.id, DVec3::new(r.pt[0], r.pt[1], r.pt[2]))).collect();
-                self.settle(&mut cache, |prep| {
-                    for &(id, pt) in &reqs {
-                        prep.lattice_lake_level(id, pt);
-                    }
-                })?;
-                if nreq > lake_cap {
-                    // (more than the request buffer holds: the rest come next round)
-                }
-                continue;
+            if nreq == 0 {
+                break (b_list, b_keys, b_vals);
             }
-            // the rest of pass A, with the bins' pieces as the piece list
-            let g1 = bind(d, &self.k.l_drain, &[&b_segs, &b_list, &b_sinks, &b_keys, &b_vals]);
-            let dummy = output(d, "dummy", 32);
-            let g2 = bind(d, &self.k.l_tile, &[&b_tiles, &b_rows, &b_cols, &b_node_f, &b_node_ids, &b_node_pts, &b_pix, &b_terr, &b_bins, &dummy, &b_counters, &b_lake_req]);
-            let mut enc = d.create_command_encoder(&Default::default());
-            {
-                let mut cp = enc.begin_compute_pass(&Default::default());
-                cp.set_bind_group(0, &self.globals, &[]);
-                cp.set_bind_group(1, &g1, &[]);
-                cp.set_bind_group(2, &g2, &[]);
-                cp.set_pipeline(&self.k.a2);
-                cp.dispatch_workgroups(wg(NA2), wg(NA2), nt as u32);
-            }
-            self.gpu.queue.submit([enc.finish()]);
-            break;
+            let reqs: Vec<GSiteReq> = read_back(&self.gpu, &b_lake_req, nreq.min(lake_cap))?;
+            self.settle(&mut cache, |prep| {
+                for r in &reqs {
+                    prep.lattice_lake_level(r.id, DVec3::new(r.pt[0], r.pt[1], r.pt[2]));
+                }
+            })?;
+        };
+        // ---- the rest of pass A (the bins' pieces as the piece list), the sites pass B needs
+        let g1 = bind(d, &self.k.l_tables, &[&b_segs, &b_list, &b_sinks, &b_keys, &b_vals, &empty, &empty, &empty, &empty, &empty, &empty, &empty]);
+        let g2 = group2(&unused);
+        let mut passes = vec![(&self.k.a2, [wg(NA2), wg(NA2), nt as u32])];
+        if full {
+            passes.push((&self.k.region_req, [wg(NA2), wg(NA2), nt as u32]));
+            passes.push((&self.k.town_req, [wg(NA), wg(NA), nt as u32]));
         }
-        let all: Vec<GTerrain> = read_back(&self.gpu, &b_terr, nt * NA2 * NA2)?;
-        Ok(all.chunks(NA2 * NA2).map(|c| c.to_vec()).collect())
+        run_passes(&g1, &g2, &passes, true);
+        if !full {
+            let all: Vec<GTerrain> = read_back(&self.gpu, &b_terr, nt * NA2 * NA2)?;
+            return Ok((all.chunks(NA2 * NA2).map(|c| c.to_vec()).collect(), vec![]));
+        }
+        let counters: Vec<u32> = read_back(&self.gpu, &b_counters, 8)?;
+        let (nreg, ntown) = (counters[3] as usize, counters[4] as usize);
+        if nreg > site_cap || ntown > site_cap {
+            bail!("GPU generator: too many land-use sites in one batch ({nreg} regions, {ntown} town cells)");
+        }
+        let reg_reqs: Vec<GSiteReq> = read_back(&self.gpu, &b_region_req, nreg)?;
+        let town_reqs: Vec<[i32; 4]> = read_back(&self.gpu, &b_town_req, ntown)?;
+        let mut reg_ids: Vec<(u64, DVec3)> = reg_reqs.iter().map(|r| (r.id, DVec3::new(r.pt[0], r.pt[1], r.pt[2]))).collect();
+        reg_ids.sort_by_key(|r| r.0);
+        reg_ids.dedup_by_key(|r| r.0);
+        let mut cells: Vec<host::Cell> = town_reqs.iter().map(|c| (c[0] as i64, c[1] as i64, c[2] as i64)).collect();
+        cells.sort_unstable();
+        cells.dedup();
+        let (regions, town_cells) = self.settle(&mut cache, |prep| {
+            let regions: Vec<(u64, GRegion)> = reg_ids.iter().filter_map(|&(id, pt)| prep.region(id, pt).map(|r| (id, r))).collect();
+            let towns: Vec<(host::Cell, Vec<(u64, GTown)>)> = cells.iter().filter_map(|&c| prep.town_candidates(c).map(|v| (c, v))).collect();
+            (regions, towns)
+        })?;
+        let (rk, ri, rv) = region_table(&regions);
+        let (tk, tc, tl, tv) = town_table(&town_cells);
+        let b_rk = storage(d, "region keys", &rk);
+        let b_ri = storage(d, "region index", &ri);
+        let b_rv = storage(d, "regions", &rv);
+        let b_tk = storage(d, "town keys", &tk);
+        let b_tc = storage(d, "town cells", &tc);
+        let b_tl = storage(d, "town list", &tl);
+        let b_tv = storage(d, "towns", &tv);
+        // ---- pass B, canopy opening, outputs
+        let g1 = bind(d, &self.k.l_tables, &[&b_segs, &b_list, &b_sinks, &b_keys, &b_vals, &b_rk, &b_ri, &b_rv, &b_tk, &b_tc, &b_tl, &b_tv]);
+        let g2 = group2(&unused);
+        let grid = [wg(NA), wg(NA), nt as u32];
+        run_passes(
+            &g1,
+            &g2,
+            &[
+                (&self.k.pass_b, grid),
+                (&self.k.open_min_x, grid),
+                (&self.k.open_min_y, grid),
+                (&self.k.open_max_x, grid),
+                (&self.k.open_max_y, grid),
+                (&self.k.open_apply, grid),
+                (&self.k.finish, [wg(N), wg(N), nt as u32]),
+            ],
+            true,
+        );
+        let counters: Vec<u32> = read_back(&self.gpu, &b_counters, 8)?;
+        if counters[5] != 0 {
+            bail!("GPU generator: pass B lacked land-use data (flags {:#x})", counters[5]);
+        }
+        let out: Vec<u32> = read_back(&self.gpu, &b_out, nt * N * N * OUT_U)?;
+        let ranges: Vec<u32> = read_back(&self.gpu, &b_ranges, nt * 2)?;
+        let tiles = ids
+            .iter()
+            .enumerate()
+            .map(|(t, &id)| {
+                let o = &out[t * N * N * OUT_U..(t + 1) * N * N * OUT_U];
+                let n = N * N;
+                let mut td = TileData {
+                    id,
+                    rgb: vec![0; n * 3],
+                    albedo: vec![0; n * 3],
+                    elevation: vec![0.0; n],
+                    normal: vec![0; n * 3],
+                    landcover: vec![0; n],
+                    emission: vec![0; n * 3],
+                    elev_min: from_orderable(!ranges[2 * t]),
+                    elev_max: from_orderable(ranges[2 * t + 1]),
+                };
+                for k in 0..n {
+                    let w = &o[k * OUT_U..(k + 1) * OUT_U];
+                    for ch in 0..3 {
+                        td.rgb[3 * k + ch] = (w[0] >> (8 * ch)) as u8;
+                        td.albedo[3 * k + ch] = (w[1] >> (8 * ch)) as u8;
+                        td.emission[3 * k + ch] = (w[2] >> (8 * ch)) as u8;
+                        td.normal[3 * k + ch] = (w[3] >> (8 * ch)) as u8 as i8;
+                    }
+                    td.elevation[k] = f32::from_bits(w[4]);
+                    td.landcover[k] = w[5] as u8;
+                }
+                td
+            })
+            .collect();
+        Ok((vec![], tiles))
     }
+}
+
+fn from_orderable(u: u32) -> f32 {
+    if u & 0x8000_0000 != 0 {
+        f32::from_bits(u & 0x7fff_ffff)
+    } else {
+        f32::from_bits(!u)
+    }
+}
+
+/// Land-use regions as an open-addressing table: keys, index into the region list, regions.
+fn region_table(regions: &[(u64, GRegion)]) -> (Vec<u64>, Vec<u32>, Vec<GRegion>) {
+    let n = (regions.len() * 2).next_power_of_two().max(16);
+    let mut keys = vec![0u64; n];
+    let mut idx = vec![0u32; n];
+    for (i, (id, _)) in regions.iter().enumerate() {
+        let mut k = (crate::noise::mix64(*id) % n as u64) as usize;
+        while keys[k] != 0 {
+            k = (k + 1) % n;
+        }
+        keys[k] = *id;
+        idx[k] = i as u32;
+    }
+    (keys, idx, regions.iter().map(|r| r.1).collect())
+}
+
+/// Town lattice cells as an open-addressing table: keys, (first, count) into the candidate
+/// list, the candidate list (indices into the towns), the towns.
+fn town_table(cells: &[(host::Cell, Vec<(u64, GTown)>)]) -> (Vec<u64>, Vec<[u32; 2]>, Vec<u32>, Vec<GTown>) {
+    let n = (cells.len() * 2).next_power_of_two().max(16);
+    let mut keys = vec![0u64; n];
+    let mut vals = vec![[0u32; 2]; n];
+    let mut list = Vec::new();
+    let mut towns = Vec::new();
+    let mut index: crate::noise::FxHashMap<u64, u32> = Default::default();
+    for (c, cands) in cells {
+        let key = crate::noise::hash3(0x7C311, c.0, c.1, c.2) | 1;
+        let first = list.len() as u32;
+        for (id, t) in cands {
+            let ti = *index.entry(*id).or_insert_with(|| {
+                towns.push(*t);
+                (towns.len() - 1) as u32
+            });
+            list.push(ti);
+        }
+        let mut k = (crate::noise::mix64(key) % n as u64) as usize;
+        while keys[k] != 0 {
+            k = (k + 1) % n;
+        }
+        keys[k] = key;
+        vals[k] = [first, cands.len() as u32];
+    }
+    (keys, vals, list, towns)
 }
 
 type FxLakes = crate::noise::FxHashMap<u64, Option<f64>>;

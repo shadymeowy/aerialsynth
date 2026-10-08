@@ -794,6 +794,22 @@ struct Drain {
     nsink: u32,
 }
 
+/// The warp of the region lattice lookup at `p` (from the grid when there).
+fn region_warp_at(p: vec3<f64>, pre: Pre) -> vec3<f32> {
+    if ((pre.flags & P_REGION_WARP) != 0u) {
+        return pre.region_warp;
+    }
+    return region_warp(p);
+}
+
+/// The cell of the region lattice at the warped point `pw`.
+fn region_cell(pw: vec3<f64>, pre: Pre) -> Cell3 {
+    if ((pre.flags & P_SITE_REGION) != 0u) {
+        return worley3_from(pw, cfg.region_cell, 1.0lf / cfg.region_cell, pre.site_region);
+    }
+    return worley3(cfg.seed ^ 0x5E61lu, pw, cfg.region_cell, 0.9);
+}
+
 /// The rest of pass A after the relief (`terrain_impl`): drainage carving, lakes, the sea,
 /// climate at the final height, land use, sites and roads.
 fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> Terrain {
@@ -1038,24 +1054,14 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
     let style = clamp(vec4<f32>(0.5) + 0.5 * m.style * 1.4, vec4<f32>(0.0), vec4<f32>(1.0));
 
     // ---- land-use sites
-    let region_cell = f32(cfg.region_cell);
+    let region_cell_m = f32(cfg.region_cell);
     t.region_id = 0lu;
     t.region_id2 = 0lu;
     t.region_edge = NONE_F;
-    if (mode != MODE_RELIEF && gsd < region_cell * 0.5) {
-        var wq = vec3<f32>(0.0);
-        if ((pre.flags & P_REGION_WARP) != 0u) {
-            wq = pre.region_warp;
-        } else {
-            wq = region_warp(p);
-        }
+    if (mode != MODE_RELIEF && gsd < region_cell_m * 0.5) {
+        let wq = region_warp_at(p, pre);
         let pw = p + vec3<f64>(wq);
-        var wc: Cell3;
-        if ((pre.flags & P_SITE_REGION) != 0u) {
-            wc = worley3_from(pw, cfg.region_cell, 1.0lf / cfg.region_cell, pre.site_region);
-        } else {
-            wc = worley3(cfg.seed ^ 0x5E61lu, pw, cfg.region_cell, 0.9);
-        }
+        let wc = region_cell(pw, pre);
         t.region_id = wc.id;
         t.region_id2 = wc.id2;
         t.region_edge = worley_edge_dist(wc, pw);

@@ -69,12 +69,61 @@ pub(crate) struct Cache {
     lakes_forced: FxHashMap<(u64, u64), Option<f64>>,
     /// levels of the lattice lakes by id (what the GPU looks up)
     pub lattice_lakes: FxHashMap<u64, Option<f64>>,
+    pub regions: FxHashMap<u64, GRegion>,
+    towns_base: FxHashMap<u64, TownBase>,
+    towns: FxHashMap<u64, TownBase>,
+    /// existing towns around each cell of the town lattice: (id, town)
+    pub town_cands: FxHashMap<Cell, Vec<(u64, GTown)>>,
+}
+
+/// A town site before / after resolving overlaps (`TownInfo`).
+#[derive(Clone, Copy)]
+struct TownBase {
+    exists: bool,
+    center: DVec3,
+    ex: DVec3,
+    ey: DVec3,
+    radius: f64,
+    block: f64,
+    street: f64,
+    organic: f64,
+    roof_style: f64,
+    height: f64,
+    lot: f64,
+    elong: f64,
+    seed: u64,
+    sun: DVec3,
+}
+
+impl TownBase {
+    fn gpu(&self) -> GTown {
+        let v = |d: DVec3| [d.x as f32, d.y as f32, d.z as f32, 0.0];
+        GTown {
+            center: [self.center.x, self.center.y, self.center.z, 0.0],
+            inv_r09: 1.0 / (0.9 * self.radius),
+            inv_r035: 1.0 / (0.35 * self.radius),
+            seed: self.seed,
+            _p: 0,
+            ex: v(self.ex),
+            ey: v(self.ey),
+            sun: v(self.sun),
+            radius: self.radius as f32,
+            block: self.block as f32,
+            street: self.street as f32,
+            organic: self.organic as f32,
+            roof_style: self.roof_style as f32,
+            height: self.height as f32,
+            lot: self.lot as f32,
+            elong: self.elong as f32,
+            _q: [0.0; 4],
+        }
+    }
 }
 
 impl Cache {
     /// Bound the memory of a long-lived cache.
     pub fn trim(&mut self) {
-        if self.flow.len() + self.tgt.len() + self.src.len() + self.points.len() + self.lakes.len() > 4_000_000 {
+        if self.flow.len() + self.tgt.len() + self.src.len() + self.points.len() + self.lakes.len() + self.regions.len() + self.towns_base.len() + self.town_cands.len() > 4_000_000 {
             *self = Cache::default();
         }
     }
@@ -430,6 +479,181 @@ impl<'a> Prep<'a> {
         }
         self.c.lakes_forced.insert(key, v);
         v
+    }
+}
+
+impl<'a> Prep<'a> {
+    // ------------------------------------------------------------ land-use regions and towns
+
+    /// The field system of land-use region `id` with site `center` (`region_info`).
+    pub fn region(&mut self, id: u64, center: DVec3) -> Option<GRegion> {
+        if let Some(r) = self.c.regions.get(&id) {
+            return Some(*r);
+        }
+        let cctx = site_ctx(self.w, center, 400.0);
+        let tc = self.point(MODE_FULL, &cctx)?;
+        let (c, east, north) = (cctx.p, cctx.east, cctx.north);
+        let ang = u01k(id, 1) * std::f64::consts::PI;
+        let (sa, ca) = ang.sin_cos();
+        let ex = east * ca + north * sa;
+        let ey = north * ca - east * sa;
+        // climate at the region centre decides the field style
+        let dry = 1.0 - smoothstep(0.2, 0.4, tc.moist as f64);
+        let u = u01k(id, 2);
+        let style = if dry > 0.5 && u < 0.6 * dry {
+            2
+        } else if u < 0.5 {
+            0
+        } else if u < 0.88 {
+            1
+        } else {
+            3
+        };
+        let scale = 0.6 + 1.1 * u01k(id, 3);
+        let (fw, fh) = match style {
+            0 => (220.0 * scale, 220.0 * scale * (1.0 + 2.0 * u01k(id, 4))),
+            1 => (300.0 * scale, 0.0),
+            2 => (if u01k(id, 4) < 0.5 { 805.0 } else { 402.0 }, 0.0),
+            _ => (60.0 + 90.0 * u01k(id, 4), 400.0 + 600.0 * u01k(id, 5)),
+        };
+        let v = |d: DVec3| [d.x as f32, d.y as f32, d.z as f32, 0.0];
+        let r = GRegion {
+            center: [c.x, c.y, c.z, 0.0],
+            ex: v(ex),
+            ey: v(ey),
+            east: v(east),
+            north: v(north),
+            split: u01k(id, 6).to_bits(),
+            style,
+            _p: 0,
+            fw: fw as f32,
+            fh: fh as f32,
+            hedge: (if u01k(id, 7) < 0.4 { u01k(id, 8) } else { 0.0 }) as f32,
+            track: (0.2 + 0.6 * u01k(id, 9)) as f32,
+            border_w: (1.5 + 3.0 * u01k(id, 10)) as f32,
+            palette: u01k(id, 11) as f32,
+            agri: tc.agri,
+            season: (tc.style[3] as f64 * 0.7 + 0.3 * u01k(id, 12)).clamp(0.0, 1.0) as f32,
+            _q: [0.0; 4],
+        };
+        self.c.regions.insert(id, r);
+        Some(r)
+    }
+
+    /// A town site before resolving overlaps (`town_base`); None while its terrain is pending.
+    fn town_base(&mut self, id: u64, center: DVec3) -> Option<TownBase> {
+        if let Some(t) = self.c.towns_base.get(&id) {
+            return Some(*t);
+        }
+        let lu = &self.w.cfg.landuse;
+        let cell = lu.town_cell_km * KM;
+        let ctx = site_ctx(self.w, center, 300.0);
+        let (east, north) = (ctx.east, ctx.north);
+        let near_surface = (center.length() - ctx.p.length()).abs() < 0.8 * cell;
+        let exists = if near_surface && u01k(id, 1) < 0.95 {
+            let tc = self.point(MODE_FULL, &ctx)?;
+            let p_exist = (tc.habit as f64 * 1.1 * lu.towns).min(0.95);
+            u01k(id, 1) < p_exist && tc.water_kind == W_NONE && tc.ground > 2.0 && tc.ground < 4000.0
+        } else {
+            false
+        };
+        let ang = u01k(id, 2) * std::f64::consts::FRAC_PI_2;
+        let (sa, ca) = ang.sin_cos();
+        let mut radius = 160.0 * (u01k(id, 3).powf(1.6) * 2.4).exp();
+        if u01k(id, 4) < 0.03 {
+            radius *= 4.0;
+        }
+        let elong = 1.0 + 1.6 * u01k(id, 11) * u01k(id, 12);
+        let s = &self.w.cfg.satellite;
+        let (az, _) = (s.sun_azimuth_deg.to_radians(), ());
+        let sun_h = glam::DVec2::new(az.sin(), az.cos());
+        let t = TownBase {
+            exists,
+            center: ctx.p,
+            ex: east * ca + north * sa,
+            ey: north * ca - east * sa,
+            radius: radius.min(cell * 0.45),
+            block: 70.0 + 70.0 * u01k(id, 5),
+            street: 6.5 + 6.0 * u01k(id, 6),
+            organic: u01k(id, 7),
+            roof_style: u01k(id, 8),
+            height: u01k(id, 9),
+            lot: 13.0 + 12.0 * u01k(id, 10),
+            elong,
+            seed: mix64(id ^ 0x70E5),
+            sun: east * sun_h.x + north * sun_h.y,
+        };
+        self.c.towns_base.insert(id, t);
+        Some(t)
+    }
+
+    /// A town site with overlaps resolved: of two towns whose footprints would overlap only
+    /// the larger exists (`town_info`).
+    fn town_info(&mut self, id: u64, center: DVec3) -> Option<TownBase> {
+        if let Some(t) = self.c.towns.get(&id) {
+            return Some(*t);
+        }
+        let mut info = self.town_base(id, center)?;
+        if info.exists {
+            let cell = self.w.cfg.landuse.town_cell_km * KM;
+            let extent = |t: &TownBase| 1.6 * t.radius * t.elong.sqrt();
+            let k = (center / cell).floor();
+            let mut pending = false;
+            'search: for dz in -2..=2i64 {
+                for dy in -2..=2i64 {
+                    for dx in -2..=2i64 {
+                        let (nid, nc) = worley3_site(self.w.seed ^ 0x70E1, (k.x as i64 + dx, k.y as i64 + dy, k.z as i64 + dz), cell, 0.8);
+                        if nid == id {
+                            continue;
+                        }
+                        let Some(n) = self.town_base(nid, nc) else {
+                            pending = true;
+                            continue;
+                        };
+                        if !n.exists || (n.center - info.center).length() > extent(&n) + extent(&info) {
+                            continue;
+                        }
+                        if n.radius > info.radius || (n.radius == info.radius && nid > id) {
+                            info.exists = false;
+                            break 'search;
+                        }
+                    }
+                }
+            }
+            if pending {
+                return None;
+            }
+        }
+        self.c.towns.insert(id, info);
+        Some(info)
+    }
+
+    /// The existing towns of the town lattice cells within ±2 cells of `key` (`select_town`'s
+    /// candidates); None while pending.
+    pub fn town_candidates(&mut self, key: Cell) -> Option<Vec<(u64, GTown)>> {
+        if let Some(v) = self.c.town_cands.get(&key) {
+            return Some(v.clone());
+        }
+        let cell = self.w.cfg.landuse.town_cell_km * KM;
+        let mut v = Vec::new();
+        let mut pending = false;
+        for dz in -2..=2i64 {
+            for dy in -2..=2i64 {
+                for dx in -2..=2i64 {
+                    let (id, c) = worley3_site(self.w.seed ^ 0x70E1, (key.0 + dx, key.1 + dy, key.2 + dz), cell, 0.8);
+                    match self.town_info(id, c) {
+                        Some(t) if t.exists => v.push((id, t.gpu())),
+                        Some(_) => {}
+                        None => pending = true,
+                    }
+                }
+            }
+        }
+        if pending {
+            return None;
+        }
+        self.c.town_cands.insert(key, v.clone());
+        Some(v)
     }
 }
 

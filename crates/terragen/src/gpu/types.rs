@@ -211,6 +211,61 @@ pub(crate) struct GTileInfo {
     pub ss: u32,
 }
 
+/// `Region` of surface.wgsl (`RegionInfo`).
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Default)]
+pub(crate) struct GRegion {
+    pub center: [f64; 4],
+    pub ex: [f32; 4],
+    pub ey: [f32; 4],
+    pub east: [f32; 4],
+    pub north: [f32; 4],
+    pub split: u64,
+    pub style: u32,
+    pub _p: u32,
+    pub fw: f32,
+    pub fh: f32,
+    pub hedge: f32,
+    pub track: f32,
+    pub border_w: f32,
+    pub palette: f32,
+    pub agri: f32,
+    pub season: f32,
+    pub _q: [f32; 4],
+}
+
+/// `Town` of surface.wgsl (`TownInfo` of an existing town).
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Default)]
+pub(crate) struct GTown {
+    pub center: [f64; 4],
+    pub inv_r09: f64,
+    pub inv_r035: f64,
+    pub seed: u64,
+    pub _p: u64,
+    pub ex: [f32; 4],
+    pub ey: [f32; 4],
+    pub sun: [f32; 4],
+    pub radius: f32,
+    pub block: f32,
+    pub street: f32,
+    pub organic: f32,
+    pub roof_style: f32,
+    pub height: f32,
+    pub lot: f32,
+    pub elong: f32,
+    pub _q: [f32; 4],
+}
+
+/// `SiteReq` / `LakeReq` of the tile kernels: a site whose data the host is to provide.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Default)]
+pub(crate) struct GSiteReq {
+    pub pt: [f64; 4],
+    pub id: u64,
+    pub _p: [u64; 3],
+}
+
 pub(crate) const TF_GRID: u32 = 1;
 pub(crate) const TF_WARP_GRID: u32 = 2;
 pub(crate) const TF_GULLY_GRID: u32 = 4;
@@ -237,5 +292,8 @@ mod tests {
         assert_eq!(std::mem::size_of::<GPointIn>(), 96);
         assert_eq!(std::mem::size_of::<GRow>(), 40);
         assert_eq!(std::mem::size_of::<GTileInfo>(), 88);
+        assert_eq!(std::mem::size_of::<GRegion>(), 160);
+        assert_eq!(std::mem::size_of::<GTown>(), 160);
+        assert_eq!(std::mem::size_of::<GSiteReq>(), 64);
     }
 }

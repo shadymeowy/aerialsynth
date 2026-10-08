@@ -198,3 +198,58 @@ fn pass_a_matches_the_cpu() {
         }
     }
 }
+
+/// Per-layer differences between two tiles: (layer, mean abs, share of samples off by more
+/// than the tolerance, max abs).
+pub(crate) fn compare_tiles(g: &tilestore::TileData, c: &tilestore::TileData) -> Vec<(&'static str, f64, f64, f64)> {
+    fn stats<T: Copy>(a: &[T], b: &[T], tol: f64, f: impl Fn(T) -> f64) -> (f64, f64, f64) {
+        let (mut sum, mut bad, mut mx) = (0.0, 0usize, 0.0f64);
+        for (x, y) in a.iter().zip(b) {
+            let e = (f(*x) - f(*y)).abs();
+            sum += e;
+            mx = mx.max(e);
+            if e > tol {
+                bad += 1;
+            }
+        }
+        (sum / a.len() as f64, bad as f64 / a.len() as f64, mx)
+    }
+    let mut out = Vec::new();
+    let mut push = |name, s: (f64, f64, f64)| out.push((name, s.0, s.1, s.2));
+    push("elevation", stats(&g.elevation, &c.elevation, 0.05, |v| v as f64));
+    push("rgb", stats(&g.rgb, &c.rgb, 2.0, |v| v as f64));
+    push("albedo", stats(&g.albedo, &c.albedo, 2.0, |v| v as f64));
+    push("emission", stats(&g.emission, &c.emission, 2.0, |v| v as f64));
+    push("normal", stats(&g.normal, &c.normal, 2.0, |v| v as f64));
+    push("landcover", stats(&g.landcover, &c.landcover, 0.5, |v| v as f64));
+    out
+}
+
+#[test]
+fn tiles_match_the_cpu() {
+    if gpu().is_none() {
+        return;
+    }
+    let cfg = crate::Config::default();
+    let gen = GpuGenerator::new(cfg.clone()).unwrap();
+    let cpu = crate::Generator::new(cfg);
+    let ids = [
+        geodesy::tiles::TileId::new(16, 39117, 25113),
+        geodesy::tiles::TileId::new(14, 9779, 6278),
+        geodesy::tiles::TileId::new(12, 2444, 1569),
+        geodesy::tiles::TileId::new(10, 611, 392),
+        geodesy::tiles::TileId::new(7, 76, 49),
+    ];
+    for id in ids {
+        let t0 = std::time::Instant::now();
+        let g = gen.tiles(&[id]).unwrap().remove(0);
+        let tg = t0.elapsed().as_secs_f64();
+        let t0 = std::time::Instant::now();
+        let c = cpu.tile(id);
+        let tc = t0.elapsed().as_secs_f64();
+        eprintln!("tile {id}: GPU {tg:.2} s, CPU {tc:.2} s, elevation range GPU {:.1}..{:.1} CPU {:.1}..{:.1}", g.elev_min, g.elev_max, c.elev_min, c.elev_max);
+        for (name, mean, bad, mx) in compare_tiles(&g, &c) {
+            eprintln!("  {name:10} mean {mean:8.4} off {:7.3}% max {mx:8.2}", bad * 100.0);
+        }
+    }
+}
