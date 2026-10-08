@@ -3,7 +3,7 @@
 # IMU.   terrain run -c configs/dataset.yaml
 world:
   seed: 7
-  supersample: 2
+  tile_supersample: 2
 tiles:
   file: out/dataset/world.h5
   max_zoom: 18
@@ -12,14 +12,14 @@ trajectory:
   file: out/dataset/traj.csv
   synth:
     kind: random
-    altitude: 600
+    altitude_m: 600
     altitude_ref: agl
-    speed: 40
-    duration: 60
-    rate: 400            # high-rate record for motion blur / vibration
-    radius: 1500
+    speed_mps: 40
+    duration_s: 60
+    rate_hz: 400            # high-rate record for motion blur / vibration
+    radius_m: 1500
     seed: 3
-    wind: { speed: 7, direction_deg: 250, turbulence: 1.2, gust_rate_per_min: 1.0, gust_amplitude: 4 }
+    wind: { speed_mps: 7, direction_deg: 250, turbulence: 1.2, gust_rate_per_min: 1.0, gust_amplitude_mps: 4 }
     vibration: { harmonic_deg: 0.05, harmonic_hz: 42, broadband_deg: 0.04 }
 render:
   supersample: 3
@@ -41,7 +41,7 @@ cameras:
     frame_rate: 10
     rgb:
       sensor:
-        exposure: { mode: auto, tau: 0.5, max_time: 0.008 }
+        exposure: { mode: auto, tau_s: 0.5, max_time_s: 0.008 }
         motion_blur: { enabled: true, max_samples: 16 }
         optics: { defocus_px: 0.4, chromatic_aberration_px: 0.5, vignette: 0.3 }
         noise: { enabled: true, read: 0.15, shot: 0.2 }

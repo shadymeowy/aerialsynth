@@ -12,6 +12,7 @@ h5 = { path = "crates/h5" }
 tilestore = { path = "crates/tilestore" }
 terragen = { path = "crates/terragen" }
 render = { path = "crates/render" }
+explorer = { path = "crates/explorer" }
 hdf5-sys = { package = "hdf5-metno-sys", version = "0.12.4", features = ["static", "zlib"] }
 glam = { version = "0.30", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }

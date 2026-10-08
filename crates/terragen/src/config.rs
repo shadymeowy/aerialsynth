@@ -16,12 +16,16 @@ pub struct Config {
     pub climate: Climate,
     pub vegetation: Vegetation,
     pub landuse: Landuse,
-    pub look: SatelliteLook,
-    /// Supersampling per axis for colour (1 = one sample per pixel).
-    pub supersample: u32,
-    /// With supersample 2: evaluate the two diagonal samples first and the other two only where
-    /// those differ (class, colour, height, light); flat areas cost half.
-    pub adaptive_supersample: bool,
+    /// Colour of the surface (the `albedo` layer, and so every rendering of it).
+    pub albedo: AlbedoLook,
+    /// Lighting of the baked `rgb` layer of the tiles (a satellite-style image). Camera images
+    /// are lit by the scenario's `render.lighting` instead.
+    pub satellite: SatelliteLook,
+    /// Supersampling per axis of the tile pixels (1 = one sample per pixel).
+    pub tile_supersample: u32,
+    /// With tile_supersample 2: evaluate the two diagonal samples first and the other two only
+    /// where those differ (class, colour, height, light); flat areas cost half.
+    pub tile_supersample_adaptive: bool,
 }
 
 impl Default for Config {
@@ -36,9 +40,10 @@ impl Default for Config {
             climate: Climate::default(),
             vegetation: Vegetation::default(),
             landuse: Landuse::default(),
-            look: SatelliteLook::default(),
-            supersample: 2,
-            adaptive_supersample: true,
+            albedo: AlbedoLook::default(),
+            satellite: SatelliteLook::default(),
+            tile_supersample: 2,
+            tile_supersample_adaptive: true,
         }
     }
 }
@@ -89,34 +94,34 @@ impl Default for Continents {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Relief {
-    /// Wavelength of mountain belts.
+    /// Wavelength of mountain belts (km).
     pub belt_wavelength_km: f64,
     /// Typical maximum mountain height above the surrounding base (m).
-    pub mountain_height: f64,
+    pub mountain_height_m: f64,
     /// Typical hill amplitude (m).
-    pub hill_height: f64,
+    pub hill_height_m: f64,
     /// Max amplitude of sub-100m micro relief (m).
-    pub micro_height: f64,
+    pub micro_height_m: f64,
     /// Fraction of arid uplands that are terraced into mesas.
     pub mesas: f64,
     /// Sand dunes amplitude in sand seas (m).
-    pub dune_height: f64,
+    pub dune_height_m: f64,
     /// Strength of the erosion-gully filter on mountain / hill slopes (0 disables).
     pub erosion: f64,
     /// Wavelength of the coarsest gully octave (m).
-    pub gully_wavelength: f64,
+    pub gully_wavelength_m: f64,
 }
 impl Default for Relief {
     fn default() -> Self {
         Relief {
             belt_wavelength_km: 700.0,
-            mountain_height: 3200.0,
-            hill_height: 260.0,
-            micro_height: 3.0,
+            mountain_height_m: 3200.0,
+            hill_height_m: 260.0,
+            micro_height_m: 3.0,
             mesas: 0.5,
-            dune_height: 35.0,
+            dune_height_m: 35.0,
             erosion: 1.0,
-            gully_wavelength: 1400.0,
+            gully_wavelength_m: 1400.0,
         }
     }
 }
@@ -173,17 +178,17 @@ impl Default for RiverLevel {
 #[serde(default, deny_unknown_fields)]
 pub struct Climate {
     /// Mean annual temperature at the equator at sea level (°C).
-    pub equator_temp: f64,
+    pub equator_temp_c: f64,
     /// Temperature drop from equator to pole (°C).
-    pub pole_drop: f64,
+    pub pole_drop_c: f64,
     /// Lapse rate (°C per km).
-    pub lapse_rate: f64,
+    pub lapse_rate_c_per_km: f64,
     /// Added to moisture (−1..1).
     pub moisture_bias: f64,
 }
 impl Default for Climate {
     fn default() -> Self {
-        Climate { equator_temp: 28.0, pole_drop: 46.0, lapse_rate: 6.0, moisture_bias: 0.0 }
+        Climate { equator_temp_c: 28.0, pole_drop_c: 46.0, lapse_rate_c_per_km: 6.0, moisture_bias: 0.0 }
     }
 }
 
@@ -229,7 +234,7 @@ impl Default for Landuse {
     }
 }
 
-/// How the baked "satellite" rgb layer is lit.
+/// Lighting of the baked `rgb` layer (a satellite-style image of each tile).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SatelliteLook {
@@ -238,28 +243,29 @@ pub struct SatelliteLook {
     pub ambient: f64,
     pub direct: f64,
     pub exposure: f64,
-    /// Atmospheric haze mixed into the satellite image (0..1).
+    /// Atmospheric haze mixed into the image (0..1).
     pub haze: f64,
-    /// Cast shadows of trees/buildings.
+    /// Cast shadows of trees and buildings.
     pub shadows: bool,
-    /// Global colour knobs applied to the generated surface albedo (and therefore to both the
-    /// `albedo` and `rgb` layers): saturation (1 = as designed, >1 more vivid) and brightness.
-    pub albedo_saturation: f64,
-    pub albedo_brightness: f64,
 }
 impl Default for SatelliteLook {
     fn default() -> Self {
-        SatelliteLook {
-            sun_azimuth_deg: 145.0,
-            sun_elevation_deg: 52.0,
-            ambient: 0.30,
-            direct: 0.95,
-            exposure: 1.0,
-            haze: 0.04,
-            shadows: true,
-            albedo_saturation: 1.0,
-            albedo_brightness: 1.0,
-        }
+        SatelliteLook { sun_azimuth_deg: 145.0, sun_elevation_deg: 52.0, ambient: 0.30, direct: 0.95, exposure: 1.0, haze: 0.04, shadows: true }
+    }
+}
+
+/// Global colour knobs applied to the generated surface albedo (and therefore to both the
+/// `albedo` and `rgb` layers).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AlbedoLook {
+    /// 1 = as designed, > 1 more vivid.
+    pub saturation: f64,
+    pub brightness: f64,
+}
+impl Default for AlbedoLook {
+    fn default() -> Self {
+        AlbedoLook { saturation: 1.0, brightness: 1.0 }
     }
 }
 

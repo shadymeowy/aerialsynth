@@ -619,7 +619,7 @@ impl World {
             }
         }
         if gully {
-            let lam_e = self.cfg.relief.gully_wavelength;
+            let lam_e = self.cfg.relief.gully_wavelength_m;
             let (mountain, amp_m) = self.mountain_mask(m);
             let hill_amp = self.hill_amplitude(m);
             let gain = 0.47 + 0.08 * m.rough;
@@ -648,7 +648,7 @@ impl World {
         // the long gully octaves (they follow the low-passed relief gradient above)
         if let (Some(cut), Some([ge, gn])) = (relief_cut, pre.gully) {
             let grad = ctx.east * ge + ctx.north * gn;
-            let lam_e = self.cfg.relief.gully_wavelength;
+            let lam_e = self.cfg.relief.gully_wavelength_m;
             pre.gully_oct = Some(self.gullies_part(ctx.p, ctx.up, grad, ctx.gsd, lam_e, cut[1], true, [0.0; 4]));
         }
         pre
@@ -702,8 +702,8 @@ impl World {
     pub fn climate(&self, m: &Macro, lat: f64, elev: f64) -> (f64, f64) {
         let c = &self.cfg.climate;
         let la = lat.abs() / std::f64::consts::FRAC_PI_2;
-        let mut t = c.equator_temp - c.pole_drop * la.powf(1.6) + m.temp;
-        t -= c.lapse_rate * elev.max(0.0) / KM;
+        let mut t = c.equator_temp_c - c.pole_drop_c * la.powf(1.6) + m.temp;
+        t -= c.lapse_rate_c_per_km * elev.max(0.0) / KM;
         let latd = lat.abs().to_degrees();
         let hadley = (-((latd - 24.0) / 9.0).powi(2)).exp();
         let mut w = 0.56 + 0.62 * m.moist;
@@ -728,13 +728,13 @@ impl World {
         let b2 = 1.0 - m.belt2.abs();
         let belt = (b1 * 0.75 + b2 * 0.45 + 0.35 * m.belt_var).max(0.0);
         let mountain = smoothstep(0.62, 0.92, belt) * smoothstep(-0.04, 0.08, m.cont);
-        let amp_m = self.cfg.relief.mountain_height * (0.55 + 0.45 * smoothstep(-0.4, 0.6, m.belt_var)) * mountain;
+        let amp_m = self.cfg.relief.mountain_height_m * (0.55 + 0.45 * smoothstep(-0.4, 0.6, m.belt_var)) * mountain;
         (mountain, amp_m)
     }
 
     fn hill_amplitude(&self, m: &Macro) -> f64 {
         let land = smoothstep(-0.06, 0.05, m.cont);
-        self.cfg.relief.hill_height * (0.15 + 0.85 * smoothstep(-0.5, 0.6, m.hill_amp)) * (0.25 + 0.75 * land)
+        self.cfg.relief.hill_height_m * (0.15 + 0.85 * smoothstep(-0.5, 0.6, m.hill_amp)) * (0.25 + 0.75 * land)
     }
 
     /// Smooth (≥ ~5 km) elevation at a point; used for water levels.
@@ -927,7 +927,7 @@ impl World {
 
         // ---- erosion gullies on mountain and hill slopes
         let relief_amp = amp_m + 0.8 * hill_amp;
-        let lam_e = self.cfg.relief.gully_wavelength;
+        let lam_e = self.cfg.relief.gully_wavelength_m;
         let mut gully = 0.0;
         let mut gully_n = 0.0;
         if self.cfg.relief.erosion > 0.0 && relief_amp > 40.0 && gsd < lam_e * 0.5 {
@@ -952,8 +952,8 @@ impl World {
         }
 
         // ---- micro relief
-        let micro = if r.micro_height > 0.0 {
-            r.micro_height * (0.4 + 0.6 * smoothstep(-0.3, 0.6, rough) + mountain) * self.micro.eval(p, gsd)
+        let micro = if r.micro_height_m > 0.0 {
+            r.micro_height_m * (0.4 + 0.6 * smoothstep(-0.3, 0.6, rough) + mountain) * self.micro.eval(p, gsd)
         } else {
             0.0
         };
@@ -990,8 +990,8 @@ impl World {
             * smoothstep(-0.25, 0.15, sand_n)
             * (1.0 - mountain)
             * smoothstep(0.01, 0.06, s);
-        if sand > 1e-3 && r.dune_height > 0.0 {
-            h += r.dune_height * sand * self.dunes(ctx, m, gsd);
+        if sand > 1e-3 && r.dune_height_m > 0.0 {
+            h += r.dune_height_m * sand * self.dunes(ctx, m, gsd);
         }
 
         // ---- rivers: major + minor networks carve valleys, set water level
@@ -1184,7 +1184,7 @@ impl World {
         }
 
         // ---- climate at actual elevation (for snow etc.)
-        let temp = temp0 - self.cfg.climate.lapse_rate * (h.max(0.0) - smooth.max(0.0)) / KM;
+        let temp = temp0 - self.cfg.climate.lapse_rate_c_per_km * (h.max(0.0) - smooth.max(0.0)) / KM;
 
         // ---- land use suitability
         let an = m.agri;

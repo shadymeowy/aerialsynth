@@ -42,7 +42,10 @@ pub struct RenderSettings {
     pub texel_px: f64,
     /// Target mesh edge length in output pixels (vertex stride is chosen per tile).
     pub mesh_px: f64,
+    /// Zoom range of the tiles used: set from the scenario's `tiles` (not configured here).
+    #[serde(skip)]
     pub min_zoom: u8,
+    #[serde(skip)]
     pub max_zoom: u8,
     pub shading: Shading,
     /// Sun / day cycle / artificial lights.
@@ -52,7 +55,8 @@ pub struct RenderSettings {
     pub max_aniso: u32,
     /// Specular sun glint on water (relit mode).
     pub water_glint: bool,
-    /// cpu (reference) or gpu (wgpu, headless; needs the `gpu` feature)
+    /// auto (the GPU when there is one), cpu (reference) or gpu (wgpu, headless; needs the
+    /// `gpu` feature of the render crate)
     pub backend: Backend,
     /// Catalogue stars (on with `lighting.stars`).
     pub stars: crate::stars::StarsConfig,
@@ -62,8 +66,27 @@ pub struct RenderSettings {
 #[serde(rename_all = "snake_case")]
 pub enum Backend {
     #[default]
+    Auto,
     Cpu,
     Gpu,
+}
+
+impl Backend {
+    /// `Auto` resolved: the GPU backend when it is compiled in and a GPU is available.
+    pub fn resolve(self) -> Backend {
+        match self {
+            Backend::Auto => {
+                #[cfg(feature = "gpu")]
+                if crate::gpu::device::shared().is_ok() {
+                    return Backend::Gpu;
+                }
+                static NOTE: std::sync::Once = std::sync::Once::new();
+                NOTE.call_once(|| eprintln!("render.backend auto: no usable GPU, rendering on the CPU"));
+                Backend::Cpu
+            }
+            b => b,
+        }
+    }
 }
 
 impl Default for RenderSettings {
@@ -73,13 +96,13 @@ impl Default for RenderSettings {
             texel_px: 1.0,
             mesh_px: 2.0,
             min_zoom: 2,
-            max_zoom: 19,
+            max_zoom: 18,
             shading: Shading::Relit,
             lighting: LightingConfig::default(),
             atmosphere: AtmoParams::default(),
             max_aniso: 8,
             water_glint: true,
-            backend: Backend::Cpu,
+            backend: Backend::Auto,
             stars: Default::default(),
         }
     }
@@ -503,7 +526,8 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(model: Arc<dyn CameraModel>, settings: RenderSettings, ell: Ellipsoid, cache: Arc<TileCache>) -> Self {
+    pub fn new(model: Arc<dyn CameraModel>, mut settings: RenderSettings, ell: Ellipsoid, cache: Arc<TileCache>) -> Self {
+        settings.backend = settings.backend.resolve();
         let ss = settings.supersample.max(1);
         let model_ss = model.scaled(ss);
         let (w, h) = (model_ss.width() as usize, model_ss.height() as usize);

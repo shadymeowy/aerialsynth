@@ -44,18 +44,22 @@ pub enum AltitudeRef {
 #[serde(default, deny_unknown_fields)]
 pub struct WindConfig {
     /// Mean wind speed (m/s).
+    #[serde(rename = "speed_mps")]
     pub speed: f64,
     /// Direction the wind blows FROM (deg, meteorological).
     pub direction_deg: f64,
     /// Turbulence intensity σ (m/s): ~0.5 light, 1.5 moderate, 3 severe.
     pub turbulence: f64,
     /// Turbulence length scale (m).
+    #[serde(rename = "length_scale_m")]
     pub length_scale: f64,
     /// Discrete gusts per minute.
     pub gust_rate_per_min: f64,
     /// Gust amplitude (m/s).
+    #[serde(rename = "gust_amplitude_mps")]
     pub gust_amplitude: f64,
     /// Gust length (m).
+    #[serde(rename = "gust_length_m")]
     pub gust_length: f64,
 }
 
@@ -158,6 +162,7 @@ pub struct GimbalConfig {
     /// on the gimbal, and /pose describes the gimbal frame, not the airframe.
     pub stabilized: bool,
     /// Gimbal response time constant (s).
+    #[serde(rename = "tau_s")]
     pub tau: f64,
     /// Fraction of vibration that passes through the gimbal / mount isolators.
     pub vibration_transmission: f64,
@@ -177,24 +182,32 @@ pub struct SynthConfig {
     pub lat: Option<f64>,
     pub lon: Option<f64>,
     pub heading_deg: f64,
+    #[serde(rename = "altitude_m")]
     pub altitude: f64,
     pub altitude_ref: AltitudeRef,
     /// Climb (m/s, negative: descent): the altitude target rises along the path at this rate
     /// (pitch follows from the climb).
+    #[serde(rename = "climb_rate_mps")]
     pub climb_rate: f64,
     /// True airspeed (m/s).
+    #[serde(rename = "speed_mps")]
     pub speed: f64,
+    #[serde(rename = "duration_s")]
     pub duration: f64,
     /// Recording rate (Hz). Keep ≥ ~4x the vibration frequency for faithful blur. Records are
     /// written every round(1 / (rate·dt)) integration steps, so the effective rate is
     /// 1 / (k·dt) (e.g. 300 Hz with dt = 1 ms becomes 333 Hz).
+    #[serde(rename = "rate_hz")]
     pub rate: f64,
     /// Integration step (s).
+    #[serde(rename = "dt_s")]
     pub dt: f64,
     /// Turn radius for circle/figure8/lawnmower and the random path's typical turn (m); a
     /// negative radius makes the circle turn left.
+    #[serde(rename = "radius_m")]
     pub radius: f64,
     /// Lawnmower leg length (m).
+    #[serde(rename = "leg_m")]
     pub leg: f64,
     /// [lat, lon] (deg) for `waypoints` (the spline passes through them).
     pub waypoints: Vec<[f64; 2]>,

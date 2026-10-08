@@ -1,6 +1,7 @@
 //! `terrain` — procedural aerial-odometry dataset toolchain.
 //!
-//! Every subcommand reads one scenario YAML (`--config`); see `terrain config` for all options.
+//! Every subcommand reads one scenario YAML (`-c` / `--config`); see `terrain config` for all
+//! options.
 
 mod commands;
 mod preview;
@@ -48,6 +49,8 @@ enum Cmd {
     Info(commands::InfoArgs),
     /// Generate tiles straight into a PNG mosaic (no HDF5), for inspecting the generator.
     Preview(preview::Args),
+    /// Fly over the tile store on a globe (window), generating tiles as you go.
+    Explore(commands::ExploreArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -62,5 +65,6 @@ fn main() -> anyhow::Result<()> {
         Cmd::Run(a) => commands::run(a),
         Cmd::Info(a) => commands::info(a),
         Cmd::Preview(a) => preview::run(a),
+        Cmd::Explore(a) => commands::explore(a),
     }
 }

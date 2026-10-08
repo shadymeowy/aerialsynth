@@ -18,7 +18,7 @@ use rayon::prelude::*;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use terragen::Generator;
-use tilestore::{Layer, StoreMeta, TileStore};
+use tilestore::{Layer, TileStore};
 
 /// Time window of the sequence in trajectory time: [t0, t1]. t0 is the zero of the sequence
 /// clock (all timestamps in the output are µs since t0).
@@ -98,6 +98,9 @@ pub fn generator_range_estimator(gen: &Generator) -> impl Fn(TileId) -> (f32, f3
     }
 }
 
+/// Planning refines to this fraction of `render.texel_px`.
+pub const PLAN_TEXEL_FACTOR: f64 = 0.8;
+
 /// Tiles needed to render every camera of the sequence (with margins and all ancestors).
 /// Frame cameras are planned at their frame times, event cameras every 1 / frame_rate.
 pub fn plan(scn: &Scenario, poses: &[Pose], gen: Option<&Generator>) -> Result<BTreeSet<TileId>> {
@@ -106,7 +109,8 @@ pub fn plan(scn: &Scenario, poses: &[Pose], gen: Option<&Generator>) -> Result<B
     let params = LodParams {
         min_zoom: scn.tiles.min_zoom,
         max_zoom: scn.tiles.max_zoom,
-        texel_px: scn.tiles.plan_texel_px,
+        // a little finer than the renderer refines (its elevation ranges are only estimated here)
+        texel_px: scn.render.texel_px * PLAN_TEXEL_FACTOR,
         cone_margin: 0.08,
         ..Default::default()
     };
@@ -190,9 +194,9 @@ impl TileOracle for DryRunOracle<'_> {
 pub fn plan_missing(scn: &Scenario, poses: &[Pose], store: &TileStore) -> Result<BTreeSet<TileId>> {
     let ell = store.meta().ellipsoid();
     let win = Window::new(scn, poses)?;
-    let max_zoom = scn.render.max_zoom.min(scn.tiles.max_zoom);
+    let max_zoom = scn.tiles.max_zoom;
     let params = LodParams {
-        min_zoom: scn.render.min_zoom.max(scn.tiles.min_zoom),
+        min_zoom: scn.tiles.min_zoom,
         max_zoom,
         texel_px: scn.render.texel_px,
         ..Default::default()
@@ -236,15 +240,9 @@ pub fn generate(gen: &Generator, store: &TileStore, tiles: &[TileId], force: boo
     Ok(total)
 }
 
+/// The scenario's tile store for adding tiles (created if missing); it must hold this world.
 pub fn open_or_create_store(scn: &Scenario, gen: &Generator) -> Result<TileStore> {
-    let meta = StoreMeta {
-        ellipsoid_a: gen.world.ell.a,
-        ellipsoid_b: gen.world.ell.b,
-        generator_config: gen.config().to_yaml(),
-        seed: gen.config().seed,
-        layers: Layer::ALL.to_vec(),
-    };
-    Ok(TileStore::open_or_create(&scn.tiles.file, meta)?)
+    gen.open_store_rw(&scn.tiles.file)
 }
 
 /// Tile cache with the layers the shading mode needs (~40% less memory per cached tile), lazily
@@ -267,8 +265,8 @@ pub fn tile_cache(scn: &Scenario, store: Arc<TileStore>, gen: Option<Arc<Generat
 pub fn renderer(scn: &Scenario, model: Arc<dyn CameraModel>, supersample: u32, ell: Ellipsoid, cache: Arc<TileCache>) -> Renderer {
     let mut rs = scn.render.clone();
     rs.supersample = supersample.max(1);
-    rs.min_zoom = rs.min_zoom.max(scn.tiles.min_zoom);
-    rs.max_zoom = rs.max_zoom.min(scn.tiles.max_zoom);
+    rs.min_zoom = scn.tiles.min_zoom;
+    rs.max_zoom = scn.tiles.max_zoom;
     Renderer::new(model, rs, ell, cache)
 }
 
@@ -475,7 +473,7 @@ fn render_camera(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], win: Window,
             emit(prev, flow)?;
         }
         let stars_gt = match &spec.stars {
-            Some(m) => stars_gt.into_iter().filter(|s| s.v as f64 <= m.mag_limit).collect(),
+            Some(m) => stars_gt.into_iter().filter(|s| m.mag_limit.is_none_or(|l| s.v as f64 <= l)).collect(),
             None => vec![],
         };
         pending = Some(Pending { index: k, t, cam, rgb, exposure, depth_z: frame.depth, points: frame.points, landcover: frame.landcover, stars: stars_gt });
@@ -546,6 +544,7 @@ pub fn render_sequence(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, ge
         }
         file.flush()?;
     }
+    output::describe(&file, scn)?;
     let g = cache.flush_generated()?;
     if g > 0 {
         eprintln!("lazily generated and stored {g} tiles");
@@ -567,6 +566,7 @@ pub fn render_events(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, gen:
         file.flush()?;
         out.push((spec.path.clone(), n));
     }
+    output::describe(&file, scn)?;
     cache.flush_generated()?;
     Ok(out)
 }

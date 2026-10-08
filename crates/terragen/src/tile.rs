@@ -129,8 +129,8 @@ impl Generator {
         let na2 = n + 4; // pass A, 2-px apron
         let z = id.z;
         let ell = self.world.ell;
-        let ss = self.world.cfg.supersample.max(1) as usize;
-        let adaptive = ss == 2 && self.world.cfg.adaptive_supersample;
+        let ss = self.world.cfg.tile_supersample.max(1) as usize;
+        let adaptive = ss == 2 && self.world.cfg.tile_supersample_adaptive;
         let ox = id.x as f64 * n as f64;
         let oy = id.y as f64 * n as f64;
 
@@ -510,7 +510,8 @@ impl Generator {
             eprintln!("tile {id}: pass A {:.3}s, pass B {:.3}s", t_a, t_start.elapsed().as_secs_f64() - t_a);
         }
         // ---------------- outputs
-        let look = &self.world.cfg.look;
+        let look = &self.world.cfg.satellite;
+        let albedo_look = &self.world.cfg.albedo;
         let az = look.sun_azimuth_deg.to_radians();
         let el = look.sun_elevation_deg.to_radians();
         let sun = DVec3::new(az.sin() * el.cos(), az.cos() * el.cos(), el.sin());
@@ -547,7 +548,7 @@ impl Generator {
                 let alb = {
                     let a = px.albedo;
                     let lum = 0.2126 * a.x + 0.7152 * a.y + 0.0722 * a.z;
-                    ((DVec3::splat(lum) + (a - DVec3::splat(lum)) * look.albedo_saturation) * look.albedo_brightness).max(DVec3::ZERO)
+                    ((DVec3::splat(lum) + (a - DVec3::splat(lum)) * albedo_look.saturation) * albedo_look.brightness).max(DVec3::ZERO)
                 };
                 let mut c = alb * (light / l0) * look.exposure;
                 c = c * (1.0 - look.haze) + haze_col * look.haze;

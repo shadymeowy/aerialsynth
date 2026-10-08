@@ -4,7 +4,8 @@
 //! ```text
 //! /                      attrs: format="terrain-tiles", format_version, tile_size, scheme="xyz",
 //!                               projection="EPSG:3857", ellipsoid_a, ellipsoid_b,
-//!                               vertical_datum="ellipsoid", generator_config (yaml), seed
+//!                               vertical_datum="ellipsoid", generator_config (yaml), seed,
+//!                               generator_version (terragen::GENERATOR_VERSION; 0 = unknown)
 //! /levels/<z>/index      i32 [N,2]   (x, y) of row n
 //! /levels/<z>/elev_range f32 [N,2]   (min, max) of the elevation layer of row n
 //! /levels/<z>/<layer>    [N,256,256(,C)] chunk = one tile, shuffle + deflate
@@ -13,7 +14,7 @@
 //!     elevation  f32     DSM, meters above the ellipsoid, at pixel centres
 //!     normal     i8  x3  unit normal (east, north, up) * 127
 //!     landcover  u8      class id (see terragen::landcover)
-//!     emission   u8  x3  night-time artificial light, linear radiance = 4 * (v/255)^2.2
+//!     emission   u8  x3  night-time artificial light, linear radiance = 16 * (v/255)^3
 //! ```
 //! Rows are appended in any order, so the file can be grown lazily (generate only the tiles a
 //! trajectory needs, add more later). Tile pixels are pixel-centre registered: pixel (i, j) of
@@ -37,7 +38,7 @@ pub enum Layer {
     Elevation,
     Normal,
     Landcover,
-    /// Night-time artificial light emission, u8 x3: linear radiance = 4 * (v/255)^2.2
+    /// Night-time artificial light emission, u8 x3: linear radiance = 16 * (v/255)^3
     Emission,
 }
 

@@ -387,7 +387,7 @@ impl SurfaceModel {
     pub fn new(world: &World) -> Self {
         let s = world.seed();
         let k = |i: u64| mix64(s ^ (0xB0B0 + i * 31337));
-        let look = &world.cfg.look;
+        let look = &world.cfg.satellite;
         let az = look.sun_azimuth_deg.to_radians();
         let el = look.sun_elevation_deg.to_radians().max(0.05);
         SurfaceModel {
@@ -931,7 +931,7 @@ impl SurfaceModel {
             None
         };
         let town_urban = town_sel.map_or(0.0, |x| x.1);
-        let town_px = town_sel.and_then(|(town, _)| self.town(&town, p, gsd, fw, town_slope, river_clear, world.cfg.look.shadows, pf));
+        let town_px = town_sel.and_then(|(town, _)| self.town(&town, p, gsd, fw, town_slope, river_clear, world.cfg.satellite.shadows, pf));
         let town_cov = town_px.map_or(0.0, |x| x.2);
         let not_urban = (1.0 - smoothstep(0.0, 0.08, town_urban)) * (1.0 - town_cov);
 
@@ -1019,7 +1019,7 @@ impl SurfaceModel {
                     }
                 }
                 // cast shadows from neighbouring trees onto the ground/other crowns
-                if world.cfg.look.shadows && tcov < 0.99 {
+                if world.cfg.satellite.shadows && tcov < 0.99 {
                     let mut shadow = 0.0;
                     for layer in &layers {
                         if layer.density <= 0.0 || layer.cell < 2.0 * gsd {

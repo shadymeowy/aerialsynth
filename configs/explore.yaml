@@ -1,0 +1,6 @@
+# Globe explorer over the seed-1 world:   terrain explore -c configs/explore.yaml --dynamic
+world:
+  seed: 1
+tiles:
+  file: out/explorer/world.h5
+  max_zoom: 17

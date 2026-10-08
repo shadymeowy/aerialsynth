@@ -229,8 +229,17 @@ fn vs_sky(@builtin(vertex_index) k: u32) -> SOut {
     return o;
 }
 
+// integer hash of a cell of the star grid (a sin-based hash loses precision for large
+// arguments: stars showed in a slice of the sky only)
 fn hash(p: vec3<f32>) -> f32 {
-    return fract(sin(dot(p, vec3<f32>(12.9898, 78.233, 37.719))) * 43758.5453);
+    let q = vec3<i32>(p);
+    var h = (u32(q.x) * 0x8da6b343u) ^ (u32(q.y) * 0xd8163841u) ^ (u32(q.z) * 0xcb1ab31fu);
+    h ^= h >> 16u;
+    h *= 0x7feb352du;
+    h ^= h >> 15u;
+    h *= 0x846ca68bu;
+    h ^= h >> 16u;
+    return f32(h) / 4294967296.0;
 }
 
 @fragment

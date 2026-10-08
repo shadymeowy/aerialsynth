@@ -5,7 +5,7 @@ world: { seed: 1 }
 tiles: { file: out/imu_check/world.h5, lazy: true }
 trajectory:
   file: out/imu_check/traj.csv
-  synth: { kind: figure8, altitude: 800, speed: 45, duration: 20, rate: 1000, radius: 700 }
+  synth: { kind: figure8, altitude_m: 800, speed_mps: 45, duration_s: 20, rate_hz: 1000, radius_m: 700 }
 imu:
   path: /imu
   rate_hz: 200

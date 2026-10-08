@@ -189,18 +189,12 @@ pub struct LandcoverModality {}
 
 /// `stars/`: the catalogue stars in each frame (id, sub-pixel position, magnitude, irradiance,
 /// visibility); see output.rs.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct StarsModality {
-    /// Faintest V magnitude recorded (stars fainter than `render.stars.mag_limit` are never
-    /// rendered).
-    pub mag_limit: f64,
-}
-
-impl Default for StarsModality {
-    fn default() -> Self {
-        StarsModality { mag_limit: 99.0 }
-    }
+    /// Faintest V magnitude recorded (None = every rendered star; stars fainter than
+    /// `render.stars.mag_limit` are never rendered).
+    pub mag_limit: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -208,12 +202,11 @@ impl Default for StarsModality {
 pub struct TilesConfig {
     /// HDF5 tile store.
     pub file: PathBuf,
-    /// Coarsest zoom planned/rendered (the whole visible area is covered from here).
+    /// Zoom range of the tiles: planned, generated and rendered (the whole visible area is
+    /// covered from `min_zoom`; detail is limited to `max_zoom`). The level of detail within it
+    /// is `render.texel_px`.
     pub min_zoom: u8,
-    /// Finest zoom generated.
     pub max_zoom: u8,
-    /// Planning refines until a texel covers at most this many pixels (smaller = finer, safer).
-    pub plan_texel_px: f64,
     /// Rings of neighbour tiles added around every planned tile (per zoom), so that consumers
     /// of the tile store (e.g. an odometry / SLAM system whose pose estimate is slightly off)
     /// find the neighbourhood of every viewed tile.
@@ -232,7 +225,6 @@ impl Default for TilesConfig {
             file: PathBuf::from("out/world.h5"),
             min_zoom: 2,
             max_zoom: 18,
-            plan_texel_px: 0.8,
             margin: 2,
             plan_every: 1,
             lazy: false,

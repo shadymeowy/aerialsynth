@@ -9,7 +9,7 @@ render:
   lighting: { mode: clock, date: "2026-01-20", time_utc: "19:30:00", stars: true }
   stars:                     # all optional
     catalog: null            # default: built-in Hipparcos + Tycho-2, V ≤ 9 (130k stars)
-    mag_limit: 99            # faintest V rendered
+    mag_limit: null          # faintest V rendered (null: the whole catalogue)
     psf_sigma_px: 0.5        # star image: Gaussian PSF integrated over the pixels
     brightness: 1.0          # 1 = physical
     refraction: true

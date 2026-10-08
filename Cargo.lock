@@ -819,7 +819,6 @@ dependencies = [
  "parking_lot",
  "pollster",
  "rayon",
- "serde_yaml",
  "terragen",
  "tilestore",
 ]
@@ -2634,6 +2633,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "explorer",
  "geodesy",
  "glam",
  "h5",

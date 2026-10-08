@@ -1,13 +1,13 @@
 # GPU backend (wgpu, headless)
 
 `render.backend: gpu` renders frames with wgpu (Vulkan / Metal / DX12) instead of the CPU
-reference renderer. It is headless (no window, no surface) and plugs into the same pipeline:
+reference renderer. The default, `auto`, takes the GPU when there is one and the CPU otherwise. It is headless (no window, no surface) and plugs into the same pipeline:
 `Renderer::render` returns the same `FrameOut` (radiance, depth, 3D points, land cover, lamp
 flicker split), so the sensor model, motion blur, events, IMU and writers are unchanged.
 
 ```yaml
 render:
-  backend: gpu   # default: cpu
+  backend: gpu   # auto (default) | gpu | cpu
 ```
 
 Build: the `gpu` feature of the `render` crate (on by default).

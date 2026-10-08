@@ -3,7 +3,7 @@ world: { seed: 1 }
 tiles: { file: out/oblique/world.h5, max_zoom: 17, lazy: true }
 trajectory:
   file: out/oblique/traj.csv
-  synth: { kind: line, altitude: 2500, speed: 70, duration: 4, heading_deg: 250 }
+  synth: { kind: line, altitude_m: 2500, speed_mps: 70, duration_s: 4, heading_deg: 250 }
 render:
   lighting: { mode: clock, date: "2026-06-21", time_utc: "16:20:00" }
 cameras:

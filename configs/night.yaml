@@ -4,7 +4,7 @@ world: { seed: 1 }
 tiles: { file: out/night/world.h5, max_zoom: 17, lazy: true }
 trajectory:
   file: out/night/traj.csv
-  synth: { kind: line, altitude: 1200, speed: 50, duration: 2, heading_deg: 20, lat: 40.03, lon: 32.90 }
+  synth: { kind: line, altitude_m: 1200, speed_mps: 50, duration_s: 2, heading_deg: 20, lat: 40.03, lon: 32.90 }
 render:
   lighting: { mode: clock, date: "2026-03-19", time_utc: "21:30:00" }
 cameras:
@@ -12,5 +12,5 @@ cameras:
     intrinsics: { model: pinhole, width: 640, height: 480, intrinsics: [400, 400, 319.5, 239.5] }
     extrinsics: { mount: forward, pitch_deg: -22 }
     frame_rate: 2
-    rgb: { sensor: { exposure: { max_time: 0.033, max_gain: 64 } } }
+    rgb: { sensor: { exposure: { max_time_s: 0.033, max_gain: 64 } } }
 output: { file: out/night/seq.h5, png_dir: out/night/png, max_frames: 1 }

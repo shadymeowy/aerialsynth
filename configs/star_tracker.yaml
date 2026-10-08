@@ -5,7 +5,7 @@ world: { seed: 1 }
 tiles: { file: out/star_tracker/world.h5, max_zoom: 17, lazy: true }
 trajectory:
   file: out/star_tracker/traj.csv
-  synth: { kind: line, lat: 41.5705, lon: 32.970, heading_deg: 190, altitude: 1500, duration: 4, rate: 100 }
+  synth: { kind: line, lat: 41.5705, lon: 32.970, heading_deg: 190, altitude_m: 1500, duration_s: 4, rate_hz: 100 }
 render:
   backend: gpu
   supersample: 2
@@ -20,7 +20,7 @@ cameras:
     stars: { mag_limit: 9 }
     rgb:
       sensor:
-        # fast optics (base_time: light gathering) rather than gain, which amplifies read noise
-        exposure: { mode: manual, ev: 15.29, base_time: 1.0e-5, max_time: 0.1, max_gain: 4 }
+        # fast optics (base_time_s: light gathering) rather than gain, which amplifies read noise
+        exposure: { mode: manual, ev: 15.29, base_time_s: 1.0e-5, max_time_s: 0.1, max_gain: 4 }
         optics: { defocus_px: 1.0, bloom: 0.0, starburst: 0.0, vignette: 0.0, chromatic_aberration_px: 0.0 }
 output: { file: out/star_tracker/seq.h5, png_dir: out/star_tracker/png, start: 0.5, end: 1.5 }

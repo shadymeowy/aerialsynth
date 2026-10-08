@@ -551,12 +551,13 @@ pub fn simulate(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], cache: Arc<Ti
     let (w, h) = (model.width() as usize, model.height() as usize);
     let mut rs: RenderSettings = scn.render.clone();
     rs.supersample = ec.supersample.max(1);
-    rs.min_zoom = rs.min_zoom.max(scn.tiles.min_zoom);
-    rs.max_zoom = rs.max_zoom.min(scn.tiles.max_zoom);
+    rs.min_zoom = scn.tiles.min_zoom;
+    rs.max_zoom = scn.tiles.max_zoom;
+    let backend = rs.backend.resolve();
     let mut renderer = Renderer::new(model.clone(), rs, ell, cache);
     renderer.split_flicker = true;
     let cpu_sensor = EventSensor::new(EventConfig { seed: ec.seed ^ spec.seed_mix(), ..ec.clone() }, w, h);
-    let mut sensor = if scn.render.backend == crate::raster::Backend::Gpu {
+    let mut sensor = if backend == crate::raster::Backend::Gpu {
         #[cfg(feature = "gpu")]
         {
             Sensor::Gpu(crate::gpu::events::GpuEventSensor::new(cpu_sensor)?)

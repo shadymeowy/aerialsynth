@@ -17,6 +17,9 @@ pub struct StoreMeta {
     /// Generator configuration (YAML) that produced the tiles, if any.
     pub generator_config: String,
     pub seed: u64,
+    /// Version of the generator that produced the tiles (0 = not recorded). Tiles of different
+    /// versions differ slightly and must not be mixed in one store.
+    pub generator_version: u32,
     /// Layers stored in this file.
     pub layers: Vec<Layer>,
 }
@@ -24,7 +27,7 @@ pub struct StoreMeta {
 impl Default for StoreMeta {
     fn default() -> Self {
         let e = geodesy::Ellipsoid::WGS84;
-        StoreMeta { ellipsoid_a: e.a, ellipsoid_b: e.b, generator_config: String::new(), seed: 0, layers: Layer::ALL.to_vec() }
+        StoreMeta { ellipsoid_a: e.a, ellipsoid_b: e.b, generator_config: String::new(), seed: 0, generator_version: 0, layers: Layer::ALL.to_vec() }
     }
 }
 
@@ -82,6 +85,7 @@ impl TileStore {
         file.set_attr("ellipsoid_b", meta.ellipsoid_b)?;
         file.set_attr_str("generator_config", &meta.generator_config)?;
         file.set_attr("seed", meta.seed)?;
+        file.set_attr("generator_version", meta.generator_version)?;
         let names: Vec<&str> = meta.layers.iter().map(|l| l.name()).collect();
         file.set_attr_str("layers", &names.join(","))?;
         file.ensure_group("levels")?;
@@ -124,6 +128,7 @@ impl TileStore {
             ellipsoid_b: file.attr("ellipsoid_b")?,
             generator_config: file.attr_str("generator_config").unwrap_or_default(),
             seed: file.attr("seed").unwrap_or(0),
+            generator_version: file.attr("generator_version").unwrap_or(0),
             layers,
         };
         let mut levels = BTreeMap::new();
@@ -154,6 +159,21 @@ impl TileStore {
             levels.insert(z, Level { rows, index, ranges, idx_ds, range_ds, layers: lds });
         }
         Ok(TileStore { file, path: path.to_path_buf(), writable, meta, levels: RwLock::new(levels) })
+    }
+
+    /// Record the world (config YAML, seed, generator version) of a writable store, e.g. of an
+    /// empty store about to be filled with another world.
+    pub fn set_generator(&mut self, config: &str, seed: u64, version: u32) -> Result<()> {
+        if !self.writable {
+            bail!("{} is open read-only", self.path.display());
+        }
+        self.file.set_attr_str("generator_config", config)?;
+        self.file.set_attr("seed", seed)?;
+        self.file.set_attr("generator_version", version)?;
+        self.meta.generator_config = config.to_string();
+        self.meta.seed = seed;
+        self.meta.generator_version = version;
+        Ok(())
     }
 
     pub fn path(&self) -> &Path {

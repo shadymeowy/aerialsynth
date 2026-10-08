@@ -23,10 +23,14 @@ pub struct ExposureConfig {
     /// Auto: target mean linear luminance of the exposed image.
     pub target: f64,
     /// Auto: adaptation time constant (s) of the EV ODE  ev' = (ev* - ev) / tau.
+    #[serde(rename = "tau_s")]
     pub tau: f64,
     /// Exposure time (s) at EV 0.
+    #[serde(rename = "base_time_s")]
     pub base_time: f64,
+    #[serde(rename = "min_time_s")]
     pub min_time: f64,
+    #[serde(rename = "max_time_s")]
     pub max_time: f64,
     /// Max analog gain (linear). Exposure beyond max_time is reached with gain.
     pub max_gain: f64,

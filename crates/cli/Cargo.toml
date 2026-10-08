@@ -21,3 +21,4 @@ serde_yaml.workspace = true
 render.workspace = true
 tilestore.workspace = true
 h5.workspace = true
+explorer.workspace = true

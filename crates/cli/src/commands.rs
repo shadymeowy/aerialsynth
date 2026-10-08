@@ -12,7 +12,7 @@ use std::sync::Arc;
 use terragen::Generator;
 use tilestore::TileStore;
 
-fn setup(c: &Common) -> Result<Scenario> {
+pub(crate) fn setup(c: &Common) -> Result<Scenario> {
     if let Some(n) = c.threads {
         rayon::ThreadPoolBuilder::new().num_threads(n).build_global().ok();
     }
@@ -213,7 +213,7 @@ fn open_store(s: &Scenario, gen: &Generator) -> Result<Arc<TileStore>> {
     let store = if s.tiles.lazy {
         pipeline::open_or_create_store(s, gen)?
     } else {
-        TileStore::open(&s.tiles.file).with_context(|| "opening tile store (run `terrain gen` first, or use --lazy)")?
+        gen.open_store_ro(&s.tiles.file).with_context(|| "opening the tile store (run `terrain gen` first, or use --lazy)")?
     };
     Ok(Arc::new(store))
 }
@@ -350,6 +350,22 @@ fn stored_tiles(s: &Scenario, gen: &Generator) -> Result<BTreeSet<TileId>> {
 }
 
 #[derive(Args)]
+pub struct ExploreArgs {
+    #[command(flatten)]
+    pub common: Common,
+    #[command(flatten)]
+    pub explore: explorer::Options,
+}
+
+/// The scenario's tile store (`tiles.file`, created if missing) on a globe.
+pub fn explore(a: ExploreArgs) -> Result<()> {
+    let s = setup(&a.common)?;
+    let gen = Generator::new(s.world.clone());
+    let store = pipeline::open_or_create_store(&s, &gen)?;
+    explorer::run(Arc::new(store), Arc::new(gen), a.explore, s.tiles.max_zoom)
+}
+
+#[derive(Args)]
 pub struct InfoArgs {
     pub file: PathBuf,
 }
@@ -357,7 +373,15 @@ pub struct InfoArgs {
 pub fn info(a: InfoArgs) -> Result<()> {
     if let Ok(st) = TileStore::open(&a.file) {
         let m = st.meta();
-        println!("tile store {} (seed {}, ellipsoid a={} b={:.6})", a.file.display(), m.seed, m.ellipsoid_a, m.ellipsoid_b);
+        println!(
+            "tile store {} (seed {}, generator version {}{}, ellipsoid a={} b={:.6})",
+            a.file.display(),
+            m.seed,
+            m.generator_version,
+            if m.generator_version == terragen::GENERATOR_VERSION { "" } else { " — not this binary's" },
+            m.ellipsoid_a,
+            m.ellipsoid_b
+        );
         println!("layers: {:?}", m.layers.iter().map(|l| l.name()).collect::<Vec<_>>());
         for z in st.zooms() {
             let t = st.tiles_at(z);

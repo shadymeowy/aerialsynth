@@ -10,7 +10,9 @@ pub struct AtmoParams {
     pub enabled: bool,
     /// Meteorological visibility at sea level (km) — sets the haze (Mie) density.
     pub visibility_km: f64,
+    #[serde(rename = "rayleigh_scale_height_m")]
     pub rayleigh_scale_height: f64,
+    #[serde(rename = "mie_scale_height_m")]
     pub mie_scale_height: f64,
     /// Brightness of the in-scattered light relative to a sunlit white surface.
     pub inscatter: f64,

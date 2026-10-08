@@ -52,7 +52,7 @@ def shot_scenario(base, shot, video, stills=False):
     sid = shot["id"]
     d = os.path.join(OUT, sid)
     scn["trajectory"]["file"] = os.path.join(d, "traj.csv")
-    scn["trajectory"]["synth"]["duration"] = start + span + 1.0
+    scn["trajectory"]["synth"]["duration_s"] = start + span + 1.0
     scn["output"]["file"] = os.path.join(d, "seq.h5")
     scn["output"]["end"] = start + span
     for c in scn["cameras"]:

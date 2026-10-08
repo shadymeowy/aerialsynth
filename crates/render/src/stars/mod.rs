@@ -33,8 +33,8 @@ use std::sync::Arc;
 pub struct StarsConfig {
     /// Catalogue file (`scripts/build_stars.py`); default: built-in Hipparcos + Tycho-2, V ≤ 9.
     pub catalog: Option<String>,
-    /// Faintest V magnitude rendered.
-    pub mag_limit: f64,
+    /// Faintest V magnitude rendered (None = the whole catalogue).
+    pub mag_limit: Option<f64>,
     /// Gaussian PSF σ (px) of a star image, integrated over the pixels (keeps sub-pixel
     /// positions in the image); the camera's optics blur (`sensor.optics.defocus_px`) adds to it.
     pub psf_sigma_px: f64,
@@ -56,7 +56,7 @@ impl Default for StarsConfig {
     fn default() -> Self {
         StarsConfig {
             catalog: None,
-            mag_limit: 99.0,
+            mag_limit: None,
             psf_sigma_px: 0.5,
             brightness: 1.0,
             refraction: true,
@@ -110,7 +110,7 @@ pub struct StarField {
 impl StarField {
     pub fn new(cfg: &StarsConfig) -> Result<StarField> {
         let cat = Catalog::load(cfg.catalog.as_deref())?;
-        let n = cat.stars.partition_point(|s| (s.v as f64) <= cfg.mag_limit);
+        let n = cat.stars.partition_point(|s| cfg.mag_limit.is_none_or(|m| (s.v as f64) <= m));
         let sun = blackbody_rgb(bv_temperature(0.65));
         let colours = (0..=350)
             .map(|i| {
@@ -167,7 +167,7 @@ impl StarField {
         list.push(ephem::Body::Moon);
         let Some(app) = planets::apparent(&sky, pos, &list) else { return vec![] };
         app.iter()
-            .filter(|a| a.v <= c.mag_limit)
+            .filter(|a| c.mag_limit.is_none_or(|m| a.v <= m))
             .map(|a| Source {
                 id: planets::body_id(a.body),
                 // the Moon as the sky draws it (lighting::moon_position), so that its ground

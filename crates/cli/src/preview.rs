@@ -5,17 +5,14 @@ use clap::Args as ClapArgs;
 use geodesy::tiles::{tile_for_latlon, TileId};
 use rayon::prelude::*;
 use std::path::PathBuf;
-use terragen::{Config, Generator, TileData, TILE_SIZE};
+use terragen::{Generator, TileData, TILE_SIZE};
 
 #[derive(ClapArgs, Debug)]
 pub struct Args {
-    /// Generator config (YAML). Defaults are used if omitted.
-    #[arg(long)]
-    pub config: Option<PathBuf>,
-    /// Override the seed from the config.
-    #[arg(long)]
-    pub seed: Option<u64>,
-    /// Centre latitude (deg). Defaults to the config's home.
+    /// Scenario (its `world`), seed override, threads.
+    #[command(flatten)]
+    pub common: crate::Common,
+    /// Centre latitude (deg). Defaults to the world's home.
     #[arg(long, allow_hyphen_values = true)]
     pub lat: Option<f64>,
     /// Centre longitude (deg).
@@ -32,17 +29,6 @@ pub struct Args {
     /// Output PNG prefix (a suffix `_<layer>.png` is appended).
     #[arg(long, short, default_value = "out/preview")]
     pub out: PathBuf,
-}
-
-pub fn load_config(path: &Option<PathBuf>, seed: Option<u64>) -> Result<Config> {
-    let mut cfg = match path {
-        Some(p) => Config::from_file(p)?,
-        None => Config::default(),
-    };
-    if let Some(s) = seed {
-        cfg.seed = s;
-    }
-    Ok(cfg)
 }
 
 pub fn layer_rgb(t: &TileData, layer: &str, emin: f32, emax: f32) -> Vec<u8> {
@@ -95,7 +81,7 @@ pub fn layer_rgb(t: &TileData, layer: &str, emin: f32, emax: f32) -> Vec<u8> {
 }
 
 pub fn run(a: Args) -> Result<()> {
-    let cfg = load_config(&a.config, a.seed)?;
+    let cfg = crate::commands::setup(&a.common)?.world;
     let home = cfg.home.clone().unwrap_or_default();
     let lat = a.lat.unwrap_or(home.lat).to_radians();
     let lon = a.lon.unwrap_or(home.lon).to_radians();

@@ -1,16 +1,13 @@
-//! Terrain explorer: a globe of the tile store, generated as you go.
+//! Globe explorer (`terrain explore`): the scenario's tile store as a globe, generated as you go.
 //!
 //! On start the base levels (z0..=`--base-zoom`) are completed in the background. Then the view
 //! streams the tiles it needs from the store; with dynamic generation on, missing ones are
 //! generated (and written to the store) as you fly.
-//!
-//!     terrain-explorer --store out/explorer/world.h5 --seed 1 --dynamic
 
 mod globe;
 mod tiles;
 
-use anyhow::{bail, Context, Result};
-use clap::Parser;
+use anyhow::{Context, Result};
 use eframe::{egui, egui_wgpu, wgpu};
 use geodesy::tiles::TileId;
 use glam::DVec2;
@@ -18,97 +15,64 @@ use globe::{Camera, Globe, Mode, Settings};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
-use terragen::{Config, Generator};
+use terragen::Generator;
 use tiles::Service;
-use tilestore::{Layer, StoreMeta, TileStore};
+use tilestore::TileStore;
 
-#[derive(Parser)]
-#[command(name = "terrain-explorer", about = "Interactive globe of a terrain tile store; generates tiles as you go")]
-struct Args {
-    /// Tile store (HDF5); created if missing.
-    #[arg(long, default_value = "out/explorer/world.h5")]
-    store: PathBuf,
-    /// Generator config: a scenario YAML (its `world` section) or a world config. Defaults to
-    /// the store's own config, else the default world.
-    #[arg(long)]
-    config: Option<PathBuf>,
-    /// Override the world seed.
-    #[arg(long)]
-    seed: Option<u64>,
+/// Options of `terrain explore`.
+#[derive(clap::Args, Clone, Debug)]
+pub struct Options {
     /// Levels 0..=this are generated for the whole planet on start.
     #[arg(long, default_value_t = 4)]
-    base_zoom: u8,
+    pub base_zoom: u8,
     /// Start with dynamic generation on.
     #[arg(long)]
-    dynamic: bool,
-    /// Deepest level generated dynamically.
-    #[arg(long, default_value_t = 17)]
-    max_zoom: u8,
+    pub dynamic: bool,
+    /// Deepest level generated dynamically (default: tiles.max_zoom).
+    #[arg(long)]
+    pub max_zoom: Option<u8>,
     /// Tiles kept on the GPU (768 KB each).
     #[arg(long, default_value_t = 512)]
-    gpu_tiles: u32,
+    pub gpu_tiles: u32,
+    /// Relief exaggeration at start.
+    #[arg(long, default_value_t = 1.0)]
+    pub exag: f32,
+    /// View mode at start: surface, elevation, landcover or relief.
+    #[arg(long, default_value = "surface")]
+    pub mode: String,
     /// Render one view without a window into this PNG (once its tiles are in) and exit.
     #[arg(long)]
-    snapshot: Option<PathBuf>,
-    /// Snapshot view: lat,lon (deg),distance (km),heading,tilt (deg).
-    #[arg(long, default_value = "20,10,16000,0,0")]
-    view: String,
+    pub snapshot: Option<PathBuf>,
+    /// Snapshot view: lat,lon (deg), distance (km), heading, tilt (deg).
+    #[arg(long, default_value = "20,10,16000,0,0", allow_hyphen_values = true)]
+    pub view: String,
     /// Snapshot size, WxH.
     #[arg(long, default_value = "1280x800")]
-    size: String,
-    /// Snapshot relief exaggeration and mode (surface, elevation, landcover, relief).
-    #[arg(long, default_value_t = 1.0)]
-    exag: f32,
-    #[arg(long, default_value = "surface")]
-    mode: String,
+    pub size: String,
 }
 
-/// The world config of a scenario (`world:` section) or a bare world config.
-fn read_config(path: &PathBuf) -> Result<Config> {
-    let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    let v: serde_yaml::Value = serde_yaml::from_str(&text)?;
-    match v.get("world") {
-        Some(w) => Config::from_yaml_str(&serde_yaml::to_string(w)?),
-        None => Config::from_yaml_str(&text),
+/// Explore `store` (which holds `gen`'s world): the window, or one `--snapshot`.
+/// `max_zoom` is the deepest level generated unless the options set one.
+pub fn run(store: Arc<TileStore>, gen: Arc<Generator>, mut opts: Options, max_zoom: u8) -> Result<()> {
+    opts.max_zoom.get_or_insert(max_zoom);
+    eprintln!("store {} ({} tiles), seed {}", store.path().display(), store.len(), gen.config().seed);
+    if let Some(out) = opts.snapshot.clone() {
+        return snapshot(&opts, store, gen, &out);
     }
-}
-
-fn open(args: &Args) -> Result<(Arc<TileStore>, Arc<Generator>)> {
-    let existing = if args.store.exists() { Some(TileStore::open_rw(&args.store)?) } else { None };
-    let mut cfg = match (&args.config, &existing) {
-        (Some(p), _) => read_config(p)?,
-        (None, Some(st)) if !st.meta().generator_config.is_empty() => Config::from_yaml_str(&st.meta().generator_config)?,
-        _ => Config::default(),
+    let mut setup = egui_wgpu::WgpuSetupCreateNew::without_display_handle();
+    // texture arrays of hundreds of tiles: the adapter's own limits, not the portable defaults
+    setup.device_descriptor = Arc::new(|adapter: &wgpu::Adapter| wgpu::DeviceDescriptor {
+        label: Some("explorer"),
+        required_limits: adapter.limits(),
+        ..Default::default()
+    });
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size([1500.0, 950.0]).with_title("Terrain explorer"),
+        wgpu_options: egui_wgpu::WgpuConfiguration { wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(setup), ..Default::default() },
+        ..Default::default()
     };
-    if let Some(s) = args.seed {
-        cfg.seed = s;
-    }
-    let gen = Generator::new(cfg);
-    let store = match existing {
-        Some(st) => {
-            // tiles of different worlds must not mix in one store
-            if st.meta().generator_config != gen.config().to_yaml() {
-                bail!(
-                    "{} was generated with a different world (seed {} vs {}): use another --store, or omit --config/--seed to explore it",
-                    args.store.display(),
-                    st.meta().seed,
-                    gen.config().seed
-                );
-            }
-            st
-        }
-        None => TileStore::create(
-            &args.store,
-            StoreMeta {
-                ellipsoid_a: gen.world.ell.a,
-                ellipsoid_b: gen.world.ell.b,
-                generator_config: gen.config().to_yaml(),
-                seed: gen.config().seed,
-                layers: Layer::ALL.to_vec(),
-            },
-        )?,
-    };
-    Ok((Arc::new(store), Arc::new(gen)))
+    eframe::run_native("terrain explore", options, Box::new(move |cc| Ok(Box::new(App::new(cc, opts, store, gen)?))))
+        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 fn base_tiles(base_zoom: u8) -> Vec<TileId> {
@@ -124,7 +88,7 @@ fn base_tiles(base_zoom: u8) -> Vec<TileId> {
     base
 }
 
-fn settings(args: &Args) -> Settings {
+fn settings(args: &Options) -> Settings {
     Settings {
         exaggeration: args.exag,
         mode: match args.mode.as_str() {
@@ -136,7 +100,7 @@ fn settings(args: &Args) -> Settings {
         borders: false,
         lod_bias: 1.0,
         dynamic: args.dynamic,
-        gen_max_zoom: args.max_zoom,
+        gen_max_zoom: args.max_zoom.unwrap_or(17),
         view_max_zoom: 20,
         base_zoom: args.base_zoom,
         sun_follows_view: true,
@@ -146,7 +110,7 @@ fn settings(args: &Args) -> Settings {
 }
 
 /// Headless: render the `--view` once every tile it wants is in, save a PNG.
-fn snapshot(args: &Args, store: Arc<TileStore>, gen: Arc<Generator>, out: &PathBuf) -> Result<()> {
+fn snapshot(args: &Options, store: Arc<TileStore>, gen: Arc<Generator>, out: &PathBuf) -> Result<()> {
     let v: Vec<f64> = args.view.split(',').map(|x| x.trim().parse()).collect::<Result<_, _>>().context("--view lat,lon,km,heading,tilt")?;
     let (w, h) = args.size.split_once('x').map(|(a, b)| (a.parse::<u32>(), b.parse::<u32>())).context("--size WxH")?;
     let (w, h) = (w?, h?);
@@ -188,29 +152,6 @@ fn snapshot(args: &Args, store: Arc<TileStore>, gen: Arc<Generator>, out: &PathB
     Ok(())
 }
 
-fn main() -> Result<()> {
-    let args = Args::parse();
-    let (store, gen) = open(&args)?;
-    eprintln!("store {} ({} tiles), seed {}", args.store.display(), store.len(), gen.config().seed);
-    if let Some(out) = &args.snapshot {
-        return snapshot(&args, store, gen, out);
-    }
-    let mut setup = egui_wgpu::WgpuSetupCreateNew::without_display_handle();
-    // texture arrays of hundreds of tiles: the adapter's own limits, not the portable defaults
-    setup.device_descriptor = Arc::new(|adapter: &wgpu::Adapter| wgpu::DeviceDescriptor {
-        label: Some("explorer"),
-        required_limits: adapter.limits(),
-        ..Default::default()
-    });
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1500.0, 950.0]).with_title("Terrain explorer"),
-        wgpu_options: egui_wgpu::WgpuConfiguration { wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(setup), ..Default::default() },
-        ..Default::default()
-    };
-    eframe::run_native("terrain-explorer", options, Box::new(move |cc| Ok(Box::new(App::new(cc, args, store, gen)?))))
-        .map_err(|e| anyhow::anyhow!("{e}"))
-}
-
 struct App {
     svc: Service,
     globe: Globe,
@@ -229,11 +170,12 @@ struct App {
 }
 
 impl App {
-    fn new(cc: &eframe::CreationContext<'_>, args: Args, store: Arc<TileStore>, gen: Arc<Generator>) -> Result<App, Box<dyn std::error::Error + Send + Sync>> {
+    fn new(cc: &eframe::CreationContext<'_>, args: Options, store: Arc<TileStore>, gen: Arc<Generator>) -> Result<App, Box<dyn std::error::Error + Send + Sync>> {
         let rs = cc.wgpu_render_state.as_ref().ok_or("wgpu is not available")?;
         let ell = gen.world.ell;
         let home = gen.config().home.as_ref().map(|h| (h.lat.to_radians(), h.lon.to_radians()));
         let base = base_tiles(args.base_zoom);
+        let store_path = store.path().to_path_buf();
         let ctx = cc.egui_ctx.clone();
         let batch = (rayon::current_num_threads() / 2).max(1);
         let svc = Service::start(store, gen, base, batch, move || ctx.request_repaint());
@@ -244,7 +186,7 @@ impl App {
             globe,
             cam: Camera { lat, lon, dist: 2.6 * ell.a, heading: 0.0, tilt: 0.0, fov_y: 40f64.to_radians(), target_h: 0.0 },
             s: settings(&args),
-            store_path: args.store,
+            store_path,
             counts: Vec::new(),
             counts_at: Instant::now() - std::time::Duration::from_secs(10),
             hover: None,

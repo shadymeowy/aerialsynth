@@ -7,7 +7,7 @@ shots:
     text: "High ridges, cirques and gullies under snow"
     seconds: 5
     scenario:
-      trajectory: { synth: { kind: line, lat: -33.5, lon: -171.0, heading_deg: 60, altitude: 1200 } }
+      trajectory: { synth: { kind: line, lat: -33.5, lon: -171.0, heading_deg: 60, altitude_m: 1200 } }
       render: { lighting: { time_utc: "02:54:00" } }
       cameras: [ { extrinsics: { pitch_deg: -30 } } ]
 
@@ -16,7 +16,7 @@ shots:
     text: "A big river valley cut deep into a snowy range"
     seconds: 5
     scenario:
-      trajectory: { synth: { kind: line, lat: 38.5, lon: 61.5, heading_deg: 200, altitude: 1300 } }
+      trajectory: { synth: { kind: line, lat: 38.5, lon: 61.5, heading_deg: 200, altitude_m: 1300 } }
       render: { lighting: { time_utc: "05:54:00" } }
       cameras: [ { extrinsics: { pitch_deg: -28 } } ]
 
@@ -25,7 +25,7 @@ shots:
     text: "A wide river splitting around islands in a forested plain"
     seconds: 5
     scenario:
-      trajectory: { synth: { kind: line, lat: -26.0, lon: 33.0, heading_deg: 80, altitude: 900 } }
+      trajectory: { synth: { kind: line, lat: -26.0, lon: 33.0, heading_deg: 80, altitude_m: 900 } }
       render: { lighting: { time_utc: "06:48:00" } }
       cameras: [ { extrinsics: { pitch_deg: -40 } } ]
 
@@ -34,7 +34,7 @@ shots:
     text: "Eroded red uplands of a dry interior"
     seconds: 5
     scenario:
-      trajectory: { synth: { kind: line, lat: 19.0, lon: -114.0, heading_deg: 120, altitude: 900 } }
+      trajectory: { synth: { kind: line, lat: 19.0, lon: -114.0, heading_deg: 120, altitude_m: 900 } }
       render: { lighting: { time_utc: "00:06:00" } }
       cameras: [ { extrinsics: { pitch_deg: -30 } } ]
 
@@ -43,7 +43,7 @@ shots:
     text: "Red desert meeting a turquoise sea"
     seconds: 5
     scenario:
-      trajectory: { synth: { kind: line, lat: -21.5, lon: -45.0, heading_deg: 200, altitude: 800 } }
+      trajectory: { synth: { kind: line, lat: -21.5, lon: -45.0, heading_deg: 200, altitude_m: 800 } }
       render: { lighting: { time_utc: "12:30:00" } }
       cameras: [ { extrinsics: { pitch_deg: -35 } } ]
 
@@ -52,7 +52,7 @@ shots:
     text: "Linear and barchan dunes of a sand sea"
     seconds: 5
     scenario:
-      trajectory: { synth: { kind: line, lat: -18.5, lon: 69.0, heading_deg: 60, altitude: 700 } }
+      trajectory: { synth: { kind: line, lat: -18.5, lon: 69.0, heading_deg: 60, altitude_m: 700 } }
       render: { lighting: { time_utc: "12:24:00" } }
       cameras: [ { extrinsics: { pitch_deg: -32 } } ]
 
@@ -61,7 +61,7 @@ shots:
     text: "A town among plantations and red laterite fields"
     seconds: 5
     scenario:
-      trajectory: { synth: { kind: line, lat: -12.5, lon: 157.5, heading_deg: 40, altitude: 600 } }
+      trajectory: { synth: { kind: line, lat: -12.5, lon: 157.5, heading_deg: 40, altitude_m: 600 } }
       render: { lighting: { time_utc: "22:30:00" } }
       cameras: [ { extrinsics: { pitch_deg: -45 } } ]
 
@@ -70,7 +70,7 @@ shots:
     text: "A lone peak rising out of the rainforest"
     seconds: 5
     scenario:
-      trajectory: { synth: { kind: line, lat: 7.0, lon: -102.0, heading_deg: 90, altitude: 1400 } }
+      trajectory: { synth: { kind: line, lat: 7.0, lon: -102.0, heading_deg: 90, altitude_m: 1400 } }
       render: { lighting: { time_utc: "16:48:00" } }
       cameras: [ { extrinsics: { pitch_deg: -25 } } ]
 
@@ -79,7 +79,7 @@ shots:
     text: "Rivers draining into a lake in a closed basin"
     seconds: 5
     scenario:
-      trajectory: { synth: { kind: line, lat: 40.939, lon: 33.905, heading_deg: 120, altitude: 1500 } }
+      trajectory: { synth: { kind: line, lat: 40.939, lon: 33.905, heading_deg: 120, altitude_m: 1500 } }
       render: { lighting: { time_utc: "07:14:00" } }
       cameras: [ { extrinsics: { pitch_deg: -35 } } ]
 
@@ -88,6 +88,6 @@ shots:
     text: "A river through boreal forest and lingering snow"
     seconds: 5
     scenario:
-      trajectory: { synth: { kind: line, lat: 64.0, lon: -160.5, heading_deg: 160, altitude: 900 } }
+      trajectory: { synth: { kind: line, lat: 64.0, lon: -160.5, heading_deg: 160, altitude_m: 900 } }
       render: { lighting: { time_utc: "23:42:00" } }
       cameras: [ { extrinsics: { pitch_deg: -35 } } ]

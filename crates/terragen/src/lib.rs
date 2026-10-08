@@ -6,9 +6,11 @@
 pub mod config;
 pub mod landcover;
 pub mod noise;
+pub mod store;
 pub mod surface;
 pub mod tile;
 pub mod world;
 
 pub use config::Config;
+pub use store::GENERATOR_VERSION;
 pub use tile::{Generator, TileData, TILE_SIZE};

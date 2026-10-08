@@ -3,7 +3,7 @@ use geodesy::tiles::{tile_for_latlon, TileId};
 use terragen::{Config, Generator, TILE_SIZE};
 
 fn gen() -> Generator {
-    Generator::new(Config { supersample: 1, ..Config::default() })
+    Generator::new(Config { tile_supersample: 1, ..Config::default() })
 }
 
 #[test]

@@ -11,7 +11,7 @@ fn main() -> anyhow::Result<()> {
     let n = a.get(6).copied().unwrap_or(400.0) as usize;
     let ell = Ellipsoid::from_a_invf(6378137.0, 298.257223563);
     let pos = geodetic2ecef(Geodetic::new(lat, lon, h), &ell);
-    let cfg = StarsConfig { dut1_s: dut1, refraction, mag_limit: 99.0, ..Default::default() };
+    let cfg = StarsConfig { dut1_s: dut1, refraction, mag_limit: None, ..Default::default() };
     let f = StarField::new(&cfg)?;
     let dirs = f.apparent(unix, pos, &ell);
     for (i, d) in dirs.iter().enumerate().take(n) {

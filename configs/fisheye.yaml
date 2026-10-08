@@ -3,7 +3,7 @@ world: { seed: 1 }
 tiles: { file: out/quick/world.h5, max_zoom: 17, lazy: true }
 trajectory:
   file: out/fisheye/traj.csv
-  synth: { kind: circle, altitude: 800, speed: 40, duration: 2, radius: 900 }
+  synth: { kind: circle, altitude_m: 800, speed_mps: 40, duration_s: 2, radius_m: 900 }
 cameras:
   - path: /fisheye
     intrinsics: { model: kannala_brandt, width: 640, height: 640, intrinsics: [205, 205, 319.5, 319.5], distortion: [0.02, -0.005, 0.0, 0.0] }

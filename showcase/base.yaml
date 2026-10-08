@@ -10,8 +10,8 @@ tiles:
   plan_every: 5        # 25 fps frames overlap heavily
 trajectory:
   synth:
-    rate: 400          # high-rate record: sub-frame poses for motion blur and vibration
-    speed: 50
+    rate_hz: 400          # high-rate record: sub-frame poses for motion blur and vibration
+    speed_mps: 50
 render:
   backend: gpu          # wgpu renderer + GPU event sensor (docs/gpu.md); cpu gives the same output
   supersample: 2        # 1080p; geometry-GT shots use 1 (see make_showcase.py)
@@ -36,7 +36,7 @@ cameras:
     frame_rate: 25
     rgb:
       sensor:
-        exposure: { mode: auto, tau: 0.4, target: 0.13 }
+        exposure: { mode: auto, tau_s: 0.4, target: 0.13 }
         motion_blur: { enabled: true, max_samples: 24 }
         optics: { defocus_px: 0.25, chromatic_aberration_px: 0.3, vignette: 0.25, bloom: 0.06 }
         noise: { enabled: true, read: 0.08, shot: 0.1 }

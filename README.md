@@ -40,15 +40,16 @@ python scripts/view_seq.py out/quick/seq.h5 view.png  # rgb | depth | flow | val
 | `events`  | add the event streams of cameras with an `events` modality (ESIM-style, realistic sensor noise); see `docs/events.md` |
 | `run`     | `traj` (if missing) → `plan` → `gen` → `render` (→ `events` if any camera has events) |
 | `info`    | summarize a tile store / sequence file |
-| `preview` | generate tiles straight into a PNG mosaic (`--layers rgb,albedo,elevation,normal,landcover,hillshade`) |
+| `preview` | generate tiles of the scenario's world straight into a PNG mosaic (`--layers rgb,albedo,elevation,normal,landcover,hillshade`) |
+| `explore` | fly over the scenario's tile store on a globe (window), generating tiles as you go; see below |
 
 ### Globe explorer
 
-`terrain-explorer` (crate `explorer`, wgpu + egui) shows a tile store as a globe you can fly
-over:
+`terrain explore` (crate `explorer`, wgpu + egui) shows the scenario's tile store
+(`tiles.file`) as a globe you can fly over:
 
 ```
-cargo run --release -p explorer -- --store out/explorer/world.h5 --seed 1 --dynamic
+terrain explore -c configs/explore.yaml --dynamic
 ```
 
 - **On start:** levels 0..=`--base-zoom` (default 4) are generated for the whole planet if they
@@ -56,10 +57,8 @@ cargo run --release -p explorer -- --store out/explorer/world.h5 --seed 1 --dyna
 - **Streaming:** the view loads the tiles it needs from the store, choosing the level by
   on-screen texel size.
 - **Dynamic generation:** with *Generate missing tiles as you fly* on (`--dynamic`), missing
-  tiles down to `--max-zoom` are generated and written to the store. With it off, only stored
-  tiles are shown.
-- **Store and world:** an existing store keeps its own world config, and opening it with a
-  different `--config`/`--seed` is refused, so worlds never mix.
+  tiles down to `--max-zoom` (default `tiles.max_zoom`) are generated and written to the store.
+  With it off, only stored tiles are shown.
 - **View modes:** surface (albedo, lit), elevation, land cover, relief. Further controls:
   relief exaggeration, tile borders coloured by level, and level-of-detail bias.
 - **Controls:** drag to move, right drag to turn and tilt, scroll to zoom, double click to fly
@@ -72,7 +71,11 @@ forwarded X server and is slow.
 
 All subcommands read **one scenario YAML** (`-c`) with the sections `world`, `tiles`,
 `trajectory`, `render`, `cameras`, `imu` and `output`. See `configs/*.yaml`, or run
-`terrain config` for the complete list with defaults.
+`terrain config` for the complete list with defaults. Unknown keys are errors. Quantities with a
+unit carry it in the key (`altitude_m`, `speed_mps`, `duration_s`, `rate_hz`, `tau_s`,
+`visibility_km`, `sun_elevation_deg`, ...), except `lat`/`lon` (degrees) and dimensionless
+factors. `tiles.min_zoom`/`max_zoom` is the zoom range of everything (planning, generation,
+rendering); `render.texel_px` sets the level of detail within it (planning refines to 0.8× that).
 
 ## Cameras and modalities
 
@@ -131,6 +134,8 @@ particular dataset layout.
 ## Tile store (`tiles.file`, HDF5)
 
 ```
+/                        attrs: format, format_version, generator_config (world YAML), seed,
+                         generator_version, ellipsoid_a/b, ...
 /levels/<z>/index        i32 [N,2]   (x, y)
 /levels/<z>/elev_range   f32 [N,2]
 /levels/<z>/rgb          u8  [N,256,256,3]  satellite look (baked sun, haze)
@@ -145,12 +150,18 @@ particular dataset layout.
   and is written with HDF5 direct chunk I/O. The bundled HDF5 is 2.2.0 (via `hdf5-metno-sys`).
 - **Readers:** files open in h5py or any HDF5 reader.
 - **Growth:** rows can be appended in any order, so a store grows lazily.
+- **One world per store:** a store records the world config and generator version of its
+  tiles. `gen`, `render`, `events` and `explore` refuse a store of another world, naming the
+  settings that differ, and refuse to add tiles to a store of another generator version.
+  Reading such a store only warns. `terrain info` shows both.
 
 ## Sequence file (`output.file`)
 
-One HDF5 file per sequence. Group paths come from the scenario; dataset names are fixed. All
-timestamps are i64 µs since the sequence start (`output.start` into the trajectory; the root
-attribute `t0` holds it in trajectory seconds).
+One HDF5 file per sequence (format version 3). Group paths come from the scenario; dataset
+names are fixed. All timestamps are i64 µs since the sequence start (`output.start` into the
+trajectory; the root attribute `t0` holds it in trajectory seconds). Every dataset carries
+`units` and `description` attributes, multi-column ones also `columns` (e.g. `exposure`:
+`exposure_time_s,gain,ev`), and `landcover` its `class_names`.
 
 ```
 <output.pose.path>/          body ground truth at output.pose.rate_hz
@@ -158,9 +169,9 @@ attribute `t0` holds it in trajectory seconds).
     position_ecef, q_ecef_body               f64 [M,3], [M,4]
     lla, q_ned_body                          lat°, lon°, h; body → local NED
     position_ned0, q_ned0_body               in the NED frame at the first pose (attr ned0_origin_lla)
-    sun_azimuth_deg, sun_elevation_deg, lights
+    sun_azimuth_deg, sun_elevation_deg, lights (artificial lights on, 0..1)
 <camera.path>/
-    calib/                   intrinsics [4], distortion_coeffs, resolution [W,H] (i64),
+    calib/                   intrinsics [4], distortion_coeffs (always; empty = none), resolution [W,H] (i64),
                              T_body_cam [4,4] (camera → body), attrs model + camera_yaml
     t                        i64 [N] frame times (mid-exposure)
     pose/                    position_ecef [N,3], q_ecef_cam [N,4] at the frame times
@@ -255,8 +266,8 @@ attribute `t0` holds it in trajectory seconds).
     their apparent positions for the date, time and place (≤ 0.01″ vs Skyfield), radiometric
     brightness and colour, planet discs, trails over the exposure, per-frame ground truth; see
     `docs/stars.md`
-  - `render.backend: gpu`: headless wgpu renderer and event sensor, same output as the CPU
-    reference; see `docs/gpu.md`
+  - `render.backend`: `auto` (default: the GPU when there is one), `gpu` (headless wgpu renderer
+    and event sensor, same output as the CPU reference; see `docs/gpu.md`) or `cpu`
   - night lights from the generated emission layer: street lamps (sodium/LED), porch lights,
     farmsteads, lit main roads near towns, plazas and industry
   - light-pollution glow in the haze
@@ -298,7 +309,7 @@ crates/tilestore  HDF5 tile pyramid (layout above), parallel codec
 crates/terragen   procedural terrain generator
 crates/render     camera, trajectories/dynamics, LOD, rasterizer, lighting, sensor, writers, pipeline
 crates/cli        `terrain` binary (the aerialsynth CLI)
-crates/explorer   `terrain-explorer`: interactive globe of a tile store (wgpu + egui), generates as you go
+crates/explorer   `terrain explore`: interactive globe of a tile store (wgpu + egui), generates as you go
 scripts/          contact.py (generator contact sheets), check_gt.py + cammodels.py (camera GT, all models), check_imu.py, check_events.py, seqio.py, view_seq.py, view_events.py
 docs/events.md    event camera modality: options, sensor model, format
 docs/stars.md     star catalogue, astrometry, brightness, star ground truth
@@ -310,8 +321,8 @@ configs/          example scenarios (quick, dataset, fisheye, events, oblique_su
 
 | task | speed |
 |------|-------|
-| generation | ~1 s CPU per 256² tile at zooms 13–17 (supersample 2) |
-| rendering 640×512, 3×3 supersampled, shadows | ~0.5 s per frame |
+| generation | ~7 tiles/s at z17, ~6 at z16, ~5 at z15, ~1.5 at z6–10 (8 threads, `world.tile_supersample` 2) |
+| rendering 640×512, 3×3 supersampled, shadows | ~0.5 s per frame on the CPU, ~40× faster on the GPU |
 
 `--lazy` rendering generates exactly the tiles each view needs.
 
@@ -341,8 +352,8 @@ cargo test --release
 
 | knob | effect |
 |------|--------|
-| `world.look.albedo_saturation`, `albedo_brightness` | the generated surface colours |
-| `world.look.*` | sun, ambient, haze of the baked satellite layer |
+| `world.albedo.saturation`, `brightness` | the generated surface colours (every layer) |
+| `world.satellite.*` | sun, ambient, haze of the baked `rgb` layer only (camera images use `render.lighting`) |
 | `render.atmosphere.visibility_km`, `inscatter` | haze |
 | `cameras[].rgb.sensor.tone` | `saturation`, `white_balance`, `curve` (`srgb`/`filmic`/`gamma`) |
 | `cameras[].rgb.sensor.exposure.target` | overall brightness |

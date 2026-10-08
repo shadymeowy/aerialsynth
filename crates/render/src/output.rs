@@ -11,7 +11,7 @@
 //!     q_ned_body          f64 [M,4]   body → local NED
 //!     position_ned0       f64 [M,3]   in the NED frame at the first pose (attr ned0_origin_lla)
 //!     q_ned0_body         f64 [M,4]
-//!     sun_azimuth_deg, sun_elevation_deg, lights   f64 [M]   scene lighting
+//!     sun_azimuth_deg, sun_elevation_deg, lights   f64 [M]   scene lighting (lights: 0..1 on)
 //! <camera.path>/
 //!     calib/              intrinsics [4] (4-parameter models), distortion_coeffs, resolution
 //!                         i64 [2] = (W, H), T_body_cam f64 [4,4] row-major camera → body;
@@ -34,6 +34,8 @@
 //! <imu.path>/             t, accel, gyro, gt_*, calib/T_body_imu  (imu.rs)
 //! ```
 //! Frames are stamped at mid-exposure. Camera frame: OpenCV (x right, y down, z forward).
+//! Every dataset carries `units`, `description` and (multi-column) `columns` attributes
+//! ([`describe`]).
 
 use crate::camera::CameraConfig;
 use crate::scenario::{h5path, Compression, DepthKind, Scenario};
@@ -46,7 +48,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub const FORMAT: &str = "terrain-sequence";
-pub const FORMAT_VERSION: i32 = 2;
+pub const FORMAT_VERSION: i32 = 3;
 
 pub fn q4(q: DQuat) -> [f64; 4] {
     [q.w, q.x, q.y, q.z]
@@ -108,6 +110,93 @@ pub fn create_file(scn: &Scenario, t0: f64) -> Result<h5::File> {
     Ok(f)
 }
 
+/// Units and descriptions of the datasets, by group kind: (dataset path in the group, units,
+/// description, column names).
+const POSE_DOC: &[(&str, &str, &str, &str)] = &[
+    ("t", "us", "time since the sequence start", ""),
+    ("position_ecef", "m", "body position, ECEF", "x,y,z"),
+    ("q_ecef_body", "", "attitude: body (FRD) to ECEF, Hamilton", "w,x,y,z"),
+    ("lla", "deg,deg,m", "geodetic position, height above the ellipsoid", "lat,lon,h"),
+    ("q_ned_body", "", "attitude: body (FRD) to the local NED frame at the body", "w,x,y,z"),
+    ("position_ned0", "m", "position in the NED frame at the first pose (attr ned0_origin_lla)", "n,e,d"),
+    ("q_ned0_body", "", "attitude: body (FRD) to the NED frame at the first pose", "w,x,y,z"),
+    ("sun_azimuth_deg", "deg", "sun azimuth, clockwise from north", ""),
+    ("sun_elevation_deg", "deg", "sun elevation above the horizon", ""),
+    ("lights", "", "artificial lights on (0 = off, 1 = fully on)", ""),
+];
+const CAMERA_DOC: &[(&str, &str, &str, &str)] = &[
+    ("t", "us", "frame times (mid-exposure) since the sequence start", ""),
+    ("calib/intrinsics", "px", "focal lengths and principal point (4-parameter models)", "fx,fy,cx,cy"),
+    ("calib/distortion_coeffs", "", "distortion coefficients of the model (empty: none)", ""),
+    ("calib/resolution", "px", "image size", "width,height"),
+    ("calib/T_body_cam", "m", "row-major 4x4: camera points into the body frame", ""),
+    ("pose/position_ecef", "m", "camera position at the frame times, ECEF", "x,y,z"),
+    ("pose/q_ecef_cam", "", "camera (OpenCV) to ECEF at the frame times, Hamilton", "w,x,y,z"),
+    ("rgb", "DN", "developed 8-bit image, sRGB", ""),
+    ("exposure", "s,,EV", "exposure of each frame", "exposure_time_s,gain,ev"),
+    ("depth", "m", "z along the optical axis or range (attr kind); +inf = sky", ""),
+    ("flow", "px", "forward optical flow to the next frame of this camera", "dx,dy"),
+    ("flow_valid", "", "1 = the flow target is visible", ""),
+    ("landcover", "", "class id (attr class_names); 255 = sky", ""),
+    ("events/x", "px", "event column", ""),
+    ("events/y", "px", "event row", ""),
+    ("events/t", "us", "event time since the sequence start", ""),
+    ("events/p", "", "polarity: 1 = ON, 0 = OFF", ""),
+    ("events/ms_index", "", "index of the first event at or after each millisecond (+1 closing entry)", ""),
+    ("stars/index", "", "frame k holds stars [index[k], index[k+1])", ""),
+    ("stars/id", "", "HIP number; Tycho-2: 1<<31 | TYC1<<17 | TYC2<<3 | TYC3; planets 1<<30 | NAIF id", ""),
+    ("stars/x", "px", "position at the frame time (pixel centres at integers)", ""),
+    ("stars/y", "px", "position at the frame time (pixel centres at integers)", ""),
+    ("stars/xm", "px", "position averaged over the exposure (trail centroid)", ""),
+    ("stars/ym", "px", "position averaged over the exposure (trail centroid)", ""),
+    ("stars/v", "mag", "catalogue V magnitude", ""),
+    ("stars/irradiance", "", "V-band irradiance relative to the Sun outside the atmosphere, after extinction", ""),
+    ("stars/visible", "", "1 = the pixel shows sky", ""),
+];
+const IMU_DOC: &[(&str, &str, &str, &str)] = &[
+    ("t", "us", "sample times since the sequence start", ""),
+    ("accel", "m/s^2", "measured specific force, IMU frame", "x,y,z"),
+    ("gyro", "rad/s", "measured angular rate, IMU frame", "x,y,z"),
+    ("gt_accel", "m/s^2", "true specific force, IMU frame", "x,y,z"),
+    ("gt_gyro", "rad/s", "true angular rate, IMU frame", "x,y,z"),
+    ("gt_bias_accel", "m/s^2", "accelerometer bias", "x,y,z"),
+    ("gt_bias_gyro", "rad/s", "gyroscope bias", "x,y,z"),
+    ("calib/T_body_imu", "m", "row-major 4x4: IMU points into the body frame", ""),
+];
+
+/// Attach `units`, `description` and `columns` attributes to every dataset of the sequence
+/// file that exists (so the file describes itself).
+pub fn describe(file: &h5::File, scn: &Scenario) -> Result<()> {
+    let annotate = |group: &str, doc: &[(&str, &str, &str, &str)]| -> Result<()> {
+        let root = file.root()?;
+        for (name, units, description, columns) in doc {
+            let p = format!("{}/{}", h5path(group).trim_end_matches('/'), name);
+            if !root.exists(&p) {
+                continue;
+            }
+            let ds = root.dataset(&p)?;
+            ds.set_attr_str("units", units)?;
+            ds.set_attr_str("description", description)?;
+            if !columns.is_empty() {
+                ds.set_attr_str("columns", columns)?;
+            }
+        }
+        Ok(())
+    };
+    annotate(&scn.output.pose.path, POSE_DOC)?;
+    for c in &scn.cameras {
+        annotate(&c.path, CAMERA_DOC)?;
+        let lc = format!("{}/landcover", h5path(&c.path).trim_end_matches('/'));
+        if file.root()?.exists(&lc) {
+            file.root()?.dataset(&lc)?.set_attr_str("class_names", &terragen::landcover::NAMES.join(","))?;
+        }
+    }
+    if let Some(imu) = &scn.imu {
+        annotate(&imu.path, IMU_DOC)?;
+    }
+    Ok(())
+}
+
 /// Open an existing sequence file for adding to it (events).
 pub fn open_file(path: &Path) -> Result<h5::File> {
     let f = h5::File::open_rw(path)?;
@@ -135,9 +224,8 @@ pub fn write_camera_calib(g: &h5::Group, cam: &CameraConfig, t_body_cam: [f64; 1
     if cam.intrinsics.len() == 4 {
         c.new_dataset::<f64>().shape(&[4]).create("intrinsics")?.write_all(&cam.intrinsics)?;
     }
-    if !cam.distortion.is_empty() {
-        c.new_dataset::<f64>().shape(&[cam.distortion.len()]).create("distortion_coeffs")?.write_all(&cam.distortion)?;
-    }
+    // always present (empty for a model without distortion)
+    c.new_dataset::<f64>().shape(&[cam.distortion.len()]).create("distortion_coeffs")?.write_all(&cam.distortion)?;
     c.new_dataset::<i64>().shape(&[2]).create("resolution")?.write_all(&[cam.width as i64, cam.height as i64])?;
     c.new_dataset::<f64>().shape(&[4, 4]).create("T_body_cam")?.write_all(&t_body_cam)?;
     c.set_attr_str("model", &cam.model)?;

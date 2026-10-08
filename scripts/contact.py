@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Contact sheet of generator previews: rows = locations, columns = zoom levels.
 
-usage: contact.py OUT.png --locs "lat,lon;lat,lon" --zooms 9,12,14,16 [--tiles 2] [--layer rgb] [--config cfg.yaml]
+usage: contact.py OUT.png --locs "lat,lon;lat,lon" --zooms 9,12,14,16 [--tiles 2] [--layer rgb] [--config scenario.yaml]
 """
 import argparse, subprocess, os, tempfile
 from PIL import Image

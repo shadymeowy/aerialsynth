@@ -27,7 +27,7 @@ shots:
     render:
       lighting: {time_utc: '16:48:00'}
     trajectory:
-      synth: {altitude: 1400, heading_deg: 90, kind: line, lat: 7.0, lon: -102.0}
+      synth: {altitude_m: 1400, heading_deg: 90, kind: line, lat: 7.0, lon: -102.0}
   seconds: 5
   text: A whole planet, generated procedurally on the WGS84 ellipsoid
 - id: moon
@@ -37,7 +37,7 @@ shots:
     - extrinsics: {pitch_deg: -8}
       rgb:
         sensor:
-          exposure: {max_gain: 64, max_time: 0.04, target: 0.06}
+          exposure: {max_gain: 64, max_time_s: 0.04, target: 0.06}
           noise: {read: 0.03, shot: 0.05}
           optics: {bloom: 0.03}
     render:
@@ -45,7 +45,7 @@ shots:
       # the real sky exposed like a long night photograph (stars 400x, moonlight 40x): the shot's look
       stars: {brightness: 400.0}
     trajectory:
-      synth: {altitude: 1300, heading_deg: 95, kind: line, lat: 39.17, lon: 33.62}
+      synth: {altitude_m: 1300, heading_deg: 95, kind: line, lat: 39.17, lon: 33.62}
   seconds: 6
   text: Moonlight and the lunar disc from the true lunar position and phase
 - id: boreal
@@ -54,7 +54,7 @@ shots:
   seconds: 6
   scenario:
     trajectory:
-      synth: {kind: line, lat: 52.97924, lon: -16.41426, heading_deg: 60, altitude: 900}
+      synth: {kind: line, lat: 52.97924, lon: -16.41426, heading_deg: 60, altitude_m: 900}
     render:
       lighting: {time_utc: '12:00:00'}
     cameras:
@@ -75,7 +75,7 @@ shots:
       path: /cam0
       rgb: {}
     trajectory:
-      synth: {altitude: 450, heading_deg: 40, kind: random, lat: 39.9, lon: 32.79, radius: 1600, speed: 60}
+      synth: {altitude_m: 450, heading_deg: 40, kind: random, lat: 39.9, lon: 32.79, radius_m: 1600, speed_mps: 60}
   seconds: 10
   speedup: 8
   text: 'Each flight plans its XYZ tiles: only what the camera sees is generated, at the right zoom'
@@ -88,7 +88,7 @@ shots:
         intrinsics: [960.0, 960.0, 959.5, 539.5]
     tiles: {max_zoom: 15}
     trajectory:
-      synth: {altitude: 10000, altitude_ref: ellipsoid, heading_deg: 70, kind: line, lat: 39.0, lon: 33.35, speed: 230}
+      synth: {altitude_m: 10000, altitude_ref: ellipsoid, heading_deg: 70, kind: line, lat: 39.0, lon: 33.35, speed_mps: 230}
     render:
       lighting: {time_utc: '08:45:00'}
   seconds: 6
@@ -100,7 +100,7 @@ shots:
     - extrinsics: {pitch_deg: -35}
     tiles: {max_zoom: 19}
     trajectory:
-      synth: {altitude: 120, heading_deg: 75, kind: line, lat: 39.902, lon: 32.785, speed: 55}
+      synth: {altitude_m: 120, heading_deg: 75, kind: line, lat: 39.902, lon: 32.785, speed_mps: 55}
   seconds: 5
   text: … down to low-level flight, in the same consistent world
 - id: modalities_mountains
@@ -129,7 +129,7 @@ shots:
       events: {supersample: 1}
     imu: {path: /imu}
     trajectory:
-      synth: {altitude: 1100, heading_deg: 80, kind: line, lat: 39.17, lon: 33.7, speed: 70}
+      synth: {altitude_m: 1100, heading_deg: 80, kind: line, lat: 39.17, lon: 33.7, speed_mps: 70}
     render:
       lighting: {time_utc: '04:45:00'}
   seconds: 6
@@ -145,7 +145,7 @@ shots:
     render:
       lighting: {time_utc: '16:08:00'}
     trajectory:
-      synth: {altitude: 700, heading_deg: 20, kind: line, lat: 39.25, lon: 33.95}
+      synth: {altitude_m: 700, heading_deg: 20, kind: line, lat: 39.25, lon: 33.95}
   seconds: 6
   text: 'A real solar ephemeris: date, time and place set the light'
 - id: dusk
@@ -157,11 +157,11 @@ shots:
         sensor:
           # the stills' exposures at their frame times (trajectory time, s), interpolated: an
           # auto exposure (gain 160) brightened the night back to day, one fixed EV cannot span it
-          exposure: {mode: manual, schedule: [[1.0, 2.09], [3.533, 2.09], [6.067, 3.88], [8.6, 7.665]], max_gain: 8, max_time: 0.04}
+          exposure: {mode: manual, schedule: [[1.0, 2.09], [3.533, 2.09], [6.067, 3.88], [8.6, 7.665]], max_gain: 8, max_time_s: 0.04}
     render:
       lighting: {time_scale: 600, time_utc: '16:50:00'}
     trajectory:
-      synth: {altitude: 900, heading_deg: 90, kind: line, lat: 39.894, lon: 32.912, speed: 40}
+      synth: {altitude_m: 900, heading_deg: 90, kind: line, lat: 39.894, lon: 32.912, speed_mps: 40}
   seconds: 7
   text: 'A continuous day cycle: twilight, and the lamps switching on'
 - id: night
@@ -171,13 +171,13 @@ shots:
     - extrinsics: {pitch_deg: -28}
       rgb:
         sensor:
-          exposure: {max_gain: 64, max_time: 0.008, target: 0.012}
+          exposure: {max_gain: 64, max_time_s: 0.008, target: 0.012}
           noise: {read: 0.04, shot: 0.06}
           optics: {bloom: 0.02, chromatic_aberration_px: 0.0, defocus_px: 0.0}
     render:
       lighting: {date: '2026-03-19', time_utc: '21:30:00'}
     trajectory:
-      synth: {altitude: 1500, heading_deg: 75, kind: line, lat: 41.562, lon: 32.955, speed: 50}
+      synth: {altitude_m: 1500, heading_deg: 75, kind: line, lat: 41.562, lon: 32.955, speed_mps: 50}
   seconds: 6
   text: 'A town at night from a plane: street lamps, windows and the glow of the haze'
 - id: stars
@@ -190,7 +190,7 @@ shots:
       rgb:
         sensor:
           # a sensitive night camera: fast optics (base_time), 40 ms, gain 4
-          exposure: {mode: manual, ev: 14.97, base_time: 5.0e-6, max_time: 0.04, max_gain: 4}
+          exposure: {mode: manual, ev: 14.97, base_time_s: 5.0e-6, max_time_s: 0.04, max_gain: 4}
           noise: {read: 0.03, shot: 0.05}
           optics: {bloom: 0.03, defocus_px: 0.9, starburst: 0.25}
     - path: /events
@@ -203,7 +203,7 @@ shots:
     trajectory:
       # a calm, gentle right turn (0.7 deg/s; no turbulence, gusts or vibration): the stars drift
       # slowly across the frame, so the event camera sees each one
-      synth: {altitude: 1500, heading_deg: 140, kind: circle, radius: 4000, lat: 41.562, lon: 32.955, speed: 50, wind: {turbulence: 0.0, gust_rate_per_min: 0.0}, vibration: {harmonic_deg: 0.0, broadband_deg: 0.0}}
+      synth: {altitude_m: 1500, heading_deg: 140, kind: circle, radius_m: 4000, lat: 41.562, lon: 32.955, speed_mps: 50, wind: {turbulence: 0.0, gust_rate_per_min: 0.0}, vibration: {harmonic_deg: 0.0, broadband_deg: 0.0}}
   seconds: 6
   extend: 6.6
   text: 'Real stars and planets at their true positions (error < 0.01″)'
@@ -225,7 +225,7 @@ shots:
       path: /cam0
       rgb:
         sensor:
-          exposure: {max_gain: 64, max_time: 0.008, target: 0.012}
+          exposure: {max_gain: 64, max_time_s: 0.008, target: 0.012}
           noise: {read: 0.04, shot: 0.06}
           optics: {bloom: 0.02, chromatic_aberration_px: 0.0, defocus_px: 0.0}
     - path: /events
@@ -238,7 +238,7 @@ shots:
       rgb: null
       events: {supersample: 1, shot_noise_dark_gain: 3.0}
     trajectory:
-      synth: {altitude: 1500, heading_deg: 75, kind: line, lat: 41.562, lon: 32.955, speed: 50}
+      synth: {altitude_m: 1500, heading_deg: 75, kind: line, lat: 41.562, lon: 32.955, speed_mps: 50}
     render:
       lighting: {date: '2026-03-19', time_utc: '21:30:00'}
   seconds: 6
@@ -258,7 +258,7 @@ shots:
       rgb:
         sensor:
           # a star tracker: 25 deg lens, fast optics (base_time), 40 ms, gain 4, slightly defocused
-          exposure: {mode: manual, ev: 13.97, base_time: 1.0e-5, max_time: 0.04, max_gain: 4}
+          exposure: {mode: manual, ev: 13.97, base_time_s: 1.0e-5, max_time_s: 0.04, max_gain: 4}
           noise: {read: 0.03, shot: 0.05}
           optics: {bloom: 0.0, defocus_px: 1.0, starburst: 0.0, vignette: 0.0, chromatic_aberration_px: 0.0}
     - path: /events
@@ -271,7 +271,7 @@ shots:
     trajectory:
       # a calm, gentle right turn (0.7 deg/s; no turbulence, gusts or vibration): the stars drift
       # slowly across the frame, so the event camera sees each one
-      synth: {altitude: 1500, heading_deg: 190, kind: circle, radius: 4000, lat: 41.5705, lon: 32.970, speed: 50, wind: {turbulence: 0.0, gust_rate_per_min: 0.0}, vibration: {harmonic_deg: 0.0, broadband_deg: 0.0}}
+      synth: {altitude_m: 1500, heading_deg: 190, kind: circle, radius_m: 4000, lat: 41.5705, lon: 32.970, speed_mps: 50, wind: {turbulence: 0.0, gust_rate_per_min: 0.0}, vibration: {harmonic_deg: 0.0, broadband_deg: 0.0}}
   seconds: 6
   extend: 6.6
   text: 'Rings mark each catalogue star''s ground-truth position (sub-pixel)'
@@ -283,7 +283,7 @@ shots:
   seconds: 6.5
   scenario:
     trajectory:
-      synth: {kind: line, lat: -26.00742, lon: 32.99572, heading_deg: 105, altitude: 1300, speed: 60}
+      synth: {kind: line, lat: -26.00742, lon: 32.99572, heading_deg: 105, altitude_m: 1300, speed_mps: 60}
     render:
       lighting: {time_utc: '07:20:00'}
     cameras:
@@ -295,7 +295,7 @@ shots:
     - extrinsics: {pitch_deg: -14}
       rgb:
         sensor:
-          exposure: {max_time: 0.03, target: 0.19}
+          exposure: {max_time_s: 0.03, target: 0.19}
           motion_blur: {max_samples: 48}
       path: /cam0
     - path: /events
@@ -311,7 +311,7 @@ shots:
       lighting: {time_utc: '16:08:00'}
     trajectory:
       synth:
-        altitude: 700
+        altitude_m: 700
         heading_deg: 20
         kind: line
         lat: 39.25
@@ -330,7 +330,7 @@ shots:
     render:
       lighting: {time_utc: '04:45:00'}
     trajectory:
-      synth: {altitude: 1100, heading_deg: 80, kind: line, lat: 39.17, lon: 33.7, speed: 70}
+      synth: {altitude_m: 1100, heading_deg: 80, kind: line, lat: 39.17, lon: 33.7, speed_mps: 70}
   seconds: 6
   text: Ridged mountains, erosion gullies and a climate-driven snow line
 - id: modalities_rivers
@@ -358,7 +358,7 @@ shots:
       rgb: null
       events: {supersample: 1}
     trajectory:
-      synth: {kind: line, lat: -26.00742, lon: 32.99572, heading_deg: 105, altitude: 1300, speed: 60}
+      synth: {kind: line, lat: -26.00742, lon: 32.99572, heading_deg: 105, altitude_m: 1300, speed_mps: 60}
     render:
       lighting: {time_utc: '07:20:00'}
   seconds: 6.5
@@ -372,7 +372,7 @@ shots:
   seconds: 6
   scenario:
     trajectory:
-      synth: {kind: line, lat: 40.95138, lon: 33.88939, heading_deg: 135, altitude: 1500}
+      synth: {kind: line, lat: 40.95138, lon: 33.88939, heading_deg: 135, altitude_m: 1500}
     render:
       lighting: {time_utc: '07:45:00'}
     cameras:
@@ -383,7 +383,7 @@ shots:
   seconds: 6.5
   scenario:
     trajectory:
-      synth: {kind: line, lat: 3.47675, lon: -103.43456, heading_deg: 215, altitude: 1000, speed: 60}
+      synth: {kind: line, lat: 3.47675, lon: -103.43456, heading_deg: 215, altitude_m: 1000, speed_mps: 60}
     render:
       lighting: {time_utc: '16:20:00'}
     cameras:
@@ -401,7 +401,7 @@ shots:
         model: kannala_brandt
         width: 1080
     trajectory:
-      synth: {altitude: 1400, heading_deg: 90, kind: line, lat: 7.0, lon: -102.0}
+      synth: {altitude_m: 1400, heading_deg: 90, kind: line, lat: 7.0, lon: -102.0}
     render:
       lighting: {time_utc: '16:48:00'}
   seconds: 5
@@ -414,7 +414,7 @@ shots:
     render:
       lighting: {time_utc: '00:55:00', date: '2026-06-22'}
     trajectory:
-      synth: {altitude: 700, heading_deg: 120, kind: line, lat: 15.0, lon: -111.38, speed: 60}
+      synth: {altitude_m: 700, heading_deg: 120, kind: line, lat: 15.0, lon: -111.38, speed_mps: 60}
   seconds: 6
   text: 'Sand seas: transverse and star dunes in low evening light'
 - id: models
@@ -462,7 +462,7 @@ shots:
       path: /mei
       rgb: {}
     trajectory:
-      synth: {altitude: 800, heading_deg: 352, kind: line, lat: 40.276, lon: 36.834}
+      synth: {altitude_m: 800, heading_deg: 352, kind: line, lat: 40.276, lon: 36.834}
     render:
       lighting: {time_utc: '06:00:00'}
   seconds: 5.5
@@ -506,7 +506,7 @@ shots:
       path: /right
       rgb: {}
     trajectory:
-      synth: {kind: line, lat: 3.47675, lon: -103.43456, heading_deg: 215, altitude: 1000, speed: 60}
+      synth: {kind: line, lat: 3.47675, lon: -103.43456, heading_deg: 215, altitude_m: 1000, speed_mps: 60}
     render:
       lighting: {time_utc: '16:20:00'}
   seconds: 6.5
@@ -519,7 +519,7 @@ shots:
     render:
       lighting: {time_utc: '02:54:00'}
     trajectory:
-      synth: {altitude: 1200, heading_deg: 60, kind: line, lat: -33.5, lon: -171.0}
+      synth: {altitude_m: 1200, heading_deg: 60, kind: line, lat: -33.5, lon: -171.0}
   seconds: 5
   text: High ridges, cirques and gullies under snow
 - id: bank
@@ -533,11 +533,11 @@ shots:
         lat: 40.279
         lon: 36.81
         heading_deg: 80
-        radius: -450
-        altitude: 700
-        speed: 60
+        radius_m: -450
+        altitude_m: 700
+        speed_mps: 60
         response: {max_bank_deg: 60}
-        wind: {speed: 9, turbulence: 1.6, gust_amplitude: 5, gust_rate_per_min: 6}
+        wind: {speed_mps: 9, turbulence: 1.6, gust_amplitude_mps: 5, gust_rate_per_min: 6}
     render:
       lighting: {time_utc: '07:30:00'}
   seconds: 7
@@ -550,7 +550,7 @@ shots:
     render:
       lighting: {time_utc: '05:00:00'}
     trajectory:
-      synth: {altitude: 1400, heading_deg: 30, kind: line, lat: -23.0, lon: 78.08, speed: 60}
+      synth: {altitude_m: 1400, heading_deg: 30, kind: line, lat: -23.0, lon: 78.08, speed_mps: 60}
   seconds: 5.5
   text: Centre-pivot irrigation where farming meets a dry climate
 - id: canyon
@@ -561,7 +561,7 @@ shots:
     render:
       lighting: {time_utc: '00:06:00'}
     trajectory:
-      synth: {altitude: 900, heading_deg: 120, kind: line, lat: 19.0, lon: -114.0}
+      synth: {altitude_m: 900, heading_deg: 120, kind: line, lat: 19.0, lon: -114.0}
   seconds: 5
   text: Eroded red uplands of a dry interior
 - id: town
@@ -570,7 +570,7 @@ shots:
     cameras:
     - extrinsics: {pitch_deg: -48}
     trajectory:
-      synth: {altitude: 500, heading_deg: 115, kind: line, lat: 41.58, lon: 32.976, climb_rate: 14.0, speed: 55}
+      synth: {altitude_m: 500, heading_deg: 115, kind: line, lat: 41.58, lon: 32.976, climb_rate_mps: 14.0, speed_mps: 55}
   seconds: 6
   text: Street grids, parks and buildings — part of the elevation model
 - id: coast
@@ -581,7 +581,7 @@ shots:
     render:
       lighting: {time_utc: '06:00:00'}
     trajectory:
-      synth: {altitude: 800, heading_deg: 352, kind: line, lat: 40.276, lon: 36.834}
+      synth: {altitude_m: 800, heading_deg: 352, kind: line, lat: 40.276, lon: 36.834}
   seconds: 5.5
   text: Shallows, surf and sun glint on open water
 - id: desert_coast
@@ -590,7 +590,7 @@ shots:
   seconds: 6
   scenario:
     trajectory:
-      synth: {kind: line, lat: -21.53612, lon: -45.01476, heading_deg: 255, altitude: 900}
+      synth: {kind: line, lat: -21.53612, lon: -45.01476, heading_deg: 255, altitude_m: 900}
     render:
       lighting: {time_utc: '12:30:00'}
     cameras:
@@ -603,7 +603,7 @@ shots:
     render:
       lighting: {time_utc: '23:42:00'}
     trajectory:
-      synth: {altitude: 900, heading_deg: 160, kind: line, lat: 64.0, lon: -160.5}
+      synth: {altitude_m: 900, heading_deg: 160, kind: line, lat: 64.0, lon: -160.5}
   seconds: 5
   text: A river through boreal forest and lingering snow
 - id: alpine_valley
@@ -614,7 +614,7 @@ shots:
     render:
       lighting: {time_utc: '05:54:00'}
     trajectory:
-      synth: {altitude: 1300, heading_deg: 200, kind: line, lat: 38.5, lon: 61.5}
+      synth: {altitude_m: 1300, heading_deg: 200, kind: line, lat: 38.5, lon: 61.5}
   seconds: 5
   text: Frozen rivers and snowfields high in the range
 - id: river
@@ -623,7 +623,7 @@ shots:
   seconds: 6
   scenario:
     trajectory:
-      synth: {kind: line, lat: 49.00184, lon: 10.50018, heading_deg: 70, altitude: 900}
+      synth: {kind: line, lat: 49.00184, lon: 10.50018, heading_deg: 70, altitude_m: 900}
     render:
       lighting: {time_utc: '08:20:00'}
     cameras:
@@ -636,7 +636,7 @@ shots:
     render:
       lighting: {time_utc: '05:40:00'}
     trajectory:
-      synth: {altitude: 900, heading_deg: 68, kind: line, lat: 41.583, lon: 33.175}
+      synth: {altitude_m: 900, heading_deg: 68, kind: line, lat: 41.583, lon: 33.175}
   seconds: 5.5
   text: Individual tree crowns with cast shadows, and a river winding through
 - id: farmland
@@ -645,7 +645,7 @@ shots:
     cameras:
     - extrinsics: {pitch_deg: -42}
     trajectory:
-      synth: {altitude: 700, heading_deg: 65, kind: line, lat: 39.905, lon: 32.775}
+      synth: {altitude_m: 700, heading_deg: 65, kind: line, lat: 39.905, lon: 32.775}
   seconds: 6
   text: Fields, hedgerows and farm tracks in the morning light
 outro:

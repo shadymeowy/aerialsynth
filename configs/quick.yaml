@@ -8,9 +8,9 @@ trajectory:
   file: out/quick/traj.csv
   synth:
     kind: random
-    altitude: 1000
-    speed: 50
-    duration: 10
+    altitude_m: 1000
+    speed_mps: 50
+    duration_s: 10
 render:
   supersample: 3
 cameras:
