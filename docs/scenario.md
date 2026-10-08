@@ -24,6 +24,8 @@ output       the sequence file: body pose rate, time window, PNG export, compres
   generation, rendering). `render.texel_px` sets the level of detail within it; planning
   refines to 0.8× that. `min_zoom` is at most 6 (the tile selection tests every tile of that
   level for every frame).
+- **Generation:** `tiles.generator: auto` (default) generates tiles on the GPU when it can, else
+  on the CPU; `gpu` / `cpu` force one. Both build the same world (`docs/gpu.md`).
 - **Paths:** relative paths are relative to the working directory.
 
 Examples: `configs/quick.yaml` (10 s smoke test), `configs/dataset.yaml` (60 s with wind,

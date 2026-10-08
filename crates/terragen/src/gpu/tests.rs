@@ -297,3 +297,25 @@ fn throughput() {
     let tc = t0.elapsed().as_secs_f64();
     eprintln!("z{z}, {done} tiles: GPU {tg:.2} s ({:.1} tiles/s), CPU {tc:.2} s ({:.1} tiles/s)", done as f64 / tg, m as f64 / tc);
 }
+
+/// A polar low-zoom tile on both generators: `cargo test ... polar -- --ignored`.
+#[test]
+#[ignore]
+fn polar_tile() {
+    if gpu().is_none() {
+        return;
+    }
+    let id = geodesy::tiles::TileId::new(3, 4, 0);
+    let gen = GpuGenerator::new(crate::Config::default()).unwrap();
+    let t0 = std::time::Instant::now();
+    let g = gen.tiles(&[id]).unwrap().remove(0);
+    let tg = t0.elapsed().as_secs_f64();
+    let cpu = crate::Generator::new(crate::Config::default());
+    let t0 = std::time::Instant::now();
+    let c = cpu.tile_cpu(id);
+    let tc = t0.elapsed().as_secs_f64();
+    eprintln!("tile {id}: GPU {tg:.1} s, CPU {tc:.1} s");
+    for (name, mean, bad, mx) in compare_tiles(&g, &c) {
+        eprintln!("  {name:10} mean {mean:8.4} off {:7.3}% max {mx:8.2}", bad * 100.0);
+    }
+}

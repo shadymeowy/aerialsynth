@@ -25,7 +25,7 @@ impl Gpu {
                 .await
                 .map_err(|e| anyhow!("no GPU adapter: {e}"))?;
             let info = adapter.get_info();
-            let features = adapter.features() & GEN_FEATURES;
+            let features = adapter.features() & (GEN_FEATURES | wgpu::Features::PIPELINE_CACHE);
             let (device, queue) = adapter
                 .request_device(&wgpu::DeviceDescriptor { label: Some("terrain"), required_features: features, required_limits: adapter.limits(), ..Default::default() })
                 .await?;

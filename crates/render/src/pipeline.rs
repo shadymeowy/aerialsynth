@@ -77,19 +77,23 @@ pub fn generator_range_estimator(gen: &Generator) -> impl Fn(TileId) -> (f32, f3
         let b = id.bounds();
         let size = (b.lon_max - b.lon_min).abs() * gen.world.ell.a * ((b.lat_min + b.lat_max) * 0.5).cos();
         let gsd = (size / 4.0).max(30.0);
-        let mut lo = f64::MAX;
-        let mut hi = f64::MIN;
+        let mut pts = Vec::with_capacity(16);
         for j in 0..4 {
             for i in 0..4 {
                 let v = (j as f64 + 0.5) / 4.0;
                 let y = id.y as f64 + v;
                 let lat = ((std::f64::consts::PI * (1.0 - 2.0 * y / (1u64 << id.z) as f64)).sinh()).atan();
                 let lon = b.lon_min + (b.lon_max - b.lon_min) * (i as f64 + 0.5) / 4.0;
-                let t = gen.world.terrain(&terragen::world::Ctx::new(lat, lon, gsd, &gen.world.ell));
-                let g = if t.water_kind != 0 { t.water.max(t.ground) } else { t.ground };
-                lo = lo.min(g);
-                hi = hi.max(g);
+                pts.push((lat, lon, gsd));
             }
+        }
+        // (a failed GPU evaluation leaves the range wide open)
+        let (mut lo, mut hi) = match gen.terrain_points(&pts) {
+            Ok(t) => t.iter().map(|t| t.surface()).fold((f64::MAX, f64::MIN), |(lo, hi), g| (lo.min(g), hi.max(g))),
+            Err(_) => (-11_000.0, 9_000.0),
+        };
+        if lo > hi {
+            (lo, hi) = (-11_000.0, 9_000.0);
         }
         let span = hi - lo;
         let r = ((lo - 40.0 - 0.3 * span) as f32, (hi + 60.0 + 0.3 * span + 0.02 * size) as f32);

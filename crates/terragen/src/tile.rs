@@ -35,6 +35,28 @@ pub enum Backend {
     Cpu,
 }
 
+/// Pass A at a point ([`Generator::terrain_points`]).
+#[derive(Clone, Copy, Debug)]
+pub struct PointTerrain {
+    /// bare ground (m above the ellipsoid; the bed under water)
+    pub ground: f64,
+    /// standing water level, or -inf
+    pub water: f64,
+    /// `world::water` kind
+    pub water_kind: u8,
+}
+
+impl PointTerrain {
+    /// The surface: ground or water, whichever is higher.
+    pub fn surface(&self) -> f64 {
+        if self.water_kind != 0 {
+            self.water.max(self.ground)
+        } else {
+            self.ground
+        }
+    }
+}
+
 /// Tiles per GPU batch (~25 MB of GPU memory each).
 #[cfg(feature = "gpu")]
 const GPU_BATCH: usize = 16;
@@ -186,6 +208,27 @@ impl Generator {
             return Ok(out);
         }
         Ok(ids.par_iter().map(|&id| self.tile_cpu(id)).collect())
+    }
+
+    /// Pass A at points (lat, lon in radians, pixel size in metres): the bare ground and the
+    /// standing water (on the GPU when tiles are generated there).
+    pub fn terrain_points(&self, pts: &[(f64, f64, f64)]) -> anyhow::Result<Vec<PointTerrain>> {
+        #[cfg(feature = "gpu")]
+        if let Some(g) = self.gpu() {
+            return Ok(g
+                .terrain_points(pts)?
+                .iter()
+                .map(|t| PointTerrain { ground: t.ground as f64, water: if t.water_kind != 0 { t.water as f64 } else { f64::NEG_INFINITY }, water_kind: t.water_kind as u8 })
+                .collect());
+        }
+        let ell = self.world.ell;
+        Ok(pts
+            .par_iter()
+            .map(|&(lat, lon, gsd)| {
+                let t = self.world.terrain(&Ctx::new(lat, lon, gsd, &ell));
+                PointTerrain { ground: t.ground, water: t.water, water_kind: t.water_kind }
+            })
+            .collect())
     }
 
     /// Generate one tile (see [`Generator::tiles`]; panics if the GPU fails).

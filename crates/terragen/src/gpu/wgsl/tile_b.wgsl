@@ -34,22 +34,40 @@ const C_MISSING: u32 = 5u;
 var<workgroup> wg_site_id: array<u64, 256>;
 var<workgroup> wg_site_pt: array<vec4<f64>, 256>;
 
-/// The region of every pass-A pixel (its id and site), deduplicated per workgroup.
+/// Is pass-B pixel (i, j) standing water at every sub-sample? (all its pass-A neighbours are
+/// water above their ground: the sample's water level, their maximum, then lies above its
+/// interpolated ground; pass B returns before the land use there)
+fn all_water(ti: TileInfo, i: u32, j: u32) -> bool {
+    for (var dj = 0u; dj < 3u; dj++) {
+        for (var di = 0u; di < 3u; di++) {
+            let t = terr[ti.pix0 + (j + dj) * NA2 + (i + di)];
+            if (t.water_kind == W_NONE || !(t.water > t.ground)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/// The region of every pass-B pixel on land (its id and site), deduplicated per workgroup.
 @compute @workgroup_size(16, 16)
 fn region_requests(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation_index) li: u32) {
     let ti = tiles[gid.z];
     let i = gid.x;
     let j = gid.y;
     wg_site_id[li] = 0lu;
-    if (i < NA2 && j < NA2) {
-        let t = terr[ti.pix0 + j * NA2 + i];
+    if (i < NA && j < NA && !all_water(ti, i, j)) {
+        // the pass-A pixel at the pass-B pixel's centre
+        let ia = i + 1u;
+        let ja = j + 1u;
+        let t = terr[ti.pix0 + ja * NA2 + ia];
         if (t.region_id != 0lu) {
-            let r = rows[ti.row_a + j];
-            let c = cols[ti.col_a + i];
+            let r = rows[ti.row_a + ja];
+            let c = cols[ti.col_a + ia];
             let ctx = row_col_ctx(r, c, r.gsd);
             var pre = pre_none();
             if ((ti.flags & TF_GRID) != 0u) {
-                let uv = grid_uv_a(ti, i, j);
+                let uv = grid_uv_a(ti, ia, ja);
                 pre = grid_pre(ti, grid_pos(ti, uv.x, uv.y));
             }
             let pw = ctx.p + vec3<f64>(region_warp_at(ctx.p, pre));
@@ -60,7 +78,7 @@ fn region_requests(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local
     }
     workgroupBarrier();
     if (li == 0u) {
-        var seen: array<u64, 8>;
+        var seen: array<u64, 64>;
         var n = 0u;
         for (var k = 0u; k < 256u; k++) {
             let id = wg_site_id[k];
@@ -77,7 +95,7 @@ fn region_requests(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local
             if (dup) {
                 continue;
             }
-            if (n < 8u) {
+            if (n < 64u) {
                 seen[n] = id;
                 n += 1u;
             }
@@ -107,7 +125,7 @@ fn town_requests(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_i
     for (var k = 0u; k < 4u; k++) {
         wg_cell[li * 4u + k] = vec4<i32>(0, 0, 0, 0);
     }
-    if (i < NA && j < NA && cfg.towns > 0.0) {
+    if (i < NA && j < NA && cfg.towns > 0.0 && !all_water(ti, i, j)) {
         let t = terr[ti.pix0 + (j + 1u) * NA2 + (i + 1u)];
         if (t.town != 0u) {
             var k = 0u;
@@ -135,7 +153,7 @@ fn town_requests(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_i
     }
     workgroupBarrier();
     if (li == 0u) {
-        var seen: array<vec4<i32>, 8>;
+        var seen: array<vec4<i32>, 64>;
         var n = 0u;
         for (var k = 0u; k < 1024u; k++) {
             let v = wg_cell[k];
@@ -152,7 +170,7 @@ fn town_requests(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_i
             if (dup) {
                 continue;
             }
-            if (n < 8u) {
+            if (n < 64u) {
                 seen[n] = v;
                 n += 1u;
             }

@@ -1,5 +1,8 @@
 # GPU backend (wgpu, headless)
 
+The GPU generates the tiles (below, [Tile generation](#tile-generation)) and renders the
+frames, on one shared headless device.
+
 `render.backend: gpu` renders frames with wgpu (Vulkan / Metal / DX12) instead of the CPU
 reference renderer. The default, `auto`, takes the GPU when there is one and the CPU otherwise;
 it also renders a camera the GPU cannot take on the CPU (a Scaramuzza model with more than 10
@@ -94,3 +97,39 @@ stars) are emulated with pairs of u32. Shading runs in f32; geometry stays f64 o
 `cargo run --release -p render --example gpu_compare SCENARIO.yaml [t] [camera] [out.png]`
 renders one frame with both backends, prints the radiance / depth / land-cover differences and
 writes CPU | GPU | |difference| side by side.
+
+## Tile generation
+
+`tiles.generator: auto` (default) generates tiles on the GPU when it has 64-bit float and
+integer shaders (`SHADER_F64`, `SHADER_INT64`: Vulkan on NVIDIA and AMD), else on the CPU;
+`gpu` / `cpu` force one. The GPU generator (`terragen::gpu`) is the CPU generator ported to WGSL
+and builds the same world:
+
+* **Same noise:** the hashes are the CPU's (u64 in the shader), the octave frames and the
+  gradient table are uploaded from the CPU's own tables, and noise lattice coordinates are f64
+  (ECEF metres over wavelengths down to decimetres; only `+ − × floor` run in f64, everything
+  inside a lattice cell in f32).
+* **Agreement:** tiles agree with the CPU's to f32 precision. On test tiles from z3 to z16, at
+  most 0.01% of the pixels differ by more than 2 DN or 5 cm (`cargo test -p terragen
+  gpu::tests`), so both write generator version 3 and can share a store.
+* **Split of the work:** per pixel and per point everything runs on the GPU: macro fields, the
+  coarse grid, relief, river carving, lakes, land use, the surface with its trees, fields, towns
+  and lights, the canopy opening and the output layers. The parts that are graphs or site lists
+  stay on the host (`gpu/host.rs`): the drainage network (flow targets, sources, channel
+  pieces), lake levels, regions, towns and their overlaps. Their inputs come from batched GPU
+  point evaluations, cached across batches. The GPU reports which lakes, regions and town cells
+  a batch needs.
+* **Batches:** 16 tiles per batch (~25 MB of GPU memory per tile). Kernels: grid nodes → relief
+  (and lake requests) → drainage pieces per 16-px bin → rest of pass A (and site requests) →
+  pass B (adaptive supersampling) → canopy opening → output layers.
+* **Startup:** the compiled pipelines are kept in `~/.cache/terrain/` (the driver's own shader
+  cache is per executable); after the first run the generator is ready in ~0.1 s.
+
+| | CPU (8 threads) | GPU (RTX 2080 Ti) |
+|---|---|---|
+| 64 tiles at z15 / z13 (cold caches) | 12.7 s / 13.5 s (5 tiles/s) | 1.1 s (60 tiles/s) |
+| `configs/quick.yaml` planned tiles (357, z0–z17) | 57.6 s | 18.2 s |
+
+Low-zoom tiles near the poles cost the most on both. A Mercator pixel of z3 at 80° is 3.4 km,
+so lakes, land-use regions and the full drainage network switch on over areas of thousands of
+kilometres.

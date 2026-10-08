@@ -535,8 +535,9 @@ fn control_points(cfg: &SynthConfig, length: f64, ell: &Ellipsoid, origin: Geode
     c
 }
 
-/// Run the flight recorder. `ground(lat, lon)` (radians) gives terrain height for AGL mode.
-pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Option<&(dyn Fn(f64, f64) -> f64 + Sync)>) -> Vec<Record> {
+/// Run the flight recorder. `ground(points)` gives the terrain height at (lat, lon) points
+/// (radians) for AGL mode.
+pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Option<&(dyn Fn(&[(f64, f64)]) -> Vec<f64> + Sync)>) -> Vec<Record> {
     let g = 9.80665;
     let dt = cfg.dt.clamp(1e-4, 0.01);
     let v = cfg.speed.max(1.0); // ground speed along the path
@@ -553,13 +554,14 @@ pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Op
     let nh = (length / ds_h).ceil() as usize + 2;
     let h_prof: Vec<f64> = match (cfg.altitude_ref, ground) {
         (AltitudeRef::Agl, Some(gf)) => {
-            let raw: Vec<f64> = (0..nh)
+            let pts: Vec<(f64, f64)> = (0..nh)
                 .map(|k| {
                     let (e, n) = path.at(k as f64 * ds_h);
                     let geo = to_geo(e, n);
-                    gf(geo.lat, geo.lon)
+                    (geo.lat, geo.lon)
                 })
                 .collect();
+            let raw = gf(&pts);
             // clearance envelope (running max over ±1 km) then smoothing (±2 km)
             let w1 = (1000.0 / ds_h) as isize;
             let w2 = (2000.0 / ds_h) as isize;

@@ -173,6 +173,11 @@ impl World {
     /// order of a z, y, x loop over the box. Columns run along the axis closest to the surface
     /// normal at `center`; per column only the few cells the shell crosses are visited.
     pub(crate) fn shell_cells(&self, center: DVec3, lo: DVec3, hi: DVec3, cell: f64) -> Vec<(i64, i64, i64)> {
+        self.shell_cells_in(center, lo, hi, cell, true)
+    }
+
+    /// [`World::shell_cells`] in any order (`sorted`: in the z, y, x loop order).
+    pub(crate) fn shell_cells_in(&self, center: DVec3, lo: DVec3, hi: DVec3, cell: f64, sorted: bool) -> Vec<(i64, i64, i64)> {
         let m = 0.5 * cell + 200.0;
         // local geocentric radius range over the box: the ellipsoid radius changes by at most
         // (a − b)·|sin 2φ|·Δφ ≤ 2 (a − b) Δφ over the box's latitude span
@@ -218,7 +223,9 @@ impl World {
                 }
             }
         }
-        out.sort_unstable_by_key(|&(x, y, z)| (z, y, x));
+        if sorted {
+            out.sort_unstable_by_key(|&(x, y, z)| (z, y, x));
+        }
         out
     }
 

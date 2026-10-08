@@ -183,12 +183,14 @@ impl GpuGenerator {
         let l_tile = layout(d, "tile", &[Ro, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw]);
         let globals = bind(d, &l_globals, &[&g_cfg, &g_grads, &g_octs, &g_fbms, &g_pal]);
         let (src_points, src_tile) = sources();
+        let t_compile = std::time::Instant::now();
+        let cache = PipelineCache::open(&gpu);
         let m_points = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("points"), source: wgpu::ShaderSource::Wgsl(src_points.into()) });
         let m_tile = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("tile"), source: wgpu::ShaderSource::Wgsl(src_tile.into()) });
         let pl_points = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("points"), bind_group_layouts: &[Some(&l_globals), Some(&l_drain), Some(&l_points)], immediate_size: 0 });
         let pl_tile = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("tile"), bind_group_layouts: &[Some(&l_globals), Some(&l_tables), Some(&l_tile)], immediate_size: 0 });
         let pipe = |module: &wgpu::ShaderModule, pl: &wgpu::PipelineLayout, entry: &str| {
-            d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some(entry), layout: Some(pl), module, entry_point: Some(entry), compilation_options: Default::default(), cache: None })
+            d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some(entry), layout: Some(pl), module, entry_point: Some(entry), compilation_options: Default::default(), cache: cache.as_ref().map(|c| &c.cache) })
         };
         // (the driver compiles each pipeline on its own: in parallel)
         let names = ["grid_nodes", "pass_a1", "bin_segments", "pass_a2", "region_requests", "town_requests", "pass_b", "open_min_x", "open_min_y", "open_max_x", "open_max_y", "open_apply", "finish"];
@@ -197,6 +199,12 @@ impl GpuGenerator {
             let points = pipe(&m_points, &pl_points, "eval_points");
             (points, hs.into_iter().map(|h| h.join().expect("pipeline")).collect())
         });
+        if let Some(c) = &cache {
+            c.save();
+        }
+        if std::env::var_os("TERRAGEN_PROFILE").is_some() {
+            eprintln!("GPU generator: pipelines ready in {:.1} s", t_compile.elapsed().as_secs_f64());
+        }
         let mut t = || tile.remove(0);
         let k = Kernels {
             points,
@@ -251,7 +259,9 @@ impl GpuGenerator {
             cp.set_bind_group(0, &self.globals, &[]);
             cp.set_bind_group(1, &g1, &[]);
             cp.set_bind_group(2, &g2, &[]);
-            cp.dispatch_workgroups((pts.len() as u32).div_ceil(64), 1, 1);
+            let groups = (pts.len() as u32).div_ceil(64);
+            let gx = groups.min(65535);
+            cp.dispatch_workgroups(gx, groups.div_ceil(gx), 1);
         }
         self.gpu.queue.submit([enc.finish()]);
         read_back(&self.gpu, &b_out, pts.len())
@@ -267,36 +277,46 @@ impl GpuGenerator {
         let prof = std::env::var_os("TERRAGEN_PROFILE").is_some();
         for round in 0..64 {
             let t0 = std::time::Instant::now();
-            let (out, need) = {
+            let (out, mut need, heights) = {
                 let mut prep = Prep::new(&self.world, cache);
                 let out = f(&mut prep);
+                prep.prepare();
                 if prof {
-                    eprintln!("  settle round {round}: host {:.3} s, {} missing, {} requests", t0.elapsed().as_secs_f64(), prep.missing, prep.need.len());
+                    eprintln!("  settle round {round}: host {:.3} s, {} missing, {} requests, {} heights", t0.elapsed().as_secs_f64(), prep.missing, prep.need.len(), prep.heights_need.len());
                 }
                 if prep.missing == 0 {
                     return Ok(out);
                 }
-                (out, std::mem::take(&mut prep.need))
+                (out, std::mem::take(&mut prep.need), std::mem::take(&mut prep.heights_need))
             };
             drop(out);
-            if need.is_empty() {
+            if need.is_empty() && heights.is_empty() {
                 bail!("GPU generator: host preparation is stuck");
             }
-            let reqs: Vec<PointReq> = need.into_values().collect();
+            let heights: Vec<((usize, host::Cell), Ctx)> = heights.into_iter().collect();
+            let mut reqs: Vec<PointReq> = need.drain().map(|(_, r)| r).collect();
+            let n_points = reqs.len();
+            reqs.extend(heights.iter().map(|(_, ctx)| PointReq { ctx: *ctx, mode: MODE_RELIEF, segs: vec![], sinks: vec![] }));
             let res = self.eval_points(&reqs, &cache.lattice_lakes)?;
-            for (r, t) in reqs.iter().zip(res) {
-                cache.points.insert(PointKey::new(r.mode, &r.ctx), t);
+            for (r, t) in reqs[..n_points].iter().zip(&res) {
+                cache.points.insert(PointKey::new(r.mode, &r.ctx), *t);
+            }
+            for (((lvl, c), ctx), t) in heights.iter().zip(&res[n_points..]) {
+                cache.set_height(*lvl, *c, ctx, t.ground as f64);
             }
         }
         bail!("GPU generator: host preparation did not settle")
     }
 
-    /// Pass A at one point (exact macro fields), like `World::terrain`.
-    pub fn terrain(&self, lat: f64, lon: f64, gsd: f64) -> Result<GTerrain> {
-        let ctx = Ctx::new(lat, lon, gsd, &self.world.ell);
+    /// Pass A at points (lat, lon in radians, pixel size in metres; exact macro fields), like
+    /// `World::terrain`.
+    pub fn terrain_points(&self, pts: &[(f64, f64, f64)]) -> Result<Vec<GTerrain>> {
+        let ell = self.world.ell;
+        let ctxs: Vec<Ctx> = pts.iter().map(|&(lat, lon, gsd)| Ctx::new(lat, lon, gsd, &ell)).collect();
         let mut cache = self.cache.lock().unwrap();
-        let t = self.settle(&mut cache, |p| p.point(MODE_FULL, &ctx))?;
-        Ok(t.expect("settled"))
+        cache.trim();
+        let out = self.settle(&mut cache, |p| ctxs.iter().map(|c| p.point(MODE_FULL, c)).collect::<Vec<_>>())?;
+        Ok(out.into_iter().map(|t| t.expect("settled")).collect())
     }
 
     /// Pass A of tiles: the terrain per pass-A pixel centre (tile + 2-pixel apron, 260 x 260).
@@ -304,9 +324,19 @@ impl GpuGenerator {
         Ok(self.run(ids, false)?.0)
     }
 
-    /// Generate tiles (one batch on the GPU).
+    /// Generate tiles (one batch on the GPU; halved while its land-use sites overflow the
+    /// request buffers).
     pub fn tiles(&self, ids: &[TileId]) -> Result<Vec<TileData>> {
-        Ok(self.run(ids, true)?.1)
+        match self.run(ids, true) {
+            Ok(r) => Ok(r.1),
+            Err(e) if e.is::<Overflow>() && ids.len() > 1 => {
+                let (a, b) = ids.split_at(ids.len() / 2);
+                let mut out = self.tiles(a)?;
+                out.extend(self.tiles(b)?);
+                Ok(out)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// The tile pipeline: pass A (and with `full` pass B and the output layers).
@@ -318,6 +348,13 @@ impl GpuGenerator {
             return Ok((vec![], vec![]));
         }
         let ss = self.world.cfg.tile_supersample.max(1) as usize;
+        let prof = std::env::var_os("TERRAGEN_PROFILE").is_some();
+        let t_run = std::time::Instant::now();
+        let stamp = |what: &str| {
+            if prof {
+                eprintln!("  batch of {nt} (z{}..{}): {what} at {:.3} s", ids.iter().map(|i| i.z).min().unwrap_or(0), ids.iter().map(|i| i.z).max().unwrap_or(0), t_run.elapsed().as_secs_f64());
+            }
+        };
         // ---- drainage pieces and sink lakes per tile
         struct TileDrain {
             segs: Vec<crate::world::Seg>,
@@ -351,6 +388,7 @@ impl GpuGenerator {
                 })
                 .collect()
         })?;
+        stamp("drainage");
         // ---- tile tables
         let mut rows: Vec<GRow> = Vec::new();
         let mut cols: Vec<GCol> = Vec::new();
@@ -457,8 +495,8 @@ impl GpuGenerator {
         // stand-ins for unused bindings (read-only in group 1, writable in group 2)
         let empty = output(d, "empty", 256);
         let unused = output(d, "unused", 256);
-        let lake_cap = 4096usize;
-        let site_cap = 1 << 16;
+        let lake_cap = 1usize << 16;
+        let site_cap = 1 << 18;
         let b_lake_req = output(d, "lake requests", (lake_cap * 64) as u64);
         let b_region_req = output(d, "region requests", (site_cap * 64) as u64);
         let b_town_req = output(d, "town requests", (site_cap * 16) as u64);
@@ -530,12 +568,13 @@ impl GpuGenerator {
                 }
             })?;
         };
+        stamp("relief, lakes, bins");
         // ---- the rest of pass A (the bins' pieces as the piece list), the sites pass B needs
         let g1 = bind(d, &self.k.l_tables, &[&b_segs, &b_list, &b_sinks, &b_keys, &b_vals, &empty, &empty, &empty, &empty, &empty, &empty, &empty]);
         let g2 = group2(&unused);
         let mut passes = vec![(&self.k.a2, [wg(NA2), wg(NA2), nt as u32])];
         if full {
-            passes.push((&self.k.region_req, [wg(NA2), wg(NA2), nt as u32]));
+            passes.push((&self.k.region_req, [wg(NA), wg(NA), nt as u32]));
             passes.push((&self.k.town_req, [wg(NA), wg(NA), nt as u32]));
         }
         run_passes(&g1, &g2, &passes, true);
@@ -544,9 +583,10 @@ impl GpuGenerator {
             return Ok((all.chunks(NA2 * NA2).map(|c| c.to_vec()).collect(), vec![]));
         }
         let counters: Vec<u32> = read_back(&self.gpu, &b_counters, 8)?;
+        stamp("pass a");
         let (nreg, ntown) = (counters[3] as usize, counters[4] as usize);
         if nreg > site_cap || ntown > site_cap {
-            bail!("GPU generator: too many land-use sites in one batch ({nreg} regions, {ntown} town cells)");
+            return Err(Overflow(format!("{nreg} regions, {ntown} town cells")).into());
         }
         let reg_reqs: Vec<GSiteReq> = read_back(&self.gpu, &b_region_req, nreg)?;
         let town_reqs: Vec<[i32; 4]> = read_back(&self.gpu, &b_town_req, ntown)?;
@@ -561,6 +601,7 @@ impl GpuGenerator {
             let towns: Vec<(host::Cell, Vec<(u64, GTown)>)> = cells.iter().filter_map(|&c| prep.town_candidates(c).map(|v| (c, v))).collect();
             (regions, towns)
         })?;
+        stamp(&format!("{} regions, {} town cells", regions.len(), town_cells.len()));
         let (rk, ri, rv) = region_table(&regions);
         let (tk, tc, tl, tv) = town_table(&town_cells);
         let b_rk = storage(d, "region keys", &rk);
@@ -592,6 +633,7 @@ impl GpuGenerator {
         if counters[5] != 0 {
             bail!("GPU generator: pass B lacked land-use data (flags {:#x})", counters[5]);
         }
+        stamp("pass b");
         let out: Vec<u32> = read_back(&self.gpu, &b_out, nt * N * N * OUT_U)?;
         let ranges: Vec<u32> = read_back(&self.gpu, &b_ranges, nt * 2)?;
         let tiles = ids
@@ -628,6 +670,18 @@ impl GpuGenerator {
         Ok((vec![], tiles))
     }
 }
+
+/// More land-use sites in a batch than the request buffers hold.
+#[derive(Debug)]
+struct Overflow(String);
+
+impl std::fmt::Display for Overflow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GPU generator: too many land-use sites in one batch ({})", self.0)
+    }
+}
+
+impl std::error::Error for Overflow {}
 
 fn from_orderable(u: u32) -> f32 {
     if u & 0x8000_0000 != 0 {
@@ -680,6 +734,43 @@ fn town_table(cells: &[(host::Cell, Vec<(u64, GTown)>)]) -> (Vec<u64>, Vec<[u32;
         vals[k] = [first, cands.len() as u32];
     }
     (keys, vals, list, towns)
+}
+
+/// The compiled pipelines kept on disk (`~/.cache/terrain/pipelines-<adapter>.bin`): the
+/// driver's own shader cache is per executable, and compiling the generator takes minutes.
+struct PipelineCache {
+    cache: wgpu::PipelineCache,
+    path: std::path::PathBuf,
+}
+
+impl PipelineCache {
+    fn open(gpu: &Gpu) -> Option<PipelineCache> {
+        if !gpu.device.features().contains(wgpu::Features::PIPELINE_CACHE) {
+            return None;
+        }
+        let key = wgpu::util::pipeline_cache_key(&gpu.info)?;
+        let dir = std::env::var_os("XDG_CACHE_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".cache")))?.join("terrain");
+        let path = dir.join(format!("pipelines-{key}.bin"));
+        let data = std::fs::read(&path).ok();
+        // SAFETY: the data is what `get_data` returned for this adapter key (or nothing); wgpu and
+        // the driver validate it and fall back to an empty cache
+        let cache = unsafe { gpu.device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor { label: Some("terrain"), data: data.as_deref(), fallback: true }) };
+        Some(PipelineCache { cache, path })
+    }
+
+    fn save(&self) {
+        let Some(data) = self.cache.get_data() else { return };
+        if std::fs::read(&self.path).is_ok_and(|old| old == data) {
+            return;
+        }
+        if let Some(dir) = self.path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let tmp = self.path.with_extension(format!("tmp{}", std::process::id()));
+        if std::fs::write(&tmp, &data).is_ok() {
+            let _ = std::fs::rename(&tmp, &self.path);
+        }
+    }
 }
 
 type FxLakes = crate::noise::FxHashMap<u64, Option<f64>>;
