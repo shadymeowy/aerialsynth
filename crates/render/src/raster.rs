@@ -514,6 +514,9 @@ pub struct Renderer {
     pub geometry_only: bool,
     /// Return lamp flicker as separate cos / sin images instead of applying it (see `FrameOut`).
     pub split_flicker: bool,
+    /// Only the radiance is wanted (live view): the GPU backend skips reading back depth,
+    /// 3D points and land cover (left empty), unless the stars of this frame need them.
+    pub radiance_only: bool,
     /// unit rays of the supersampled grid (camera frame)
     pub(crate) rays: Vec<[f32; 3]>,
     /// unique id of this renderer (GPU-side caches of its ray table)
@@ -541,7 +544,7 @@ impl Renderer {
             .collect();
         static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Renderer { model, model_ss, settings, ell, cache, geometry_only: false, split_flicker: false, rays, id, stars_in_render: true, star_field: Default::default() }
+        Renderer { model, model_ss, settings, ell, cache, geometry_only: false, split_flicker: false, radiance_only: false, rays, id, stars_in_render: true, star_field: Default::default() }
     }
 
     pub fn select_units(&self, cam: &CamPose) -> Vec<Unit> {

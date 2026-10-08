@@ -51,6 +51,8 @@ enum Cmd {
     Preview(preview::Args),
     /// Fly over the tile store on a globe (window), generating tiles as you go.
     Explore(commands::ExploreArgs),
+    /// Fly a scenario camera in realtime, rendered by the dataset renderer and sensor (window).
+    Live(commands::LiveArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -66,5 +68,6 @@ fn main() -> anyhow::Result<()> {
         Cmd::Info(a) => commands::info(a),
         Cmd::Preview(a) => preview::run(a),
         Cmd::Explore(a) => commands::explore(a),
+        Cmd::Live(a) => commands::live(a),
     }
 }

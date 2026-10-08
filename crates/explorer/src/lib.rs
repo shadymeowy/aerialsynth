@@ -6,6 +6,7 @@
 
 mod fly;
 mod globe;
+pub mod live;
 mod tiles;
 
 use anyhow::{Context, Result};

@@ -2,12 +2,13 @@
 name = "explorer"
 version.workspace = true
 edition.workspace = true
-description = "Globe explorer (`terrain explore`): browse a tile store, generate tiles as you go"
+description = "`terrain explore` (globe of a tile store) and `terrain live` (the dataset renderer in realtime)"
 
 [dependencies]
 geodesy.workspace = true
 tilestore.workspace = true
 terragen.workspace = true
+render.workspace = true
 glam.workspace = true
 anyhow.workspace = true
 rayon.workspace = true

@@ -366,6 +366,22 @@ pub fn explore(a: ExploreArgs) -> Result<()> {
 }
 
 #[derive(Args)]
+pub struct LiveArgs {
+    #[command(flatten)]
+    pub common: Common,
+    #[command(flatten)]
+    pub live: explorer::live::LiveOptions,
+}
+
+/// A scenario camera flown in realtime through the dataset renderer.
+pub fn live(a: LiveArgs) -> Result<()> {
+    let s = setup(&a.common)?;
+    let gen = Generator::new(s.world.clone());
+    let store = pipeline::open_or_create_store(&s, &gen)?;
+    explorer::live::run(s, Arc::new(store), Arc::new(gen), a.live)
+}
+
+#[derive(Args)]
 pub struct InfoArgs {
     pub file: PathBuf,
 }

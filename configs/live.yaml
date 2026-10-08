@@ -1,0 +1,14 @@
+# Realtime flight through the dataset renderer:
+#   terrain live -c configs/live.yaml --dynamic             (free flight; P: plane)
+# Same world and tile store as configs/explore.yaml. The camera, lighting, atmosphere and
+# sensor below are what is rendered, as in a dataset frame (motion blur aside).
+world: { seed: 1 }
+tiles: { file: out/explorer/world.h5, max_zoom: 17 }
+render:
+  supersample: 1
+  lighting: { mode: clock, date: "2026-06-21", time_utc: "07:30:00" }   # ~09:40 local solar time
+cameras:
+  - path: /cam0
+    intrinsics: { model: pinhole, width: 1280, height: 720, intrinsics: [747.6, 747.6, 639.5, 359.5] }
+    extrinsics: { mount: forward, pitch_deg: -15 }
+    rgb: {}

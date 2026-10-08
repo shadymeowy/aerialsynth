@@ -41,7 +41,19 @@ python scripts/view_seq.py out/quick/seq.h5 view.png  # rgb | depth | flow | val
 | `run`     | `traj` (if missing) → `plan` → `gen` → `render` (→ `events` if any camera has events) |
 | `info`    | summarize a tile store / sequence file |
 | `preview` | generate tiles of the scenario's world straight into a PNG mosaic (`--layers rgb,albedo,elevation,normal,landcover,hillshade`) |
-| `explore` | fly over the scenario's tile store on a globe (window), generating tiles as you go; see below |
+| `explore` | browse the scenario's tile store on a globe (window, its own light shader), generating tiles as you go; see below |
+| `live` | fly a scenario camera in realtime, rendered by the dataset renderer and sensor (window); `docs/live.md` |
+
+### Live renderer
+
+`terrain live` flies a camera of the scenario in realtime through the actual dataset renderer
+and sensor (lighting for the date and time, atmosphere, shadows, night lights, stars, auto
+exposure, noise, tone curve). Missing tiles are generated in the background. Details:
+`docs/live.md`.
+
+```
+terrain live -c configs/live.yaml --dynamic --scale 0.5   # 640×360 at ~40 frames/s (WASD, P: plane)
+```
 
 ### Globe explorer and realtime flight
 
@@ -294,12 +306,13 @@ crates/tilestore  HDF5 tile pyramid (layout above), parallel codec
 crates/terragen   procedural terrain generator
 crates/render     camera, trajectories/dynamics, LOD, rasterizer, lighting, sensor, writers, pipeline
 crates/cli        `terrain` binary (the aerialsynth CLI)
-crates/explorer   `terrain explore`: interactive globe of a tile store (wgpu + egui), generates as you go
+crates/explorer   `terrain explore` (globe of a tile store) and `terrain live` (the dataset renderer in realtime)
 scripts/          contact.py (generator contact sheets), check_gt.py + cammodels.py (camera GT, all models), check_imu.py, check_events.py, seqio.py, view_seq.py, view_events.py
 docs/events.md    event camera modality: options, sensor model, format
 docs/stars.md     star catalogue, astrometry, brightness, star ground truth
 docs/gpu.md       GPU backend (wgpu, headless)
 docs/explorer.md  globe explorer and realtime flight: controls, options, how it works
+docs/live.md      live renderer: the dataset renderer and sensor in realtime
 configs/          example scenarios (quick, dataset, fisheye, events, oblique_sunset, night, night_moon, cruise, imu_check, star_tracker)
 ```
 

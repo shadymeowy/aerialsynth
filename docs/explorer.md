@@ -1,5 +1,8 @@
 # Globe explorer and realtime flight (`terrain explore`)
 
+The explorer draws with its own lightweight shader (lit albedo, simple haze and sky). For the
+dataset renderer and sensor in realtime, use `terrain live` (`docs/live.md`).
+
 `terrain explore` opens the scenario's tile store (`tiles.file`) as a globe. You can orbit the
 whole planet, or fly over it in realtime with free flight (WASD) or a simple plane. Tiles stream
 in from the store as you move; with dynamic generation on, missing tiles are generated in the

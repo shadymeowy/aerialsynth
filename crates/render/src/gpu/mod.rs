@@ -550,12 +550,15 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
         cp.set_bind_group(0, &bg, &[]);
         cp.dispatch_workgroups(ow.div_ceil(8), oh.div_ceil(8), 1);
     }
-    let nb = if split { 4 } else { 2 };
-    for k in 0..nb {
+    // geometry (depth, points, land cover) unless only the radiance is wanted (the stars mask
+    // the sky with it)
+    let need_geo = !r.radiance_only || r.geometry_only || (sun_state.stars && r.stars_in_render);
+    let bufs: Vec<usize> = (0..if split { 4 } else { 2 }).filter(|&k| k != 1 || need_geo).collect();
+    for &k in &bufs {
         enc.copy_buffer_to_buffer(&tg.out[k], 0, &tg.read[k], 0, (ow * oh * 16) as u64);
     }
     queue.submit([enc.finish()]);
-    for k in 0..nb {
+    for &k in &bufs {
         tg.read[k].slice(..).map_async(wgpu::MapMode::Read, |r| r.expect("GPU read-back"));
     }
     d.poll(wgpu::PollType::wait_indefinitely()).expect("GPU poll");
@@ -568,7 +571,7 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
         v
     };
     let rad = get(0);
-    let geo = get(1);
+    let geo = if need_geo { get(1) } else { Vec::new() };
     let cs = (ss / 2) as usize;
     let mut out = FrameOut {
         width: ow,
@@ -586,6 +589,9 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
     let wss = w as usize;
     for k in 0..n {
         out.radiance.extend_from_slice(&rad[k][..3]);
+        if !need_geo {
+            continue;
+        }
         let g = geo[k];
         let range = g[1];
         if range > 0.0 {
