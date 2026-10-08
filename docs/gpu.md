@@ -128,8 +128,15 @@ and builds the same world:
 | | CPU (8 threads) | GPU (RTX 2080 Ti) |
 |---|---|---|
 | 64 tiles at z15 / z13 (cold caches) | 12.7 s / 13.5 s (5 tiles/s) | 1.1 s (60 tiles/s) |
-| `configs/quick.yaml` planned tiles (357, z0–z17) | 57.6 s | 18.2 s |
+| `configs/quick.yaml` planned tiles (357, z0–z17) | 57.6 s | 9.0 s |
+| its completion (280 tiles, mostly z1–z8 near the poles) | 148 s | 105 s |
+| `terrain view` snapshot from an empty store (592 tiles, the whole globe at z3–z4) | 323 s | 256 s |
 
-Low-zoom tiles near the poles cost the most on both. A Mercator pixel of z3 at 80° is 3.4 km,
-so lakes, land-use regions and the full drainage network switch on over areas of thousands of
-kilometres.
+Tiles of zoom 9 and above are 6–12× faster. Low-zoom tiles gain much less, for two reasons:
+* **Polar pixels:** a Mercator pixel of z3 at 80° is 3.4 km, so lakes and land-use regions
+  switch on over areas of thousands of kilometres.
+* **Lake levels:** every lake's level takes 11 terrain evaluations with the finest drainage
+  network around it.
+
+That host-side graph work (`gpu/host.rs`, parallel over CPU threads) then dominates. Moving the
+drainage graph to the GPU is the next step for them.

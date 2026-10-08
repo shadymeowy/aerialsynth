@@ -6,7 +6,7 @@ ground truth. A viewer flies over the world in realtime.
 
 - **World:** continents, mountains carved by erosion, rivers, lakes, climate and biomes,
   forests of individual trees, fields, towns with buildings, roads, night lights. Any place,
-  any zoom, generated on demand into one HDF5 tile store.
+  any zoom, generated on demand (on the GPU) into one HDF5 tile store.
 - **Flights:** spline paths with wind, gusts, turbulence and engine vibration; or your own
   trajectory CSV.
 - **Sensors:**
@@ -68,7 +68,7 @@ Layouts in `docs/formats.md`. Python helpers in `scripts/`: `check_gt.py`, `chec
 | `docs/viewer.md` | the viewer: map and camera views, controls, how it works |
 | `docs/events.md` | event cameras |
 | `docs/stars.md` | stars, planets, Moon: catalogue, astrometry, star ground truth |
-| `docs/gpu.md` | the GPU backend |
+| `docs/gpu.md` | the GPU backend: tile generation and rendering |
 
 ## Code
 

@@ -2,6 +2,9 @@
 
 ## Terrain (`crates/terragen`)
 
+Generated on the GPU by default (`tiles.generator`; the same world as the CPU generator, see
+`docs/gpu.md`).
+
 - **Determinism:** a pure function of (seed, config, position), using f64 3D noise on the
   ellipsoid surface. There are no seams or pole problems.
 - **Band limiting:** fields are band-limited by the pixel GSD, so coarse zooms approximate the
@@ -99,7 +102,7 @@
 
 | task | speed |
 |------|-------|
-| generation | ~7 tiles/s at z17, ~6 at z16, ~5 at z15, ~1.5 at z6–10 (8 threads, `world.tile_supersample` 2) |
+| generation | GPU (default, `docs/gpu.md`): ~60 tiles/s at z13–z15; CPU: ~7 tiles/s at z17, ~6 at z16, ~5 at z15, ~1.5 at z6–10 (8 threads, `world.tile_supersample` 2) |
 | rendering 640×512, 3×3 supersampled, shadows | ~0.5 s per frame on the CPU, ~40× faster on the GPU |
 
 `terrain run --lazy` generates exactly the tiles each view needs while rendering. The live
@@ -126,7 +129,8 @@ cargo test --release
   1 kHz simulator truth.
 - **Solar position.**
 - **Generator invariants:** determinism, seamless east-west and north-south tile borders, parent ≈
-  mean of its children.
+  mean of its children (on the default backend: the GPU).
+- **GPU generator:** noise, pass A and whole tiles (z7–z16) against the CPU generator.
 - **Tile stores:** a store refuses tiles of another world.
 - **Flight camera:** level flight holds height and heading, banked turns at g·tan(bank)/V, the
   ground stops the camera.
