@@ -1,7 +1,7 @@
 //! Headless snapshots of the map view (`terrain view --snapshot`).
 
 use crate::fly::{FlyCam, FlyMode};
-use crate::globe::{Camera, Globe};
+use crate::globe::{CamFrame, Camera, Globe};
 use crate::tiles::Service;
 use crate::{base_tiles, map_settings, ViewOptions};
 use anyhow::{Context, Result};
@@ -164,6 +164,17 @@ fn fading(look: &[Look], t: f64) -> Option<((Option<String>, bool), f64)> {
     Some((look_at(look, k.t, false), x * x * (3.0 - 2.0 * x)))
 }
 
+/// Roll, pitch, yaw (deg, aerospace ZYX) of an FRD body looking along the camera (x: the view
+/// direction, z: down the image) in the NED frame at (lat, lon) (rad).
+fn attitude(f: &CamFrame, lat: f64, lon: f64) -> (f64, f64, f64) {
+    let (sl, cl) = lat.sin_cos();
+    let (so, co) = lon.sin_cos();
+    let (n, e, d) = (DVec3::new(-sl * co, -sl * so, cl), DVec3::new(-so, co, 0.0), DVec3::new(-cl * co, -cl * so, -sl));
+    let (x, z) = (f.dir, -f.cam_up);
+    let y = z.cross(x);
+    (y.dot(d).atan2(z.dot(d)).to_degrees(), (-x.dot(d)).clamp(-1.0, 1.0).asin().to_degrees(), x.dot(e).atan2(x.dot(n)).to_degrees())
+}
+
 pub(crate) fn headless_device() -> Result<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(async {
         let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
@@ -176,8 +187,9 @@ pub(crate) fn headless_device() -> Result<(wgpu::Device, wgpu::Queue)> {
 
 /// Record a keyframed map flight into `dir/frame_00000.png`, … at `fps`: every frame is
 /// captured once its tiles are in (or after `args.wait` seconds). `dir/frames.csv` gives each
-/// frame's time, eye position (deg, m above the ellipsoid), distance to the target (km), shading
-/// mode and the finest zoom level drawn.
+/// frame's time, the camera pose as a trajectory (position in deg / m above the ellipsoid;
+/// roll / pitch / yaw in deg of a forward-looking FRD body, as `terrain run` reads them), the
+/// distance to the target (km), the shading mode and the finest zoom level drawn.
 pub(crate) fn record(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Generator>, dir: &Path, path: &Path, fps: f64) -> Result<()> {
     let flight = serde_yaml::from_str::<Flight>(&std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?)
         .with_context(|| format!("parsing {}", path.display()))?;
@@ -194,7 +206,7 @@ pub(crate) fn record(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Generat
     let (w, h) = (w?, h?);
     std::fs::create_dir_all(dir)?;
     let mut csv = std::io::BufWriter::new(std::fs::File::create(dir.join("frames.csv"))?);
-    writeln!(csv, "frame,t,lat,lon,h,km,mode,max_zoom")?;
+    writeln!(csv, "frame,t,lat,lon,h,roll,pitch,yaw,km,mode,max_zoom")?;
     let (device, queue) = headless_device()?;
     let ell = gen.world.ell;
     let svc = Service::start(store, gen, base_tiles(args.base_zoom), (rayon::current_num_threads() / 2).max(1), || {});
@@ -243,8 +255,17 @@ pub(crate) fn record(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Generat
         }
         let img: Vec<u8> = px.iter().map(|v| v.round().clamp(0.0, 255.0) as u8).collect();
         image::save_buffer(dir.join(format!("frame_{k:05}.png")), &img, w, h, image::ExtendedColorType::Rgba8)?;
-        let eye = ecef2geodetic(cam.frame(&ell, w as f64 / h as f64).eye, &ell);
-        writeln!(csv, "{k},{t:.4},{:.6},{:.6},{:.1},{:.4},{mode},{max_zoom}", eye.lat.to_degrees(), eye.lon.to_degrees(), eye.h, cam.dist / 1000.0)?;
+        let f = cam.frame(&ell, w as f64 / h as f64);
+        let eye = ecef2geodetic(f.eye, &ell);
+        let (roll, pitch, yaw) = attitude(&f, eye.lat, eye.lon);
+        writeln!(
+            csv,
+            "{k},{t:.4},{:.8},{:.8},{:.2},{roll:.5},{pitch:.5},{yaw:.5},{:.4},{mode},{max_zoom}",
+            eye.lat.to_degrees(),
+            eye.lon.to_degrees(),
+            eye.h,
+            cam.dist / 1000.0
+        )?;
         if k % 25 == 0 || k + 1 == n {
             eprintln!(
                 "frame {k}/{n} ({:.0} s): {:.1} km, finest z{max_zoom}, {} generated",
@@ -282,6 +303,19 @@ mod tests {
         // beyond the last key the camera holds
         let (c, _) = at_time(&keys, 9.0);
         assert!((c.dist / 1000.0 - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn attitude_of_the_orbit_camera() {
+        let ell = geodesy::Ellipsoid::WGS84;
+        let mut c = at_time(&[key(0.0, 7.0, -102.0, 3.0), key(1.0, 7.0, -102.0, 3.0)], 0.0).0;
+        // looking east, 63 deg from straight down: yaw 90, pitch -27, level wings
+        c.heading = 90f64.to_radians();
+        c.tilt = 63f64.to_radians();
+        let f = c.frame(&ell, 16.0 / 9.0);
+        let eye = ecef2geodetic(f.eye, &ell);
+        let (roll, pitch, yaw) = attitude(&f, eye.lat, eye.lon);
+        assert!(roll.abs() < 0.05 && (pitch + 27.0).abs() < 0.05 && (yaw - 90.0).abs() < 0.05, "{roll} {pitch} {yaw}");
     }
 
     #[test]

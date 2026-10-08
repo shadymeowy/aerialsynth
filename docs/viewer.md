@@ -129,9 +129,11 @@ terrain view -c configs/view.yaml --snapshot out/fly.png --view fly:39.9,32.8,60
 
 `--record DIR --path FILE` flies the map camera along keyframes and saves every frame
 (`DIR/frame_00000.png`, …, at `--fps`, `--size`), each once its tiles are in (or after `--wait`
-seconds). `DIR/frames.csv` gives each frame's time, eye position and height, distance to the
-target and the finest zoom level drawn. The showcase's opening globe shot is one
-(`showcase/globe/dive.yaml`).
+seconds). `DIR/frames.csv` gives each frame's time, the camera pose as a trajectory (`lat`,
+`lon`, `h`, and `roll`, `pitch`, `yaw` of a forward-looking body, the columns `terrain run`
+reads), the distance to the target and the finest zoom level drawn: the dataset renderer can fly
+the same path. The showcase opens with one (`showcase/globe/dive.yaml`), handed over to the
+dataset renderer 6 km above the ground.
 
 ```yaml
 keys:     # the orbit camera: target lat / lon (deg), distance (km), heading / tilt / fov (deg), exag

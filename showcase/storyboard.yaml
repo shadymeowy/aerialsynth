@@ -6,6 +6,8 @@
 #   layout:   single (default) | grid (2x2 of four cameras) | modalities | map | globe (a map
 #             flight recorded by `terrain view --record`: `path` is its keyframes file)
 #   notes:    time-coded remarks, top left: [{t, until, text}]
+#   follows:  a globe shot: fly its recorded camera path on from its end, with the dataset
+#             renderer and the globe's tile store (the hand-off from map to camera)
 #   speedup:  time-lapse factor for the flight (frames are rendered every speedup/fps seconds)
 #
 # Times are UTC; local solar time here (33°E) is UTC + 2h12.
@@ -25,13 +27,25 @@ shots:
   layout: globe
   path: globe/dive.yaml
   label: The planet
-  seconds: 19.4
+  seconds: 17.5
   text: Web-Mercator tiles from z0 to z17, generated as the camera needs them
   notes:
   - {t: 0.5, until: 2.3, text: surface}
   - {t: 2.5, until: 4.0, text: elevation}
   - {t: 4.2, until: 5.7, text: land cover}
-  - {t: 8.8, until: 16.3, text: level of detail · tile borders coloured by zoom level}
+  - {t: 8.8, until: 15.4, text: level of detail · tile borders coloured by zoom level}
+- id: descent
+  follows: globe
+  label: ''
+  text: ''
+  seconds: 2.4
+  notes:
+  - {t: 0.3, text: 'the dataset renderer takes over: sun, atmosphere, shadows, sensor'}
+  scenario:
+    cameras:
+    - extrinsics: {pitch_deg: 0}
+    render:
+      lighting: {time_utc: '16:48:00'}
 - id: volcano
   label: Rainforest peak
   scenario:

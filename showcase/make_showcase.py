@@ -123,11 +123,35 @@ def render_globe(base, shot, video, force=False):
     return scn
 
 
-def render_shot(base, shot, video, stills=False, force=False):
+def follow_scenario(base, shot, video, lead):
+    """Scenario of a shot that `follows` a globe shot (`lead`): its camera flies the globe's
+    recorded camera path on, over the globe's tile store."""
+    scn = shot_scenario(base, shot, video)
+    scn["tiles"]["file"] = globe_scenario(base, lead)["tiles"]["file"]
+    scn["tiles"]["lazy"] = True
+    return scn
+
+
+def follow_trajectory(base, lead, start):
+    """The camera path recorded by the globe shot `lead`, from the end of its shown part on, as
+    a trajectory CSV: that moment is output time `start`; the last pose is held after it."""
+    rows = list(csv.DictReader(open(globe_scenario(base, lead)["output"]["file"])))
+    t0 = lead["seconds"] - start
+    cols = ("lat", "lon", "h", "roll", "pitch", "yaw")
+    out = ["t," + ",".join(cols)]
+    rows = [r for r in rows if float(r["t"]) >= t0] + [dict(rows[-1], t=float(rows[-1]["t"]) + 60.0)]
+    for r in rows:
+        out.append(f"{float(r['t']) - t0:.4f}," + ",".join(r[c] for c in cols))
+    return "\n".join(out) + "\n"
+
+
+def render_shot(base, shot, video, stills=False, force=False, scn=None, traj=None):
+    """Render a shot by `terrain run` (`scn`: its scenario, if not the default one; `traj`: its
+    trajectory CSV, if not synthesized)."""
     sid = shot["id"]
     d = os.path.join(OUT, sid)
     os.makedirs(d, exist_ok=True)
-    scn = shot_scenario(base, shot, video, stills)
+    scn = scn or shot_scenario(base, shot, video, stills)
     text = yaml.safe_dump(scn, sort_keys=False)
     tag = "stills" if stills else "scenario"
     path = os.path.join(d, f"{tag}.yaml")
@@ -135,15 +159,18 @@ def render_shot(base, shot, video, stills=False, force=False):
     # the render backend (cpu / gpu) gives the same output: not part of the up-to-date check
     keyed = copy.deepcopy(scn)
     keyed.get("render", {}).pop("backend", None)
-    digest = hashlib.sha1(yaml.safe_dump(keyed, sort_keys=False).encode()).hexdigest()
+    digest = hashlib.sha1((yaml.safe_dump(keyed, sort_keys=False) + (traj or "")).encode()).hexdigest()
     if not force and os.path.exists(stamp) and open(stamp).read() == digest and os.path.exists(scn["output"]["file"]):
         print(f"[{sid}] up to date")
         return scn
     with open(path, "w") as f:
         f.write(text)
-    traj = scn["trajectory"]["file"]
-    if os.path.exists(traj):
-        os.remove(traj)  # the flight belongs to the scenario
+    traj_file = scn["trajectory"]["file"]
+    if os.path.exists(traj_file):
+        os.remove(traj_file)  # the flight belongs to the scenario
+    if traj is not None:
+        with open(traj_file, "w") as f:
+            f.write(traj)
     t0 = time.time()
     print(f"[{sid}] rendering ({tag}) …", flush=True)
     log = open(os.path.join(d, f"{tag}.log"), "w")
@@ -603,7 +630,7 @@ def collage_sources(shots_scn, video):
     """One striking frame per shot (the middle one of its first camera) for the title collage."""
     ims = []
     for shot, scn in shots_scn:
-        if shot.get("layout") in ("modalities", "map", "events", "globe"):
+        if shot.get("layout") in ("modalities", "map", "events", "globe") or "follows" in shot:
             continue
         with h5py.File(scn["output"]["file"], "r") as f:
             rgb = f[scn["cameras"][0]["path"]]["rgb"]
@@ -998,6 +1025,14 @@ def main():
             if a.stills:
                 continue  # (no sequence; preview it with `terrain view --record` at a small --size)
             scn = globe_scenario(base, s) if a.compose_only else render_globe(base, s, story["video"], a.force)
+        elif "follows" in s:
+            if a.stills:
+                continue  # (flies a globe shot's recording)
+            lead = next(x for x in story["shots"] if x["id"] == s["follows"])
+            scn = follow_scenario(base, s, story["video"], lead)
+            if not a.compose_only:
+                traj = follow_trajectory(base, lead, scn["output"]["start"])
+                scn = render_shot(base, s, story["video"], force=a.force, scn=scn, traj=traj)
         elif "source" in s:
             # shown from another shot's sequence (e.g. its event camera, later in the same flight)
             src = next(x for x in story["shots"] if x["id"] == s["source"])
