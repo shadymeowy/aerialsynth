@@ -627,8 +627,8 @@ impl Globe {
         let mut walk = Walk { eye, planes, pix, exag, s, svc, draws: Vec::new(), want_load: Vec::new(), want_gen: Vec::new() };
         self.visit(TileId::new(0, 0, 0), None, &mut walk);
         let Walk { draws, mut want_load, mut want_gen, .. } = walk;
-        want_load.sort_by(|a, b| (a.0.z, a.1).partial_cmp(&(b.0.z, b.1)).unwrap());
-        want_gen.sort_by(|a, b| (a.0.z, a.1).partial_cmp(&(b.0.z, b.1)).unwrap());
+        want_load.sort_by(|a, b| a.1.total_cmp(&b.1));
+        want_gen.sort_by(|a, b| a.1.total_cmp(&b.1));
         self.stats.want_load = want_load.len();
         self.stats.want_gen = want_gen.len();
         svc.want(want_load.into_iter().take(64).map(|x| x.0).collect(), want_gen.into_iter().take(32).map(|x| x.0).collect());
@@ -814,10 +814,16 @@ impl Globe {
         let src = own.map(|o| (t, o.0)).or(fallback.map(|f| (f.0, f.1)));
         if own.is_none() {
             self.requested.insert(t, frame);
+            // most wanted first: the blurriest stand-in on screen (the texel size of the ancestor
+            // drawn instead, seen from here; nothing to draw at all comes first)
+            let blur = match fallback {
+                Some((a, _, _)) => width_m * (1u64 << (t.z - a.z)) as f64 / N as f64 / dist,
+                None => f64::MAX,
+            };
             if w.svc.store.contains(t) {
-                w.want_load.push((t, dist));
+                w.want_load.push((t, -blur));
             } else if w.s.dynamic && t.z <= w.s.gen_max_zoom {
-                w.want_gen.push((t, dist));
+                w.want_gen.push((t, -blur));
             }
         }
         let Some((src_t, layer)) = src else { return };

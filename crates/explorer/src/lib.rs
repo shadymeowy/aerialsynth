@@ -53,6 +53,9 @@ pub struct Options {
     /// `fly:lat,lon,height above ground (m),heading,pitch (deg)` for the flight camera.
     #[arg(long, default_value = "20,10,16000,0,0", allow_hyphen_values = true)]
     pub view: String,
+    /// Snapshot: longest wait (s) for the view's tiles before capturing.
+    #[arg(long, default_value_t = 600.0)]
+    pub wait: f64,
     /// Snapshot size, WxH.
     #[arg(long, default_value = "1280x800")]
     pub size: String,
@@ -149,7 +152,7 @@ fn snapshot(args: &Options, store: Arc<TileStore>, gen: Arc<Generator>, out: &Pa
         };
         globe.render(&cf, &s, &svc, w, h, None);
         calm = if globe.settled(&svc) { calm + 1 } else { 0 };
-        if calm >= 5 || t0.elapsed().as_secs() > 600 {
+        if calm >= 5 || t0.elapsed().as_secs_f64() > args.wait {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -188,6 +191,9 @@ struct App {
     fly: Option<FlyCam>,
     last_cf: Option<CamFrame>,
     agl: f64,
+    /// `--fly`: keep the camera this high above the ground (as finer tiles refine it) until the
+    /// first input
+    spawn_agl: Option<f64>,
 }
 
 /// How the view is driven.
@@ -239,6 +245,7 @@ impl App {
             }),
             last_cf: None,
             agl: 0.0,
+            spawn_agl: args.fly.as_ref().map(|_| 600.0),
         })
     }
 
@@ -485,6 +492,14 @@ impl eframe::App for App {
                     };
                     let g = f.geodetic(&ell);
                     let ground = self.globe.height_at(g.lat, g.lon, 22).unwrap_or(0.0).max(0.0) * exag;
+                    if let Some(agl) = self.spawn_agl {
+                        let touched = inp.forward != 0.0 || inp.right != 0.0 || inp.up != 0.0 || inp.yaw != 0.0 || inp.look_yaw != 0.0 || inp.look_pitch != 0.0;
+                        if touched {
+                            self.spawn_agl = None;
+                        } else {
+                            f.pos = geodesy::geodetic2ecef(geodesy::Geodetic { h: ground + agl, ..g }, &ell);
+                        }
+                    }
                     f.update(dt_ms / 1000.0, &inp, &ell, ground);
                     self.agl = f.geodetic(&ell).h - ground;
                     f.frame(&ell, aspect, ground)
