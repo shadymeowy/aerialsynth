@@ -17,7 +17,27 @@ pub use tilestore::TileData;
 pub struct Generator {
     pub world: World,
     pub surface: SurfaceModel,
+    backend: Backend,
+    /// the GPU generator, compiled on first use (Err: unavailable)
+    #[cfg(feature = "gpu")]
+    gpu: std::sync::OnceLock<Result<crate::gpu::GpuGenerator, String>>,
 }
+
+/// Where tiles are generated. The GPU generator (`terragen::gpu`) builds the same world as the
+/// CPU one: tiles agree to f32 precision (a few pixels in 10,000 differ, by a few DN or cm).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Backend {
+    /// the GPU when it has 64-bit float and integer shaders, else the CPU
+    #[default]
+    Auto,
+    Gpu,
+    Cpu,
+}
+
+/// Tiles per GPU batch (~25 MB of GPU memory each).
+#[cfg(feature = "gpu")]
+const GPU_BATCH: usize = 16;
 
 /// A node of the tile's coarse grid.
 struct Node {
@@ -98,10 +118,79 @@ struct PassA {
 }
 
 impl Generator {
+    /// A generator on the GPU when there is one (`Backend::Auto`).
     pub fn new(cfg: Config) -> Self {
+        Self::with_backend(cfg, Backend::Auto)
+    }
+
+    /// A generator on `backend` (the GPU generator is compiled on first use).
+    pub fn with_backend(cfg: Config, backend: Backend) -> Self {
         let world = World::new(cfg);
         let surface = SurfaceModel::new(&world);
-        Generator { world, surface }
+        Generator {
+            world,
+            surface,
+            backend,
+            #[cfg(feature = "gpu")]
+            gpu: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// A generator on `backend`; `Backend::Gpu` fails without a suitable GPU.
+    pub fn try_with_backend(cfg: Config, backend: Backend) -> anyhow::Result<Self> {
+        if backend == Backend::Gpu {
+            #[cfg(feature = "gpu")]
+            crate::gpu::shared()?.check_generator()?;
+            #[cfg(not(feature = "gpu"))]
+            anyhow::bail!("this build has no GPU tile generator (feature `gpu`)");
+        }
+        Ok(Self::with_backend(cfg, backend))
+    }
+
+    /// The GPU generator, if tiles are generated on the GPU.
+    #[cfg(feature = "gpu")]
+    pub fn gpu(&self) -> Option<&crate::gpu::GpuGenerator> {
+        if self.backend == Backend::Cpu {
+            return None;
+        }
+        if self.backend == Backend::Auto && !crate::gpu::shared().is_ok_and(|g| g.check_generator().is_ok()) {
+            return None;
+        }
+        match self.gpu.get_or_init(|| crate::gpu::GpuGenerator::new(self.world.cfg.clone()).map_err(|e| format!("{e:#}"))) {
+            Ok(g) => Some(g),
+            Err(e) => {
+                static WARNED: std::sync::Once = std::sync::Once::new();
+                WARNED.call_once(|| eprintln!("warning: GPU tile generator unavailable ({e}); generating on the CPU"));
+                None
+            }
+        }
+    }
+
+    /// "GPU (<adapter>)" or "CPU": where tiles are generated.
+    pub fn backend_name(&self) -> String {
+        #[cfg(feature = "gpu")]
+        if let Some(g) = self.gpu() {
+            return format!("GPU ({})", g.adapter());
+        }
+        "CPU".into()
+    }
+
+    /// Generate tiles: on the GPU in batches, or on the CPU in parallel.
+    pub fn tiles(&self, ids: &[TileId]) -> anyhow::Result<Vec<TileData>> {
+        #[cfg(feature = "gpu")]
+        if let Some(g) = self.gpu() {
+            let mut out = Vec::with_capacity(ids.len());
+            for chunk in ids.chunks(GPU_BATCH) {
+                out.extend(g.tiles(chunk)?);
+            }
+            return Ok(out);
+        }
+        Ok(ids.par_iter().map(|&id| self.tile_cpu(id)).collect())
+    }
+
+    /// Generate one tile (see [`Generator::tiles`]; panics if the GPU fails).
+    pub fn tile(&self, id: TileId) -> TileData {
+        self.tiles(&[id]).expect("tile generation").remove(0)
     }
 
     pub fn config(&self) -> &Config {
@@ -303,8 +392,8 @@ impl Generator {
         PassA { grid, nodes, use_grid, gk0x, gk0y, ng, pf_cut }
     }
 
-    /// Generate one tile (parallel over rows internally).
-    pub fn tile(&self, id: TileId) -> TileData {
+    /// Generate one tile on the CPU (parallel over rows internally).
+    pub fn tile_cpu(&self, id: TileId) -> TileData {
         let n = TILE_SIZE;
         let na = n + 2; // pass B, 1-px apron
         let na2 = n + 4; // pass A, 2-px apron

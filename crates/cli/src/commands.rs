@@ -30,7 +30,7 @@ fn bar(len: usize, what: &str) -> ProgressBar {
 }
 
 fn synth(s: &Scenario, out: &Path) -> Result<()> {
-    let gen = Generator::new(s.world.clone());
+    let gen = pipeline::generator(&s)?;
     let home = s.world.home.clone().unwrap_or_default();
     let ell = gen.world.ell;
     // ground reference for AGL flights: smooth terrain sampled at ~200 m resolution
@@ -123,6 +123,7 @@ fn gen_tiles(s: &Scenario, gen: &Generator, tiles: Vec<TileId>, force: bool) -> 
         _ => tiles,
     };
     let store = pipeline::open_or_create_store(s, gen)?;
+    eprintln!("generating on the {}", gen.backend_name());
     let b = bar(0, "gen");
     let t0 = std::time::Instant::now();
     let n = pipeline::generate(gen, &store, &tiles, force, &|done, total| {
@@ -148,7 +149,7 @@ fn do_render(s: &Scenario) -> Result<()> {
         bail!("nothing to render: the scenario has no `cameras` and no `imu`");
     }
     let poses = load_poses(s)?;
-    let gen = Arc::new(Generator::new(s.world.clone()));
+    let gen = Arc::new(pipeline::generator(&s)?);
     let store = open_store(s, &gen)?;
     let b = bar(0, "render");
     b.set_style(ProgressStyle::with_template("render {msg:12} {bar:40} {pos}/{len} [{elapsed_precise} < {eta_precise}] {per_sec}").unwrap());
@@ -176,7 +177,7 @@ fn do_events(s: &Scenario) -> Result<()> {
         bail!("no camera has an `events` modality");
     }
     let poses = load_poses(s)?;
-    let gen = Arc::new(Generator::new(s.world.clone()));
+    let gen = Arc::new(pipeline::generator(&s)?);
     let store = open_store(s, &gen)?;
     let b = ProgressBar::new(1000);
     b.set_style(ProgressStyle::with_template("events {msg:12} {bar:40} {percent}% [{elapsed_precise} < {eta_precise}]").unwrap());
@@ -260,7 +261,7 @@ pub fn run(a: RunArgs) -> Result<()> {
         synth(&s, &s.trajectory.file)?;
     }
     let before = if want(Step::Tiles) {
-        let gen = Generator::new(s.world.clone());
+        let gen = pipeline::generator(&s)?;
         let tiles = plan_tiles(&s, &gen)?;
         gen_tiles(&s, &gen, tiles.into_iter().collect(), false)?;
         complete_tiles(&s, &gen)?;
@@ -278,7 +279,7 @@ pub fn run(a: RunArgs) -> Result<()> {
     // tiles generated lazily while rendering (event steps between the planned samples) get
     // their neighbourhood too
     if let Some(before) = before {
-        let gen = Generator::new(s.world.clone());
+        let gen = pipeline::generator(&s)?;
         let mut lazy: BTreeSet<TileId> = stored_tiles(&s, &gen)?.difference(&before).copied().collect();
         if !lazy.is_empty() {
             pipeline::with_margin_and_ancestors(&s, &mut lazy);
@@ -344,7 +345,7 @@ pub fn tiles(a: TilesArgs) -> Result<()> {
         let at = a.at.as_deref().map(|v| parse_floats(v, 2, "--at lat,lon")).transpose()?.map(|v| (v[0], v[1]));
         return crate::preview::mosaic(s.world.clone(), at, a.zoom, a.size, &a.layers, prefix);
     }
-    let gen = Generator::new(s.world.clone());
+    let gen = pipeline::generator(&s)?;
     let flight = a.list.is_none() && a.bbox.is_none();
     let tiles: Vec<TileId> = if let Some(t) = &a.list {
         parse_tile_list(t)?
@@ -392,7 +393,7 @@ pub struct ViewArgs {
 /// The world on a globe (map) and through a camera (the dataset renderer), flown live.
 pub fn view(a: ViewArgs) -> Result<()> {
     let s = setup(&a.common)?;
-    let gen = Generator::new(s.world.clone());
+    let gen = pipeline::generator(&s)?;
     // (read-only without generation: a store of another generator version can be viewed)
     let store = if a.view.no_generate {
         gen.open_store_ro(&s.tiles.file).with_context(|| format!("opening the tile store {} (without --no-generate it is created)", s.tiles.file.display()))?

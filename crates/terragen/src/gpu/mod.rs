@@ -257,6 +257,11 @@ impl GpuGenerator {
         read_back(&self.gpu, &b_out, pts.len())
     }
 
+    /// The GPU's name.
+    pub fn adapter(&self) -> &str {
+        &self.gpu.info.name
+    }
+
     /// Run `f` on the host caches until it needs no more GPU point evaluations.
     fn settle<T>(&self, cache: &mut Cache, mut f: impl FnMut(&mut Prep) -> T) -> Result<T> {
         let prof = std::env::var_os("TERRAGEN_PROFILE").is_some();

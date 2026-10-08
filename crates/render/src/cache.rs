@@ -117,16 +117,32 @@ impl TileCache {
             let g = self.inner.lock();
             ids.iter().copied().filter(|id| !g.map.contains_key(id)).collect()
         };
-        let loaded: Vec<(TileData, bool)> = missing.par_iter().filter_map(|&id| self.load(id).ok().flatten()).collect();
-        let (gen, stored): (Vec<_>, Vec<_>) = loaded.into_iter().partition(|(_, g)| *g);
-        let gen = match self.store_generated(gen.into_iter().map(|(t, _)| t).collect()) {
+        // stored tiles read in parallel, the rest generated in one batch
+        let read: Vec<(TileId, Option<TileData>)> = missing.par_iter().map(|&id| (id, self.store.read_tile(id, &self.layers).ok().flatten())).collect();
+        let mut stored = Vec::new();
+        let mut todo = Vec::new();
+        for (id, t) in read {
+            match t {
+                Some(t) => stored.push(t),
+                None if self.generator.is_some() && id.z <= self.lazy_max_zoom => todo.push(id),
+                None => {}
+            }
+        }
+        let generated = match (&self.generator, todo.is_empty()) {
+            (Some(g), false) => g.tiles(&todo).unwrap_or_else(|e| {
+                eprintln!("warning: generating tiles failed: {e:#}");
+                vec![]
+            }),
+            _ => vec![],
+        };
+        let gen = match self.store_generated(generated) {
             Ok(g) => g,
             Err(e) => {
                 eprintln!("warning: writing generated tiles back failed: {e:#}");
                 vec![]
             }
         };
-        for t in stored.into_iter().map(|(t, _)| t).chain(gen) {
+        for t in stored.into_iter().chain(gen) {
             self.insert(t.id, Arc::new(t));
         }
     }

@@ -231,13 +231,18 @@ pub fn generate(gen: &Generator, store: &TileStore, tiles: &[TileId], force: boo
     let mut done = 0;
     progress(0, total);
     for chunk in todo.chunks(batch) {
-        let data: Vec<tilestore::TileData> = chunk.par_iter().map(|id| gen.tile(*id)).collect();
+        let data = gen.tiles(chunk)?;
         store.write_tiles(&data)?;
         done += chunk.len();
         progress(done, total);
     }
     store.flush()?;
     Ok(total)
+}
+
+/// The scenario's tile generator (`tiles.generator`).
+pub fn generator(scn: &Scenario) -> Result<Generator> {
+    Generator::try_with_backend(scn.world.clone(), scn.tiles.generator)
 }
 
 /// The scenario's tile store for adding tiles (created if missing); it must hold this world.

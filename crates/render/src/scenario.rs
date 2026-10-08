@@ -221,6 +221,9 @@ pub struct TilesConfig {
     pub lazy: bool,
     /// Tile cache size (tiles in memory, ~0.7 MB each) for rendering.
     pub cache_tiles: usize,
+    /// Where tiles are generated: `auto` (the GPU when it has 64-bit shaders, else the CPU),
+    /// `gpu` or `cpu`. Both build the same world (tiles agree to f32 precision).
+    pub generator: terragen::Backend,
 }
 
 impl Default for TilesConfig {
@@ -233,6 +236,7 @@ impl Default for TilesConfig {
             plan_every: 1,
             lazy: false,
             cache_tiles: 2000,
+            generator: terragen::Backend::Auto,
         }
     }
 }

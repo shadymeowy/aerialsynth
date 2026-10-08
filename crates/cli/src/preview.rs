@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 use geodesy::tiles::{tile_for_latlon, TileId};
-use rayon::prelude::*;
 use terragen::{Generator, TileData, TILE_SIZE};
 
 pub fn layer_rgb(t: &TileData, layer: &str, emin: f32, emax: f32) -> Vec<u8> {
@@ -73,7 +72,8 @@ pub fn mosaic(cfg: terragen::Config, at: Option<(f64, f64)>, zoom: u8, size: u32
         }
     }
     let t0 = std::time::Instant::now();
-    let tiles: Vec<(i64, i64, TileData)> = ids.par_iter().map(|&(dx, dy, id)| (dx, dy, gen.tile(id))).collect();
+    let data = gen.tiles(&ids.iter().map(|i| i.2).collect::<Vec<_>>())?;
+    let tiles: Vec<(i64, i64, TileData)> = ids.iter().zip(data).map(|(&(dx, dy, _), t)| (dx, dy, t)).collect();
     let dt = t0.elapsed().as_secs_f64();
     eprintln!("generated {} tiles in {:.2}s ({:.3}s/tile wall)", tiles.len(), dt, dt / tiles.len() as f64);
     let emin = tiles.iter().map(|t| t.2.elev_min).fold(f32::MAX, f32::min);

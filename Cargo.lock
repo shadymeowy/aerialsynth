@@ -2599,13 +2599,16 @@ name = "terragen"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytemuck",
  "geodesy",
  "glam",
  "image",
+ "pollster",
  "rayon",
  "serde",
  "serde_yaml",
  "tilestore",
+ "wgpu",
 ]
 
 [[package]]

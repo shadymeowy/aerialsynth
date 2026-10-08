@@ -15,4 +15,4 @@ pub mod world;
 
 pub use config::Config;
 pub use store::GENERATOR_VERSION;
-pub use tile::{Generator, TileData, TILE_SIZE};
+pub use tile::{Backend, Generator, TileData, TILE_SIZE};

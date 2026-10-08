@@ -246,7 +246,7 @@ fn tiles_match_the_cpu() {
         let g = gen.tiles(&[id]).unwrap().remove(0);
         let tg = t0.elapsed().as_secs_f64();
         let t0 = std::time::Instant::now();
-        let c = cpu.tile(id);
+        let c = cpu.tile_cpu(id);
         let tc = t0.elapsed().as_secs_f64();
         eprintln!("tile {id}: GPU {tg:.2} s, CPU {tc:.2} s, elevation range GPU {:.1}..{:.1} CPU {:.1}..{:.1}", g.elev_min, g.elev_max, c.elev_min, c.elev_max);
         for (name, mean, bad, mx) in compare_tiles(&g, &c) {
@@ -293,7 +293,7 @@ fn throughput() {
     let tg = t0.elapsed().as_secs_f64();
     let cpu = crate::Generator::new(crate::Config::default());
     let t0 = std::time::Instant::now();
-    let m: usize = ids.par_iter().map(|&id| cpu.tile(id).rgb.len()).count();
+    let m: usize = ids.par_iter().map(|&id| cpu.tile_cpu(id).rgb.len()).count();
     let tc = t0.elapsed().as_secs_f64();
     eprintln!("z{z}, {done} tiles: GPU {tg:.2} s ({:.1} tiles/s), CPU {tc:.2} s ({:.1} tiles/s)", done as f64 / tg, m as f64 / tc);
 }

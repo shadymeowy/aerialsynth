@@ -203,7 +203,14 @@ fn generator(sh: Arc<Shared>, store: Arc<TileStore>, gen: Arc<Generator>, batch:
         };
         sh.stats.gen_busy.store(ids.len(), Ordering::Relaxed);
         let t0 = std::time::Instant::now();
-        let tiles: Vec<TileData> = ids.par_iter().map(|&id| gen.tile(id)).collect();
+        let tiles: Vec<TileData> = match gen.tiles(&ids) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("generating tiles: {e:#}");
+                sh.stats.errors.fetch_add(1, Ordering::Relaxed);
+                vec![]
+            }
+        };
         sh.stats.gen_us.fetch_add((t0.elapsed().as_secs_f64() * 1e6) as u64, Ordering::Relaxed);
         if let Err(e) = store.write_tiles(&tiles) {
             eprintln!("writing tiles: {e:#}");
