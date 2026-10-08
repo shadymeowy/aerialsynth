@@ -1,5 +1,5 @@
 # IMU validation (no cameras): 1 kHz flight record and body poses, 200 Hz IMU with a lever arm
-# and a rotated mount.   terrain traj -c configs/imu_check.yaml && terrain render -c configs/imu_check.yaml
+# and a rotated mount.   terrain run -c configs/examples/imu_check.yaml
 #                         python scripts/check_imu.py out/imu_check/seq.h5
 world: { seed: 1 }
 tiles: { file: out/imu_check/world.h5, lazy: true }

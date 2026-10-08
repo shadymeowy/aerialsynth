@@ -1,35 +1,9 @@
-//! Mosaic preview of generated (or stored) tiles.
+//! Mosaic preview of generated tiles (`terrain tiles --png`).
 
 use anyhow::Result;
-use clap::Args as ClapArgs;
 use geodesy::tiles::{tile_for_latlon, TileId};
 use rayon::prelude::*;
-use std::path::PathBuf;
 use terragen::{Generator, TileData, TILE_SIZE};
-
-#[derive(ClapArgs, Debug)]
-pub struct Args {
-    /// Scenario (its `world`), seed override, threads.
-    #[command(flatten)]
-    pub common: crate::Common,
-    /// Centre latitude (deg). Defaults to the world's home.
-    #[arg(long, allow_hyphen_values = true)]
-    pub lat: Option<f64>,
-    /// Centre longitude (deg).
-    #[arg(long, allow_hyphen_values = true)]
-    pub lon: Option<f64>,
-    #[arg(long, short)]
-    pub zoom: u8,
-    /// Mosaic size in tiles per side.
-    #[arg(long, default_value_t = 4)]
-    pub tiles: u32,
-    /// Layers to write: rgb, albedo, elevation, normal, landcover, hillshade (comma separated).
-    #[arg(long, default_value = "rgb")]
-    pub layers: String,
-    /// Output PNG prefix (a suffix `_<layer>.png` is appended).
-    #[arg(long, short, default_value = "out/preview")]
-    pub out: PathBuf,
-}
 
 pub fn layer_rgb(t: &TileData, layer: &str, emin: f32, emax: f32) -> Vec<u8> {
     let n = TILE_SIZE * TILE_SIZE;
@@ -80,21 +54,22 @@ pub fn layer_rgb(t: &TileData, layer: &str, emin: f32, emax: f32) -> Vec<u8> {
     out
 }
 
-pub fn run(a: Args) -> Result<()> {
-    let cfg = crate::commands::setup(&a.common)?.world;
+/// A mosaic of `size` × `size` tiles of zoom `zoom` around (lat, lon) (deg; default: the
+/// world's home), generated straight into `<out>_<layer>.png` (no tile store).
+pub fn mosaic(cfg: terragen::Config, at: Option<(f64, f64)>, zoom: u8, size: u32, layers: &str, out: &std::path::Path) -> Result<()> {
     let home = cfg.home.clone().unwrap_or_default();
-    let lat = a.lat.unwrap_or(home.lat).to_radians();
-    let lon = a.lon.unwrap_or(home.lon).to_radians();
+    let (lat, lon) = at.unwrap_or((home.lat, home.lon));
+    let (lat, lon) = (lat.to_radians(), lon.to_radians());
     let gen = Generator::new(cfg);
-    let c = tile_for_latlon(lat, lon, a.zoom);
-    let n = a.tiles as i64;
-    let max = 1i64 << a.zoom;
+    let c = tile_for_latlon(lat, lon, zoom);
+    let n = size as i64;
+    let max = 1i64 << zoom;
     let mut ids = Vec::new();
     for dy in 0..n {
         for dx in 0..n {
             let x = (c.x as i64 + dx - n / 2).rem_euclid(max);
             let y = (c.y as i64 + dy - n / 2).clamp(0, max - 1);
-            ids.push((dx, dy, TileId::new(a.zoom, x as u32, y as u32)));
+            ids.push((dx, dy, TileId::new(zoom, x as u32, y as u32)));
         }
     }
     let t0 = std::time::Instant::now();
@@ -104,11 +79,11 @@ pub fn run(a: Args) -> Result<()> {
     let emin = tiles.iter().map(|t| t.2.elev_min).fold(f32::MAX, f32::min);
     let emax = tiles.iter().map(|t| t.2.elev_max).fold(f32::MIN, f32::max);
     eprintln!("elevation range {emin:.1} .. {emax:.1} m");
-    if let Some(p) = a.out.parent() {
+    if let Some(p) = out.parent() {
         std::fs::create_dir_all(p)?;
     }
     let w = (n as usize) * TILE_SIZE;
-    for layer in a.layers.split(',') {
+    for layer in layers.split(',') {
         let mut img = image::RgbImage::new(w as u32, w as u32);
         for (dx, dy, t) in &tiles {
             let px = layer_rgb(t, layer, emin, emax);
@@ -119,7 +94,7 @@ pub fn run(a: Args) -> Result<()> {
                 }
             }
         }
-        let path = format!("{}_{}.png", a.out.display(), layer);
+        let path = format!("{}_{}.png", out.display(), layer);
         img.save(&path)?;
         eprintln!("wrote {path}");
     }

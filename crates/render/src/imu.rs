@@ -1,6 +1,6 @@
 //! Synthetic IMU from the trajectory.
 //!
-//! Truth: `terrain traj` records the exact specific force and inertial angular rate of the body
+//! Truth: `terrain run --step traj` records the exact specific force and inertial angular rate of the body
 //! (computed inside the flight simulator from the analytic kinematics + Coriolis / transport
 //! rate − WGS84 normal gravity, integrated at 1 kHz). For trajectories without those columns
 //! the truth is derived numerically from the poses (lower fidelity).

@@ -1,7 +1,6 @@
-# Realtime flight through the dataset renderer:
-#   terrain live -c configs/live.yaml --dynamic             (free flight; P: plane)
-# Same world and tile store as configs/explore.yaml. The camera, lighting, atmosphere and
-# sensor below are what is rendered, as in a dataset frame (motion blur aside).
+# The seed-1 world in the viewer:   terrain view -c configs/view.yaml          (map; M: camera)
+#                                   terrain view -c configs/view.yaml --camera-view
+# The camera view renders /cam0 below with this lighting, as a dataset frame would look.
 world: { seed: 1 }
 tiles: { file: out/explorer/world.h5, max_zoom: 17 }
 render:

@@ -180,7 +180,7 @@ pub fn interpolate(poses: &[Pose], t: f64) -> Pose {
 }
 
 /// True IMU samples carried by a trajectory CSV (columns `f_x..f_z, w_x..w_z`, body FRD), as
-/// written by `terrain traj`.
+/// written by `terrain run --step traj`.
 #[derive(Clone, Copy, Debug)]
 pub struct ImuTruth {
     pub t: f64,

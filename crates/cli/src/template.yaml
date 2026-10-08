@@ -1,0 +1,50 @@
+# A scenario: one file drives `terrain run`, `tiles` and `view`. Every section and key is
+# optional (defaults shown); `terrain config --all` lists every setting, docs/scenario.md
+# explains them.
+
+world:                         # the planet: a pure function of these settings
+  seed: 1
+  home: { lat: 39.9, lon: 32.8, radius_km: 600.0, strength: 0.6 }   # kept as land
+
+tiles:
+  file: out/world.h5           # tile store (one world per store; grows as needed)
+  min_zoom: 2
+  max_zoom: 18                 # finest level: z18 ≈ 0.5 m, z17 ≈ 1 m, z15 ≈ 4 m pixels
+  lazy: false                  # generate tiles the renderer misses while rendering
+
+trajectory:
+  file: out/traj.csv           # flight record: synthesized (below) or your own CSV
+  synth:
+    kind: random               # random | line | circle | figure8 | lawnmower | waypoints
+    altitude_m: 800.0
+    altitude_ref: agl          # agl (above the terrain) | ellipsoid
+    speed_mps: 45.0
+    duration_s: 60.0
+    heading_deg: 30.0
+    lat: null                  # start (deg); null = the world's home
+    lon: null
+
+render:
+  backend: auto                # auto (the GPU if there is one) | gpu | cpu
+  supersample: 3               # per axis; odd when a camera has depth / flow / landcover
+  lighting:
+    mode: fixed                # fixed | clock (sun and moon from the date and time)
+    sun_azimuth_deg: 145.0
+    sun_elevation_deg: 52.0
+    date: 2026-06-21           # clock mode, UTC
+    time_utc: 08:30:00
+
+cameras:                       # any number; omit for none
+- path: /cam0                  # HDF5 group of this camera
+  intrinsics: { model: pinhole, width: 640, height: 512, intrinsics: [457.0, 457.0, 319.5, 255.5] }
+  extrinsics: { mount: nadir } # nadir | forward, plus roll/pitch/yaw_deg and translation
+  frame_rate: 10.0
+  rgb: {}                      # modalities (omit = off): rgb, depth, flow, landcover, events, stars
+  depth: {}
+  flow: {}
+
+imu: {}                        # omit for no IMU
+
+output:
+  file: out/seq.h5             # the sequence: poses, IMU, every camera's modalities
+  png_dir: null                # also PNG / NPY files per frame

@@ -23,10 +23,10 @@ sheet = Image.new("RGB", (a.cell * len(zooms), a.cell * len(locs)))
 for r, (lat, lon) in enumerate(locs):
     for c, z in enumerate(zooms):
         prefix = os.path.join(tmp, f"{r}_{z}")
-        cmd = [a.bin, "preview", "-z", str(z), "--tiles", str(a.tiles), "--lat", str(lat), "--lon", str(lon),
-               "--layers", a.layer, "-o", prefix]
+        cmd = [a.bin, "tiles", "--png", prefix, "--zoom", str(z), "--size", str(a.tiles), "--at", f"{lat},{lon}",
+               "--layers", a.layer]
         if a.config:
-            cmd += ["--config", a.config]
+            cmd += ["-c", a.config]
         subprocess.run(cmd, check=True, stderr=subprocess.DEVNULL)
         im = Image.open(f"{prefix}_{a.layer}.png").resize((a.cell, a.cell), Image.LANCZOS)
         sheet.paste(im, (c * a.cell, r * a.cell))

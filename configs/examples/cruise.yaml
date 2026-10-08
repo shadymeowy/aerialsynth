@@ -1,4 +1,4 @@
-# Cruise altitude_m: 10 km above the ellipsoid, wide FOV tilted 25° forward.
+# Cruise altitude: 10 km above the ellipsoid, wide FOV tilted 25° forward.
 world: { seed: 1 }
 tiles: { file: out/cruise/world.h5, max_zoom: 16, lazy: true }
 trajectory:

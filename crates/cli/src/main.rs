@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "terrain", version, about = "Procedural XYZ terrain tiles + onboard camera renderer")]
+#[command(name = "terrain", version, about = "A procedural planet for aerial vision: terrain tiles, flights and camera datasets", after_help = "Start: `terrain config > my.yaml`, edit, `terrain run -c my.yaml`, `terrain view -c my.yaml`.")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -31,43 +31,31 @@ pub struct Common {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Print the full default scenario YAML (or the merged one with --config).
-    Config(commands::ConfigArgs),
-    /// Synthesize a flight record (spline path + ODE disturbances) → trajectory.file.
-    Traj(commands::TrajArgs),
-    /// List the XYZ tiles needed to render every camera along the trajectory.
-    Plan(commands::PlanArgs),
-    /// Generate tiles into the HDF5 tile store (from the plan, a tile list or a bbox).
-    Gen(commands::GenArgs),
-    /// Render the sequence file: body poses, IMU, every camera's frame modalities.
-    Render(commands::RenderArgs),
-    /// Simulate the cameras with an `events` modality (ESIM-style) into the sequence file.
-    Events(commands::RenderArgs),
-    /// traj (if missing) → plan → gen → render (→ events if enabled).
+    /// Make a dataset: trajectory → tiles → render → events (or --step …).
     Run(commands::RunArgs),
-    /// Summarize a tile store or a rendered sequence file.
+    /// Plan and generate the flight's tiles (or a region's), list them, or preview them as PNGs.
+    Tiles(commands::TilesArgs),
+    /// Open the world: a map of the tile store and the camera through the dataset renderer, flown live.
+    View(commands::ViewArgs),
+    /// Summarize a tile store or a sequence file.
     Info(commands::InfoArgs),
-    /// Generate tiles straight into a PNG mosaic (no HDF5), for inspecting the generator.
-    Preview(preview::Args),
-    /// Fly over the tile store on a globe (window), generating tiles as you go.
-    Explore(commands::ExploreArgs),
-    /// Fly a scenario camera in realtime, rendered by the dataset renderer and sensor (window).
-    Live(commands::LiveArgs),
+    /// Print a scenario template (--all: every setting; -c: a scenario with its defaults filled in).
+    Config(commands::ConfigArgs),
 }
 
 fn main() -> anyhow::Result<()> {
+    // end quietly when the reader of the output goes away (`terrain config --all | head`)
+    #[cfg(unix)]
+    // SAFETY: restoring the default disposition of SIGPIPE before any thread starts.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Config(a) => commands::config(a),
-        Cmd::Traj(a) => commands::traj(a),
-        Cmd::Plan(a) => commands::plan(a),
-        Cmd::Gen(a) => commands::gen(a),
-        Cmd::Render(a) => commands::render(a),
-        Cmd::Events(a) => commands::events(a),
         Cmd::Run(a) => commands::run(a),
+        Cmd::Tiles(a) => commands::tiles(a),
+        Cmd::View(a) => commands::view(a),
         Cmd::Info(a) => commands::info(a),
-        Cmd::Preview(a) => preview::run(a),
-        Cmd::Explore(a) => commands::explore(a),
-        Cmd::Live(a) => commands::live(a),
+        Cmd::Config(a) => commands::config(a),
     }
 }

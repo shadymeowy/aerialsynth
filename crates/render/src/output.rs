@@ -201,7 +201,7 @@ pub fn describe(file: &h5::File, scn: &Scenario) -> Result<()> {
 pub fn open_file(path: &Path) -> Result<h5::File> {
     let f = h5::File::open_rw(path)?;
     if f.attr_str("format").unwrap_or_default() != FORMAT {
-        anyhow::bail!("{} is not a terrain sequence file (run `terrain render` first)", path.display());
+        anyhow::bail!("{} is not a terrain sequence file (make it with `terrain run`)", path.display());
     }
     Ok(f)
 }

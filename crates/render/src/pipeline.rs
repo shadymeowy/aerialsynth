@@ -559,7 +559,7 @@ pub fn render_events(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, gen:
     let win = Window::new(scn, poses)?;
     let cache = tile_cache(scn, store, gen);
     let path = &scn.output.file;
-    let file = output::open_file(path).with_context(|| format!("opening {} (run `terrain render` first)", path.display()))?;
+    let file = output::open_file(path).with_context(|| format!("opening {} (make it with `terrain run`)", path.display()))?;
     let mut out = vec![];
     for spec in scn.cameras.iter().filter(|c| c.events.is_some()) {
         let n = crate::events::simulate(scn, spec, poses, cache.clone(), ell, &file, (win.t0, win.t1), &|d, t| progress(&spec.path, d, t))?;

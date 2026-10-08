@@ -1,8 +1,8 @@
 [package]
-name = "explorer"
+name = "viewer"
 version.workspace = true
 edition.workspace = true
-description = "`terrain explore` (globe of a tile store) and `terrain live` (the dataset renderer in realtime)"
+description = "`terrain view`: map (globe of the tile store) and camera (the dataset renderer, live), flown in realtime"
 
 [dependencies]
 geodesy.workspace = true
@@ -19,3 +19,6 @@ eframe = { version = "0.36", default-features = false, features = ["wgpu", "defa
 half = { version = "2", features = ["bytemuck"] }
 pollster.workspace = true
 image.workspace = true
+
+[dev-dependencies]
+serde_yaml.workspace = true

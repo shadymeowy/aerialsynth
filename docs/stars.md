@@ -131,7 +131,7 @@ ray that dips to its tangent height and back up. Those get twice the horizontal 
 the tangent height, less the part above the observer: about 1° at the limb seen from 10 km.
 Below the limb (hidden) the refraction fades out.
 
-**Validation** (`cargo test -p render stars`, plus `configs/star_tracker.yaml`):
+**Validation** (`cargo test -p render stars`, plus `configs/examples/star_tracker.yaml`):
 * Star positions were compared against Skyfield 1.53 (JPL DE421, IAU 2000A) for the same
   catalogue records: 1,600 star/place/time cases, sea level to 10 km, years 2026–2031. The
   mean separation is 0.0002–0.0005″ and the worst 0.0009″.
@@ -140,7 +140,7 @@ Below the limb (hidden) the refraction fades out.
   `skyfield.magnitudelib` to within 0.03.
 * Jupiter's rendered disc centroids to 0.012 px of its ground truth.
 * Refraction matches pyERFA's `refco` to within 0.02″.
-* Centroids measured in the rendered images (`configs/star_tracker.yaml`: 25° field of view,
+* Centroids measured in the rendered images (`configs/examples/star_tracker.yaml`: 25° field of view,
   100 ms, 8-bit output) against the ground truth:
   * without motion: 0.02 px for bright stars and 0.06 px at V 4–5.5, limited by noise at
     fainter magnitudes;

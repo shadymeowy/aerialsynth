@@ -1,6 +1,6 @@
 # Star tracker: a 25° camera looking at Orion from an aircraft at 1.5 km on a winter night,
 # with per-frame star ground truth (catalogue id, sub-pixel position, magnitude). See docs/stars.md.
-#   terrain run -c configs/star_tracker.yaml
+#   terrain run -c configs/examples/star_tracker.yaml
 world: { seed: 1 }
 tiles: { file: out/star_tracker/world.h5, max_zoom: 17, lazy: true }
 trajectory:

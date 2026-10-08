@@ -1,5 +1,5 @@
 # Multi-camera rig with an event camera, over the quick world (0.5 s):
-#   terrain run -c configs/events.yaml      (render: poses, IMU, frames; then events)
+#   terrain run -c configs/examples/events.yaml      (render: poses, IMU, frames; then events)
 # /cam0: frame camera (rgb + depth + flow). /dvs: event camera that also carries depth and
 # flow ground truth at 20 Hz on its own intrinsics / mounting.
 world: { seed: 1 }

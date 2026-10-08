@@ -78,8 +78,8 @@ cameras:
 ```
 
 ```
-terrain run -c configs/events.yaml           # render (poses, IMU, frames), then events
-terrain events -c configs/events.yaml        # (re)simulate only the events into the existing file
+terrain run -c configs/examples/events.yaml           # render (poses, IMU, frames), then events
+terrain run -c configs/examples/events.yaml --step events   # (re)simulate only the events into the existing file
 python scripts/view_events.py out/events/seq.h5 view.png --camera /dvs --window-ms 5
 ```
 
@@ -99,7 +99,7 @@ cameras with the same settings get independent noise.
 
 Performance on 8 cores (VGA, supersample 2, `max_px_per_step` 0.5, ~1000 m AGL flight with
 engine vibration): about 100 s of compute per simulated second, at ~520 renders/s; the
-`terrain events` summary prints renders, sensor steps and their times. The sensor model runs
+The events step prints renders, sensor steps and their times. The sensor model runs
 in parallel (~3 ms per step) and is not the bottleneck. Two knobs trade fidelity for speed:
 
 - **`max_px_per_step`:** step size limit; larger is faster and less exact.

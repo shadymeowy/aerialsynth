@@ -465,9 +465,9 @@ def map_frames(shot, f, video, scn):
     with open(lst, "w") as fh:
         fh.write("\n".join(need) + "\n")
     scen = os.path.join(d, "scenario.yaml")
-    subprocess.run([TERRAIN, "gen", "-c", scen, "--tiles", lst], cwd=ROOT, check=True, capture_output=True)
+    subprocess.run([TERRAIN, "tiles", "-c", scen, "--list", lst], cwd=ROOT, check=True, capture_output=True)
     plan_file = os.path.join(d, "plan.txt")
-    subprocess.run([TERRAIN, "plan", "-c", scen, "-o", plan_file], cwd=ROOT, check=True, capture_output=True)
+    subprocess.run([TERRAIN, "tiles", "-c", scen, "--dry-run", "-o", plan_file], cwd=ROOT, check=True, capture_output=True)
     plan = [tuple(map(int, l.split("/"))) for l in open(plan_file) if l.strip()]
     mosaic = read_tile_mosaic(store, z, x0, y0, x1, y1)
     ox, oy = x0 * 256, y0 * 256

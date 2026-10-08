@@ -238,7 +238,7 @@ impl Default for TilesConfig {
 pub struct TrajectoryConfig {
     /// Trajectory CSV (input of plan/render, output of `traj`).
     pub file: PathBuf,
-    /// Synthetic flight recorder settings (`terrain traj`).
+    /// Synthetic flight recorder settings (`terrain run --step traj`).
     pub synth: SynthConfig,
 }
 
