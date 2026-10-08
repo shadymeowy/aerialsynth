@@ -86,6 +86,17 @@ fn bilerp(v: [f64; 4], fx: f64, fy: f64) -> f64 {
     a + (b - a) * fy
 }
 
+/// Pass A of a tile and the coarse grid (for pass B).
+struct PassA {
+    grid: Vec<Terrain>,
+    nodes: Vec<Node>,
+    use_grid: bool,
+    gk0x: i64,
+    gk0y: i64,
+    ng: usize,
+    pf_cut: f64,
+}
+
 impl Generator {
     pub fn new(cfg: Config) -> Self {
         let world = World::new(cfg);
@@ -122,20 +133,19 @@ impl Generator {
         (t, s.height, s.class)
     }
 
-    /// Generate one tile (parallel over rows internally).
-    pub fn tile(&self, id: TileId) -> TileData {
+    /// Pass A of a tile: the terrain at the pixel centres of the tile and a 2-pixel apron
+    /// (260 x 260, row-major).
+    pub fn pass_a(&self, id: TileId) -> Vec<Terrain> {
+        self.pass_a_impl(id).grid
+    }
+
+    fn pass_a_impl(&self, id: TileId) -> PassA {
         let n = TILE_SIZE;
-        let na = n + 2; // pass B, 1-px apron
         let na2 = n + 4; // pass A, 2-px apron
         let z = id.z;
         let ell = self.world.ell;
-        let ss = self.world.cfg.tile_supersample.max(1) as usize;
-        let adaptive = ss == 2 && self.world.cfg.tile_supersample_adaptive;
         let ox = id.x as f64 * n as f64;
         let oy = id.y as f64 * n as f64;
-
-        let prof = std::env::var_os("TERRAGEN_PROFILE").is_some();
-        let t_start = std::time::Instant::now();
         // ---------------- macro fields: on a coarse grid aligned to global multiples of 16 px
         // (shared by neighbouring tiles → seamless), or exactly at low zooms where the grid would
         // be too coarse for the macro wavelengths.
@@ -290,6 +300,25 @@ impl Generator {
             })
             .collect();
         let grid: Vec<Terrain> = rows_a.into_iter().flatten().collect();
+        PassA { grid, nodes, use_grid, gk0x, gk0y, ng, pf_cut }
+    }
+
+    /// Generate one tile (parallel over rows internally).
+    pub fn tile(&self, id: TileId) -> TileData {
+        let n = TILE_SIZE;
+        let na = n + 2; // pass B, 1-px apron
+        let na2 = n + 4; // pass A, 2-px apron
+        let z = id.z;
+        let ell = self.world.ell;
+        let ss = self.world.cfg.tile_supersample.max(1) as usize;
+        let adaptive = ss == 2 && self.world.cfg.tile_supersample_adaptive;
+        let ox = id.x as f64 * n as f64;
+        let oy = id.y as f64 * n as f64;
+        const G: f64 = 16.0;
+
+        let prof = std::env::var_os("TERRAGEN_PROFILE").is_some();
+        let t_start = std::time::Instant::now();
+        let PassA { grid, nodes, use_grid, gk0x, gk0y, ng, pf_cut } = self.pass_a_impl(id);
         // pass-A value at pass-B grid coordinates (i, j) ∈ [-1, na]
         let at = |i: isize, j: isize| -> &Terrain {
             let i = (i + 1).clamp(0, na2 as isize - 1) as usize;

@@ -133,3 +133,68 @@ fn noise_matches_the_cpu() {
         assert!(e < 1e-4, "output {k}: error {e}");
     }
 }
+
+/// Compare GPU and CPU pass A over a tile: (field name, max abs error, mean abs error,
+/// share of pixels off by more than `tol`).
+fn compare_pass_a(gen: &GpuGenerator, cpu: &crate::Generator, id: geodesy::tiles::TileId) -> Vec<(String, f64, f64, f64)> {
+    let g = gen.pass_a(&[id]).unwrap().remove(0);
+    let c = cpu.pass_a(id);
+    assert_eq!(g.len(), c.len());
+    let mut out = Vec::new();
+    let mut field = |name: &str, tol: f64, f: &dyn Fn(&crate::gpu::types::GTerrain, &crate::world::Terrain) -> (f64, f64)| {
+        let (mut mx, mut sum, mut bad) = (0.0f64, 0.0f64, 0usize);
+        for (a, b) in g.iter().zip(&c) {
+            let (x, y) = f(a, b);
+            let e = (x - y).abs();
+            mx = mx.max(e);
+            sum += e;
+            if e > tol {
+                bad += 1;
+            }
+        }
+        out.push((name.to_string(), mx, sum / g.len() as f64, bad as f64 / g.len() as f64));
+    };
+    let cl = |v: f64| v.clamp(-1e6, 1e6);
+    field("ground", 0.05, &|a, b| (a.ground as f64, b.ground));
+    field("water_kind", 0.5, &|a, b| (a.water_kind as f64, b.water_kind as f64));
+    field("water", 0.05, &|a, b| (cl(a.water as f64), cl(b.water)));
+    field("river_d", 0.05, &|a, b| (cl(a.river_d as f64), cl(b.river_d)));
+    field("river_hw", 0.01, &|a, b| (a.river_hw as f64, b.river_hw));
+    field("river_level", 0.05, &|a, b| (a.river_level as f64, b.river_level));
+    field("temp", 0.01, &|a, b| (a.temp as f64, b.temp));
+    field("moist", 0.001, &|a, b| (a.moist as f64, b.moist));
+    field("agri", 0.001, &|a, b| (a.agri as f64, b.agri));
+    field("habit", 0.001, &|a, b| (a.habit as f64, b.habit));
+    field("gully", 0.001, &|a, b| (a.gully as f64, b.gully));
+    field("floodplain", 0.001, &|a, b| (a.floodplain as f64, b.floodplain));
+    field("road_major", 0.05, &|a, b| (cl(a.road_major as f64), cl(b.road_major)));
+    field("road_minor", 0.05, &|a, b| (cl(a.road_minor as f64), cl(b.road_minor)));
+    field("region_id", 0.5, &|a, b| ((a.region_id != b.region.id) as u8 as f64, 0.0));
+    field("region_edge", 0.05, &|a, b| (if a.region_id == 0 { 0.0 } else { cl(a.region_edge as f64) }, if b.region.id == 0 { 0.0 } else { cl(b.region.edge) }));
+    field("town", 0.5, &|a, b| (a.town as f64, (b.town.id != 0) as u8 as f64));
+    out
+}
+
+#[test]
+fn pass_a_matches_the_cpu() {
+    if gpu().is_none() {
+        return;
+    }
+    let cfg = crate::Config::default();
+    let gen = GpuGenerator::new(cfg.clone()).unwrap();
+    let cpu = crate::Generator::new(cfg);
+    let tiles = [
+        geodesy::tiles::TileId::new(14, 9779, 6278),
+        geodesy::tiles::TileId::new(12, 2444, 1569),
+        geodesy::tiles::TileId::new(10, 611, 392),
+        geodesy::tiles::TileId::new(7, 76, 49),
+    ];
+    for id in tiles {
+        let t0 = std::time::Instant::now();
+        let r = compare_pass_a(&gen, &cpu, id);
+        eprintln!("tile {id} ({:.2} s)", t0.elapsed().as_secs_f64());
+        for (name, mx, mean, bad) in &r {
+            eprintln!("  {name:12} max {mx:10.4} mean {mean:10.6} off {:.4}%", bad * 100.0);
+        }
+    }
+}

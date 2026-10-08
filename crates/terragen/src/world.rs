@@ -571,7 +571,7 @@ impl World {
     }
 
     /// Wavelength (m) of the floodplain-edge noise of drainage level `li`.
-    fn floodplain_wavelength(&self, li: usize) -> f64 {
+    pub(crate) fn floodplain_wavelength(&self, li: usize) -> f64 {
         let lc = &self.cfg.hydro.levels[li];
         400.0 + 0.75 * (lc.width_m[0] + lc.width_m[1])
     }

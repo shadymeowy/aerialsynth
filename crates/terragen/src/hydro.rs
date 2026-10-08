@@ -55,7 +55,7 @@ thread_local! {
 }
 
 impl World {
-    fn level_key(&self, lvl: usize) -> u64 {
+    pub(crate) fn level_key(&self, lvl: usize) -> u64 {
         self.seed.rotate_left(23) ^ (lvl as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15)
     }
 
@@ -172,7 +172,7 @@ impl World {
     /// active points (radius within [b − m, a + m], see `maybe_active`) can pass through, in the
     /// order of a z, y, x loop over the box. Columns run along the axis closest to the surface
     /// normal at `center`; per column only the few cells the shell crosses are visited.
-    fn shell_cells(&self, center: DVec3, lo: DVec3, hi: DVec3, cell: f64) -> Vec<(i64, i64, i64)> {
+    pub(crate) fn shell_cells(&self, center: DVec3, lo: DVec3, hi: DVec3, cell: f64) -> Vec<(i64, i64, i64)> {
         let m = 0.5 * cell + 200.0;
         // local geocentric radius range over the box: the ellipsoid radius changes by at most
         // (a − b)·|sin 2φ|·Δφ ≤ 2 (a − b) Δφ over the box's latitude span
@@ -226,7 +226,7 @@ impl World {
     /// from the surface by a geocentric height estimate; `flow_point` decides with the geodetic
     /// height |h| < cell / 2, which differs from the estimate by far less than the margin).
     #[inline]
-    fn maybe_active(&self, lvl: usize, c: (i64, i64, i64), cell: f64) -> bool {
+    pub(crate) fn maybe_active(&self, lvl: usize, c: (i64, i64, i64), cell: f64) -> bool {
         let hh = hash3(self.level_key(lvl), c.0, c.1, c.2);
         let p = DVec3::new(
             c.0 as f64 + 0.5 + 0.8 * (u01k(hh, 1) - 0.5),
