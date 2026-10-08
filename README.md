@@ -43,39 +43,16 @@ python scripts/view_seq.py out/quick/seq.h5 view.png  # rgb | depth | flow | val
 | `preview` | generate tiles of the scenario's world straight into a PNG mosaic (`--layers rgb,albedo,elevation,normal,landcover,hillshade`) |
 | `explore` | fly over the scenario's tile store on a globe (window), generating tiles as you go; see below |
 
-### Globe explorer
+### Globe explorer and realtime flight
 
-`terrain explore` (crate `explorer`, wgpu + egui) shows the scenario's tile store
-(`tiles.file`) as a globe you can fly over:
+`terrain explore` shows the scenario's tile store as a globe. You can orbit the planet, or fly
+over it in realtime (free flight with WASD, or a simple plane). Tiles stream in as you move,
+and with `--dynamic` missing ones are generated and stored. Details: `docs/explorer.md`.
 
 ```
-terrain explore -c configs/explore.yaml --dynamic            # orbit the planet
-terrain explore -c configs/explore.yaml --dynamic --fly free # fly over home (WASD)
+terrain explore -c configs/explore.yaml --dynamic             # orbit the planet
+terrain explore -c configs/explore.yaml --dynamic --fly free  # fly over home (WASD; F: next mode)
 ```
-
-- **On start:** levels 0..=`--base-zoom` (default 4) are generated for the whole planet if they
-  are missing (z0–z4: 341 tiles, ~4 min on 8 threads).
-- **Streaming:** the view loads the tiles it needs from the store, choosing the level by
-  on-screen texel size.
-- **Dynamic generation:** with *Generate missing tiles as you fly* on (`--dynamic`), missing
-  tiles down to `--max-zoom` (default `tiles.max_zoom`) are generated and written to the store.
-  With it off, only stored tiles are shown.
-- **View modes:** surface (albedo, lit), elevation, land cover, relief. Further controls:
-  relief exaggeration, tile borders coloured by level, and level-of-detail bias.
-- **Orbit controls:** drag to move, right drag to turn and tilt, scroll to zoom, double click
-  to fly to a point.
-- **Flying (realtime):** **F** cycles orbit → free flight → plane, starting from the current
-  view. `--fly free|plane` starts in the air over the world's home. Missing tiles stream in
-  (and with `--dynamic` are generated) as you fly. The camera stays above the terrain, and a
-  head-up readout shows speed, altitude above the ellipsoid and the ground, and attitude.
-  - free flight: WASD, Space / C up and down, drag to look, scroll for speed, Shift ×5, Ctrl ×0.2
-  - plane: always flying; W/S nose down / up, A/D roll (banked turns), Q/E rudder,
-    Shift / Ctrl throttle
-- **Headless snapshot:** `--snapshot out.png --view lat,lon,km,heading,tilt [--exag 2 --mode
-  relief --size 1280x800]` renders one view without a window, once its tiles are in.
-
-Run it on the machine's own display. Over SSH X forwarding, every frame goes through the
-forwarded X server and is slow.
 
 All subcommands read **one scenario YAML** (`-c`) with the sections `world`, `tiles`,
 `trajectory`, `render`, `cameras`, `imu` and `output`. See `configs/*.yaml`, or run
@@ -322,6 +299,7 @@ scripts/          contact.py (generator contact sheets), check_gt.py + cammodels
 docs/events.md    event camera modality: options, sensor model, format
 docs/stars.md     star catalogue, astrometry, brightness, star ground truth
 docs/gpu.md       GPU backend (wgpu, headless)
+docs/explorer.md  globe explorer and realtime flight: controls, options, how it works
 configs/          example scenarios (quick, dataset, fisheye, events, oblique_sunset, night, night_moon, cruise, imu_check, star_tracker)
 ```
 
@@ -355,6 +333,9 @@ cargo test --release
   1 kHz simulator truth.
 - **Solar position.**
 - **Generator invariants:** determinism, seamless tile borders, parent ≈ mean of its children.
+- **Tile stores:** a store refuses tiles of another world.
+- **Flight camera:** level flight holds height and heading, banked turns at g·tan(bank)/V, the
+  ground stops the camera.
 
 ## Look / colour knobs
 

@@ -44,7 +44,7 @@ pub struct Options {
     #[arg(long, default_value_t = 1.0)]
     pub exag: f32,
     /// View mode at start: surface, elevation, landcover or relief.
-    #[arg(long, default_value = "surface")]
+    #[arg(long, default_value = "surface", value_parser = ["surface", "elevation", "landcover", "relief"])]
     pub mode: String,
     /// Render one view without a window into this PNG (once its tiles are in) and exit.
     #[arg(long)]

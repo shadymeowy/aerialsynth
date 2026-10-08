@@ -528,10 +528,10 @@ impl Globe {
                 let mut h = 0.0f64;
                 for i in 0..N {
                     let k = row * N + i;
-                    for ch in 0..3 {
-                        acc[ch] += srgb_to_linear(p.color[4 * k + ch] as f64 / 255.0);
+                    for (ch, a) in acc.iter_mut().enumerate() {
+                        *a += srgb_to_linear(p.color[4 * k + ch] as f64 / 255.0);
                     }
-                    water += matches!(p.color[4 * k + 3], 1 | 2 | 3) as usize;
+                    water += matches!(p.color[4 * k + 3], 1..=3) as usize;
                     h += p.elev[k].max(0.0) as f64;
                 }
                 let m = N as f64;
@@ -772,7 +772,7 @@ impl Globe {
         if self.geo.len() > 200_000 {
             self.geo.clear();
         }
-        if self.frame % 600 == 0 {
+        if self.frame.is_multiple_of(600) {
             self.requested.retain(|_, f| frame - *f < 600);
         }
         self.stats.drawn = recs.len();

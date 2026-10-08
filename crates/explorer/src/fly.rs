@@ -143,3 +143,61 @@ impl FlyCam {
         CamFrame { eye: self.pos, view_proj: proj * view, dir: fwd, cam_up: up, fov_y: self.fov_y }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn start(mode: FlyMode, h: f64) -> (FlyCam, Ellipsoid) {
+        let ell = Ellipsoid::WGS84;
+        let p = geodetic2ecef(Geodetic { lat: 0.7, lon: 0.6, h }, &ell);
+        (FlyCam::at(p, DVec3::X, &ell, 0.8, mode), ell)
+    }
+
+    #[test]
+    fn frame_looks_along_the_start_direction() {
+        let ell = Ellipsoid::WGS84;
+        let p = geodetic2ecef(Geodetic { lat: 0.7, lon: 0.6, h: 500.0 }, &ell);
+        let dir = DVec3::new(0.3, -0.8, 0.2).normalize();
+        let f = FlyCam::at(p, dir, &ell, 0.8, FlyMode::Free);
+        assert!((f.frame(&ell, 1.5, 0.0).dir - dir).length() < 1e-9);
+    }
+
+    #[test]
+    fn level_flight_keeps_heading_and_height() {
+        let (mut f, ell) = start(FlyMode::Free, 1000.0);
+        (f.heading, f.pitch, f.speed) = (1.0, 0.0, 50.0);
+        let inp = FlyInput { forward: 1.0, ..Default::default() };
+        for _ in 0..600 {
+            f.update(1.0 / 60.0, &inp, &ell, 0.0);
+        }
+        // 500 m along a straight line: the ground curves away by d² / 2R ≈ 2 cm
+        let h = f.geodetic(&ell).h;
+        assert!((h - 1000.0).abs() < 0.1, "{h}");
+        assert!((f.heading - 1.0).abs() < 1e-9);
+        assert!((f.pos - start(FlyMode::Free, 1000.0).0.pos).length() > 499.0);
+    }
+
+    #[test]
+    fn a_banked_plane_turns_at_g_tan_bank_over_speed() {
+        let (mut f, ell) = start(FlyMode::Plane, 2000.0);
+        (f.heading, f.pitch, f.roll, f.speed) = (0.0, 0.0, 0.5, 60.0);
+        let dt = 1e-3;
+        f.update(dt, &FlyInput::default(), &ell, 0.0);
+        let rate = f.heading / dt;
+        let want = 9.81 * 0.5f64.tan() / 60.0;
+        assert!((rate - want).abs() < 0.01 * want, "{rate} vs {want}");
+    }
+
+    #[test]
+    fn the_ground_stops_the_camera() {
+        let (mut f, ell) = start(FlyMode::Free, 100.0);
+        (f.pitch, f.speed) = (-1.5, 200.0);
+        let inp = FlyInput { forward: 1.0, ..Default::default() };
+        for _ in 0..120 {
+            f.update(1.0 / 60.0, &inp, &ell, 80.0);
+        }
+        let h = f.geodetic(&ell).h;
+        assert!((h - 82.0).abs() < 1e-6, "{h}");
+    }
+}
