@@ -61,8 +61,12 @@ pub(crate) fn point_in(c: &Ctx, mode: u32, dr: GDrain) -> GPointIn {
 #[derive(Default)]
 pub(crate) struct Cache {
     flow: FxHashMap<(usize, Cell), FlowPt>,
+    /// the surface point of an active drainage lattice point (None: inactive)
+    flow_geo: FxHashMap<(usize, Cell), Option<Ctx>>,
     tgt: FxHashMap<(usize, Cell), Option<Cell>>,
     src: FxHashMap<(usize, Cell), bool>,
+    /// the channel pieces a drainage node owns
+    pieces: FxHashMap<(usize, Cell), Vec<Seg>>,
     pub points: FxHashMap<PointKey, GTerrain>,
     /// lake levels by (id, radius bits)
     lakes: FxHashMap<(u64, u64), Option<f64>>,
@@ -123,7 +127,7 @@ impl TownBase {
 impl Cache {
     /// Bound the memory of a long-lived cache.
     pub fn trim(&mut self) {
-        if self.flow.len() + self.tgt.len() + self.src.len() + self.points.len() + self.lakes.len() + self.regions.len() + self.towns_base.len() + self.town_cands.len() > 4_000_000 {
+        if self.flow.len() + self.flow_geo.len() + self.tgt.len() + self.src.len() + self.pieces.len() + self.points.len() + self.lakes.len() + self.regions.len() + self.towns_base.len() + self.town_cands.len() > 4_000_000 {
             *self = Cache::default();
         }
     }
@@ -138,11 +142,14 @@ pub(crate) struct Prep<'a> {
     pub need: FxHashMap<PointKey, PointReq>,
     /// count of stand-in values used so far
     pub missing: usize,
+    /// town sites whose base / overlap resolution is still pending in this pass
+    towns_pending: FxHashSet<u64>,
+    towns_info_pending: FxHashSet<u64>,
 }
 
 impl<'a> Prep<'a> {
     pub fn new(w: &'a World, c: &'a mut Cache) -> Self {
-        Prep { w, c, need: FxHashMap::default(), missing: 0 }
+        Prep { w, c, need: FxHashMap::default(), missing: 0, towns_pending: FxHashSet::default(), towns_info_pending: FxHashSet::default() }
     }
 
     /// The point evaluation `mode` at `ctx`, if done; else it is requested (once its own inputs
@@ -234,24 +241,29 @@ impl<'a> Prep<'a> {
         if let Some(f) = self.c.flow.get(&(lvl, c)) {
             return *f;
         }
-        let cell = self.w.cfg.hydro.levels[lvl].cell_km * KM;
-        let hh = hash3(self.w.level_key(lvl), c.0, c.1, c.2);
-        let p = DVec3::new(
-            c.0 as f64 + 0.5 + 0.8 * (u01k(hh, 1) - 0.5),
-            c.1 as f64 + 0.5 + 0.8 * (u01k(hh, 2) - 0.5),
-            c.2 as f64 + 0.5 + 0.8 * (u01k(hh, 3) - 0.5),
-        ) * cell;
-        let g = geodesy::ecef2geodetic(p, &self.w.ell);
-        let active = g.h.abs() < 0.5 * cell;
-        let fp = if active {
-            let ctx = Ctx::new(g.lat, g.lon, cell / 4.0, &self.w.ell);
-            match self.point(MODE_RELIEF, &ctx) {
+        let geo = match self.c.flow_geo.get(&(lvl, c)) {
+            Some(g) => *g,
+            None => {
+                let cell = self.w.cfg.hydro.levels[lvl].cell_km * KM;
+                let hh = hash3(self.w.level_key(lvl), c.0, c.1, c.2);
+                let p = DVec3::new(
+                    c.0 as f64 + 0.5 + 0.8 * (u01k(hh, 1) - 0.5),
+                    c.1 as f64 + 0.5 + 0.8 * (u01k(hh, 2) - 0.5),
+                    c.2 as f64 + 0.5 + 0.8 * (u01k(hh, 3) - 0.5),
+                ) * cell;
+                let g = geodesy::ecef2geodetic(p, &self.w.ell);
+                let geo = (g.h.abs() < 0.5 * cell).then(|| Ctx::new(g.lat, g.lon, cell / 4.0, &self.w.ell));
+                self.c.flow_geo.insert((lvl, c), geo);
+                geo
+            }
+        };
+        let fp = match geo {
+            Some(ctx) => match self.point(MODE_RELIEF, &ctx) {
                 Some(t) => FlowPt { s: ctx.p, h: t.ground as f64, active: true },
                 // a stand-in (the result is discarded)
                 None => return FlowPt { s: ctx.p, h: 0.0, active: true },
-            }
-        } else {
-            FlowPt { s: DVec3::ZERO, h: 0.0, active: false }
+            },
+            None => FlowPt { s: DVec3::ZERO, h: 0.0, active: false },
         };
         self.c.flow.insert((lvl, c), fp);
         fp
@@ -364,10 +376,6 @@ impl<'a> Prep<'a> {
             let reach = radius + 4.6 * cell + lc.valley_m;
             let lo = ((center - DVec3::splat(reach)) / cell).floor();
             let hi = ((center + DVec3::splat(reach)) / cell).floor();
-            let width = |c: Cell| {
-                let hh = hash3(self.w.level_key(lvl) ^ 0x51DE, c.0, c.1, c.2);
-                (0.5 * (lc.width_m[0] + (lc.width_m[1] - lc.width_m[0]) * u01k(hh, 1)), lc.valley_m * (0.6 + 0.8 * u01k(hh, 2)))
-            };
             for c in self.w.shell_cells(center, lo, hi, cell) {
                 if !self.w.maybe_active(lvl, c, cell) {
                     continue;
@@ -376,35 +384,15 @@ impl<'a> Prep<'a> {
                 if !fp.active || (fp.s - center).length() > reach {
                     continue;
                 }
-                let Some(tc) = self.flow_target(lvl, c) else { continue };
-                let tp = self.flow_point(lvl, tc);
-                let (hw, valley) = width(c);
-                let seg = |a: DVec3, b: DVec3, ha: f64, hb: f64, hw: f64, hw_b: f64| Seg { a, b, ha, hb, level: lvl as u8, hw, valley, hw_b, sink: false };
-                let mid = 0.5 * (fp.s + tp.s);
-                let hmid = 0.5 * (fp.h + tp.h);
-                if self.is_source(lvl, c) {
-                    out.push(seg(fp.s, mid, fp.h, hmid, 0.08 * hw, hw));
+                if let Some(p) = self.c.pieces.get(&(lvl, c)) {
+                    out.extend_from_slice(p);
+                    continue;
                 }
-                match self.flow_target(lvl, tc) {
-                    Some(ttc) => {
-                        let tq = self.flow_point(lvl, ttc);
-                        let (hw2, _) = width(tc);
-                        let mid2 = 0.5 * (tp.s + tq.s);
-                        let hmid2 = 0.5 * (tp.h + tq.h);
-                        let at = |t: f64| {
-                            let (u, v) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t));
-                            (mid * u + tp.s * v + mid2 * (t * t), hmid * u + tp.h * v + hmid2 * (t * t), hw + (hw2 - hw) * t)
-                        };
-                        let n = 6usize;
-                        for k in 0..n {
-                            let (a, ha, wa) = at(k as f64 / n as f64);
-                            let (b, hb, wb) = at((k + 1) as f64 / n as f64);
-                            out.push(seg(a, b, ha, hb, wa, wb));
-                        }
-                    }
-                    None => {
-                        out.push(Seg { sink: tp.h > 0.0, ..seg(mid, tp.s, hmid, tp.h, hw, hw) });
-                    }
+                let before = self.missing;
+                let start = out.len();
+                self.node_pieces(lvl, c, fp, &mut out);
+                if self.missing == before {
+                    self.c.pieces.insert((lvl, c), out[start..].to_vec());
                 }
             }
             let keep = radius + 0.4 * cell + 1.4 * lc.valley_m + 0.35 * lc.meander * cell;
@@ -421,6 +409,47 @@ impl<'a> Prep<'a> {
             out.truncate(k);
         }
         out
+    }
+
+    /// The channel pieces drainage node `c` owns: from a source to the middle of its edge, the
+    /// bend at its downstream node (to the middle of the next edge), or the last edge into a
+    /// sink / the sea (`World::river_segments`).
+    fn node_pieces(&mut self, lvl: usize, c: Cell, fp: FlowPt, out: &mut Vec<Seg>) {
+        let lc = self.w.cfg.hydro.levels[lvl].clone();
+        let Some(tc) = self.flow_target(lvl, c) else { return };
+        let tp = self.flow_point(lvl, tc);
+        let width = |c: Cell| {
+            let hh = hash3(self.w.level_key(lvl) ^ 0x51DE, c.0, c.1, c.2);
+            (0.5 * (lc.width_m[0] + (lc.width_m[1] - lc.width_m[0]) * u01k(hh, 1)), lc.valley_m * (0.6 + 0.8 * u01k(hh, 2)))
+        };
+        let (hw, valley) = width(c);
+        let seg = |a: DVec3, b: DVec3, ha: f64, hb: f64, hw: f64, hw_b: f64| Seg { a, b, ha, hb, level: lvl as u8, hw, valley, hw_b, sink: false };
+        let mid = 0.5 * (fp.s + tp.s);
+        let hmid = 0.5 * (fp.h + tp.h);
+        if self.is_source(lvl, c) {
+            out.push(seg(fp.s, mid, fp.h, hmid, 0.08 * hw, hw));
+        }
+        match self.flow_target(lvl, tc) {
+            Some(ttc) => {
+                let tq = self.flow_point(lvl, ttc);
+                let (hw2, _) = width(tc);
+                let mid2 = 0.5 * (tp.s + tq.s);
+                let hmid2 = 0.5 * (tp.h + tq.h);
+                let at = |t: f64| {
+                    let (u, v) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t));
+                    (mid * u + tp.s * v + mid2 * (t * t), hmid * u + tp.h * v + hmid2 * (t * t), hw + (hw2 - hw) * t)
+                };
+                let n = 6usize;
+                for k in 0..n {
+                    let (a, ha, wa) = at(k as f64 / n as f64);
+                    let (b, hb, wb) = at((k + 1) as f64 / n as f64);
+                    out.push(seg(a, b, ha, hb, wa, wb));
+                }
+            }
+            None => {
+                out.push(Seg { sink: tp.h > 0.0, ..seg(mid, tp.s, hmid, tp.h, hw, hw) });
+            }
+        }
     }
 
     // ------------------------------------------------------------ lakes
@@ -545,13 +574,20 @@ impl<'a> Prep<'a> {
         if let Some(t) = self.c.towns_base.get(&id) {
             return Some(*t);
         }
+        if self.towns_pending.contains(&id) {
+            self.missing += 1;
+            return None;
+        }
         let lu = &self.w.cfg.landuse;
         let cell = lu.town_cell_km * KM;
         let ctx = site_ctx(self.w, center, 300.0);
         let (east, north) = (ctx.east, ctx.north);
         let near_surface = (center.length() - ctx.p.length()).abs() < 0.8 * cell;
         let exists = if near_surface && u01k(id, 1) < 0.95 {
-            let tc = self.point(MODE_FULL, &ctx)?;
+            let Some(tc) = self.point(MODE_FULL, &ctx) else {
+                self.towns_pending.insert(id);
+                return None;
+            };
             let p_exist = (tc.habit as f64 * 1.1 * lu.towns).min(0.95);
             u01k(id, 1) < p_exist && tc.water_kind == W_NONE && tc.ground > 2.0 && tc.ground < 4000.0
         } else {
@@ -593,7 +629,14 @@ impl<'a> Prep<'a> {
         if let Some(t) = self.c.towns.get(&id) {
             return Some(*t);
         }
-        let mut info = self.town_base(id, center)?;
+        if self.towns_info_pending.contains(&id) {
+            self.missing += 1;
+            return None;
+        }
+        let Some(mut info) = self.town_base(id, center) else {
+            self.towns_info_pending.insert(id);
+            return None;
+        };
         if info.exists {
             let cell = self.w.cfg.landuse.town_cell_km * KM;
             let extent = |t: &TownBase| 1.6 * t.radius * t.elong.sqrt();
@@ -621,6 +664,7 @@ impl<'a> Prep<'a> {
                 }
             }
             if pending {
+                self.towns_info_pending.insert(id);
                 return None;
             }
         }

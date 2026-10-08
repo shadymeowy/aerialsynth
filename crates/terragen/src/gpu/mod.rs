@@ -83,12 +83,6 @@ pub(crate) fn read_back<T: bytemuck::Pod>(g: &Gpu, buf: &wgpu::Buffer, n: usize)
     Ok(out)
 }
 
-/// A compute pipeline of `src` with its layout derived from the shader.
-pub(crate) fn pipeline(d: &wgpu::Device, label: &str, src: &str, entry: &str) -> wgpu::ComputePipeline {
-    let module = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some(label), source: wgpu::ShaderSource::Wgsl(src.into()) });
-    d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some(label), layout: None, module: &module, entry_point: Some(entry), compilation_options: Default::default(), cache: None })
-}
-
 #[derive(Clone, Copy)]
 enum Bind {
     Uniform,
@@ -265,10 +259,15 @@ impl GpuGenerator {
 
     /// Run `f` on the host caches until it needs no more GPU point evaluations.
     fn settle<T>(&self, cache: &mut Cache, mut f: impl FnMut(&mut Prep) -> T) -> Result<T> {
-        for _ in 0..64 {
+        let prof = std::env::var_os("TERRAGEN_PROFILE").is_some();
+        for round in 0..64 {
+            let t0 = std::time::Instant::now();
             let (out, need) = {
                 let mut prep = Prep::new(&self.world, cache);
                 let out = f(&mut prep);
+                if prof {
+                    eprintln!("  settle round {round}: host {:.3} s, {} missing, {} requests", t0.elapsed().as_secs_f64(), prep.missing, prep.need.len());
+                }
                 if prep.missing == 0 {
                     return Ok(out);
                 }

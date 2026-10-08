@@ -650,3 +650,5 @@ impl std::hash::Hasher for FxHasher {
 pub type FxBuild = std::hash::BuildHasherDefault<FxHasher>;
 /// HashMap with [`FxHasher`].
 pub type FxHashMap<K, V> = std::collections::HashMap<K, V, FxBuild>;
+/// HashSet with [`FxHasher`].
+pub type FxHashSet<K> = std::collections::HashSet<K, FxBuild>;

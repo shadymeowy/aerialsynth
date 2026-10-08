@@ -70,7 +70,8 @@ fn noise_matches_the_cpu() {
         pts.push([p.x, p.y, p.z, gsd]);
     }
     let src = format!("{}{}{}", tables::wgsl_consts(), NOISE_WGSL, NOISE_TEST);
-    let pipe = pipeline(&g.device, "noise-test", &src, "main");
+    let module = g.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("noise-test"), source: wgpu::ShaderSource::Wgsl(src.into()) });
+    let pipe = g.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: None, layout: None, module: &module, entry_point: Some("main"), compilation_options: Default::default(), cache: None });
     let b_grads = storage(&g.device, "grads", &tables::grads());
     let b_octs = storage(&g.device, "octs", &octs);
     let b_fbms = storage(&g.device, "fbms", &fbms);
@@ -252,4 +253,47 @@ fn tiles_match_the_cpu() {
             eprintln!("  {name:10} mean {mean:8.4} off {:7.3}% max {mx:8.2}", bad * 100.0);
         }
     }
+}
+
+/// Timing of one low-zoom tile (cold caches): `TERRAGEN_PROFILE=1 cargo test ... -- --ignored`.
+#[test]
+#[ignore]
+fn profile_low_zoom() {
+    if gpu().is_none() {
+        return;
+    }
+    let gen = GpuGenerator::new(crate::Config::default()).unwrap();
+    for id in [geodesy::tiles::TileId::new(7, 76, 49), geodesy::tiles::TileId::new(10, 612, 392)] {
+        let t0 = std::time::Instant::now();
+        gen.tiles(&[id]).unwrap();
+        eprintln!("tile {id}: {:.2} s", t0.elapsed().as_secs_f64());
+    }
+}
+
+/// Throughput on a block of tiles: GPU in batches vs the CPU generator (rayon over tiles).
+#[test]
+#[ignore]
+fn throughput() {
+    if gpu().is_none() {
+        return;
+    }
+    use rayon::prelude::*;
+    let z: u8 = std::env::var("TP_Z").ok().and_then(|v| v.parse().ok()).unwrap_or(15);
+    let n: u32 = std::env::var("TP_N").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
+    let batch: usize = std::env::var("TP_BATCH").ok().and_then(|v| v.parse().ok()).unwrap_or(16);
+    let gen = GpuGenerator::new(crate::Config::default()).unwrap();
+    let c = geodesy::tiles::tile_for_latlon(39.9f64.to_radians(), 32.8f64.to_radians(), z);
+    let ids: Vec<_> = (0..n * n).map(|k| geodesy::tiles::TileId::new(z, c.x + k % n, c.y + k / n)).collect();
+    // warm the GPU generator's caches on a neighbouring block, then time
+    let t0 = std::time::Instant::now();
+    let mut done = 0;
+    for chunk in ids.chunks(batch) {
+        done += gen.tiles(chunk).unwrap().len();
+    }
+    let tg = t0.elapsed().as_secs_f64();
+    let cpu = crate::Generator::new(crate::Config::default());
+    let t0 = std::time::Instant::now();
+    let m: usize = ids.par_iter().map(|&id| cpu.tile(id).rgb.len()).count();
+    let tc = t0.elapsed().as_secs_f64();
+    eprintln!("z{z}, {done} tiles: GPU {tg:.2} s ({:.1} tiles/s), CPU {tc:.2} s ({:.1} tiles/s)", done as f64 / tg, m as f64 / tc);
 }
