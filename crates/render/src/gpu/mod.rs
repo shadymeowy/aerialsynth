@@ -34,6 +34,25 @@ pub const POOL_SLOTS: u32 = 2048;
 /// Budget of GPU memory for cached meshes (bytes).
 pub const MESH_BUDGET: u64 = 1536 << 20;
 
+/// Can the GPU backend render `model` at supersample `ss`: a GPU, the projection within the
+/// shader's parameter block, the supersampled G-buffer within the texture size limit and the ray
+/// table / output buffers within the buffer size limits?
+pub fn supports(model: &dyn crate::camera::CameraModel, ss: u32) -> Result<(), String> {
+    model.gpu_fits()?;
+    let gpu = device::shared().map_err(|e| format!("no usable GPU ({e:#})"))?;
+    let l = gpu.device.limits();
+    let (w, h) = (model.width() as u64 * ss.max(1) as u64, model.height() as u64 * ss.max(1) as u64);
+    if w.max(h) > l.max_texture_dimension_2d as u64 {
+        return Err(format!("{w}×{h} px (supersample {ss}) exceeds the GPU's texture size limit of {} px", l.max_texture_dimension_2d));
+    }
+    let buf = l.max_storage_buffer_binding_size.min(l.max_buffer_size);
+    let rays = w * h * 16;
+    if rays > buf {
+        return Err(format!("the {w}×{h} ray table ({} MB) exceeds the GPU's buffer size limit ({} MB)", rays >> 20, buf >> 20));
+    }
+    Ok(())
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Vertex {

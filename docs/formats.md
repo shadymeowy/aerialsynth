@@ -24,7 +24,8 @@ Both files are HDF5 and open in h5py or any HDF5 reader. `terrain info FILE` sum
 - **One world per store:** a store records the world config and generator version of its
   tiles. Every command refuses a store of another world, naming the settings that differ.
   It also refuses to add tiles to a store of another generator version; reading such a store
-  only warns. `terrain info` shows both.
+  only warns (`run` and `tiles` open a store for writing only when tiles are missing, or with
+  `--lazy`; `terrain view` always writes). `terrain info` shows both.
 - **Making tiles:** `terrain tiles` plans and generates the flight's tiles. `--bbox` covers a
   region, `--list` a tile list. Existing tiles are skipped, so the store grows lazily.
   `tiles.lazy` (or `terrain run --lazy`) generates what the renderer misses while rendering.

@@ -22,7 +22,8 @@ output       the sequence file: body pose rate, time window, PNG export, compres
   dimensionless factors.
 - **Zoom range:** `tiles.min_zoom` / `max_zoom` is the zoom range of everything (planning,
   generation, rendering). `render.texel_px` sets the level of detail within it; planning
-  refines to 0.8× that.
+  refines to 0.8× that. `min_zoom` is at most 6 (the tile selection tests every tile of that
+  level for every frame).
 - **Paths:** relative paths are relative to the working directory.
 
 Examples: `configs/quick.yaml` (10 s smoke test), `configs/dataset.yaml` (60 s with wind,
@@ -86,7 +87,9 @@ output: { file: out/seq.h5, pose: { path: /pose, rate_hz: 200 } }
   - **Camera:** OpenCV (x right, y down, z forward). Pixel centres sit on integer coordinates.
   - **Extrinsics:** a camera's `extrinsics` give the mount (`nadir`/`forward`), roll/pitch/yaw
     offsets and the translation in the body frame, or an explicit `q_body_cam`.
-- **Trajectory CSV:** columns are matched by name. Supported layouts:
+- **Trajectory CSV:** columns are matched by name; other columns are ignored (a
+  `terrain view --record` frames.csv loads as is). `t` is in seconds and must increase;
+  every row needs as many fields as the header. Supported layouts:
   - `t,lat,lon,h,qw,qx,qy,qz`
   - `t,lat,lon,h,roll,pitch,yaw`
   - `t,x,y,z,qw..` (ECEF, q = body→ECEF)
