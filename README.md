@@ -49,7 +49,8 @@ python scripts/view_seq.py out/quick/seq.h5 view.png  # rgb | depth | flow | val
 (`tiles.file`) as a globe you can fly over:
 
 ```
-terrain explore -c configs/explore.yaml --dynamic
+terrain explore -c configs/explore.yaml --dynamic            # orbit the planet
+terrain explore -c configs/explore.yaml --dynamic --fly free # fly over home (WASD)
 ```
 
 - **On start:** levels 0..=`--base-zoom` (default 4) are generated for the whole planet if they
@@ -61,8 +62,15 @@ terrain explore -c configs/explore.yaml --dynamic
   With it off, only stored tiles are shown.
 - **View modes:** surface (albedo, lit), elevation, land cover, relief. Further controls:
   relief exaggeration, tile borders coloured by level, and level-of-detail bias.
-- **Controls:** drag to move, right drag to turn and tilt, scroll to zoom, double click to fly
-  to a point.
+- **Orbit controls:** drag to move, right drag to turn and tilt, scroll to zoom, double click
+  to fly to a point.
+- **Flying (realtime):** **F** cycles orbit → free flight → plane, starting from the current
+  view. `--fly free|plane` starts in the air over the world's home. Missing tiles stream in
+  (and with `--dynamic` are generated) as you fly. The camera stays above the terrain, and a
+  head-up readout shows speed, altitude above the ellipsoid and the ground, and attitude.
+  - free flight: WASD, Space / C up and down, drag to look, scroll for speed, Shift ×5, Ctrl ×0.2
+  - plane: always flying; W/S nose down / up, A/D roll (banked turns), Q/E rudder,
+    Shift / Ctrl throttle
 - **Headless snapshot:** `--snapshot out.png --view lat,lon,km,heading,tilt [--exag 2 --mode
   relief --size 1280x800]` renders one view without a window, once its tiles are in.
 

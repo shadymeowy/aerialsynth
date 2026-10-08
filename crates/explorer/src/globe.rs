@@ -102,12 +102,15 @@ pub struct Camera {
     pub target_h: f64,
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct CamFrame {
     pub eye: DVec3,
     pub view_proj: DMat4,
     /// view direction and the camera's up (ECEF)
     pub dir: DVec3,
     pub cam_up: DVec3,
+    /// vertical field of view (rad)
+    pub fov_y: f64,
 }
 
 impl Camera {
@@ -130,7 +133,7 @@ impl Camera {
         let near = (alt * 0.05).clamp(0.05, 50_000.0).min(self.dist * 0.2);
         let view = DMat4::look_to_rh(DVec3::ZERO, dir, cam_up);
         let proj = DMat4::perspective_infinite_reverse_rh(self.fov_y, aspect, near);
-        CamFrame { eye, view_proj: proj * view, dir, cam_up }
+        CamFrame { eye, view_proj: proj * view, dir, cam_up, fov_y: self.fov_y }
     }
 
     /// Move the target by a screen drag (pixels) at `m_per_px`.
@@ -595,7 +598,7 @@ impl Globe {
     }
 
     /// Draw a frame of `w` x `h` pixels into the globe image and ask the service for tiles.
-    pub fn render(&mut self, cam: &Camera, s: &Settings, svc: &Service, w: u32, h: u32, renderer: Option<&mut egui_wgpu::Renderer>) -> CamFrame {
+    pub fn render(&mut self, cf: &CamFrame, s: &Settings, svc: &Service, w: u32, h: u32, renderer: Option<&mut egui_wgpu::Renderer>) {
         self.frame += 1;
         self.stats.uploads = 0;
         let (w, h) = (w.max(16), h.max(16));
@@ -617,10 +620,9 @@ impl Globe {
         }
 
         // ---- level of detail
-        let cf = cam.frame(&self.ell, w as f64 / h as f64);
         let eye = cf.eye;
         let planes = frustum_planes(&cf.view_proj);
-        let pix = cam.fov_y / h as f64;
+        let pix = cf.fov_y / h as f64;
         let exag = s.exaggeration as f64;
         let mut walk = Walk { eye, planes, pix, exag, s, svc, draws: Vec::new(), want_load: Vec::new(), want_gen: Vec::new() };
         self.visit(TileId::new(0, 0, 0), None, &mut walk);
@@ -778,7 +780,6 @@ impl Globe {
         self.stats.capacity = self.capacity as usize;
         self.stats.pending_uploads = self.pending.len();
         self.stats.max_zoom_drawn = max_z;
-        cf
     }
 
     fn obtainable(&self, t: TileId, w: &Walk) -> bool {

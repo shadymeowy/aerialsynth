@@ -4,14 +4,16 @@
 //! streams the tiles it needs from the store; with dynamic generation on, missing ones are
 //! generated (and written to the store) as you fly.
 
+mod fly;
 mod globe;
 mod tiles;
 
 use anyhow::{Context, Result};
 use eframe::{egui, egui_wgpu, wgpu};
 use geodesy::tiles::TileId;
-use glam::DVec2;
-use globe::{Camera, Globe, Mode, Settings};
+use glam::{DVec2, DVec3};
+use fly::{FlyCam, FlyInput, FlyMode};
+use globe::{CamFrame, Camera, Globe, Mode, Settings};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -31,9 +33,13 @@ pub struct Options {
     /// Deepest level generated dynamically (default: tiles.max_zoom).
     #[arg(long)]
     pub max_zoom: Option<u8>,
-    /// Tiles kept on the GPU (768 KB each).
-    #[arg(long, default_value_t = 512)]
+    /// Tiles kept on the GPU (768 KB each; capped by the GPU's texture array limit). Low,
+    /// level views towards the horizon draw ~600 tiles.
+    #[arg(long, default_value_t = 1536)]
     pub gpu_tiles: u32,
+    /// Start flying (free or plane) over the world's home, instead of orbiting the planet.
+    #[arg(long, value_parser = ["free", "plane"])]
+    pub fly: Option<String>,
     /// Relief exaggeration at start.
     #[arg(long, default_value_t = 1.0)]
     pub exag: f32,
@@ -43,7 +49,8 @@ pub struct Options {
     /// Render one view without a window into this PNG (once its tiles are in) and exit.
     #[arg(long)]
     pub snapshot: Option<PathBuf>,
-    /// Snapshot view: lat,lon (deg), distance (km), heading, tilt (deg).
+    /// Snapshot view: lat,lon (deg), distance (km), heading, tilt (deg) of the orbit camera, or
+    /// `fly:lat,lon,height above ground (m),heading,pitch (deg)` for the flight camera.
     #[arg(long, default_value = "20,10,16000,0,0", allow_hyphen_values = true)]
     pub view: String,
     /// Snapshot size, WxH.
@@ -111,7 +118,8 @@ fn settings(args: &Options) -> Settings {
 
 /// Headless: render the `--view` once every tile it wants is in, save a PNG.
 fn snapshot(args: &Options, store: Arc<TileStore>, gen: Arc<Generator>, out: &PathBuf) -> Result<()> {
-    let v: Vec<f64> = args.view.split(',').map(|x| x.trim().parse()).collect::<Result<_, _>>().context("--view lat,lon,km,heading,tilt")?;
+    let fly_view = args.view.starts_with("fly:");
+    let v: Vec<f64> = args.view.trim_start_matches("fly:").split(',').map(|x| x.trim().parse()).collect::<Result<_, _>>().context("--view lat,lon,km,heading,tilt (or fly:lat,lon,agl_m,heading,pitch)")?;
     let (w, h) = args.size.split_once('x').map(|(a, b)| (a.parse::<u32>(), b.parse::<u32>())).context("--size WxH")?;
     let (w, h) = (w?, h?);
     let (device, queue) = pollster::block_on(async {
@@ -130,7 +138,16 @@ fn snapshot(args: &Options, store: Arc<TileStore>, gen: Arc<Generator>, out: &Pa
     let mut calm = 0;
     loop {
         cam.target_h = globe.height_at(cam.lat, cam.lon, 22).unwrap_or(0.0).max(0.0) * s.exaggeration as f64;
-        globe.render(&cam, &s, &svc, w, h, None);
+        let cf = if fly_view {
+            // v[2] m above the ground under the camera (as known so far)
+            let p = geodesy::geodetic2ecef(geodesy::Geodetic { lat: cam.lat, lon: cam.lon, h: cam.target_h + v[2] }, &ell);
+            let mut f = FlyCam::at(p, DVec3::X, &ell, cam.fov_y, FlyMode::Free);
+            (f.heading, f.pitch) = (v[3].to_radians(), v[4].to_radians());
+            f.frame(&ell, w as f64 / h as f64, cam.target_h)
+        } else {
+            cam.frame(&ell, w as f64 / h as f64)
+        };
+        globe.render(&cf, &s, &svc, w, h, None);
         calm = if globe.settled(&svc) { calm + 1 } else { 0 };
         if calm >= 5 || t0.elapsed().as_secs() > 600 {
             break;
@@ -167,6 +184,18 @@ struct App {
     frame_ms: f64,
     last_frame: Instant,
     home: Option<(f64, f64)>,
+    nav: Nav,
+    fly: Option<FlyCam>,
+    last_cf: Option<CamFrame>,
+    agl: f64,
+}
+
+/// How the view is driven.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Nav {
+    Orbit,
+    Free,
+    Plane,
 }
 
 impl App {
@@ -196,7 +225,59 @@ impl App {
             frame_ms: 0.0,
             last_frame: Instant::now(),
             home,
+            nav: match args.fly.as_deref() {
+                Some("plane") => Nav::Plane,
+                Some(_) => Nav::Free,
+                None => Nav::Orbit,
+            },
+            fly: args.fly.as_deref().map(|m| {
+                // 600 m up, heading north, looking a little down (the ground pushes it up)
+                let p = geodesy::geodetic2ecef(geodesy::Geodetic { lat, lon, h: 600.0 }, &ell);
+                let mut f = FlyCam::at(p, DVec3::X, &ell, 50f64.to_radians(), if m == "plane" { FlyMode::Plane } else { FlyMode::Free });
+                (f.heading, f.pitch, f.speed) = (0.0, if m == "plane" { 0.0 } else { -0.15 }, 60.0);
+                f
+            }),
+            last_cf: None,
+            agl: 0.0,
         })
+    }
+
+    /// Change the navigation, starting the new camera where the old one is.
+    fn switch_nav(&mut self, nav: Nav) {
+        let ell = self.globe.ellipsoid();
+        match nav {
+            Nav::Orbit => {
+                if let Some(f) = &self.fly {
+                    // orbit the ground point under the camera, from its height
+                    let g = f.geodetic(&ell);
+                    (self.cam.lat, self.cam.lon) = (g.lat, g.lon);
+                    self.cam.dist = self.agl.max(150.0);
+                    (self.cam.heading, self.cam.tilt) = (f.heading, 0.0);
+                }
+            }
+            Nav::Free | Nav::Plane => {
+                let mode = if nav == Nav::Plane { FlyMode::Plane } else { FlyMode::Free };
+                match (&mut self.fly, self.nav) {
+                    (Some(f), Nav::Free | Nav::Plane) => {
+                        f.mode = mode;
+                        if mode == FlyMode::Plane {
+                            f.speed = f.speed.clamp(30.0, 300.0);
+                        }
+                    }
+                    _ => {
+                        if let Some(cf) = &self.last_cf {
+                            let mut f = FlyCam::at(cf.eye, cf.dir, &ell, self.cam.fov_y, mode);
+                            if mode == FlyMode::Plane {
+                                f.speed = f.speed.clamp(30.0, 300.0);
+                                f.pitch = f.pitch.clamp(-0.3, 0.3);
+                            }
+                            self.fly = Some(f);
+                        }
+                    }
+                }
+            }
+        }
+        self.nav = nav;
     }
 
     fn panel(&mut self, ui: &mut egui::Ui) {
@@ -280,6 +361,31 @@ impl App {
 
         // ---- camera
         ui.strong("Camera");
+        let mut nav = self.nav;
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut nav, Nav::Orbit, "Orbit");
+            ui.selectable_value(&mut nav, Nav::Free, "Free flight");
+            ui.selectable_value(&mut nav, Nav::Plane, "Plane");
+        });
+        if nav != self.nav {
+            self.switch_nav(nav);
+        }
+        if let Some(f) = &mut self.fly {
+            if self.nav != Nav::Orbit {
+                let mut kmh = f.speed * 3.6;
+                ui.add(egui::Slider::new(&mut kmh, 5.0..=200_000.0).logarithmic(true).text("speed km/h"));
+                f.speed = kmh / 3.6;
+                ui.label(egui::RichText::new(match self.nav {
+                    Nav::Plane => "W/S nose down/up · A/D roll · Q/E rudder
+Shift/Ctrl throttle · drag: look · F: next mode",
+                    _ => "WASD move · Space/C up/down · drag: look
+scroll: speed · Shift ×5 · Ctrl ×0.2 · F: next mode",
+                }).small().weak());
+            }
+        }
+        if self.nav == Nav::Orbit {
+            ui.label(egui::RichText::new("F: fly from here").small().weak());
+        }
         ui.monospace(format!(
             "{:>9.4}°  {:>9.4}°\nalt {}  hdg {:>3.0}°  tilt {:>2.0}°",
             self.cam.lat.to_degrees(),
@@ -351,39 +457,106 @@ impl eframe::App for App {
             let ell = self.globe.ellipsoid();
 
             // ---- input
-            let m_per_pt = self.cam.dist * self.cam.fov_y / rect.height().max(1.0) as f64;
-            if resp.dragged_by(egui::PointerButton::Primary) {
-                let d = resp.drag_delta();
-                self.cam.pan(d.x as f64, d.y as f64, m_per_pt, &ell);
+            let typing = ui.ctx().egui_wants_keyboard_input();
+            if !typing && ui.input(|i| i.key_pressed(egui::Key::F)) {
+                let next = match self.nav {
+                    Nav::Orbit => Nav::Free,
+                    Nav::Free => Nav::Plane,
+                    Nav::Plane => Nav::Orbit,
+                };
+                self.switch_nav(next);
             }
-            if resp.dragged_by(egui::PointerButton::Secondary) || resp.dragged_by(egui::PointerButton::Middle) {
-                let d = resp.drag_delta();
-                self.cam.heading -= d.x as f64 * 0.005;
-                self.cam.tilt = (self.cam.tilt + d.y as f64 * 0.004).clamp(0.0, 1.48);
-            }
-            if resp.hovered() {
-                let scroll = ui.input(|i| i.smooth_scroll_delta.y) as f64;
-                if scroll != 0.0 {
-                    self.cam.dist = (self.cam.dist * (-scroll * 0.003).exp()).clamp(40.0, 6.0e7);
+            let exag = self.s.exaggeration as f64;
+            let aspect = w.max(1) as f64 / h.max(1) as f64;
+            let cf = match (self.nav, &mut self.fly) {
+                (Nav::Free | Nav::Plane, Some(f)) => {
+                    let key = |k: egui::Key| if !typing && ui.input(|i| i.key_down(k)) { 1.0 } else { 0.0 };
+                    let d = if resp.dragged_by(egui::PointerButton::Primary) || resp.dragged_by(egui::PointerButton::Secondary) { resp.drag_delta() } else { egui::Vec2::ZERO };
+                    let inp = FlyInput {
+                        forward: key(egui::Key::W) - key(egui::Key::S),
+                        right: key(egui::Key::D) - key(egui::Key::A),
+                        up: key(egui::Key::Space) - key(egui::Key::C),
+                        yaw: key(egui::Key::E) - key(egui::Key::Q),
+                        boost: ui.input(|i| i.modifiers.shift),
+                        slow: ui.input(|i| i.modifiers.ctrl),
+                        look_yaw: d.x as f64 * 0.003,
+                        look_pitch: -d.y as f64 * 0.003,
+                        speed_steps: if resp.hovered() && self.nav == Nav::Free { ui.input(|i| i.smooth_scroll_delta.y) as f64 / 50.0 } else { 0.0 },
+                    };
+                    let g = f.geodetic(&ell);
+                    let ground = self.globe.height_at(g.lat, g.lon, 22).unwrap_or(0.0).max(0.0) * exag;
+                    f.update(dt_ms / 1000.0, &inp, &ell, ground);
+                    self.agl = f.geodetic(&ell).h - ground;
+                    f.frame(&ell, aspect, ground)
                 }
-            }
-            // keep the target on the terrain (smoothly: finer tiles change it as they arrive)
-            let th = self.globe.height_at(self.cam.lat, self.cam.lon, 22).unwrap_or(0.0).max(0.0) * self.s.exaggeration as f64;
-            self.cam.target_h += (th - self.cam.target_h) * 0.25;
+                _ => {
+                    let m_per_pt = self.cam.dist * self.cam.fov_y / rect.height().max(1.0) as f64;
+                    if resp.dragged_by(egui::PointerButton::Primary) {
+                        let d = resp.drag_delta();
+                        self.cam.pan(d.x as f64, d.y as f64, m_per_pt, &ell);
+                    }
+                    if resp.dragged_by(egui::PointerButton::Secondary) || resp.dragged_by(egui::PointerButton::Middle) {
+                        let d = resp.drag_delta();
+                        self.cam.heading -= d.x as f64 * 0.005;
+                        self.cam.tilt = (self.cam.tilt + d.y as f64 * 0.004).clamp(0.0, 1.48);
+                    }
+                    if resp.hovered() {
+                        let scroll = ui.input(|i| i.smooth_scroll_delta.y) as f64;
+                        if scroll != 0.0 {
+                            self.cam.dist = (self.cam.dist * (-scroll * 0.003).exp()).clamp(40.0, 6.0e7);
+                        }
+                    }
+                    // keep the target on the terrain (smoothly: finer tiles change it as they arrive)
+                    let th = self.globe.height_at(self.cam.lat, self.cam.lon, 22).unwrap_or(0.0).max(0.0) * exag;
+                    self.cam.target_h += (th - self.cam.target_h) * 0.25;
+                    let cf = self.cam.frame(&ell, aspect);
+                    let g = geodesy::ecef2geodetic(cf.eye, &ell);
+                    self.agl = g.h - self.globe.height_at(g.lat, g.lon, 22).unwrap_or(0.0).max(0.0) * exag;
+                    cf
+                }
+            };
 
             // ---- render
             let rs = frame.wgpu_render_state().expect("wgpu").clone();
-            let cf = {
+            {
                 let mut r = rs.renderer.write();
-                self.globe.render(&self.cam, &self.s, &self.svc, w, h, Some(&mut r))
-            };
+                self.globe.render(&cf, &self.s, &self.svc, w, h, Some(&mut r));
+            }
             self.eye_alt = geodesy::ecef2geodetic(cf.eye, &ell).h;
             if let Some(id) = self.globe.texture_id {
                 ui.painter().image(id, rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
             }
             let ndc_of = |p: egui::Pos2| DVec2::new(((p.x - rect.left()) / rect.width() * 2.0 - 1.0) as f64, (1.0 - (p.y - rect.top()) / rect.height() * 2.0) as f64);
             self.hover = resp.hover_pos().and_then(|p| self.globe.pick(&cf, ndc_of(p)));
-            if resp.double_clicked() {
+            if self.nav != Nav::Orbit {
+                if let Some(f) = &self.fly {
+                    // head-up readout
+                    let g = f.geodetic(&ell);
+                    let text = format!(
+                        "{}   {:.1} km/h\nalt {}  above ground {}\nhdg {:03.0}°  pitch {:+.0}°  roll {:+.0}°\n{:.4}°, {:.4}°",
+                        if self.nav == Nav::Plane { "PLANE" } else { "FREE FLIGHT" },
+                        f.speed * 3.6,
+                        fmt_dist(g.h),
+                        fmt_dist(self.agl),
+                        f.heading.to_degrees(),
+                        f.pitch.to_degrees(),
+                        f.roll.to_degrees(),
+                        g.lat.to_degrees(),
+                        g.lon.to_degrees()
+                    );
+                    let pos = rect.left_top() + egui::vec2(12.0, 10.0);
+                    let font = egui::FontId::monospace(13.0);
+                    ui.painter().text(pos + egui::vec2(1.0, 1.0), egui::Align2::LEFT_TOP, &text, font.clone(), egui::Color32::from_black_alpha(200));
+                    ui.painter().text(pos, egui::Align2::LEFT_TOP, &text, font, egui::Color32::from_rgb(230, 240, 230));
+                    // horizon / attitude marker at the centre
+                    let c = rect.center();
+                    let stroke = egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(230, 240, 230, 160));
+                    ui.painter().line_segment([c - egui::vec2(18.0, 0.0), c - egui::vec2(6.0, 0.0)], stroke);
+                    ui.painter().line_segment([c + egui::vec2(6.0, 0.0), c + egui::vec2(18.0, 0.0)], stroke);
+                }
+            }
+            self.last_cf = Some(cf);
+            if self.nav == Nav::Orbit && resp.double_clicked() {
                 if let Some(p) = resp.interact_pointer_pos() {
                     if let Some((la, lo)) = self.globe.pick(&cf, ndc_of(p)) {
                         (self.cam.lat, self.cam.lon) = (la, lo);
