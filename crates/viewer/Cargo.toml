@@ -16,9 +16,9 @@ clap.workspace = true
 parking_lot.workspace = true
 bytemuck.workspace = true
 eframe = { version = "0.36", default-features = false, features = ["wgpu", "default_fonts", "x11", "wayland"] }
+serde.workspace = true
+serde_yaml.workspace = true
 half = { version = "2", features = ["bytemuck"] }
 pollster.workspace = true
 image.workspace = true
 
-[dev-dependencies]
-serde_yaml.workspace = true

@@ -61,6 +61,7 @@ forwarding it runs, but slowly.
 | `--exag`, `--mode` | 1, surface | map relief exaggeration and shading |
 | `--gpu-tiles` | 1536 | map tiles on the GPU (768 KB each) |
 | `--snapshot PNG --view … --wait S --size WxH` | | a headless map view into a PNG (below) |
+| `--record DIR --path FILE --fps N` | 25 fps | a headless keyframed map flight into PNG frames (below) |
 
 ## How it works
 
@@ -70,7 +71,7 @@ Code: `crates/viewer`:
 - `camera.rs`: the camera view;
 - `fly.rs`: the flight;
 - `tiles.rs`: the tile service;
-- `snapshot.rs`: headless snapshots.
+- `snapshot.rs`: headless snapshots and recordings.
 
 It uses wgpu 30 (shared with the dataset renderer) and egui / eframe 0.36.
 
@@ -122,6 +123,34 @@ It uses wgpu 30 (shared with the dataset renderer) and egui / eframe 0.36.
 
 ```sh
 terrain view -c configs/view.yaml --snapshot out/fly.png --view fly:39.9,32.8,600,0,-12 --wait 45 --size 1280x720
+```
+
+## Recordings
+
+`--record DIR --path FILE` flies the map camera along keyframes and saves every frame
+(`DIR/frame_00000.png`, …, at `--fps`, `--size`), each once its tiles are in (or after `--wait`
+seconds). `DIR/frames.csv` gives each frame's time, eye position and height, distance to the
+target and the finest zoom level drawn. The showcase's opening globe shot is one
+(`showcase/globe/dive.yaml`).
+
+```yaml
+keys:     # the orbit camera: target lat / lon (deg), distance (km), heading / tilt / fov (deg), exag
+  - { t: 0,  lat: 20, lon: 40,   km: 15000 }
+  - { t: 8,  lat: 10, lon: -70,  km: 13000 }
+  - { t: 20, lat: 7,  lon: -102, km: 3, heading: 90, tilt: 63 }
+look:     # switches of the shading mode and tile borders, dissolving over `fade` seconds
+  - { t: 0,   mode: surface }
+  - { t: 2.2, mode: elevation, fade: 0.7 }
+  - { t: 8.2, borders: true, fade: 0.6 }
+```
+
+- **Keys:** interpolated with Catmull-Rom splines: the position as a unit vector, the distance
+  logarithmically (an even zoom from orbit to the ground), easing in at the first key and out at
+  the last. Omitted: heading and tilt 0 (north up, straight down), exaggeration 1, fov 40°.
+- **Look:** a switch holds until the next one that sets the same thing.
+
+```sh
+terrain view -c configs/view.yaml --record out/dive --path showcase/globe/dive.yaml --size 1920x1080
 ```
 
 ## Performance (RTX 2080 Ti, Xeon W-2125)

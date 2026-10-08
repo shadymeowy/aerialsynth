@@ -2857,6 +2857,7 @@ dependencies = [
  "pollster",
  "rayon",
  "render",
+ "serde",
  "serde_yaml",
  "terragen",
  "tilestore",

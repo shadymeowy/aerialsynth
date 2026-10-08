@@ -25,6 +25,7 @@ All shots share one planet: the places (farmland at 39.9°N 32.8°E, the snow-ca
 | single | farmland, river valley, mountains, town, coast, forest, golden hour, day→night time-lapse, night towns, full moon, 10 km cruise, 60 m treetop flight, steep turns, vibration motion blur, 200° fisheye |
 | grid | camera models from one pose (pinhole, distorted pinhole, Kannala–Brandt 190°, Mei 200°); a four-camera rig (nadir, forward, left / right oblique) |
 | modalities | RGB, depth (normalised to the frame's maximum), optical flow (Middlebury colour wheel), events (10 ms, ON red / OFF blue) of one camera |
+| globe | the opening: the planet turning through its map layers (surface, elevation, land cover), then a dive through the tile pyramid (borders coloured by zoom) down to the first shot; a keyframed map flight (`globe/dive.yaml`) recorded by `terrain view --record` into its own tile store |
 | map | a sped-up flight next to a 2D mosaic of its XYZ tiles: whole trajectory, current position, camera footprint (from depth), the planned LOD tiles coloured by zoom, altitude profile |
 
 ## Options

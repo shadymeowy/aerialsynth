@@ -7,12 +7,13 @@
     python showcase/make_showcase.py --stills         # quick framing check: 3 small frames per shot
 
 Shots are described in storyboard.yaml (scenario overrides on base.yaml). Each shot is rendered
-by `terrain run` into out/showcase/<id>/ (scenario.yaml, traj.csv, seq.h5); a shot is re-rendered
-only when its resolved scenario changed. Composition (captions, cross-fades, 2x2 panels, the
+by `terrain run` into out/showcase/<id>/ (scenario.yaml, traj.csv, seq.h5) — the globe shot by
+`terrain view --record` into out/showcase/<id>/frames/ — and is re-rendered only when its
+resolved scenario changed. Composition (captions, cross-fades, 2x2 panels, the
 tile map) is done here and piped into ffmpeg (H.264). Needs: numpy, h5py, pyyaml, pillow,
 matplotlib (colour maps), ffmpeg, and the release build of `terrain` (cargo build --release).
 """
-import argparse, copy, hashlib, math, os, subprocess, sys, time
+import argparse, copy, csv, hashlib, math, os, subprocess, sys, time
 import numpy as np, h5py, yaml
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
@@ -79,6 +80,46 @@ def shot_scenario(base, shot, video, stills=False):
                 i["width"], i["height"] = i["width"] // 2, i["height"] // 2
                 f = i["intrinsics"]
                 i["intrinsics"] = [f[0] / 2, f[1] / 2, (f[2] + 0.5) / 2 - 0.5, (f[3] + 0.5) / 2 - 0.5]
+    return scn
+
+
+def globe_scenario(base, shot):
+    """Scenario of a globe shot (`layout: globe`): the base world, its own tile store (the
+    whole planet's coarse levels and the dive's tiles); `output.file` stands for the recording
+    (its frames.csv, written last)."""
+    d = os.path.join(OUT, shot["id"])
+    scn = deep_merge(base, shot.get("scenario", {}))
+    scn["tiles"]["file"] = os.path.join(d, "world.h5")
+    scn["output"]["file"] = os.path.join(d, "frames", "frames.csv")
+    return scn
+
+
+def render_globe(base, shot, video, force=False):
+    """A globe shot: the keyframed map flight `shot.path` recorded by `terrain view --record`."""
+    sid = shot["id"]
+    d = os.path.join(OUT, sid)
+    os.makedirs(d, exist_ok=True)
+    scn = globe_scenario(base, shot)
+    path = os.path.join(HERE, shot["path"])
+    size = f"{video['width']}x{video['height']}"
+    text = yaml.safe_dump(scn, sort_keys=False)
+    digest = hashlib.sha1((text + open(path).read() + f"{size} {video['fps']}").encode()).hexdigest()
+    stamp = os.path.join(d, "scenario.done")
+    if not force and os.path.exists(stamp) and open(stamp).read() == digest and os.path.exists(scn["output"]["file"]):
+        print(f"[{sid}] up to date")
+        return scn
+    with open(os.path.join(d, "scenario.yaml"), "w") as f:
+        f.write(text)
+    t0 = time.time()
+    print(f"[{sid}] recording the globe flight …", flush=True)
+    log = open(os.path.join(d, "scenario.log"), "w")
+    cmd = [TERRAIN, "view", "-c", os.path.join(d, "scenario.yaml"), "--record", os.path.dirname(scn["output"]["file"]),
+           "--path", path, "--fps", str(video["fps"]), "--size", size, "--wait", "120"]
+    if subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT).returncode != 0:
+        raise SystemExit(f"[{sid}] terrain view failed, see {log.name}")
+    with open(stamp, "w") as f:
+        f.write(digest)
+    print(f"[{sid}] done in {time.time() - t0:.0f} s", flush=True)
     return scn
 
 
@@ -335,6 +376,12 @@ def single_frames(shot, f, video):
         yield fit(img, W, H)
 
 
+def globe_frames(shot, scn, video):
+    d = os.path.dirname(scn["output"]["file"])
+    for n in sorted(x for x in os.listdir(d) if x.startswith("frame_") and x.endswith(".png")):
+        yield fit(np.asarray(Image.open(os.path.join(d, n)).convert("RGB")), video["width"], video["height"])
+
+
 def grid_frames(shot, f, video, scn):
     W, H = video["width"], video["height"]
     paths = [c["path"] for c in scn["cameras"]]
@@ -556,7 +603,7 @@ def collage_sources(shots_scn, video):
     """One striking frame per shot (the middle one of its first camera) for the title collage."""
     ims = []
     for shot, scn in shots_scn:
-        if shot.get("layout") in ("modalities", "map", "events"):
+        if shot.get("layout") in ("modalities", "map", "events", "globe"):
             continue
         with h5py.File(scn["output"]["file"], "r") as f:
             rgb = f[scn["cameras"][0]["path"]]["rgb"]
@@ -636,8 +683,10 @@ def outro_frames(video, outro, seconds=6.0):
 
 # ----------------------------------------------------------------------------- composition
 def shot_stream(shot, scn, video):
-    f = h5py.File(scn["output"]["file"], "r")
     lay = shot.get("layout", "single")
+    if lay == "globe":
+        return globe_frames(shot, scn, video)
+    f = h5py.File(scn["output"]["file"], "r")
     if lay == "grid":
         gen = grid_frames(shot, f, video, scn)
     elif lay == "modalities":
@@ -747,6 +796,8 @@ def geo_readout(scn, shot, video):
     """Per output frame k: 'lat, lon · height · UTC' of the flight at that frame (pose of the
     sequence, the scenario's clock incl. its time-lapse factor), or None."""
     import datetime
+    if shot.get("layout") == "globe":
+        return globe_readout(scn)
     f = h5py.File(scn["output"]["file"], "r")
     if "/cam0" not in f or "pose" not in f:
         return lambda k: None
@@ -772,6 +823,30 @@ def geo_readout(scn, shot, video):
     return text
 
 
+def globe_readout(scn):
+    """Per frame of a globe shot: 'lat, lon · height · finest tiles' of the recorded flight."""
+    rows = list(csv.DictReader(open(scn["output"]["file"])))
+
+    def text(k):
+        r = rows[min(k, len(rows) - 1)]
+        lat, lon, h = float(r["lat"]), float(r["lon"]), float(r["h"])
+        alt = f"{h / 1000:,.0f} km" if h >= 20000 else f"{h:,.0f} m"
+        return (f"{abs(lat):.4f}°{'N' if lat >= 0 else 'S'}  {abs(lon):.4f}°{'E' if lon >= 0 else 'W'}  ·  {alt}  ·  "
+                f"finest tiles z{r['max_zoom']}")
+    return text
+
+
+def notes_layer(shot, t, dur, W, H):
+    """A shot's time-coded `notes` ({t, until, text}): top left, fading in and out."""
+    items = []
+    for n in shot.get("notes", []):
+        end = min(n.get("until", dur), dur - 0.15)
+        a = ease((t - n["t"]) / 0.4) * ease((end - t) / 0.4)
+        if a > 0:
+            items.append(((u(36), u(30)), n["text"], FONTS.get("light", u(24)), a, "la"))
+    return text_layer((W, H), items) if items else None
+
+
 def shot_frames(shot, scn, video, band):
     W, H, fps = video["width"], video["height"], video["fps"]
     dur = shot["seconds"] + video["crossfade"]
@@ -787,6 +862,9 @@ def shot_frames(shot, scn, video, band):
             if a > 0:
                 lay = text_layer((W, H), [((W - u(14), u(12)), txt, FONTS.get("medium", u(13)), 0.85 * a, "ra")])
                 fr = np.asarray(Image.alpha_composite(Image.fromarray(fr).convert("RGBA"), lay).convert("RGB"))
+        notes = notes_layer(shot, k / fps, dur, W, H)
+        if notes is not None:
+            fr = np.asarray(Image.alpha_composite(Image.fromarray(fr).convert("RGBA"), notes).convert("RGB"))
         frames.append(caption(fr, shot["label"], shot["text"], k / fps, dur, W, H, band))
     return frames
 
@@ -916,7 +994,11 @@ def main():
     has_events = lambda s: "source" in s or any("events" in c for c in s.get("scenario", {}).get("cameras", []))
     order = [s for s in shots if not has_events(s)] + [s for s in shots if has_events(s)]
     for s in order:
-        if "source" in s:
+        if s.get("layout") == "globe":
+            if a.stills:
+                continue  # (no sequence; preview it with `terrain view --record` at a small --size)
+            scn = globe_scenario(base, s) if a.compose_only else render_globe(base, s, story["video"], a.force)
+        elif "source" in s:
             # shown from another shot's sequence (e.g. its event camera, later in the same flight)
             src = next(x for x in story["shots"] if x["id"] == s["source"])
             scn = by_id.get(s["source"]) or (shot_scenario(base, src, story["video"], a.stills) if a.compose_only or a.stills

@@ -1,0 +1,19 @@
+# The globe shot of the showcase: `terrain view --record` (docs/viewer.md). The planet turns
+# while the map flips through its layers, then the camera dives through the level-of-detail
+# pyramid (tile borders coloured by zoom level) down to the start of the volcano shot.
+keys:
+  - { t: 0.0,  lat: 20.0, lon: 40.0,     km: 15000 }
+  - { t: 4.0,  lat: 15.0, lon: 0.0,      km: 15500 }
+  - { t: 8.0,  lat: 10.0, lon: -70.0,    km: 13000 }
+  - { t: 10.5, lat: 8.0,  lon: -95.0,    km: 3800,  heading: 20, tilt: 12 }
+  - { t: 13.0, lat: 7.2,  lon: -100.8,   km: 520,   heading: 58, tilt: 36 }
+  - { t: 15.5, lat: 7.03, lon: -101.8,   km: 45,    heading: 82, tilt: 54 }
+  - { t: 18.0, lat: 7.0,  lon: -101.962, km: 7,     heading: 90, tilt: 61 }
+  - { t: 20.0, lat: 7.0,  lon: -101.974, km: 3.1,   heading: 90, tilt: 63 }
+look:
+  - { t: 0.0,  mode: surface }
+  - { t: 2.2,  mode: elevation, fade: 0.7 }
+  - { t: 3.9,  mode: landcover, fade: 0.7 }
+  - { t: 5.6,  mode: surface,   fade: 0.7 }
+  - { t: 8.2,  borders: true,   fade: 0.6 }
+  - { t: 16.3, borders: false,  fade: 1.2 }

@@ -3,7 +3,9 @@
 #
 #   label:    small caption, bottom left          text: feature description, bottom right
 #   seconds:  shown duration (shots cross-fade by `video.crossfade` seconds)
-#   layout:   single (default) | grid (2x2 of four cameras) | modalities | map
+#   layout:   single (default) | grid (2x2 of four cameras) | modalities | map | globe (a map
+#             flight recorded by `terrain view --record`: `path` is its keyframes file)
+#   notes:    time-coded remarks, top left: [{t, until, text}]
 #   speedup:  time-lapse factor for the flight (frames are rendered every speedup/fps seconds)
 #
 # Times are UTC; local solar time here (33°E) is UTC + 2h12.
@@ -19,6 +21,17 @@ video:
   tagline: "Every frame below is rendered from generated tiles — no imagery, no elevation data."
 
 shots:
+- id: globe
+  layout: globe
+  path: globe/dive.yaml
+  label: The planet
+  seconds: 19.4
+  text: Web-Mercator tiles from z0 to z17, generated as the camera needs them
+  notes:
+  - {t: 0.5, until: 2.3, text: surface}
+  - {t: 2.5, until: 4.0, text: elevation}
+  - {t: 4.2, until: 5.7, text: land cover}
+  - {t: 8.8, until: 16.3, text: level of detail · tile borders coloured by zoom level}
 - id: volcano
   label: Rainforest peak
   scenario:

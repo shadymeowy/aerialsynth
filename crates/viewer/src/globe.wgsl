@@ -40,7 +40,6 @@ struct VOut {
     @location(1) uv: vec2<f32>,
     @location(2) up: vec3<f32>,
     @location(3) rel: vec3<f32>,
-    @location(4) h: f32,
 };
 
 fn elev_at(suv: vec2<f32>, layer: u32) -> f32 {
@@ -72,7 +71,6 @@ fn vs(@location(0) pos: vec3<f32>, @location(1) uv: vec2<f32>, @location(2) skir
     o.uv = uv;
     o.up = up;
     o.rel = p;
-    o.h = h;
     return o;
 }
 
@@ -181,7 +179,8 @@ fn fs(i: VOut) -> @location(0) vec4<f32> {
         }
         n = normalize(up - east * gr.x - north * gr.y);
         switch mode {
-            case 1u: { base = hypso(i.h, water); }
+            // (the texel heights: the mesh heights are box-filtered over its grid spacing)
+            case 1u: { base = hypso(elev_at(i.suv, d.layer), water); }
             case 2u: { base = palette(lc); }
             case 3u: { base = vec3<f32>(0.6); }
             default: { base = c.rgb; }
@@ -194,7 +193,9 @@ fn fs(i: VOut) -> @location(0) vec4<f32> {
     let v = normalize(-i.rel);
     if (water && mode != 3u) {
         let hv = normalize(sun + v);
-        col += vec3<f32>(1.0, 0.95, 0.85) * pow(max(dot(up, hv), 0.0), 120.0) * 0.8 * day;
+        // a tight glint on a faint sheen (a broad bright lobe turns oceans into a white blob)
+        let s = max(dot(up, hv), 0.0);
+        col += vec3<f32>(1.0, 0.95, 0.85) * (pow(s, 600.0) * 0.35 + pow(s, 40.0) * 0.03) * day;
     }
     // aerial perspective towards the sky colour behind the point: the path through the lower
     // atmosphere (~25 km thick), not the whole distance (seen from orbit, the disc stays clear
