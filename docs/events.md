@@ -113,7 +113,8 @@ lights are on, the event sensor steps at least `flicker_steps_per_period` times 
 period. At night this produces the periodic ON/OFF bursts at lamps that real event cameras
 show (activity spectrum peaks at 100/200/300 Hz). These steps need no extra renders: the
 renderer returns the lamp light as `radiance + cos(ωt)·A + sin(ωt)·B` (exact; checked against
-direct renders to 1e-11), so only image motion triggers renders.
+direct renders to 1e-11), so only image motion triggers renders, plus one every 0.25 s for a
+still camera (so a hover keeps its batches of steps short and follows lighting changes).
 
 ## Possible next steps
 

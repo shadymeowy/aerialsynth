@@ -197,6 +197,10 @@ pub struct StarsModality {
     pub mag_limit: Option<f64>,
 }
 
+/// The largest `tiles.min_zoom`: the tile selection tests every tile of `min_zoom` (4^min_zoom)
+/// for every frame.
+pub const MAX_MIN_ZOOM: u8 = 6;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TilesConfig {
@@ -204,7 +208,7 @@ pub struct TilesConfig {
     pub file: PathBuf,
     /// Zoom range of the tiles: planned, generated and rendered (the whole visible area is
     /// covered from `min_zoom`; detail is limited to `max_zoom`). The level of detail within it
-    /// is `render.texel_px`.
+    /// is `render.texel_px`. `min_zoom` is at most [`MAX_MIN_ZOOM`].
     pub min_zoom: u8,
     pub max_zoom: u8,
     /// Rings of neighbour tiles added around every planned tile (per zoom), so that consumers
@@ -339,6 +343,13 @@ impl Scenario {
         if self.output.pose.rate_hz <= 0.0 {
             bail!("output.pose.rate_hz must be > 0");
         }
+        let (z0, z1) = (self.tiles.min_zoom, self.tiles.max_zoom);
+        if z0 > z1 || z1 > geodesy::MAX_ZOOM {
+            bail!("tiles: min_zoom {z0} .. max_zoom {z1} is not a zoom range (0 <= min_zoom <= max_zoom <= {})", geodesy::MAX_ZOOM);
+        }
+        if z0 > MAX_MIN_ZOOM {
+            bail!("tiles.min_zoom {z0} > {MAX_MIN_ZOOM}: the tile selection tests every tile of min_zoom (4^{z0}) for every frame");
+        }
         if let Some(imu) = &self.imu {
             if imu.rate_hz <= 0.0 {
                 bail!("imu.rate_hz must be > 0");
@@ -370,7 +381,15 @@ impl Scenario {
                     bail!("camera {}: events need max_px_per_step > 0 and 0 < min_rate_hz <= max_rate_hz", c.path);
                 }
             }
-            c.intrinsics.build().with_context(|| format!("camera {}", c.path))?;
+            let model = c.intrinsics.build().with_context(|| format!("camera {}", c.path))?;
+            // `backend: gpu` must be able to render the camera (`auto` falls back to the CPU)
+            #[cfg(feature = "gpu")]
+            if self.render.backend == crate::raster::Backend::Gpu {
+                let frames = std::iter::once(ss).filter(|_| c.has_frames());
+                for s in frames.chain(c.events.as_ref().map(|e| e.supersample)) {
+                    crate::gpu::supports(&*model, s).map_err(|e| anyhow::anyhow!("camera {}: render.backend gpu: {e} (backend auto renders it on the CPU)", c.path))?;
+                }
+            }
         }
         for (i, (what, p)) in groups.iter().enumerate() {
             if !p.starts_with('/') || p.len() < 2 {
@@ -410,5 +429,16 @@ mod tests {
         let mut s = Scenario::default();
         s.cameras.push(CameraSpec { path: "/cam0/sub".into(), ..CameraSpec::example() });
         assert!(s.validate().is_err());
+    }
+
+    #[test]
+    fn zoom_ranges_are_checked() {
+        let with = |z0: u8, z1: u8| {
+            let mut s = Scenario::default();
+            (s.tiles.min_zoom, s.tiles.max_zoom) = (z0, z1);
+            s.validate()
+        };
+        assert!(with(2, 18).is_ok() && with(MAX_MIN_ZOOM, MAX_MIN_ZOOM).is_ok());
+        assert!(with(15, 10).is_err() && with(2, geodesy::MAX_ZOOM + 1).is_err() && with(MAX_MIN_ZOOM + 1, 18).is_err());
     }
 }

@@ -39,6 +39,10 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+/// Longest batch of sensor steps between two rendered keys (s): a still camera renders that
+/// often anyway (bounded memory, lighting changes sampled).
+const MAX_BATCH_S: f64 = 0.25;
+
 /// Event camera knobs. Names in parentheses are the corresponding Prophesee biases.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -637,7 +641,9 @@ pub fn simulate(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], cache: Arc<Ti
             times.push(tn);
             (t, cam) = (tn, cam_n);
             let moved = d >= 0.25 * max_px || max_motion(&k0, &k0.cam, &cam_n, m) >= 0.5 * max_px;
-            if moved || tn >= t_end {
+            // a still camera renders a key at least every MAX_BATCH_S too: bounded batches,
+            // lighting changes sampled
+            if moved || tn >= t_end || tn - k0.t >= MAX_BATCH_S {
                 break;
             }
         }

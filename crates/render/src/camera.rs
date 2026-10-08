@@ -38,6 +38,8 @@ pub trait CameraModel: Send + Sync + std::fmt::Debug {
     fn config(&self) -> CameraConfig;
     /// Projection parameters for the GPU vertex shader (see `GpuCamera`).
     fn gpu(&self) -> GpuCamera;
+    /// Does the projection fit the GPU's parameter block (`gpu` panics otherwise)?
+    fn gpu_fits(&self) -> Result<(), String>;
 }
 
 /// A camera model's projection in a flat form for the GPU (`project` in mesh.wgsl):
@@ -671,6 +673,13 @@ impl<M: Proj> CameraModel for Cam<M> {
     }
     fn config(&self) -> CameraConfig {
         self.m.cfg(self.w, self.h)
+    }
+    fn gpu_fits(&self) -> Result<(), String> {
+        let n = self.m.gpu().1.len();
+        if n > 16 {
+            return Err(format!("the camera model has {n} projection parameters, the GPU takes at most 16 (scaramuzza: at most 10 inv_poly coefficients)"));
+        }
+        Ok(())
     }
     fn gpu(&self) -> GpuCamera {
         let (kind, v) = self.m.gpu();

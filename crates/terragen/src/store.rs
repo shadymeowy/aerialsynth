@@ -82,7 +82,13 @@ impl Generator {
             if writing {
                 bail!("{name} was written by {what}, this is version {GENERATOR_VERSION}: new tiles would not match its old ones; use a new tiles file");
             }
-            eprintln!("warning: {name} was written by {what} (this is version {GENERATOR_VERSION})");
+            // (once per store and process: commands open a store several times)
+            static WARNED: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
+            let mut warned = WARNED.lock().unwrap_or_else(|e| e.into_inner());
+            if !warned.iter().any(|p| p == store.path()) {
+                warned.push(store.path().to_path_buf());
+                eprintln!("warning: {name} was written by {what} (this is version {GENERATOR_VERSION}); reading only");
+            }
         }
         Ok(())
     }

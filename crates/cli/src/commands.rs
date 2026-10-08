@@ -62,7 +62,10 @@ fn synth(s: &Scenario, out: &Path) -> Result<()> {
 
 fn load_poses(s: &Scenario) -> Result<Vec<render::Pose>> {
     let ell = geodesy::Ellipsoid::from_a_invf(s.world.planet.a, s.world.planet.inv_f);
-    let p = render::trajectory::load(&s.trajectory.file, &ell).with_context(|| "loading the trajectory (`terrain run --step traj` makes one)")?;
+    if !s.trajectory.file.exists() {
+        bail!("trajectory {} does not exist (`terrain run --step traj` makes one)", s.trajectory.file.display());
+    }
+    let p = render::trajectory::load(&s.trajectory.file, &ell)?;
     if p.is_empty() {
         bail!("trajectory {} is empty", s.trajectory.file.display());
     }
@@ -97,7 +100,28 @@ fn parse_tile_list(p: &Path) -> Result<Vec<TileId>> {
     Ok(v)
 }
 
+/// The scenario's tile store opened read-only (None if there is none yet): reading a store of
+/// another generator version only warns.
+fn read_store(s: &Scenario, gen: &Generator) -> Result<Option<TileStore>> {
+    if !s.tiles.file.exists() {
+        return Ok(None);
+    }
+    Ok(Some(gen.open_store_ro(&s.tiles.file)?))
+}
+
 fn gen_tiles(s: &Scenario, gen: &Generator, tiles: Vec<TileId>, force: bool) -> Result<()> {
+    // the store is opened for writing only when there is something to generate
+    let tiles = match (force, read_store(s, gen)?) {
+        (false, Some(st)) => {
+            let todo: Vec<TileId> = tiles.iter().copied().filter(|t| !st.contains(*t)).collect();
+            if todo.is_empty() {
+                eprintln!("all {} tiles are stored in {} ({} tiles total)", tiles.len(), s.tiles.file.display(), st.len());
+                return Ok(());
+            }
+            todo
+        }
+        _ => tiles,
+    };
     let store = pipeline::open_or_create_store(s, gen)?;
     let b = bar(0, "gen");
     let t0 = std::time::Instant::now();
@@ -178,9 +202,9 @@ fn complete_tiles(s: &Scenario, gen: &Generator) -> Result<()> {
     let poses = load_poses(s)?;
     // one zoom level of tiles with unknown elevation per pass (see TileOracle::refine_unknown)
     for pass in 1..=24 {
-        let missing = {
-            let store = pipeline::open_or_create_store(s, gen)?;
-            pipeline::plan_missing(s, &poses, &store)?
+        let missing = match read_store(s, gen)? {
+            Some(store) => pipeline::plan_missing(s, &poses, &store)?,
+            None => pipeline::plan_missing(s, &poses, &pipeline::open_or_create_store(s, gen)?)?,
         };
         if missing.is_empty() {
             eprintln!("dry run {pass}: all tiles the renderer selects are stored");
@@ -194,7 +218,9 @@ fn complete_tiles(s: &Scenario, gen: &Generator) -> Result<()> {
 }
 
 fn stored_tiles(s: &Scenario, gen: &Generator) -> Result<BTreeSet<TileId>> {
-    let store = pipeline::open_or_create_store(s, gen)?;
+    let Some(store) = read_store(s, gen)? else {
+        return Ok(BTreeSet::new());
+    };
     Ok(store.zooms().into_iter().flat_map(|z| store.tiles_at(z)).collect())
 }
 

@@ -532,6 +532,20 @@ impl Renderer {
     pub fn new(model: Arc<dyn CameraModel>, mut settings: RenderSettings, ell: Ellipsoid, cache: Arc<TileCache>) -> Self {
         settings.backend = settings.backend.resolve();
         let ss = settings.supersample.max(1);
+        // a camera the GPU cannot take renders on the CPU (`backend: gpu` is refused earlier, by
+        // Scenario::validate)
+        #[cfg(feature = "gpu")]
+        if settings.backend == Backend::Gpu {
+            if let Err(why) = crate::gpu::supports(&*model, ss) {
+                static NOTED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+                let mut noted = NOTED.lock().unwrap_or_else(|e| e.into_inner());
+                if !noted.contains(&why) {
+                    eprintln!("render.backend: {why}; rendering this camera on the CPU");
+                    noted.push(why);
+                }
+                settings.backend = Backend::Cpu;
+            }
+        }
         let model_ss = model.scaled(ss);
         let (w, h) = (model_ss.width() as usize, model_ss.height() as usize);
         let rays: Vec<[f32; 3]> = (0..w * h)
