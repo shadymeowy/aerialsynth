@@ -60,8 +60,9 @@
     their apparent positions for the date, time and place (≤ 0.01″ vs Skyfield), radiometric
     brightness and colour, planet discs, trails over the exposure, per-frame ground truth; see
     `docs/stars.md`
-  - `render.backend`: `auto` (default: the GPU when there is one), `gpu` (headless wgpu renderer
-    and event sensor, same output as the CPU reference; see `docs/gpu.md`) or `cpu`
+  - `render.backend`: `auto` (default: the GPU when there is one and it supports the cameras),
+    `gpu` (headless wgpu renderer and event sensor: frames match the CPU reference to ~0.1 %,
+    events are statistically equivalent, not bit-identical; see `docs/gpu.md`) or `cpu`
   - night lights from the generated emission layer: street lamps (sodium/LED), porch lights,
     farmsteads, lit main roads near towns, plazas and industry
   - light-pollution glow in the haze
