@@ -4,23 +4,28 @@ use crate::fly::{FlyCam, FlyMode};
 use crate::globe::{CamFrame, Camera, Globe};
 use crate::tiles::Service;
 use crate::{base_tiles, map_settings, ViewOptions};
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use eframe::wgpu;
 use geodesy::ecef2geodetic;
-use glam::DVec3;
+use geodesy::tiles::{latlon_to_pixel, TileId};
+use glam::{DVec2, DVec3};
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 use terragen::Generator;
-use tilestore::TileStore;
+use tilestore::{Layer, TileStore, TILE_SIZE};
 
 /// Headless: render the `--view` once every tile it wants is in, save a PNG.
 pub(crate) fn snapshot(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Generator>, out: &Path) -> Result<()> {
     let fly_view = args.view.starts_with("fly:");
-    let v: Vec<f64> = args.view.trim_start_matches("fly:").split(',').map(|x| x.trim().parse()).collect::<Result<_, _>>().context("--view lat,lon,km,heading,tilt (or fly:lat,lon,agl_m,heading,pitch)")?;
-    let (w, h) = args.size.split_once('x').map(|(a, b)| (a.parse::<u32>(), b.parse::<u32>())).context("--size WxH")?;
-    let (w, h) = (w?, h?);
+    const VIEW: &str = "--view lat,lon,km,heading,tilt (or fly:lat,lon,agl_m,heading,pitch)";
+    let v: Vec<f64> = args.view.trim_start_matches("fly:").split(',').map(|x| x.trim().parse()).collect::<Result<_, _>>().context(VIEW)?;
+    if v.len() != 5 || v.iter().any(|x| !x.is_finite()) || (!fly_view && v[2] <= 0.0) {
+        bail!("{VIEW}: five numbers (a distance > 0), got {:?}", args.view);
+    }
+    let (w, h) = parse_size(&args.size)?;
     let (device, queue) = headless_device()?;
     let ell = gen.world.ell;
     let svc = Service::start(store, gen, base_tiles(args.base_zoom), (rayon::current_num_threads() / 2).max(1), || {});
@@ -165,15 +170,72 @@ fn fading(look: &[Look], t: f64) -> Option<((Option<String>, bool), f64)> {
 }
 
 /// Roll, pitch, yaw (deg, aerospace ZYX) of an FRD body looking along the camera (x: the view
-/// direction, z: down the image) in the NED frame at (lat, lon) (rad).
+/// direction, z: down the image) in the NED frame at (lat, lon) (rad). Looking straight down
+/// or up (gimbal lock), roll is 0 and the yaw is that of the image's up (down) direction.
 fn attitude(f: &CamFrame, lat: f64, lon: f64) -> (f64, f64, f64) {
     let (sl, cl) = lat.sin_cos();
     let (so, co) = lon.sin_cos();
     let (n, e, d) = (DVec3::new(-sl * co, -sl * so, cl), DVec3::new(-so, co, 0.0), DVec3::new(-cl * co, -cl * so, -sl));
     let (x, z) = (f.dir, -f.cam_up);
     let y = z.cross(x);
-    (y.dot(d).atan2(z.dot(d)).to_degrees(), (-x.dot(d)).clamp(-1.0, 1.0).asin().to_degrees(), x.dot(e).atan2(x.dot(n)).to_degrees())
+    let pitch = (-x.dot(d)).clamp(-1.0, 1.0).asin();
+    if x.dot(d).abs() > 1.0 - 1e-9 {
+        // x = ∓d: with roll 0 the body z is (±cos yaw, ±sin yaw, 0) in NED, i.e. ±(image down)
+        let s = if pitch < 0.0 { -1.0 } else { 1.0 };
+        return (0.0, pitch.to_degrees(), (s * z.dot(e)).atan2(s * z.dot(n)).to_degrees());
+    }
+    (y.dot(d).atan2(z.dot(d)).to_degrees(), pitch.to_degrees(), x.dot(e).atan2(x.dot(n)).to_degrees())
 }
+
+/// `WxH` (each ≥ 16 px).
+fn parse_size(size: &str) -> Result<(u32, u32)> {
+    let wh = size.split_once('x').and_then(|(a, b)| Some((a.trim().parse::<u32>().ok()?, b.trim().parse::<u32>().ok()?)));
+    match wh {
+        Some((w, h)) if w >= 16 && h >= 16 => Ok((w, h)),
+        _ => bail!("--size WxH (each at least 16 px), got {size:?}"),
+    }
+}
+
+/// Terrain height (DSM, m above the ellipsoid) bilinear in the pixels of one zoom level, from
+/// the store or generated (in memory) where it has no tile. A recorded flight's orbit target
+/// sits on it: `Globe::height_at` takes the finest *resident* tile, whose level steps as tiles
+/// stream in, so the recorded eye path (which `terrain run` may fly on) would jump and differ
+/// between runs.
+struct Ground {
+    store: Arc<TileStore>,
+    gen: Arc<Generator>,
+    z: u8,
+    tiles: HashMap<TileId, Vec<f32>>,
+}
+
+impl Ground {
+    fn texel(&mut self, i: i64, j: i64) -> Result<f64> {
+        let (n, size) = (TILE_SIZE as i64, (TILE_SIZE as i64) << self.z);
+        let (i, j) = (i.rem_euclid(size), j.clamp(0, size - 1));
+        let id = TileId::new(self.z, (i / n) as u32, (j / n) as u32);
+        if !self.tiles.contains_key(&id) {
+            let e = match self.store.read_tile(id, &[Layer::Elevation])? {
+                Some(t) => t.elevation,
+                None => self.gen.tile(id).elevation,
+            };
+            self.tiles.insert(id, e);
+        }
+        let e = &self.tiles[&id];
+        Ok(e.get(((j % n) * n + i % n) as usize).copied().unwrap_or(0.0) as f64)
+    }
+
+    fn at(&mut self, lat: f64, lon: f64) -> Result<f64> {
+        let p = latlon_to_pixel(lat, lon, self.z, TILE_SIZE as u32) - DVec2::splat(0.5);
+        let (i, j) = (p.x.floor() as i64, p.y.floor() as i64);
+        let (fx, fy) = (p.x - i as f64, p.y - j as f64);
+        let top = self.texel(i, j)? * (1.0 - fx) + self.texel(i + 1, j)? * fx;
+        let bot = self.texel(i, j + 1)? * (1.0 - fx) + self.texel(i + 1, j + 1)? * fx;
+        Ok(top * (1.0 - fy) + bot * fy)
+    }
+}
+
+/// Level of the DSM a recorded orbit target sits on (~38 m pixels).
+const GROUND_ZOOM: u8 = 12;
 
 pub(crate) fn headless_device() -> Result<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(async {
@@ -195,20 +257,26 @@ pub(crate) fn record(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Generat
         .with_context(|| format!("parsing {}", path.display()))?;
     let (keys, look) = (flight.keys, flight.look);
     if keys.len() < 2 || keys.windows(2).any(|w| w[1].t <= w[0].t) {
-        anyhow::bail!("{}: at least two keys with increasing t", path.display());
+        bail!("{}: at least two keys with increasing t", path.display());
+    }
+    if let Some(k) = keys.iter().find(|k| !(k.km > 0.0 && k.fov > 0.0 && k.fov < 180.0) || ![k.t, k.lat, k.lon, k.km, k.heading, k.tilt, k.exag, k.fov].iter().all(|v| v.is_finite())) {
+        bail!("{}: key at t = {}: km must be > 0, fov in (0, 180), every value finite", path.display(), k.t);
     }
     for m in look.iter().filter_map(|k| k.mode.as_deref()) {
         if !["surface", "elevation", "landcover", "relief"].contains(&m) {
-            anyhow::bail!("{}: unknown mode {m:?} (surface, elevation, landcover, relief)", path.display());
+            bail!("{}: unknown mode {m:?} (surface, elevation, landcover, relief)", path.display());
         }
     }
-    let (w, h) = args.size.split_once('x').map(|(a, b)| (a.parse::<u32>(), b.parse::<u32>())).context("--size WxH")?;
-    let (w, h) = (w?, h?);
+    if !(fps > 0.0 && fps.is_finite()) {
+        bail!("--fps must be > 0, got {fps}");
+    }
+    let (w, h) = parse_size(&args.size)?;
     std::fs::create_dir_all(dir)?;
     let mut csv = std::io::BufWriter::new(std::fs::File::create(dir.join("frames.csv"))?);
     writeln!(csv, "frame,t,lat,lon,h,roll,pitch,yaw,km,mode,max_zoom")?;
     let (device, queue) = headless_device()?;
     let ell = gen.world.ell;
+    let mut ground = Ground { store: store.clone(), gen: gen.clone(), z: GROUND_ZOOM, tiles: HashMap::new() };
     let svc = Service::start(store, gen, base_tiles(args.base_zoom), (rayon::current_num_threads() / 2).max(1), || {});
     let mut globe = Globe::new(&device, &queue, ell, args.gpu_tiles);
     let base = map_settings(args);
@@ -226,6 +294,13 @@ pub(crate) fn record(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Generat
     for k in 0..n {
         let t = k as f64 / fps;
         let (mut cam, exag) = at_time(&keys, t);
+        // the target on the ground, faded in below 400 km (from orbit it does not matter, and
+        // nothing is generated for it there)
+        let x = ((400e3 - cam.dist) / 300e3).clamp(0.0, 1.0);
+        let weight = x * x * (3.0 - 2.0 * x);
+        if weight > 0.0 {
+            cam.target_h = ground.at(cam.lat, cam.lon)?.max(0.0) * exag * weight;
+        }
         let now = look_at(&look, t, true);
         let mode = now.0.clone().unwrap_or_else(|| args.mode.clone());
         // after --until: the camera path only
@@ -242,7 +317,6 @@ pub(crate) fn record(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Generat
             let tf = Instant::now();
             let mut calm = 0;
             loop {
-                cam.target_h = globe.height_at(cam.lat, cam.lon, 22).unwrap_or(0.0).max(0.0) * exag;
                 globe.render(&cam.frame(&ell, w as f64 / h as f64), s, &svc, w, h, None);
                 calm = if globe.settled(&svc) { calm + 1 } else { 0 };
                 if calm >= 3 || tf.elapsed().as_secs_f64() > wait {
@@ -324,6 +398,26 @@ mod tests {
         let eye = ecef2geodetic(f.eye, &ell);
         let (roll, pitch, yaw) = attitude(&f, eye.lat, eye.lon);
         assert!(roll.abs() < 0.05 && (pitch + 27.0).abs() < 0.05 && (yaw - 90.0).abs() < 0.05, "{roll} {pitch} {yaw}");
+    }
+
+    #[test]
+    fn attitude_gives_back_the_camera_axes() {
+        // the body axes rebuilt from roll / pitch / yaw are the view direction and image down,
+        // also looking straight down (gimbal lock: roll and yaw are not unique there)
+        let ell = geodesy::Ellipsoid::WGS84;
+        for &(lat, lon, km, heading, tilt) in &[(20.0, 40.0, 15000.0, 0.0, 0.0), (10.0, -70.0, 13000.0, 0.0, 0.0), (7.0, -100.0, 3.0, 30.0, 0.0), (-60.0, 170.0, 50.0, 250.0, 0.0), (7.0, -102.0, 3.0, 90.0, 63.0), (45.0, 10.0, 8.0, 300.0, 80.0)] {
+            let mut c = at_time(&[key(0.0, lat, lon, km), key(1.0, lat, lon, km)], 0.0).0;
+            (c.heading, c.tilt) = (f64::to_radians(heading), f64::to_radians(tilt));
+            let f = c.frame(&ell, 16.0 / 9.0);
+            let eye = ecef2geodetic(f.eye, &ell);
+            let (roll, pitch, yaw) = attitude(&f, eye.lat, eye.lon);
+            let q = geodesy::euler_zyx_to_quat(yaw.to_radians(), pitch.to_radians(), roll.to_radians());
+            let (sl, cl) = eye.lat.sin_cos();
+            let (so, co) = eye.lon.sin_cos();
+            let ned = |v: DVec3| DVec3::new(v.dot(DVec3::new(-sl * co, -sl * so, cl)), v.dot(DVec3::new(-so, co, 0.0)), v.dot(DVec3::new(-cl * co, -cl * so, -sl)));
+            let (x, z) = (q * DVec3::X, q * DVec3::Z);
+            assert!((x - ned(f.dir)).length() < 1e-6 && (z + ned(f.cam_up)).length() < 1e-6, "{lat} {lon} {heading} {tilt}: {roll} {pitch} {yaw}");
+        }
     }
 
     #[test]

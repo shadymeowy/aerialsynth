@@ -179,6 +179,11 @@ impl TileStore {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Opened for writing (`create` / `open_rw`)?
+    pub fn writable(&self) -> bool {
+        self.writable
+    }
     pub fn meta(&self) -> &StoreMeta {
         &self.meta
     }

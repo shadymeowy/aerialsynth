@@ -36,6 +36,8 @@ struct Request {
     wall: f64,
     forward: bool,
     dynamic: bool,
+    /// deepest level to generate (the viewer's `--max-zoom` / slider)
+    max_zoom: u8,
 }
 
 /// The latest developed frame.
@@ -167,8 +169,6 @@ fn render_thread(sh: Arc<Shared>, scn: Scenario, spec: CameraSpec, scale: f64, s
         })?
     };
     let forward_ext = Extrinsics { mount: Mount::Forward, pitch_deg: -15.0, ..Extrinsics::default() };
-    let max_zoom = scn.tiles.max_zoom;
-    let want_params = LodParams { min_zoom: scn.tiles.min_zoom, max_zoom, texel_px: scn.render.texel_px, ..Default::default() };
     let mut last_want = Instant::now() - std::time::Duration::from_secs(10);
     while !sh.stop.load(Ordering::Relaxed) {
         let Some(req) = sh.req.lock().clone() else {
@@ -178,12 +178,15 @@ fn render_thread(sh: Arc<Shared>, scn: Scenario, spec: CameraSpec, scale: f64, s
         let t0 = Instant::now();
         let ext = if req.forward { &forward_ext } else { &spec.extrinsics };
         let cam = req.pose.camera(ext, &ell);
+        // (the renderer itself goes no deeper than the scenario's tiles.max_zoom)
+        let max_zoom = req.max_zoom.min(scn.tiles.max_zoom);
         *sh.ground.lock() = ground_at(&cache, req.pose.geo.lat, req.pose.geo.lon, max_zoom);
         // what this view would select, generated in the background (ancestors first: the
         // renderer descends into a tile only through its stored parents)
         if req.dynamic && last_want.elapsed().as_secs_f64() > 0.3 {
             last_want = Instant::now();
             let oracle = WantOracle { store: &store, max_zoom };
+            let want_params = LodParams { min_zoom: scn.tiles.min_zoom, max_zoom, texel_px: scn.render.texel_px, ..Default::default() };
             let mut want: BTreeSet<TileId> = BTreeSet::new();
             for u in Selector::new(&cam, model.as_ref(), ell, &want_params, &oracle).select() {
                 let mut a = u.id;
@@ -266,10 +269,11 @@ impl CameraView {
         })
     }
 
-    /// Render `pose` next (`wall`: seconds since the start, for the auto exposure).
-    pub fn request(&self, pose: Pose, wall: f64, dynamic: bool) {
+    /// Render `pose` next (`wall`: seconds since the start, for the auto exposure; `dynamic`:
+    /// generate the missing tiles it wants, down to `max_zoom`).
+    pub fn request(&self, pose: Pose, wall: f64, dynamic: bool, max_zoom: u8) {
         let t = pose.t + self.time_offset_h * 3600.0;
-        *self.sh.req.lock() = Some(Request { pose: Pose { t, ..pose }, t, wall, forward: self.forward, dynamic });
+        *self.sh.req.lock() = Some(Request { pose: Pose { t, ..pose }, t, wall, forward: self.forward, dynamic, max_zoom });
     }
 
     /// Stop rendering until the next request (the view is hidden).
