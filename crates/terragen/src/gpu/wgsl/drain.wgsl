@@ -61,6 +61,13 @@ const CHUNK: u32 = 4096u;
 @group(2) @binding(12) var<storage, read_write> sink_out: array<SinkPiece>;
 /// per query: its boxes [first, count] (gather)
 @group(2) @binding(13) var<storage, read> q_boxes: array<vec2<u32>>;
+/// a copy of the keys after the enumeration (plain loads for the lookups)
+@group(2) @binding(14) var<storage, read> lat_keys_ro: array<u64>;
+/// per slot: queued for a target (1), a source (2) in this batch
+@group(2) @binding(15) var<storage, read_write> lat_mark: array<atomic<u32>>;
+/// the points to compute targets / sources for ([5] / [6] of `dcount` entries)
+@group(2) @binding(16) var<storage, read_write> work_t: array<u32>;
+@group(2) @binding(17) var<storage, read_write> work_s: array<u32>;
 
 struct SinkPiece {
     b: vec4<f64>,
@@ -87,7 +94,7 @@ fn lat_find(key: u64) -> u32 {
     let mask = arrayLength(&lat_flags) - 1u;
     var k = u32(mix64(key)) & mask;
     for (var i = 0u; i < 64u; i++) {
-        let v = atomicLoad(&lat_keys[k]);
+        let v = lat_keys_ro[k];
         if (v == key) {
             return k;
         }
@@ -164,6 +171,16 @@ fn in_shell(bx: DBox, c: vec3<i32>) -> bool {
     return ci[ax] >= k0 && ci[ax] <= k1;
 }
 
+/// Can the cell hold a lattice point near the surface? (a conservative f32 test on the cell
+/// centre's distance from the Earth's centre: a filter only, `lat_maybe_active` decides)
+fn near_shell(bx: DBox, c: vec3<i32>) -> bool {
+    let cell = f32(bx.cell);
+    let m = (vec3<f32>(c) + 0.5) * cell;
+    let r = length(m);
+    let slack = 0.87 * cell + 1000.0;
+    return r >= sqrt(f32(bx.r_lo2)) - slack && r <= sqrt(f32(bx.r_hi2)) + slack;
+}
+
 /// Cell `i` (linear, z, y, x order) of the box.
 fn box_cell(bx: DBox, i: u32) -> vec3<i32> {
     let x = i % bx.dims.x;
@@ -195,7 +212,7 @@ fn lat_enum(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_inde
             break;
         }
         let c = box_cell(bx, i);
-        if (!in_shell(bx, c) || !lat_maybe_active(bx.level, c)) {
+        if (!near_shell(bx, c) || surely_inactive(bx.level, c) || !lat_maybe_active(bx.level, c)) {
             continue;
         }
         let key = lat_key(bx.level, c);
@@ -281,7 +298,7 @@ fn lat_heights(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workg
         return;
     }
     let s = new_list[i];
-    let key = atomicLoad(&lat_keys[s]);
+    let key = lat_keys_ro[s];
     let lvl = lat_level(key);
     let c = lat_cell(key);
     let p = lat_point(lvl, c);
@@ -309,8 +326,24 @@ fn lat_heights(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workg
 
 // ---------------------------------------------------------------- targets, sources
 
+/// Is no point of the cell anywhere near the surface? (a cheap f32 test with a wide margin:
+/// the cell's point lies within 0.9 cells of its centre per axis)
+fn surely_inactive(lvl: u32, c: vec3<i32>) -> bool {
+    let cell = cfg.lvl_a[lvl].x;
+    let m = (vec3<f32>(c) + 0.5) * cell;
+    let r = length(m);
+    let a = f32(cfg.ell_a);
+    let b = f32(cfg.ell_b);
+    let sz = m.z / max(r, 1.0);
+    let r_gc = a * b / sqrt(b * b * (1.0 - sz * sz) + a * a * sz * sz);
+    return abs(r - r_gc) > 2.1 * cell + 300.0;
+}
+
 /// A neighbour: 0 inactive, 1 active (slot in `slot`), 2 unknown (not evaluated yet).
 fn neighbour(lvl: u32, c: vec3<i32>, slot: ptr<function, u32>) -> u32 {
+    if (surely_inactive(lvl, c)) {
+        return 0u;
+    }
     let s = lat_find(lat_key(lvl, c));
     if (s == LAT_NONE) {
         if (lat_maybe_active(lvl, c)) {
@@ -326,19 +359,59 @@ fn neighbour(lvl: u32, c: vec3<i32>, slot: ptr<function, u32>) -> u32 {
     return select(0u, 1u, (f & LF_ACTIVE) != 0u);
 }
 
-/// Downstream neighbour (steepest descent) of every active point that lacks one
-/// (`World::flow_target`); points with neighbours not evaluated yet wait.
+/// The slot of the active lattice point at chunk cell `k` (LAT_NONE: none).
+fn chunk_slot(gid: vec3<u32>, wg: vec3<u32>, li: u32, nwg: vec3<u32>, k: u32, extra: f32) -> u32 {
+    let chunk = wg.x + wg.y * nwg.x;
+    if (chunk >= arrayLength(&chunk_box)) {
+        return LAT_NONE;
+    }
+    let bx = boxes[chunk_box[chunk]];
+    let i = (chunk - bx.chunk0) * CHUNK + k;
+    if (i >= box_size(bx)) {
+        return LAT_NONE;
+    }
+    let c = box_cell(bx, i);
+    if (!near_shell(bx, c) || surely_inactive(bx.level, c) || !lat_maybe_active(bx.level, c)) {
+        return LAT_NONE;
+    }
+    let s = lat_find(lat_key(bx.level, c));
+    if (s == LAT_NONE || (lat_flags[s] & LF_ACTIVE) == 0u) {
+        return LAT_NONE;
+    }
+    // (only the points within reach of the query, plus `extra` cells)
+    if (f64(dist64(lat_s[s].xyz, bx.center.xyz)) > bx.reach + f64(extra) * bx.cell) {
+        return LAT_NONE;
+    }
+    return s;
+}
+
+/// Queue the active points of the boxes that lack a downstream neighbour (each point once).
+@compute @workgroup_size(256)
+fn mark_targets(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) li: u32, @builtin(num_workgroups) nwg: vec3<u32>) {
+    for (var k = li; k < CHUNK; k += 256u) {
+        // (the nodes' 2-cell neighbourhoods: within 2·√3 + 2·0.8·√3 cells)
+        let s = chunk_slot(gid, wg, li, nwg, k, 6.2);
+        if (s != LAT_NONE && (lat_flags[s] & LF_TGT) == 0u && (atomicOr(&lat_mark[s], 1u) & 1u) == 0u) {
+            let j = atomicAdd(&dcount[5], 1u);
+            if (j < arrayLength(&work_t)) {
+                work_t[j] = s;
+            }
+        }
+    }
+}
+
+/// Downstream neighbours (steepest descent) of the queued points (`World::flow_target`).
 @compute @workgroup_size(64)
 fn lat_targets(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>) {
-    let s = gid.x + gid.y * nwg.x * 64u;
-    if (s >= arrayLength(&lat_flags)) {
-        return;
+    let i = gid.x + gid.y * nwg.x * 64u;
+    if (i < min(atomicLoad(&dcount[5]), arrayLength(&work_t))) {
+        lat_target(work_t[i]);
     }
+}
+
+fn lat_target(s: u32) {
     let f = lat_flags[s];
-    if ((f & (LF_ACTIVE | LF_TGT)) != LF_ACTIVE) {
-        return;
-    }
-    let key = atomicLoad(&lat_keys[s]);
+    let key = lat_keys_ro[s];
     let lvl = lat_level(key);
     let c = lat_cell(key);
     let cell = f32(lvl_cell(lvl));
@@ -407,18 +480,36 @@ fn lat_targets(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workg
     lat_flags[s] = f | LF_TGT;
 }
 
-/// Is every active point with a target a source (nothing drains into it)? (`World::is_source`)
+
+/// Queue the active points of the boxes that are not known to be sources or not (each once).
+@compute @workgroup_size(256)
+fn mark_sources(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) li: u32, @builtin(num_workgroups) nwg: vec3<u32>) {
+    for (var k = li; k < CHUNK; k += 256u) {
+        let s = chunk_slot(gid, wg, li, nwg, k, 0.0);
+        if (s != LAT_NONE && (lat_flags[s] & LF_SRC) == 0u && (atomicOr(&lat_mark[s], 2u) & 2u) == 0u) {
+            let j = atomicAdd(&dcount[6], 1u);
+            if (j < arrayLength(&work_s)) {
+                work_s[j] = s;
+            }
+        }
+    }
+}
+
+/// Are the queued points sources (nothing drains into them)? (`World::is_source`)
 @compute @workgroup_size(64)
 fn lat_sources(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>) {
-    let s = gid.x + gid.y * nwg.x * 64u;
-    if (s >= arrayLength(&lat_flags)) {
-        return;
+    let i = gid.x + gid.y * nwg.x * 64u;
+    if (i < min(atomicLoad(&dcount[6]), arrayLength(&work_s))) {
+        let s = work_s[i];
+        if ((lat_flags[s] & (LF_TGT | LF_SRC)) == LF_TGT) {
+            lat_source(s);
+        }
     }
+}
+
+fn lat_source(s: u32) {
     let f = lat_flags[s];
-    if ((f & (LF_ACTIVE | LF_TGT | LF_SRC)) != (LF_ACTIVE | LF_TGT)) {
-        return;
-    }
-    let key = atomicLoad(&lat_keys[s]);
+    let key = lat_keys_ro[s];
     let lvl = lat_level(key);
     let c = lat_cell(key);
     for (var dz = -2; dz <= 2; dz++) {
@@ -478,7 +569,7 @@ fn lat_width(lvl: u32, c: vec3<i32>) -> vec2<f32> {
 fn node_pieces(bx: DBox, i: u32, write: bool, base: u32) -> u32 {
     let c = box_cell(bx, i);
     let lvl = bx.level;
-    if (!in_shell(bx, c) || !lat_maybe_active(lvl, c)) {
+    if (!near_shell(bx, c) || surely_inactive(lvl, c) || !in_shell(bx, c) || !lat_maybe_active(lvl, c)) {
         return 0u;
     }
     let s = lat_find(lat_key(lvl, c));
@@ -538,7 +629,7 @@ fn node_pieces(bx: DBox, i: u32, write: bool, base: u32) -> u32 {
     if (tt != LAT_NONE) {
         let qs = lat_s[tt].xyz;
         let qh = lat_h[tt];
-        let hw2 = lat_width(lvl, lat_cell(atomicLoad(&lat_keys[t]))).x;
+        let hw2 = lat_width(lvl, lat_cell(lat_keys_ro[t])).x;
         let mid2 = 0.5lf * (ts + qs);
         let hmid2 = 0.5 * (th + qh);
         for (var k = 0u; k < 6u; k++) {

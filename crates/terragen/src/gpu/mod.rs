@@ -144,7 +144,9 @@ struct Kernels {
 struct DrainKernels {
     enumerate: wgpu::ComputePipeline,
     heights: wgpu::ComputePipeline,
+    mark_targets: wgpu::ComputePipeline,
     targets: wgpu::ComputePipeline,
+    mark_sources: wgpu::ComputePipeline,
     sources: wgpu::ComputePipeline,
     count: wgpu::ComputePipeline,
     scan: wgpu::ComputePipeline,
@@ -155,16 +157,22 @@ struct DrainKernels {
 /// their surface point, height, flags and flow target; kept across batches.
 struct Lattice {
     keys: wgpu::Buffer,
+    /// the keys after the last enumeration (read-only lookups)
+    keys_ro: wgpu::Buffer,
     s: wgpu::Buffer,
     h: wgpu::Buffer,
     flags: wgpu::Buffer,
     tgt: wgpu::Buffer,
+    /// per slot: queued for a target / source in this batch; the work lists
+    mark: wgpu::Buffer,
+    work_t: wgpu::Buffer,
+    work_s: wgpu::Buffer,
     cap: usize,
     used: usize,
 }
 
 /// Lattice table slots (~50 bytes each).
-const LAT_CAP: usize = 1 << 22;
+const LAT_CAP: usize = 1 << 23;
 /// Lattice cells per enumeration / gather chunk.
 const CHUNK: usize = 4096;
 
@@ -228,7 +236,7 @@ impl GpuGenerator {
         let l_drain = layout(d, "drain", &[Ro, Ro, Ro, Ro, Ro]);
         let l_tables = layout(d, "tables", &[Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro]);
         let l_points = layout(d, "points", &[Ro, Rw, Rw, Rw]);
-        let l_lat = layout(d, "drainage", &[Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Ro]);
+        let l_lat = layout(d, "drainage", &[Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw]);
         let l_tile = layout(d, "tile", &[Ro, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw]);
         let globals = bind(d, &l_globals, &[&g_cfg, &g_grads, &g_octs, &g_fbms, &g_pal]);
         let (src_points, src_tile, src_drain) = sources();
@@ -245,7 +253,7 @@ impl GpuGenerator {
         };
         // (the driver compiles each pipeline on its own: in parallel)
         let names = ["grid_nodes", "pass_a1", "bin_segments", "pass_a2", "region_requests", "town_requests", "pass_b", "open_min_x", "open_min_y", "open_max_x", "open_max_y", "open_apply", "finish"];
-        let dnames = ["lat_enum", "lat_heights", "lat_targets", "lat_sources", "gather_count", "gather_scan", "gather_write"];
+        let dnames = ["lat_enum", "lat_heights", "mark_targets", "lat_targets", "mark_sources", "lat_sources", "gather_count", "gather_scan", "gather_write"];
         let (points, mut tile, mut drain): (wgpu::ComputePipeline, Vec<wgpu::ComputePipeline>, Vec<wgpu::ComputePipeline>) = std::thread::scope(|s| {
             let hs: Vec<_> = names.iter().map(|n| s.spawn(|| pipe(&m_tile, &pl_tile, n))).collect();
             let hd: Vec<_> = dnames.iter().map(|n| s.spawn(|| pipe(&m_drain, &pl_drain, n))).collect();
@@ -253,7 +261,7 @@ impl GpuGenerator {
             (points, hs.into_iter().map(|h| h.join().expect("pipeline")).collect(), hd.into_iter().map(|h| h.join().expect("pipeline")).collect())
         });
         let mut dk = || drain.remove(0);
-        let dk = DrainKernels { enumerate: dk(), heights: dk(), targets: dk(), sources: dk(), count: dk(), scan: dk(), write: dk() };
+        let dk = DrainKernels { enumerate: dk(), heights: dk(), mark_targets: dk(), targets: dk(), mark_sources: dk(), sources: dk(), count: dk(), scan: dk(), write: dk() };
         if let Some(c) = &cache {
             c.save();
         }
@@ -285,10 +293,14 @@ impl GpuGenerator {
         };
         let lat = Lattice {
             keys: output(d, "lattice keys", (LAT_CAP * 8) as u64),
+            keys_ro: output(d, "lattice keys (copy)", (LAT_CAP * 8) as u64),
             s: output(d, "lattice points", (LAT_CAP * 32) as u64),
             h: output(d, "lattice heights", (LAT_CAP * 4) as u64),
             flags: output(d, "lattice flags", (LAT_CAP * 4) as u64),
             tgt: output(d, "lattice targets", (LAT_CAP * 4) as u64),
+            mark: output(d, "lattice marks", (LAT_CAP * 4) as u64),
+            work_t: output(d, "target work", (LAT_CAP * 4) as u64),
+            work_s: output(d, "source work", (LAT_CAP * 4) as u64),
             cap: LAT_CAP,
             used: 0,
         };
@@ -300,7 +312,7 @@ impl GpuGenerator {
     /// area: one drainage query per group, filtered per point (`DR_KEEP`).
     fn eval_points(&self, reqs: &[PointReq], lakes: &FxLakes) -> Result<(Vec<GTerrain>, Vec<Vec<(DVec3, f64)>>)> {
         const GROUP: f64 = 30_000.0;
-        const GROUPS_PER_PASS: usize = 256;
+        const GROUPS_PER_PASS: usize = 2048;
         let d = &self.gpu.device;
         let mut groups: crate::noise::FxHashMap<(u64, (i64, i64, i64)), Vec<usize>> = Default::default();
         for (i, r) in reqs.iter().enumerate() {
@@ -383,6 +395,7 @@ impl GpuGenerator {
         let w = &self.world;
         let ell = w.ell;
         let mut boxes_e: Vec<GBox> = Vec::new();
+        let mut boxes_t: Vec<GBox> = Vec::new();
         let mut boxes_g: Vec<GBox> = Vec::new();
         let mut q_boxes: Vec<[u32; 2]> = Vec::new();
         for (qi, q) in queries.iter().enumerate() {
@@ -398,6 +411,7 @@ impl GpuGenerator {
                     let hi = ((q.center + DVec3::splat(reach)) / cell).floor();
                     boxes_g.push(dbox(&ell, q.center, lo, hi, cell, reach, lvl, qi, q.radius));
                     boxes_e.push(dbox(&ell, q.center, lo - DVec3::splat(4.0), hi + DVec3::splat(4.0), cell, reach, lvl, qi, q.radius));
+                    boxes_t.push(dbox(&ell, q.center, lo - DVec3::splat(2.0), hi + DVec3::splat(2.0), cell, reach, lvl, qi, q.radius));
                 }
             }
             q_boxes.push([first as u32, (boxes_g.len() - first) as u32]);
@@ -412,12 +426,16 @@ impl GpuGenerator {
             out
         };
         let chunks_e = chunks(&mut boxes_e);
+        let chunks_t = chunks(&mut boxes_t);
         let chunks_g = chunks(&mut boxes_g);
+        let t_drain = std::time::Instant::now();
         let mut lat = self.lat.lock().unwrap();
         let mut seg_cap = (1usize << 18).max(queries.len() * 64);
         let sink_cap = 1usize << 16;
         let b_boxes_e = storage(d, "boxes", &boxes_e);
         let b_chunks_e = storage(d, "chunks", &chunks_e);
+        let b_boxes_t = storage(d, "boxes", &boxes_t);
+        let b_chunks_t = storage(d, "chunks", &chunks_t);
         let b_boxes_g = storage(d, "boxes", &boxes_g);
         let b_chunks_g = storage(d, "chunks", &chunks_g);
         let b_qboxes = storage(d, "query boxes", &q_boxes);
@@ -430,9 +448,9 @@ impl GpuGenerator {
             let gx = g.min(65535);
             [gx, g.div_ceil(gx), 1]
         };
-        let run = |lat: &Lattice, enc: &mut wgpu::CommandEncoder, new_list: &wgpu::Buffer, segs: &wgpu::Buffer, boxes: &wgpu::Buffer, chunks: &wgpu::Buffer, passes: &[(&wgpu::ComputePipeline, [u32; 3])]| {
+        let run = |lat: &Lattice, keys_ro: &wgpu::Buffer, enc: &mut wgpu::CommandEncoder, new_list: &wgpu::Buffer, segs: &wgpu::Buffer, boxes: &wgpu::Buffer, chunks: &wgpu::Buffer, passes: &[(&wgpu::ComputePipeline, [u32; 3])]| {
             let g1 = bind(d, &self.k.l_drain, &[&b_dummy(d), &b_dummy(d), &b_dummy(d), &b_dummy(d), &b_dummy(d)]);
-            let g2 = bind(d, &self.k.l_lat, &[&lat.keys, &lat.s, &lat.h, &lat.flags, &lat.tgt, boxes, chunks, new_list, &b_count, segs, &b_chunk_n, &b_range, &b_sinks, &b_qboxes]);
+            let g2 = bind(d, &self.k.l_lat, &[&lat.keys, &lat.s, &lat.h, &lat.flags, &lat.tgt, boxes, chunks, new_list, &b_count, segs, &b_chunk_n, &b_range, &b_sinks, &b_qboxes, keys_ro, &lat.mark, &lat.work_t, &lat.work_s]);
             let mut cp = enc.begin_compute_pass(&Default::default());
             cp.set_bind_group(0, &self.globals, &[]);
             cp.set_bind_group(1, &g1, &[]);
@@ -447,9 +465,10 @@ impl GpuGenerator {
         let new_cap = n_cells.min(lat.cap).max(1);
         let b_new = output(d, "new lattice points", (new_cap * 4) as u64);
         let dummy_segs = output(d, "-", 256);
+        let dummy_ro = output(d, "-", 256);
         let mut n_new = 0usize;
         for attempt in 0..2 {
-            if lat.used > lat.cap / 2 || attempt == 1 {
+            if lat.used > lat.cap * 3 / 5 || attempt == 1 {
                 let mut enc = d.create_command_encoder(&Default::default());
                 enc.clear_buffer(&lat.keys, 0, None);
                 enc.clear_buffer(&lat.flags, 0, None);
@@ -459,8 +478,9 @@ impl GpuGenerator {
             let mut enc = d.create_command_encoder(&Default::default());
             enc.clear_buffer(&b_count, 0, None);
             if !chunks_e.is_empty() {
-                run(&lat, &mut enc, &b_new, &dummy_segs, &b_boxes_e, &b_chunks_e, &[(&self.k.dk.enumerate, wg2(chunks_e.len()))]);
+                run(&lat, &dummy_ro, &mut enc, &b_new, &dummy_segs, &b_boxes_e, &b_chunks_e, &[(&self.k.dk.enumerate, wg2(chunks_e.len()))]);
             }
+            enc.copy_buffer_to_buffer(&lat.keys, 0, &lat.keys_ro, 0, (lat.cap * 8) as u64);
             self.gpu.queue.submit([enc.finish()]);
             let c: Vec<u32> = read_back(&self.gpu, &b_count, 8)?;
             n_new = c[0] as usize;
@@ -472,25 +492,40 @@ impl GpuGenerator {
             }
         }
         lat.used += n_new;
+        let prof = std::env::var_os("TERRAGEN_PROFILE").is_some();
+        let t_enum = t_drain.elapsed().as_secs_f64();
         // ---- heights, targets, sources, the queries' pieces
         loop {
             let b_segs = output(d, "drainage pieces", (seg_cap * std::mem::size_of::<GSeg>()) as u64);
             let mut enc = d.create_command_encoder(&Default::default());
             enc.clear_buffer(&b_count, 12, None);
-            let all = lat.cap.div_ceil(64);
-            run(&lat, &mut enc, &b_new, &b_segs, &b_boxes_g, &b_chunks_g, &[(&self.k.dk.heights, wg2(n_new.div_ceil(64))), (&self.k.dk.targets, wg2(all)), (&self.k.dk.sources, wg2(all))]);
-            if !chunks_g.is_empty() {
-                run(
-                    &lat,
-                    &mut enc,
-                    &b_new,
-                    &b_segs,
-                    &b_boxes_g,
-                    &b_chunks_g,
-                    &[(&self.k.dk.count, wg2(chunks_g.len())), (&self.k.dk.scan, [(queries.len() as u32).div_ceil(64).max(1), 1, 1]), (&self.k.dk.write, wg2(chunks_g.len()))],
-                );
+            enc.clear_buffer(&lat.mark, 0, None);
+            // (targets: the gather boxes and 2 cells around, for the sources and the next edge)
+            let passes: Vec<(&str, &wgpu::ComputePipeline, [u32; 3], &wgpu::Buffer, &wgpu::Buffer)> = vec![
+                ("heights", &self.k.dk.heights, wg2(n_new.div_ceil(64)), &b_boxes_g, &b_chunks_g),
+                ("mark_t", &self.k.dk.mark_targets, wg2(chunks_t.len()), &b_boxes_t, &b_chunks_t),
+                ("targets", &self.k.dk.targets, wg2(lat.cap.min(n_cells).div_ceil(64)), &b_boxes_t, &b_chunks_t),
+                ("mark_s", &self.k.dk.mark_sources, wg2(chunks_g.len()), &b_boxes_g, &b_chunks_g),
+                ("sources", &self.k.dk.sources, wg2(lat.cap.min(n_cells).div_ceil(64)), &b_boxes_g, &b_chunks_g),
+                ("count", &self.k.dk.count, wg2(chunks_g.len()), &b_boxes_g, &b_chunks_g),
+                ("scan", &self.k.dk.scan, [(queries.len() as u32).div_ceil(64).max(1), 1, 1], &b_boxes_g, &b_chunks_g),
+                ("write", &self.k.dk.write, wg2(chunks_g.len()), &b_boxes_g, &b_chunks_g),
+            ];
+            let mut times = String::new();
+            for (name, p, n, bx, ch) in &passes {
+                let t = std::time::Instant::now();
+                run(&lat, &lat.keys_ro, &mut enc, &b_new, &b_segs, bx, ch, &[(p, *n)]);
+                if prof {
+                    // each pass on its own (timing)
+                    self.gpu.queue.submit([std::mem::replace(&mut enc, d.create_command_encoder(&Default::default())).finish()]);
+                    d.poll(wgpu::PollType::wait_indefinitely())?;
+                    times += &format!(" {name} {:.3}", t.elapsed().as_secs_f64());
+                }
             }
             self.gpu.queue.submit([enc.finish()]);
+            if prof {
+                eprintln!("    drainage passes:{times}");
+            }
             n_new = 0;
             let c: Vec<u32> = read_back(&self.gpu, &b_count, 8)?;
             if c[2] != 0 {
@@ -504,6 +539,17 @@ impl GpuGenerator {
             let nsink = c[4] as usize;
             if nsink > sink_cap {
                 bail!("GPU generator: {nsink} sink pieces in one drainage batch (at most {sink_cap})");
+            }
+            if prof {
+                eprintln!(
+                    "    drainage: {} queries, {} cells, {} new points, {} pieces: enumerate {:.3} s, all {:.3} s",
+                    queries.len(),
+                    n_cells,
+                    lat.used,
+                    total,
+                    t_enum,
+                    t_drain.elapsed().as_secs_f64()
+                );
             }
             let ranges: Vec<[u32; 2]> = if queries.is_empty() { vec![] } else { read_back(&self.gpu, &b_range, queries.len())? };
             let mut sp: Vec<GSinkPiece> = read_back(&self.gpu, &b_sinks, nsink)?;

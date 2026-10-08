@@ -112,13 +112,16 @@ and builds the same world:
 * **Agreement:** tiles agree with the CPU's to f32 precision. On test tiles from z3 to z16, at
   most 0.01% of the pixels differ by more than 2 DN or 5 cm (`cargo test -p terragen
   gpu::tests`), so both write generator version 3 and can share a store.
-* **Split of the work:** per pixel and per point everything runs on the GPU: macro fields, the
+* **Split of the work:** everything per pixel and per point runs on the GPU: macro fields, the
   coarse grid, relief, river carving, lakes, land use, the surface with its trees, fields, towns
-  and lights, the canopy opening and the output layers. The parts that are graphs or site lists
-  stay on the host (`gpu/host.rs`): the drainage network (flow targets, sources, channel
-  pieces), lake levels, regions, towns and their overlaps. Their inputs come from batched GPU
-  point evaluations, cached across batches. The GPU reports which lakes, regions and town cells
-  a batch needs.
+  and lights, the canopy opening and the output layers.
+  * **Drainage network** (`drain.wgsl`): the jittered lattice points of every level live in a
+    GPU hash table kept across batches. The table holds their heights, flow targets (steepest
+    descent), sources, and each query's channel pieces, gathered in the CPU's lattice order.
+  * **Host** (`gpu/host.rs`): only site lists remain: lake levels (minimum over the rim), sink
+    lakes, land-use regions, towns and their overlaps. Their inputs come from batched GPU point
+    evaluations, cached across batches. The GPU reports which lakes, regions and town cells a
+    batch needs.
 * **Batches:** 16 tiles per batch (~25 MB of GPU memory per tile). Kernels: grid nodes → relief
   (and lake requests) → drainage pieces per 16-px bin → rest of pass A (and site requests) →
   pass B (adaptive supersampling) → canopy opening → output layers.
@@ -128,15 +131,12 @@ and builds the same world:
 | | CPU (8 threads) | GPU (RTX 2080 Ti) |
 |---|---|---|
 | 64 tiles at z15 / z13 (cold caches) | 12.7 s / 13.5 s (5 tiles/s) | 1.1 s (60 tiles/s) |
-| `configs/quick.yaml` planned tiles (357, z0–z17) | 57.6 s | 9.0 s |
-| its completion (280 tiles, mostly z1–z8 near the poles) | 148 s | 105 s |
-| `terrain view` snapshot from an empty store (592 tiles, the whole globe at z3–z4) | 323 s | 256 s |
+| `configs/quick.yaml` planned tiles (357, z0–z17) | 57.6 s | 5.7 s |
+| its completion (280 tiles, mostly z1–z8 near the poles) | 148 s | 13 s |
+| `terrain view` snapshot from an empty store (592 tiles, the whole globe at z3–z4) | 323 s | 33 s |
 
-Tiles of zoom 9 and above are 6–12× faster. Low-zoom tiles gain much less, for two reasons:
+Low-zoom tiles are the most work per tile on both backends, for two reasons:
 * **Polar pixels:** a Mercator pixel of z3 at 80° is 3.4 km, so lakes and land-use regions
-  switch on over areas of thousands of kilometres.
+  switch on over thousands of kilometres.
 * **Lake levels:** every lake's level takes 11 terrain evaluations with the finest drainage
   network around it.
-
-That host-side graph work (`gpu/host.rs`, parallel over CPU threads) then dominates. Moving the
-drainage graph to the GPU is the next step for them.
