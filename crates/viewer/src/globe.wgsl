@@ -168,7 +168,9 @@ fn fs(i: VOut) -> @location(0) vec4<f32> {
         water = d.cap_color.a > 0.5;
     } else {
         let c = textureSample(color_tex, samp, i.suv, d.layer);
-        let lc = u32(round(c.a * 255.0));
+        // the class of the nearest texel (filtering blends class ids into other classes)
+        let ci = clamp(vec2<i32>(floor(i.suv * 256.0)), vec2<i32>(0), vec2<i32>(255));
+        let lc = u32(round(textureLoad(color_tex, ci, d.layer, 0).a * 255.0));
         water = lc == 1u || lc == 2u || lc == 3u;
         var gr = textureSample(grad_tex, samp, i.suv, d.layer).xy * exag;
         // walls of buildings are steps of metres over one texel: cap the slope (~50 deg) so they

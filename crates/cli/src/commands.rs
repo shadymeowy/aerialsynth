@@ -367,7 +367,12 @@ pub struct ViewArgs {
 pub fn view(a: ViewArgs) -> Result<()> {
     let s = setup(&a.common)?;
     let gen = Generator::new(s.world.clone());
-    let store = pipeline::open_or_create_store(&s, &gen)?;
+    // (read-only without generation: a store of another generator version can be viewed)
+    let store = if a.view.no_generate {
+        gen.open_store_ro(&s.tiles.file).with_context(|| format!("opening the tile store {} (without --no-generate it is created)", s.tiles.file.display()))?
+    } else {
+        pipeline::open_or_create_store(&s, &gen)?
+    };
     viewer::run(s, Arc::new(store), Arc::new(gen), a.view)
 }
 

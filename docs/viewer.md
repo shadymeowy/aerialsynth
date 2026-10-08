@@ -16,7 +16,8 @@ terrain view -c configs/view.yaml --camera-view    # fly the camera through the 
 ```
 
 Both views share one flight and one tile store. By default the tiles a view wants are
-generated in the background and stored (`--no-generate`: stored tiles only). On start, levels
+generated in the background and stored (`--no-generate`: stored tiles only, the store opened
+read-only, so a store of another generator version can be viewed). On start, levels
 z0..=`--base-zoom` (4) are completed for the whole planet (341 tiles, ~4 min on 8 threads).
 
 Run it on the machine's own display (on this machine the local X server is `:1`). Over SSH X
@@ -53,8 +54,8 @@ forwarding it runs, but slowly.
 | `--camera-view` | | open the camera view |
 | `--fly free\|plane` | | start flying instead of orbiting |
 | `--start lat,lon,agl` | home, 600 m | where to start (deg, deg, m above the ground) |
-| `--no-generate` | | stored tiles only |
-| `--max-zoom`, `--base-zoom` | `tiles.max_zoom`, 4 | deepest generated level; levels completed on start |
+| `--no-generate` | | stored tiles only (read-only) |
+| `--max-zoom`, `--base-zoom` | `tiles.max_zoom`, 4 | deepest generated level (map and camera; the camera renders no deeper than `tiles.max_zoom`); levels completed on start |
 | `--camera PATH` | first camera with `rgb` | the scenario camera; without one, a 960×540 forward camera |
 | `--scale F` | ≤ 960 px wide | camera resolution factor (pinhole-type models) |
 | `--supersample N` | 1 | camera supersampling |
@@ -151,6 +152,10 @@ look:     # switches of the shading mode and tile borders, dissolving over `fade
   logarithmically (an even zoom from orbit to the ground), easing in at the first key and out at
   the last. Omitted: heading and tilt 0 (north up, straight down), exaggeration 1, fov 40°.
 - **Look:** a switch holds until the next one that sets the same thing.
+- **Target height:** the orbit target sits on the z12 DSM (bilinear; tiles the store lacks are
+  generated in memory), faded in below 400 km: the recorded path is the same in every run,
+  whatever tiles have streamed in. Looking straight down, `frames.csv` gives roll 0 and the yaw
+  of the image's up direction.
 
 ```sh
 terrain view -c configs/view.yaml --record out/dive --path showcase/globe/dive.yaml --size 1920x1080

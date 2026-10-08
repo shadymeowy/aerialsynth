@@ -450,7 +450,9 @@ impl App {
 
     fn tiles_section(&mut self, ui: &mut egui::Ui) {
         let st = self.svc.stats();
-        ui.checkbox(&mut self.s.dynamic, "Generate missing tiles").on_hover_text("generate the tiles the view wants and store them");
+        ui.add_enabled(self.svc.store.writable(), egui::Checkbox::new(&mut self.s.dynamic, "Generate missing tiles"))
+            .on_hover_text("generate the tiles the view wants and store them")
+            .on_disabled_hover_text("the store is open read-only (--no-generate)");
         let generated = st.generated.load(Ordering::Relaxed);
         let dt = self.rate_mark.0.elapsed().as_secs_f64();
         if dt > 1.0 {
@@ -618,7 +620,7 @@ impl App {
         if let (Some(c), Some(f)) = (&mut self.camview, &self.fly) {
             let ell = self.globe.ellipsoid();
             let pose = render::Pose { t: wall, geo: f.geodetic(&ell), q_ned_body: geodesy::euler_zyx_to_quat(f.heading, f.pitch, f.roll) };
-            c.request(pose, wall, self.s.dynamic);
+            c.request(pose, wall, self.s.dynamic, self.s.gen_max_zoom);
             c.show(ui, rect);
         }
     }

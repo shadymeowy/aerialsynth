@@ -3,7 +3,7 @@
 //!
 //! The view sends the tiles it wants every frame (most important first); workers take the first
 //! ones that are not in flight. The base levels (z0..=base) are generated unconditionally;
-//! deeper tiles only while dynamic generation is on.
+//! deeper tiles only while dynamic generation is on. A read-only store generates nothing.
 
 use geodesy::tiles::{gsd_ew, gsd_ns, pixel_to_latlon, TileId};
 use glam::DVec2;
@@ -67,9 +67,10 @@ pub struct Service {
 }
 
 impl Service {
-    /// Start the workers; `base` lists the base tiles to generate if missing.
+    /// Start the workers; `base` lists the base tiles to generate if missing (and the store is
+    /// writable).
     pub fn start(store: Arc<TileStore>, gen: Arc<Generator>, base: Vec<TileId>, gen_batch: usize, repaint: impl Fn() + Send + Sync + 'static) -> Service {
-        let missing: VecDeque<TileId> = base.into_iter().filter(|t| !store.contains(*t)).collect();
+        let missing: VecDeque<TileId> = base.into_iter().filter(|t| store.writable() && !store.contains(*t)).collect();
         let shared = Arc::new(Shared {
             state: Mutex::new(State { base: missing.clone(), ..Default::default() }),
             cv: Condvar::new(),
@@ -84,7 +85,7 @@ impl Service {
             let (sh, st) = (shared.clone(), store.clone());
             threads.push(std::thread::Builder::new().name(format!("tile-load-{k}")).spawn(move || loader(sh, st)).unwrap());
         }
-        {
+        if store.writable() {
             let (sh, st, g) = (shared.clone(), store.clone(), gen.clone());
             threads.push(std::thread::Builder::new().name("tile-gen".into()).spawn(move || generator(sh, st, g, gen_batch.max(1))).unwrap());
         }
@@ -119,7 +120,11 @@ impl Service {
 
 impl Drop for Service {
     fn drop(&mut self) {
-        self.shared.stop.store(true, Ordering::Relaxed);
+        {
+            // (under the lock: a worker between its stop check and `wait` would miss the wakeup)
+            let _s = self.shared.state.lock();
+            self.shared.stop.store(true, Ordering::Relaxed);
+        }
         self.shared.cv.notify_all();
         for t in self.threads.drain(..) {
             let _ = t.join();
