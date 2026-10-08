@@ -64,3 +64,35 @@ fn lod_consistency() {
     let mean_err = err / cnt;
     assert!(mean_err < 6.0, "mean |parent - avg(children)| = {mean_err} m");
 }
+
+/// The normals of a tile's bottom row (from pass B's apron) agree with the pixels of its
+/// southern neighbour, i.e. both tiles produce the same terrain there. Rows 5609 / 5610 at z14
+/// straddle 49.2°N, where the switch between grid-interpolated and exact gully inputs used to be
+/// decided per tile from its centre latitude (mountains near 178°W: steps of up to 17 m).
+#[test]
+fn seamless_north_south() {
+    use geodesy::tiles::{gsd_ew, gsd_ns, pixel_to_latlon};
+    use glam::{DVec2, DVec3};
+    let g = gen();
+    let ell = g.world.ell;
+    let n = TILE_SIZE;
+    let (z, x, y) = (14u8, 91u32, 5609u32);
+    let a = g.tile(TileId::new(z, x, y));
+    let b = g.tile(TileId::new(z, x, y + 1));
+    let h = |t: &terragen::TileData, i: usize, j: usize| t.elevation[j * n + i] as f64;
+    let j = n - 1;
+    let (lat, _) = pixel_to_latlon(DVec2::new(0.0, y as f64 * n as f64 + j as f64 + 0.5), z, n as u32);
+    let (gx, gy) = (gsd_ew(lat, z, n as u32, &ell), gsd_ns(lat, z, n as u32, &ell));
+    let mut bad = 0;
+    for i in 1..n - 1 {
+        // the normal as the tile computes it (ENU, central differences), with the neighbour's
+        // first row in place of the apron
+        let v = DVec3::new(-(h(&a, i + 1, j) - h(&a, i - 1, j)) / (2.0 * gx), (h(&b, i, 0) - h(&a, i, j - 1)) / (2.0 * gy), 1.0).normalize();
+        let k = 3 * (j * n + i);
+        let d = (0..3).map(|c| ((v[c] * 127.0).round() as i32 - a.normal[k + c] as i32).abs()).max().unwrap();
+        if d > 1 {
+            bad += 1;
+        }
+    }
+    assert!(bad <= 2, "{bad} of {} bottom-edge normals disagree with the southern neighbour", n - 2);
+}

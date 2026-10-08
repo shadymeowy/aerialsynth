@@ -139,9 +139,15 @@ impl Generator {
         // ---------------- macro fields: on a coarse grid aligned to global multiples of 16 px
         // (shared by neighbouring tiles → seamless), or exactly at low zooms where the grid would
         // be too coarse for the macro wavelengths.
-        let (lat_c, _) = pixel_to_latlon(DVec2::new(ox + 128.0, oy + 128.0), z, n as u32);
-        let use_grid = 16.0 * gsd_ew(lat_c, z, n as u32, &ell) <= 2000.0;
         const G: f64 = 16.0;
+        // The grid / exact choices below depend on the zoom only: the node spacing at
+        // GRID_REF_LAT. (Taken at each tile's centre latitude, the north-south neighbours at the
+        // switch latitudes took different paths for adjacent pixels: seams of up to 17 m.) At
+        // 40° the choices equal the old per-tile ones for tile centres between 35.2° and 49.1°;
+        // towards the equator the grid spacing is up to 1.3× the limits below.
+        const GRID_REF_LAT: f64 = 40.0;
+        let g_m = G * gsd_ew(GRID_REF_LAT.to_radians(), z, n as u32, &ell);
+        let use_grid = g_m <= 2000.0;
         // two nodes beyond the 2-px apron on each side: bicubic needs a 4x4 neighbourhood
         let gk0x = (ox / G) as i64 - 2;
         let gk0y = (oy / G) as i64 - 2;
@@ -150,7 +156,6 @@ impl Generator {
         // fraction of their shortest wavelength, else evaluated exactly per pixel: the mountain
         // domain warp (>= 7.5 km), the low-passed relief gradient for the gullies (>= 700 m) and
         // the road networks (band-limited at >= 200 m).
-        let g_m = G * gsd_ew(lat_c, z, n as u32, &ell);
         let warp_on_grid = use_grid && g_m <= 1000.0;
         let gully_on_grid = use_grid && g_m <= 100.0;
         let roads_on_grid = use_grid && g_m <= 400.0;

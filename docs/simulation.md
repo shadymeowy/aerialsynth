@@ -6,6 +6,9 @@
   ellipsoid surface. There are no seams or pole problems.
 - **Band limiting:** fields are band-limited by the pixel GSD, so coarse zooms approximate the
   average of fine ones. Large-scale fields are sampled on a 16-px grid aligned to tile corners.
+  Whether a field comes from the grid or per pixel depends on the zoom only, so neighbouring
+  tiles always take the same path (generator version 3; version 2 decided it per tile and
+  left north-south seams at a few latitudes).
 - **Landforms:**
   - continents and shelves, home-region land bias
   - mountain belts (ridged multifractal with domain warp) carved by dendritic erosion gullies
@@ -121,7 +124,8 @@ cargo test --release
 - **IMU:** noise statistics, level-flight truth, lever arm and sample timing against the
   1 kHz simulator truth.
 - **Solar position.**
-- **Generator invariants:** determinism, seamless tile borders, parent ≈ mean of its children.
+- **Generator invariants:** determinism, seamless east-west and north-south tile borders, parent ≈
+  mean of its children.
 - **Tile stores:** a store refuses tiles of another world.
 - **Flight camera:** level flight holds height and heading, banked turns at g·tan(bank)/V, the
   ground stops the camera.

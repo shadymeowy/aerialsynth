@@ -9,8 +9,10 @@ use tilestore::{Layer, StoreMeta, TileStore};
 /// Version of the generator's output. Bump it whenever a change alters generated tiles (stores
 /// remember it, and tiles of another version are not appended to them).
 /// 1: until 2026-10-08; 2: fast generation (grid-interpolated long octaves, adaptive
-/// supersampling).
-pub const GENERATOR_VERSION: u32 = 2;
+/// supersampling); 3: the grid / exact choices depend on the zoom only (version 2 decided them
+/// per tile from its centre latitude: north-south seams at the switch latitudes; tiles centred
+/// between 35.2° and 49.1° are unchanged).
+pub const GENERATOR_VERSION: u32 = 3;
 
 impl Generator {
     /// Metadata of a new store for this world.
