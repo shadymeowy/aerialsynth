@@ -13,6 +13,8 @@ pub(crate) struct GCfg {
     pub lake_cell: f64,
     pub region_cell: f64,
     pub town_cell: f64,
+    pub ell_a: f64,
+    pub ell_b: f64,
     pub seed: u64,
     pub nlevels: u32,
     pub flags: u32,
@@ -52,6 +54,7 @@ pub(crate) struct GCfg {
     pub _p: [f32; 3],
     pub lvl_a: [[f32; 4]; 4],
     pub lvl_b: [[f32; 4]; 4],
+    pub _tail: [f32; 4],
 }
 
 pub(crate) const CF_RIVERS: u32 = 1;
@@ -107,21 +110,6 @@ pub(crate) struct GSeg {
     pub _p: [u32; 2],
 }
 
-impl GSeg {
-    pub fn from(s: &crate::world::Seg) -> GSeg {
-        GSeg {
-            a: [s.a.x, s.a.y, s.a.z, 0.0],
-            b: [s.b.x, s.b.y, s.b.z, 0.0],
-            ha: s.ha as f32,
-            hb: s.hb as f32,
-            hw: s.hw as f32,
-            valley: s.valley as f32,
-            hw_b: s.hw_b as f32,
-            level: s.level as u32,
-            _p: [0; 2],
-        }
-    }
-}
 
 /// `Sink` of world.wgsl.
 #[repr(C)]
@@ -142,7 +130,12 @@ pub(crate) struct GDrain {
     pub nseg: u32,
     pub sink0: u32,
     pub nsink: u32,
+    pub flags: u32,
+    pub _p: [u32; 3],
 }
+
+pub(crate) const DR_DIRECT: u32 = 1;
+pub(crate) const DR_KEEP: u32 = 2;
 
 /// `PointIn` of points.wgsl.
 #[repr(C)]
@@ -159,6 +152,7 @@ pub(crate) struct GPointIn {
     pub _p: u32,
     pub dr: GDrain,
     pub _q: [u32; 4],
+    pub _r: [u32; 4],
 }
 
 /// `Row` of tile_a.wgsl.
@@ -257,6 +251,39 @@ pub(crate) struct GTown {
     pub _q: [f32; 4],
 }
 
+/// `DBox` of drain.wgsl: a box of lattice cells of one level for one query.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Default)]
+pub(crate) struct GBox {
+    pub center: [f64; 4],
+    pub r_lo2: f64,
+    pub r_hi2: f64,
+    pub cell: f64,
+    pub reach: f64,
+    pub lo: [i32; 4],
+    pub dims: [u32; 4],
+    pub level: u32,
+    pub ax: u32,
+    pub sign: i32,
+    pub query: u32,
+    pub chunk0: u32,
+    pub radius: f32,
+    pub _p: [u32; 2],
+}
+
+/// `SinkPiece` of drain.wgsl / `SinkRep` of points.wgsl: a sink piece's end point and half
+/// width, with its query / point and order.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable, Default)]
+pub(crate) struct GSinkPiece {
+    pub b: [f64; 4],
+    pub hw: f32,
+    pub owner: u32,
+    pub order: u32,
+    pub _p: u32,
+    pub _q: [u32; 4],
+}
+
 /// `SiteReq` / `LakeReq` of the tile kernels: a site whose data the host is to provide.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Default)]
@@ -273,7 +300,10 @@ pub(crate) const TF_ROADS_GRID: u32 = 8;
 
 pub(crate) const MODE_FULL: u32 = 0;
 pub(crate) const MODE_NOLAKES: u32 = 1;
+/// relief only (the drainage lattice heights, `drain.wgsl`)
+#[allow(dead_code)]
 pub(crate) const MODE_RELIEF: u32 = 2;
+pub(crate) const MODE_REPORT: u32 = 3;
 
 pub(crate) const W_NONE: u32 = 0;
 
@@ -285,15 +315,17 @@ mod tests {
     use super::*;
     #[test]
     fn sizes_match_wgsl() {
-        assert_eq!(std::mem::size_of::<GCfg>(), 416);
+        assert_eq!(std::mem::size_of::<GCfg>(), 448);
         assert_eq!(std::mem::size_of::<GTerrain>(), 128);
         assert_eq!(std::mem::size_of::<GSeg>(), 96);
         assert_eq!(std::mem::size_of::<GSink>(), 64);
-        assert_eq!(std::mem::size_of::<GPointIn>(), 96);
+        assert_eq!(std::mem::size_of::<GPointIn>(), 128);
         assert_eq!(std::mem::size_of::<GRow>(), 40);
         assert_eq!(std::mem::size_of::<GTileInfo>(), 88);
         assert_eq!(std::mem::size_of::<GRegion>(), 160);
         assert_eq!(std::mem::size_of::<GTown>(), 160);
         assert_eq!(std::mem::size_of::<GSiteReq>(), 64);
+        assert_eq!(std::mem::size_of::<GBox>(), 128);
+        assert_eq!(std::mem::size_of::<GSinkPiece>(), 64);
     }
 }

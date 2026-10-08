@@ -9,8 +9,9 @@ pub struct Gpu {
 }
 
 /// Shader features the tile generator needs: f64 for the noise lattice coordinates (ECEF metres
-/// over wavelengths down to decimetres) and u64 for the hashes (the same as the CPU's).
-pub const GEN_FEATURES: wgpu::Features = wgpu::Features::SHADER_F64.union(wgpu::Features::SHADER_INT64);
+/// over wavelengths down to decimetres), u64 for the hashes (the same as the CPU's) and 64-bit
+/// atomics for the drainage lattice's hash table.
+pub const GEN_FEATURES: wgpu::Features = wgpu::Features::SHADER_F64.union(wgpu::Features::SHADER_INT64).union(wgpu::Features::SHADER_INT64_ATOMIC_ALL_OPS);
 
 impl Gpu {
     /// The first high-performance adapter (Vulkan / Metal / DX12), headless, with the

@@ -10,6 +10,8 @@ struct Cfg {
     lake_cell: f64,
     region_cell: f64,
     town_cell: f64,
+    ell_a: f64,
+    ell_b: f64,
     seed: u64,
     nlevels: u32,
     flags: u32,
@@ -785,13 +787,49 @@ fn lake_known(id: u64) -> bool {
     return false;
 }
 
-/// Where a point's drainage data is: channel pieces `seg_list[seg0 .. seg0 + nseg]`, sink lakes
-/// `sinks[sink0 .. sink0 + nsink]`.
+/// Where a point's drainage data is: channel pieces `seg_list[seg0 .. seg0 + nseg]` (or
+/// `segs[seg0 ..]` with DR_DIRECT), sink lakes `sinks[sink0 .. sink0 + nsink]`.
 struct Drain {
     seg0: u32,
     nseg: u32,
     sink0: u32,
     nsink: u32,
+    flags: u32,
+    _p0: u32,
+    _p1: u32,
+    _p2: u32,
+}
+
+/// the pieces are `segs[seg0 ..]` (no list)
+const DR_DIRECT: u32 = 1u;
+/// the pieces are those of a group of points: keep only those `river_segments` keeps for this
+/// point (by distance)
+const DR_KEEP: u32 = 2u;
+
+/// Is the piece within `keep` of `c`?
+fn seg_near(sg: Seg, c: vec3<f64>, keep: f32) -> bool {
+    let ab = vec3<f32>(sg.b.xyz - sg.a.xyz);
+    let ca = vec3<f32>(c - sg.a.xyz);
+    let u = clamp(dot(ca, ab) / max(dot(ab, ab), 1e-9), 0.0, 1.0);
+    return length(ca - ab * u) <= keep;
+}
+
+/// The distance within which `river_segments(p, 0, ..)` keeps a piece of level `lvl`.
+fn keep_dist(lvl: u32) -> f32 {
+    let cell = cfg.lvl_a[lvl].x;
+    return 0.4 * cell + 1.4 * cfg.lvl_a[lvl].w + 0.35 * cfg.lvl_b[lvl].y * cell;
+}
+
+/// Piece `k` of a point's drainage data (LAT_NONE: not kept).
+fn drain_seg(dr: Drain, k: u32, p: vec3<f64>) -> u32 {
+    var si = dr.seg0 + k;
+    if ((dr.flags & DR_DIRECT) == 0u) {
+        si = seg_list[dr.seg0 + k];
+    }
+    if ((dr.flags & DR_KEEP) != 0u && !seg_near(segs[si], p, keep_dist(segs[si].level))) {
+        return 0xffffffffu;
+    }
+    return si;
 }
 
 /// The warp of the region lattice lookup at `p` (from the grid when there).
@@ -848,7 +886,11 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
         var best_floor = 0.0;
         var best_lvl = 0u;
         for (var k = 0u; k < dr.nseg; k++) {
-            let sg = segs[seg_list[dr.seg0 + k]];
+            let si = drain_seg(dr, k, p);
+            if (si == 0xffffffffu) {
+                continue;
+            }
+            let sg = segs[si];
             let li = sg.level;
             if ((have_warp & (1u << li)) == 0u) {
                 var w = vec2<f32>(0.0);

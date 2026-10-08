@@ -1,26 +1,18 @@
-//! Host side of the GPU generator: the parts of the world that are graphs or site lists rather
-//! than per-pixel fields (the drainage network of `hydro.rs`, lake levels, sink lakes), kept
-//! in caches across batches. Everything they need from the terrain itself comes from GPU point
-//! evaluations: a computation that lacks one records the request and goes on with a stand-in
-//! value; its result is then discarded, the requests are evaluated on the GPU in one batch, and
-//! the computation runs again (`Prep::missing`).
+//! Host side of the GPU generator: the parts of the world that are site lists rather than
+//! fields (lake levels, sink lakes, land-use regions, towns), kept in caches across batches.
+//! Everything they need from the terrain comes from GPU point evaluations (the drainage network
+//! itself is on the GPU, `drain.wgsl`): a computation that lacks one records the request and
+//! goes on with a stand-in value; its result is then discarded, the requests are evaluated on
+//! the GPU in one batch, and the computation runs again (`GpuGenerator::settle`).
 
 use super::types::*;
 use crate::noise::*;
 use crate::world::{Ctx, Seg, World};
-use geodesy::Geodetic;
 use glam::DVec3;
 
 pub(crate) type Cell = (i64, i64, i64);
 
 const KM: f64 = 1000.0;
-
-#[derive(Clone, Copy)]
-struct FlowPt {
-    s: DVec3,
-    h: f64,
-    active: bool,
-}
 
 /// Key of a point evaluation: mode, surface point, pixel size.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -32,11 +24,11 @@ impl PointKey {
     }
 }
 
-/// A point evaluation the GPU is to run.
+/// A point evaluation the GPU is to run (its drainage pieces come from the GPU's drainage
+/// network; a full evaluation brings its sink lakes with their levels).
 pub(crate) struct PointReq {
     pub ctx: Ctx,
     pub mode: u32,
-    pub segs: Vec<Seg>,
     pub sinks: Vec<GSink>,
 }
 
@@ -54,22 +46,16 @@ pub(crate) fn point_in(c: &Ctx, mode: u32, dr: GDrain) -> GPointIn {
         _p: 0,
         dr,
         _q: [0; 4],
+        _r: [0; 4],
     }
 }
 
 /// Results of GPU evaluations and what was derived from them (pure functions of the world).
 #[derive(Default)]
 pub(crate) struct Cache {
-    flow: FxHashMap<(usize, Cell), FlowPt>,
-    /// the surface point of an active drainage lattice point (None: inactive)
-    flow_geo: FxHashMap<(usize, Cell), Option<Ctx>>,
-    tgt: FxHashMap<(usize, Cell), Option<Cell>>,
-    src: FxHashMap<(usize, Cell), bool>,
-    /// the channel pieces a drainage node owns
-    pieces: FxHashMap<(usize, Cell), Vec<Seg>>,
-    /// active lattice points with a height and no flow target yet, per level
-    fresh: Vec<Vec<Cell>>,
     pub points: FxHashMap<PointKey, GTerrain>,
+    /// the sink pieces (end point, half width) a full point evaluation keeps, in order
+    pub point_sinks: FxHashMap<PointKey, Vec<(DVec3, f64)>>,
     /// lake levels by (id, radius bits)
     lakes: FxHashMap<(u64, u64), Option<f64>>,
     lakes_forced: FxHashMap<(u64, u64), Option<f64>>,
@@ -127,18 +113,9 @@ impl TownBase {
 }
 
 impl Cache {
-    /// Store evaluated drainage lattice heights.
-    pub fn set_height(&mut self, lvl: usize, c: Cell, ctx: &Ctx, h: f64) {
-        self.flow.insert((lvl, c), FlowPt { s: ctx.p, h, active: true });
-        if self.fresh.len() <= lvl {
-            self.fresh.resize(lvl + 1, Vec::new());
-        }
-        self.fresh[lvl].push(c);
-    }
-
     /// Bound the memory of a long-lived cache.
     pub fn trim(&mut self) {
-        if self.flow.len() + self.flow_geo.len() + self.tgt.len() + self.src.len() + self.pieces.len() + self.points.len() + self.lakes.len() + self.regions.len() + self.towns_base.len() + self.town_cands.len() > 4_000_000 {
+        if self.points.len() + self.point_sinks.len() + self.lakes.len() + self.regions.len() + self.towns_base.len() + self.town_cands.len() > 2_000_000 {
             *self = Cache::default();
         }
     }
@@ -158,13 +135,11 @@ pub(crate) struct Prep<'a> {
     towns_info_pending: FxHashSet<u64>,
     /// point evaluations asked for whose inputs are still to be prepared (`prepare`)
     pending: FxHashMap<PointKey, (Ctx, u32)>,
-    /// drainage lattice heights to evaluate (relief mode)
-    pub heights_need: FxHashMap<(usize, Cell), Ctx>,
 }
 
 impl<'a> Prep<'a> {
     pub fn new(w: &'a World, c: &'a mut Cache) -> Self {
-        Prep { w, c, need: FxHashMap::default(), missing: 0, towns_pending: FxHashSet::default(), towns_info_pending: FxHashSet::default(), pending: FxHashMap::default(), heights_need: FxHashMap::default() }
+        Prep { w, c, need: FxHashMap::default(), missing: 0, towns_pending: FxHashSet::default(), towns_info_pending: FxHashSet::default(), pending: FxHashMap::default() }
     }
 
     /// The point evaluation `mode` at `ctx`, if done; else it is requested (its inputs are
@@ -181,129 +156,55 @@ impl<'a> Prep<'a> {
         None
     }
 
-    /// The drainage inputs of the requested point evaluations: the requests whose inputs are
-    /// complete go to `need`. Points are grouped by area: the channel pieces of a group are
-    /// searched once and filtered per point, which gives each point exactly its own pieces
-    /// (`World::river_segments` keeps a piece by its distance, in a global lattice order).
+    /// The inputs of the requested point evaluations: the requests whose inputs are complete go
+    /// to `need`. A full evaluation needs the levels of its sink lakes (`terrain_impl`), which
+    /// follow from the sink pieces it keeps: those are reported by the GPU first.
     pub fn prepare(&mut self) {
-        use rayon::prelude::*;
-        const GROUP: f64 = 30_000.0;
         while !self.pending.is_empty() {
-            let pending = std::mem::take(&mut self.pending);
-            let mut groups: FxHashMap<(u32, u64, Cell), Vec<(PointKey, Ctx)>> = FxHashMap::default();
+            let mut pending: Vec<(PointKey, (Ctx, u32))> = std::mem::take(&mut self.pending).into_iter().collect();
+            pending.sort_unstable_by_key(|p| (p.0 .0, p.0 .1, p.0 .2, p.0 .3, p.0 .4));
             for (key, (ctx, mode)) in pending {
-                if mode == MODE_RELIEF || !self.w.cfg.hydro.rivers {
-                    self.need.insert(key, PointReq { ctx, mode, segs: vec![], sinks: vec![] });
+                if mode != MODE_FULL || !self.w.cfg.hydro.rivers {
+                    let before = self.missing;
+                    if mode == MODE_FULL {
+                        self.lattice_lakes_at(ctx.p);
+                    }
+                    if self.missing == before {
+                        self.need.insert(key, PointReq { ctx, mode, sinks: vec![] });
+                    }
                     continue;
                 }
-                let g = (ctx.p / GROUP).floor();
-                groups.entry((mode, ctx.gsd.to_bits(), (g.x as i64, g.y as i64, g.z as i64))).or_default().push((key, ctx));
-            }
-            let mut groups: Vec<_> = groups.into_iter().collect();
-            groups.sort_unstable_by_key(|g| g.0);
-            let w = self.w;
-            let prof = std::env::var_os("TERRAGEN_PROFILE").is_some();
-            let t0 = std::time::Instant::now();
-            let lap = |what: &str| {
-                if prof {
-                    eprintln!("    prepare: {what} at {:.3} s", t0.elapsed().as_secs_f64());
-                }
-            };
-            // 1. the drainage lattice heights the groups lack (all requested together)
-            let cache = &*self.c;
-            let lacking: Vec<Vec<(usize, Cell)>> = groups.par_iter().map(|((_, _, _), pts)| cache.group_missing_heights(w, pts)).collect();
-            let mut per_level: Vec<FxHashSet<Cell>> = vec![FxHashSet::default(); w.cfg.hydro.levels.len()];
-            for l in &lacking {
-                for &(lvl, c) in l {
-                    per_level[lvl].insert(c);
-                }
-            }
-            for (lvl, cells) in per_level.into_iter().enumerate() {
-                if !cells.is_empty() {
-                    let mut cells: Vec<Cell> = cells.into_iter().collect();
-                    cells.sort_unstable();
-                    self.request_heights(lvl, &cells);
-                }
-            }
-            // (the lacking points that are not active are known now)
-            let cache = &*self.c;
-            let blocked: Vec<bool> = groups.par_iter().zip(&lacking).map(|(((_, _, _), pts), l)| !l.is_empty() && !cache.group_missing_heights(w, pts).is_empty()).collect();
-            self.missing += blocked.iter().filter(|b| **b).count();
-            lap(&format!("{} groups, heights", groups.len()));
-            // 2. the channel pieces of the drainage nodes they reach
-            let cache = &*self.c;
-            let nodes: Vec<Vec<(usize, Cell)>> = groups.par_iter().zip(&blocked).map(|(((_, _, _), pts), &b)| if b { vec![] } else { cache.group_nodes_without_pieces(w, pts) }).collect();
-            let mut per_level: Vec<FxHashSet<Cell>> = vec![FxHashSet::default(); w.cfg.hydro.levels.len()];
-            for l in &nodes {
-                for &(lvl, c) in l {
-                    per_level[lvl].insert(c);
-                }
-            }
-            for (lvl, cells) in per_level.into_iter().enumerate() {
-                let cells: Vec<Cell> = cells.into_iter().collect();
-                self.ensure_pieces(lvl, &cells);
-            }
-            lap("pieces");
-            // 3. the groups whose inputs are all cached, in parallel; the others one by one
-            // (lake levels: they request what is missing)
-            let cache = &*self.c;
-            let ready: Vec<Option<Vec<(PointKey, PointReq)>>> = groups.par_iter().zip(&blocked).map(|(((mode, _, _), pts), &b)| if b { None } else { cache.group_ro(w, *mode, pts) }).collect();
-            for ((((mode, _, _), pts), r), b) in groups.into_iter().zip(ready).zip(blocked) {
-                match r {
-                    Some(reqs) => self.need.extend(reqs),
-                    None if !b => self.prepare_group(mode, pts),
-                    None => {}
-                }
-            }
-            lap("groups");
-        }
-    }
-
-    /// The inputs of a group of point evaluations, filling the caches ([`Prep::prepare`]).
-    fn prepare_group(&mut self, mode: u32, pts: Vec<(PointKey, Ctx)>) {
-        let gsd = pts[0].1.gsd;
-        let c = pts.iter().fold(DVec3::ZERO, |a, p| a + p.1.p) / pts.len() as f64;
-        let r = pts.iter().map(|p| (p.1.p - c).length()).fold(0.0, f64::max);
-        let all = match self.c.river_segments_ro(self.w, c, r, gsd) {
-            Some(v) => v,
-            None => {
+                let Some(pieces) = self.c.point_sinks.get(&key).cloned() else {
+                    let rk = PointKey::new(MODE_REPORT, &ctx);
+                    self.need.entry(rk).or_insert(PointReq { ctx, mode: MODE_REPORT, sinks: vec![] });
+                    continue;
+                };
+                let segs: Vec<Seg> = pieces.iter().map(|&(b, hw)| Seg { a: b, b, ha: 0.0, hb: 0.0, level: 0, hw, valley: 0.0, hw_b: hw, sink: true }).collect();
                 let before = self.missing;
-                let v = self.river_segments(c, r, gsd);
-                if self.missing != before {
-                    return;
-                }
-                v
-            }
-        };
-        for (key, ctx) in pts {
-            let segs = keep_segments(self.w, &all, ctx.p);
-            let before = self.missing;
-            let mut sinks = Vec::new();
-            if mode == MODE_FULL {
+                let mut sinks = Vec::new();
                 for (id, sc, rad) in World::sink_lakes(&segs) {
                     if (ctx.p - sc).length() < 1.6 * rad {
                         let level = self.lake_level_forced(id, sc, rad);
                         sinks.push(gsink(id, sc, rad, level));
                     }
                 }
-                self.lattice_lakes_at(ctx.p, 0.0);
-            }
-            if self.missing == before {
-                self.need.insert(key, PointReq { ctx, mode, segs, sinks });
+                self.lattice_lakes_at(ctx.p);
+                if self.missing == before {
+                    self.need.insert(key, PointReq { ctx, mode, sinks });
+                }
             }
         }
     }
 
     /// Make sure the levels of the lattice lakes a point within `radius` of `p` may look up are
     /// known (the two nearest lake sites of the point, see `terrain_impl`).
-    pub fn lattice_lakes_at(&mut self, p: DVec3, radius: f64) {
+    pub fn lattice_lakes_at(&mut self, p: DVec3) {
         let cfg = &self.w.cfg.hydro;
         if cfg.lake_density <= 0.0 {
             return;
         }
         let cell = cfg.lake_cell_km * KM;
         let sites = worley3_sites(self.w.seed ^ 0x1A4E, p, cell, 0.85);
-        let _ = radius;
         for (id, pt) in sites {
             self.lattice_lake(id, pt * cell, p);
         }
@@ -326,135 +227,6 @@ impl<'a> Prep<'a> {
         let level = self.lake_level(id, pt, rad);
         if self.missing == before {
             self.c.lattice_lakes.insert(id, level);
-        }
-    }
-
-    // ------------------------------------------------------------ drainage (`hydro.rs`)
-
-    fn flow_point(&mut self, lvl: usize, c: Cell) -> FlowPt {
-        if let Some(f) = self.c.flow.get(&(lvl, c)) {
-            return *f;
-        }
-        let geo = match self.c.flow_geo.get(&(lvl, c)) {
-            Some(g) => *g,
-            None => {
-                let g = flow_geo(self.w, lvl, c);
-                self.c.flow_geo.insert((lvl, c), g);
-                g
-            }
-        };
-        match geo {
-            Some(ctx) => {
-                // requested; a stand-in meanwhile (the result is discarded)
-                self.missing += 1;
-                self.heights_need.entry((lvl, c)).or_insert(ctx);
-                FlowPt { s: ctx.p, h: 0.0, active: true }
-            }
-            None => {
-                let fp = FlowPt { s: DVec3::ZERO, h: 0.0, active: false };
-                self.c.flow.insert((lvl, c), fp);
-                fp
-            }
-        }
-    }
-
-    /// The lattice points of level `lvl` that `cells` lack (their geometry in parallel), with
-    /// their heights requested.
-    fn request_heights(&mut self, lvl: usize, cells: &[Cell]) {
-        use rayon::prelude::*;
-        let new: Vec<Cell> = cells.iter().filter(|c| !self.c.flow_geo.contains_key(&(lvl, **c))).copied().collect();
-        let w = self.w;
-        let geo: Vec<(Cell, Option<Ctx>)> = new.par_iter().map(|&c| (c, flow_geo(w, lvl, c))).collect();
-        for (c, g) in geo {
-            self.c.flow_geo.insert((lvl, c), g);
-        }
-        for &c in cells {
-            self.flow_point(lvl, c);
-        }
-    }
-
-    /// All drainage pieces whose valley could reach within `radius` of `center`
-    /// (`World::river_segments`).
-    pub fn river_segments(&mut self, center: DVec3, radius: f64, gsd: f64) -> Vec<Seg> {
-        if !self.w.cfg.hydro.rivers {
-            return vec![];
-        }
-        let mut complete = true;
-        for (lvl, lc) in self.w.cfg.hydro.levels.iter().enumerate() {
-            let cell = lc.cell_km * KM;
-            if lc.valley_m < 0.2 * gsd && lc.width_m[1] < 0.15 * gsd {
-                continue;
-            }
-            let reach = radius + 4.6 * cell + lc.valley_m;
-            let lo = ((center - DVec3::splat(reach)) / cell).floor();
-            let hi = ((center + DVec3::splat(reach)) / cell).floor();
-            // the heights of every lattice point the graph can visit (targets within 2 cells,
-            // their targets and sources within 4), requested together before walking it
-            let missing = self.c.missing_heights(self.w, lvl, center, lo - DVec3::splat(4.0), hi + DVec3::splat(4.0));
-            if !missing.is_empty() {
-                self.request_heights(lvl, &missing);
-                if !self.c.missing_heights(self.w, lvl, center, lo - DVec3::splat(4.0), hi + DVec3::splat(4.0)).is_empty() {
-                    complete = false;
-                    continue;
-                }
-            }
-            let nodes = self.c.nodes_without_pieces(self.w, lvl, center, reach, lo, hi);
-            self.ensure_pieces(lvl, &nodes);
-        }
-        if !complete {
-            return vec![];
-        }
-        match self.c.river_segments_ro(self.w, center, radius, gsd) {
-            Some(v) => v,
-            None => {
-                self.missing += 1;
-                vec![]
-            }
-        }
-    }
-
-    /// Compute (in parallel) and cache the channel pieces of active drainage nodes whose
-    /// neighbourhood heights are known, with the flow targets and sources they need.
-    fn ensure_pieces(&mut self, lvl: usize, nodes: &[Cell]) {
-        use rayon::prelude::*;
-        let todo: Vec<Cell> = nodes.iter().filter(|c| !self.c.pieces.contains_key(&(lvl, **c))).copied().collect();
-        if todo.is_empty() {
-            return;
-        }
-        // flow targets of every lattice point whose height is new (the nodes' ±2
-        // neighbourhoods are among them: sources, the next edge); those lacking neighbours stay
-        // for later
-        let fresh = if lvl < self.c.fresh.len() { std::mem::take(&mut self.c.fresh[lvl]) } else { Vec::new() };
-        let w = self.w;
-        let cache = &*self.c;
-        let tg: Vec<(Cell, Option<Option<Cell>>)> = fresh.par_iter().filter(|c| !cache.tgt.contains_key(&(lvl, **c))).map(|&c| (c, cache.target_calc(w, lvl, c))).collect();
-        if std::env::var_os("TERRAGEN_PROFILE").is_some() {
-            eprintln!("    pieces of level {lvl}: {} nodes, {} targets", todo.len(), tg.len());
-        }
-        for (c, t) in tg {
-            match t {
-                Some(t) => {
-                    self.c.tgt.insert((lvl, c), t);
-                }
-                None => self.c.fresh[lvl].push(c),
-            }
-        }
-        let cache = &*self.c;
-        let src: Vec<(Cell, Option<bool>)> = todo.par_iter().map(|&c| (c, cache.source(w, lvl, c))).collect();
-        for (c, v) in src {
-            if let Some(v) = v {
-                self.c.src.insert((lvl, c), v);
-            }
-        }
-        let cache = &*self.c;
-        let pcs: Vec<(Cell, Option<Vec<Seg>>)> = todo.par_iter().map(|&c| (c, cache.pieces_calc(w, lvl, c))).collect();
-        for (c, v) in pcs {
-            match v {
-                Some(v) => {
-                    self.c.pieces.insert((lvl, c), v);
-                }
-                None => self.missing += 1,
-            }
         }
     }
 
@@ -516,6 +288,7 @@ impl<'a> Prep<'a> {
         v
     }
 }
+
 
 impl<'a> Prep<'a> {
     // ------------------------------------------------------------ land-use regions and towns
@@ -707,21 +480,6 @@ impl<'a> Prep<'a> {
     }
 }
 
-/// The pieces of `segs` that `river_segments(p, 0, ..)` keeps (by distance, per level).
-fn keep_segments(w: &World, segs: &[Seg], p: DVec3) -> Vec<Seg> {
-    segs.iter()
-        .filter(|s| {
-            let lc = &w.cfg.hydro.levels[s.level as usize];
-            let cell = lc.cell_km * KM;
-            let keep = 0.4 * cell + 1.4 * lc.valley_m + 0.35 * lc.meander * cell;
-            let ab = s.b - s.a;
-            let u = ((p - s.a).dot(ab) / ab.length_squared().max(1e-9)).clamp(0.0, 1.0);
-            (p - (s.a + ab * u)).length() <= keep
-        })
-        .copied()
-        .collect()
-}
-
 /// The radius of lattice lake `id`.
 fn lattice_lake_radius(w: &World, id: u64) -> f64 {
     let cell = w.cfg.hydro.lake_cell_km * KM;
@@ -737,290 +495,6 @@ fn lattice_lake_wanted(w: &World, id: u64, pt: DVec3, p: DVec3) -> bool {
     (p - pc).length() <= lattice_lake_radius(w, id) * 1.5 + 2.0
 }
 
-/// The surface point of the drainage lattice point of level `lvl` in cell `c` (None: not
-/// active: farther than half a cell from the surface).
-fn flow_geo(w: &World, lvl: usize, c: Cell) -> Option<Ctx> {
-    let cell = w.cfg.hydro.levels[lvl].cell_km * KM;
-    let hh = hash3(w.level_key(lvl), c.0, c.1, c.2);
-    let p = DVec3::new(
-        c.0 as f64 + 0.5 + 0.8 * (u01k(hh, 1) - 0.5),
-        c.1 as f64 + 0.5 + 0.8 * (u01k(hh, 2) - 0.5),
-        c.2 as f64 + 0.5 + 0.8 * (u01k(hh, 3) - 0.5),
-    ) * cell;
-    let g = geodesy::ecef2geodetic(p, &w.ell);
-    (g.h.abs() < 0.5 * cell).then(|| Ctx::new(g.lat, g.lon, cell / 4.0, &w.ell))
-}
-
-/// Centre and radius of a group of points.
-fn group_disc(pts: &[(PointKey, Ctx)]) -> (DVec3, f64) {
-    let c = pts.iter().fold(DVec3::ZERO, |a, p| a + p.1.p) / pts.len() as f64;
-    (c, pts.iter().map(|p| (p.1.p - c).length()).fold(0.0, f64::max))
-}
-
-impl Cache {
-    /// The drainage lattice point of level `lvl` in cell `c` if known (points certainly not
-    /// active are never stored).
-    fn flow_at(&self, w: &World, lvl: usize, c: Cell) -> Option<FlowPt> {
-        if let Some(f) = self.flow.get(&(lvl, c)) {
-            return Some(*f);
-        }
-        let cell = w.cfg.hydro.levels[lvl].cell_km * KM;
-        (!w.maybe_active(lvl, c, cell)).then_some(FlowPt { s: DVec3::ZERO, h: 0.0, active: false })
-    }
-
-    /// The lattice points (maybe active) of level `lvl` in the box [lo, hi] (cells) without a
-    /// known height.
-    fn missing_heights(&self, w: &World, lvl: usize, center: DVec3, lo: DVec3, hi: DVec3) -> Vec<Cell> {
-        let cell = w.cfg.hydro.levels[lvl].cell_km * KM;
-        w.shell_cells_in(center, lo, hi, cell, false).into_iter().filter(|&c| !self.flow.contains_key(&(lvl, c)) && w.maybe_active(lvl, c, cell)).collect()
-    }
-
-    /// The active drainage nodes of level `lvl` within `reach` of `center` without pieces.
-    fn nodes_without_pieces(&self, w: &World, lvl: usize, center: DVec3, reach: f64, lo: DVec3, hi: DVec3) -> Vec<Cell> {
-        let cell = w.cfg.hydro.levels[lvl].cell_km * KM;
-        w.shell_cells_in(center, lo, hi, cell, false)
-            .into_iter()
-            .filter(|&c| {
-                !self.pieces.contains_key(&(lvl, c)) && w.maybe_active(lvl, c, cell) && self.flow.get(&(lvl, c)).is_some_and(|f| f.active && (f.s - center).length() <= reach)
-            })
-            .collect()
-    }
-
-    /// The levels a query of pixel size `gsd` uses, with their reach boxes around `center`.
-    fn level_boxes(w: &World, center: DVec3, radius: f64, gsd: f64) -> Vec<(usize, f64, DVec3, DVec3)> {
-        let mut out = Vec::new();
-        for (lvl, lc) in w.cfg.hydro.levels.iter().enumerate() {
-            let cell = lc.cell_km * KM;
-            if lc.valley_m < 0.2 * gsd && lc.width_m[1] < 0.15 * gsd {
-                continue;
-            }
-            let reach = radius + 4.6 * cell + lc.valley_m;
-            out.push((lvl, reach, ((center - DVec3::splat(reach)) / cell).floor(), ((center + DVec3::splat(reach)) / cell).floor()));
-        }
-        out
-    }
-
-    /// The lattice heights a group's drainage query lacks.
-    fn group_missing_heights(&self, w: &World, pts: &[(PointKey, Ctx)]) -> Vec<(usize, Cell)> {
-        let (c, r) = group_disc(pts);
-        let mut out = Vec::new();
-        for (lvl, _, lo, hi) in Self::level_boxes(w, c, r, pts[0].1.gsd) {
-            out.extend(self.missing_heights(w, lvl, c, lo - DVec3::splat(4.0), hi + DVec3::splat(4.0)).into_iter().map(|c| (lvl, c)));
-        }
-        out
-    }
-
-    /// The drainage nodes a group's drainage query reaches without pieces.
-    fn group_nodes_without_pieces(&self, w: &World, pts: &[(PointKey, Ctx)]) -> Vec<(usize, Cell)> {
-        let (c, r) = group_disc(pts);
-        let mut out = Vec::new();
-        for (lvl, reach, lo, hi) in Self::level_boxes(w, c, r, pts[0].1.gsd) {
-            out.extend(self.nodes_without_pieces(w, lvl, c, reach, lo, hi).into_iter().map(|c| (lvl, c)));
-        }
-        out
-    }
-
-    /// Downstream neighbour (steepest descent) of an active point (`World::flow_target`); None
-    /// when a height it needs is unknown.
-    fn target_calc(&self, w: &World, lvl: usize, c: Cell) -> Option<Option<Cell>> {
-        let cell = w.cfg.hydro.levels[lvl].cell_km * KM;
-        let me = self.flow_at(w, lvl, c)?;
-        let mut best = None;
-        if me.active && me.h > -150.0 {
-            let mut best_slope = 0.0;
-            for dz in -1..=1 {
-                for dy in -1..=1 {
-                    for dx in -1..=1 {
-                        if dx == 0 && dy == 0 && dz == 0 {
-                            continue;
-                        }
-                        let n = (c.0 + dx, c.1 + dy, c.2 + dz);
-                        let o = self.flow_at(w, lvl, n)?;
-                        if !o.active {
-                            continue;
-                        }
-                        let d = (o.s - me.s).length();
-                        if d < 0.2 * cell || d > 1.8 * cell {
-                            continue;
-                        }
-                        let slope = (o.h - me.h) / d;
-                        if slope < best_slope {
-                            best_slope = slope;
-                            best = Some(n);
-                        }
-                    }
-                }
-            }
-            // no lower neighbour: look a little farther for an outlet
-            if best.is_none() {
-                for dz in -2..=2i64 {
-                    for dy in -2..=2i64 {
-                        for dx in -2..=2i64 {
-                            if dx.abs().max(dy.abs()).max(dz.abs()) < 2 {
-                                continue;
-                            }
-                            let n = (c.0 + dx, c.1 + dy, c.2 + dz);
-                            let o = self.flow_at(w, lvl, n)?;
-                            if !o.active {
-                                continue;
-                            }
-                            let d = (o.s - me.s).length();
-                            if d > 3.0 * cell {
-                                continue;
-                            }
-                            let slope = (o.h - me.h) / d;
-                            if slope < best_slope {
-                                best_slope = slope;
-                                best = Some(n);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Some(best)
-    }
-
-    fn target(&self, w: &World, lvl: usize, c: Cell) -> Option<Option<Cell>> {
-        match self.tgt.get(&(lvl, c)) {
-            Some(t) => Some(*t),
-            None => self.target_calc(w, lvl, c),
-        }
-    }
-
-    /// No other point drains into `c` (`World::is_source`).
-    fn source(&self, w: &World, lvl: usize, c: Cell) -> Option<bool> {
-        if let Some(v) = self.src.get(&(lvl, c)) {
-            return Some(*v);
-        }
-        for dz in -2..=2i64 {
-            for dy in -2..=2i64 {
-                for dx in -2..=2i64 {
-                    let n = (c.0 + dx, c.1 + dy, c.2 + dz);
-                    if n != c && self.flow_at(w, lvl, n)?.active && self.target(w, lvl, n)? == Some(c) {
-                        return Some(false);
-                    }
-                }
-            }
-        }
-        Some(true)
-    }
-
-    /// The channel pieces drainage node `c` owns: from a source to the middle of its edge, the
-    /// bend at its downstream node (to the middle of the next edge), or the last edge into a
-    /// sink / the sea (`World::river_segments`).
-    fn pieces_calc(&self, w: &World, lvl: usize, c: Cell) -> Option<Vec<Seg>> {
-        let lc = &w.cfg.hydro.levels[lvl];
-        let fp = self.flow_at(w, lvl, c)?;
-        let mut out = Vec::new();
-        let Some(tc) = self.target(w, lvl, c)? else { return Some(out) };
-        let tp = self.flow_at(w, lvl, tc)?;
-        let width = |c: Cell| {
-            let hh = hash3(w.level_key(lvl) ^ 0x51DE, c.0, c.1, c.2);
-            (0.5 * (lc.width_m[0] + (lc.width_m[1] - lc.width_m[0]) * u01k(hh, 1)), lc.valley_m * (0.6 + 0.8 * u01k(hh, 2)))
-        };
-        let (hw, valley) = width(c);
-        let seg = |a: DVec3, b: DVec3, ha: f64, hb: f64, hw: f64, hw_b: f64| Seg { a, b, ha, hb, level: lvl as u8, hw, valley, hw_b, sink: false };
-        let mid = 0.5 * (fp.s + tp.s);
-        let hmid = 0.5 * (fp.h + tp.h);
-        if self.source(w, lvl, c)? {
-            out.push(seg(fp.s, mid, fp.h, hmid, 0.08 * hw, hw));
-        }
-        match self.target(w, lvl, tc)? {
-            Some(ttc) => {
-                let tq = self.flow_at(w, lvl, ttc)?;
-                let (hw2, _) = width(tc);
-                let mid2 = 0.5 * (tp.s + tq.s);
-                let hmid2 = 0.5 * (tp.h + tq.h);
-                let at = |t: f64| {
-                    let (u, v) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t));
-                    (mid * u + tp.s * v + mid2 * (t * t), hmid * u + tp.h * v + hmid2 * (t * t), hw + (hw2 - hw) * t)
-                };
-                let n = 6usize;
-                for k in 0..n {
-                    let (a, ha, wa) = at(k as f64 / n as f64);
-                    let (b, hb, wb) = at((k + 1) as f64 / n as f64);
-                    out.push(seg(a, b, ha, hb, wa, wb));
-                }
-            }
-            None => out.push(Seg { sink: tp.h > 0.0, ..seg(mid, tp.s, hmid, tp.h, hw, hw) }),
-        }
-        Some(out)
-    }
-
-    /// The channel pieces of `river_segments(center, radius, gsd)` from cached data only (None:
-    /// something is not cached).
-    fn river_segments_ro(&self, w: &World, center: DVec3, radius: f64, gsd: f64) -> Option<Vec<Seg>> {
-        let mut out = Vec::new();
-        if !w.cfg.hydro.rivers {
-            return Some(out);
-        }
-        for (lvl, lc) in w.cfg.hydro.levels.iter().enumerate() {
-            let first = out.len();
-            let cell = lc.cell_km * KM;
-            if lc.valley_m < 0.2 * gsd && lc.width_m[1] < 0.15 * gsd {
-                continue;
-            }
-            let reach = radius + 4.6 * cell + lc.valley_m;
-            let lo = ((center - DVec3::splat(reach)) / cell).floor();
-            let hi = ((center + DVec3::splat(reach)) / cell).floor();
-            for c in w.shell_cells(center, lo, hi, cell) {
-                if !w.maybe_active(lvl, c, cell) {
-                    continue;
-                }
-                let fp = self.flow.get(&(lvl, c))?;
-                if !fp.active || (fp.s - center).length() > reach {
-                    continue;
-                }
-                out.extend_from_slice(self.pieces.get(&(lvl, c))?);
-            }
-            let keep = radius + 0.4 * cell + 1.4 * lc.valley_m + 0.35 * lc.meander * cell;
-            let mut k = first;
-            for i in first..out.len() {
-                let s = out[i];
-                let ab = s.b - s.a;
-                let u = ((center - s.a).dot(ab) / ab.length_squared().max(1e-9)).clamp(0.0, 1.0);
-                if (center - (s.a + ab * u)).length() <= keep {
-                    out[k] = s;
-                    k += 1;
-                }
-            }
-            out.truncate(k);
-        }
-        Some(out)
-    }
-
-    /// The point evaluations of a group with inputs from cached data only ([`Prep::prepare`]).
-    fn group_ro(&self, w: &World, mode: u32, pts: &[(PointKey, Ctx)]) -> Option<Vec<(PointKey, PointReq)>> {
-        let gsd = pts[0].1.gsd;
-        let (c, r) = group_disc(pts);
-        let all = self.river_segments_ro(w, c, r, gsd)?;
-        let mut out = Vec::with_capacity(pts.len());
-        for &(key, ctx) in pts {
-            let segs = keep_segments(w, &all, ctx.p);
-            let mut sinks = Vec::new();
-            if mode == MODE_FULL {
-                for (id, sc, rad) in World::sink_lakes(&segs) {
-                    if (ctx.p - sc).length() < 1.6 * rad {
-                        let level = *self.lakes_forced.get(&(id, rad.to_bits()))?;
-                        sinks.push(gsink(id, sc, rad, level));
-                    }
-                }
-                if w.cfg.hydro.lake_density > 0.0 {
-                    let cell = w.cfg.hydro.lake_cell_km * KM;
-                    for (id, pt) in worley3_sites(w.seed ^ 0x1A4E, ctx.p, cell, 0.85) {
-                        if lattice_lake_wanted(w, id, pt * cell, ctx.p) && !self.lattice_lakes.contains_key(&id) {
-                            return None;
-                        }
-                    }
-                }
-            }
-            out.push((key, PointReq { ctx, mode, segs, sinks }));
-        }
-        Some(out)
-    }
-}
-
 /// A sink lake for the GPU.
 pub(crate) fn gsink(id: u64, c: DVec3, rad: f64, level: Option<f64>) -> GSink {
     GSink { c: [c.x, c.y, c.z, 0.0], id, rad: rad as f32, level: level.map_or(NONE_F, |l| l as f32), _p: [0; 2] }
@@ -1030,9 +504,4 @@ pub(crate) fn gsink(id: u64, c: DVec3, rad: f64, level: Option<f64>) -> GSink {
 pub(crate) fn site_ctx(w: &World, pt: DVec3, gsd: f64) -> Ctx {
     let g = geodesy::ecef2geodetic(pt, &w.ell);
     Ctx::new(g.lat, g.lon, gsd, &w.ell)
-}
-
-#[allow(dead_code)]
-fn geodetic(lat: f64, lon: f64) -> Geodetic {
-    Geodetic::new(lat, lon, 0.0)
 }

@@ -665,5 +665,6 @@ fn pass_a2(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id)
     dr.nseg = bin.y;
     dr.sink0 = ti.sink0;
     dr.nsink = ti.nsink;
+    dr.flags = 0u;
     terr[ti.pix0 + j * NA2 + i] = terrain_rest(ctx, m, pre, rl, MODE_FULL, dr);
 }
