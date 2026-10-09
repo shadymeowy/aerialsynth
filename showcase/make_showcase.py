@@ -1019,7 +1019,7 @@ def main():
     ap.add_argument("--force", action="store_true", help="re-render even if up to date")
     ap.add_argument("--title-preview", action="store_true", help="save a few title-card frames (from the stills) → out/showcase/title_*.png")
     ap.add_argument("--out", default=os.path.join(OUT, "showcase.mp4"))
-    ap.add_argument("--story", default=os.path.join(HERE, "storyboard.yaml"), help="storyboard (e.g. showcase/scout.yaml: candidate places)")
+    ap.add_argument("--story", default=os.path.join(HERE, "storyboard.yaml"), help="storyboard YAML")
     a = ap.parse_args()
     if not os.path.exists(TERRAIN):
         raise SystemExit("build terrain first: cargo build --release")

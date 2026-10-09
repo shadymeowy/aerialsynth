@@ -120,7 +120,7 @@ crates/viewer     terrain view: map and camera views
 crates/cli        the terrain command
 configs/          example scenarios
 docs/             documentation
-scripts/          Python tools: validation, visualization, data builders
+scripts/          Python tools: ground-truth validation, data builders
 showcase/         the showcase videos
 ```
 
@@ -135,8 +135,6 @@ pip install -r scripts/requirements.txt
 
 - `check_gt.py`, `check_imu.py`, `check_events.py`: validation of a sequence file; PASS / FAIL
   per check ([`docs/formats.md`](docs/formats.md)).
-- `view_seq.py`, `view_events.py`: contact sheets of a sequence's frames and event windows.
-- `contact.py`: contact sheets of generator previews (`terrain tiles --png`).
 - `build_stars.py`, `build_planets.py`: rebuild the bundled star catalogue and ephemeris.
 
 [`showcase/`](showcase/README.md) renders the showcase video and the long-haul airliner flight,

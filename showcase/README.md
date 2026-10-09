@@ -65,7 +65,7 @@ python showcase/make_showcase.py --compose-only    # no rendering: re-compose ch
 python showcase/make_showcase.py --only coast --compose-only   # the same for one shot's clip
 python showcase/make_showcase.py --full-compose    # compose every frame from the sequences instead of joining clips
 python showcase/make_showcase.py --force           # re-render even if up to date
-python showcase/make_showcase.py --story showcase/scout.yaml --stills   # another storyboard (candidate places)
+python showcase/make_showcase.py --story OTHER.yaml --stills   # another storyboard
 python showcase/make_showcase.py --title-preview   # title-card frames from the stills
 python showcase/showcase_score.py VIDEO [OUT]      # the score under another video
 ```
@@ -74,8 +74,7 @@ Each shot is rendered into `out/showcase/<id>/` (`scenario.yaml`, `traj.csv`, `s
 is re-rendered only when its resolved scenario changes. Its captioned clip
 (`out/showcase/clips/NN_<id>.mp4`) is re-composed only when the shot's entry or the video
 settings change; the video joins the clips with cross-fades. So editing a caption, a note or a
-duration only needs `--compose-only`. (`scout.yaml` reuses some storyboard ids, and the output
-directory is `out/showcase/<id>` for either storyboard: a scout run overwrites those shots.)
+duration only needs `--compose-only`.
 The score follows the cuts it finds in `out/showcase/clips`; under another video its sections
 are spread over the video's length.
 
@@ -105,7 +104,6 @@ flight's tiles would take tens of GB). `make_airliner.py` builds the `terragen` 
 | `requirements.txt` | the Python packages of these scripts (`pip install -r showcase/requirements.txt`) |
 | `base.yaml` | base scenario of every shot of both videos: one world (seed 1), one shared tile store, 1920×1080 camera, sensor look |
 | `storyboard.yaml` | the showcase's shots: caption (bottom left), description (bottom right), duration, layout and the scenario overrides (deep-merged onto `base.yaml`), the title and outro |
-| `scout.yaml` | an alternative storyboard of candidate places, for `--stills` checks before they go into `storyboard.yaml` |
 | `make_showcase.py` | renders the shots with `terrain run` (the globe with `terrain view --record`), composes the video (captions, cross-fades, title collage, 2×2 panels, tile map, outro) and pipes it into ffmpeg (H.264); its drawing helpers are shared with `make_airliner.py` |
 | `showcase_score.py` | the showcase's score, synthesised here (no samples): electronic, 120 bpm in A minor (kick, hats, clap, a rolling bass pumped by the kick, a pluck arpeggio, pads, bells, a lead motif) on a beat grid through the cuts; its sections follow the storyboard (quiet under the title and globe, the groove from the first landscape, a sunset drop, a drum-less night section, the peak through the steep turns, settling into the outro) |
 | `airliner.yaml` | the flight: the route (airports, waypoints, speeds, climb and descent), the take-off time, the globe opening, the flight timeline (playback speed along the route, camera switches, captions) and the outro |
