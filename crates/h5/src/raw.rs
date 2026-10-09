@@ -114,11 +114,7 @@ struct RawErr {
     min: hid_t,
 }
 
-unsafe extern "C" fn walk_cb(
-    _n: c_uint,
-    err: *const sys::h5e::H5E_error2_t,
-    data: *mut c_void,
-) -> herr_t {
+unsafe extern "C" fn walk_cb(_n: c_uint, err: *const sys::h5e::H5E_error2_t, data: *mut c_void) -> herr_t {
     // SAFETY: HDF5 passes a valid error record; `data` is the &mut Vec we
     // handed to H5Ewalk2. Strings are only valid during the callback, so copy.
     unsafe {
@@ -160,12 +156,7 @@ pub(crate) fn error_stack() -> String {
         if stack < 0 {
             return "<unable to retrieve HDF5 error stack>".into();
         }
-        sys::h5e::H5Ewalk2(
-            stack,
-            sys::h5e::H5E_direction_t::H5E_WALK_DOWNWARD,
-            Some(walk_cb),
-            &mut recs as *mut Vec<RawErr> as *mut c_void,
-        );
+        sys::h5e::H5Ewalk2(stack, sys::h5e::H5E_direction_t::H5E_WALK_DOWNWARD, Some(walk_cb), &mut recs as *mut Vec<RawErr> as *mut c_void);
         let msgs: Vec<String> = recs
             .iter()
             .map(|r| {

@@ -392,8 +392,8 @@ impl Sensor {
                 for i in 0..k {
                     let sx = x as f64 - d[2 * i] as f64;
                     let sy = y as f64 - d[2 * i + 1] as f64;
-                    for c in 0..3 {
-                        acc[c] += bilinear(radiance, w, h, sx, sy, c);
+                    for (c, a) in acc.iter_mut().enumerate() {
+                        *a += bilinear(radiance, w, h, sx, sy, c);
                     }
                 }
                 for c in 0..3 {
@@ -484,7 +484,11 @@ impl Sensor {
                     let e = match t.curve {
                         ToneCurve::Srgb => {
                             let v = v.min(1.0);
-                            if v <= 0.0031308 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
+                            if v <= 0.0031308 {
+                                v * 12.92
+                            } else {
+                                1.055 * v.powf(1.0 / 2.4) - 0.055
+                            }
                         }
                         ToneCurve::Gamma => v.min(1.0).powf(1.0 / t.gamma),
                         ToneCurve::Filmic => {
@@ -501,7 +505,6 @@ impl Sensor {
         out
     }
 }
-
 
 /// EV at time `t` from (time, EV) points (sorted by time), linear in between, constant outside.
 fn schedule_ev(s: &[[f64; 2]], t: f64) -> f64 {

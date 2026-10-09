@@ -202,7 +202,18 @@ impl StarField {
     /// (and Saturn's rings). Sources are added to the sky pixels of `radiance` (empty: ground
     /// truth only). Returns the sources in the image at the pose `mid` (the frame time).
     #[allow(clippy::too_many_arguments)]
-    pub fn render_track(&self, radiance: &mut [f32], points: &[Option<DVec3>], (w, h): (usize, usize), model: &dyn CameraModel, track: &[CamPose], mid: &CamPose, unix: f64, ell: &Ellipsoid, atmo: &AtmoParams) -> Vec<StarObs> {
+    pub fn render_track(
+        &self,
+        radiance: &mut [f32],
+        points: &[Option<DVec3>],
+        (w, h): (usize, usize),
+        model: &dyn CameraModel,
+        track: &[CamPose],
+        mid: &CamPose,
+        unix: f64,
+        ell: &Ellipsoid,
+        atmo: &AtmoParams,
+    ) -> Vec<StarObs> {
         let rt = mid.r_ecef_cam.transpose();
         // view cone (plus the rotation over the exposure) for culling before any allocation
         let turn = track.iter().map(|c| (c.r_ecef_cam.transpose() * mid.r_ecef_cam * DVec3::Z).angle_between(DVec3::Z)).fold(0.0, f64::max);
@@ -253,7 +264,16 @@ impl StarField {
                         // exposure-averaged position: mean of the track at equal time steps
                         let seg: Vec<DVec2> = pts.windows(2).filter_map(|q| Some((q[0]? + q[1]?) * 0.5)).collect();
                         let pmean = if seg.is_empty() { p } else { seg.iter().fold(DVec2::ZERO, |a, b| a + *b) / seg.len() as f64 };
-                        StarObs { id: s.id, x: p.x as f32, y: p.y as f32, xm: pmean.x as f32, ym: pmean.y as f32, v: s.v, irradiance: (e * t.y) as f32, visible: sky(xi, yi) }
+                        StarObs {
+                            id: s.id,
+                            x: p.x as f32,
+                            y: p.y as f32,
+                            xm: pmean.x as f32,
+                            ym: pmean.y as f32,
+                            v: s.v,
+                            irradiance: (e * t.y) as f32,
+                            visible: sky(xi, yi),
+                        }
                     });
                     if radiance.is_empty() || !s.draw {
                         return obs.map(|o| (Some(o), vec![]));
@@ -385,6 +405,7 @@ const RING_OUT: f64 = 2.269;
 /// opacity; the unlit face of the rings is dim). `dc`: direction to the planet, `ex`, `ey`: the
 /// image x / y directions at it, `sun`: planet → Sun, all in the camera frame. At most about
 /// `budget` samples.
+#[allow(clippy::too_many_arguments)]
 fn planet_shape(rpx: f64, dc: DVec3, ex: DVec3, ey: DVec3, sun: DVec3, pole: DVec3, globe_frac: f64, budget: usize) -> Vec<(DVec2, f64)> {
     let rings = pole.length_squared() > 0.5;
     let extent = if rings { RING_OUT } else { 1.0 } * rpx;
@@ -510,25 +531,39 @@ mod tests {
         type Case = (f64, f64, f64, f64, f64, &'static [(u32, f64, f64)]);
         let cases: [Case; 2] = [
             // 2026-03-19 21:30 UTC, lat 41.5705 lon 32.97 h 1500.0 m (Skyfield, DE421)
-            (1773955800.0, 41.5705, 32.97, 1500.0, 0.051546, &[
-                (32349, 245.206470669, 2.178336034),
-                (91262, 50.488495659, 14.463243025),
-                (11767, 359.338462323, 41.196513944),
-                (27989, 271.451858665, 9.567755203),
-                (30438, 220.635154324, -25.102898281),
-                (71683, 157.689034797, -19.529870960),
-                (104214, 27.204426347, -3.174344156),
-            ]),
+            (
+                1773955800.0,
+                41.5705,
+                32.97,
+                1500.0,
+                0.051546,
+                &[
+                    (32349, 245.206470669, 2.178336034),
+                    (91262, 50.488495659, 14.463243025),
+                    (11767, 359.338462323, 41.196513944),
+                    (27989, 271.451858665, 9.567755203),
+                    (30438, 220.635154324, -25.102898281),
+                    (71683, 157.689034797, -19.529870960),
+                    (104214, 27.204426347, -3.174344156),
+                ],
+            ),
             // 2031-07-01 12:00 UTC, lat -64.1 lon -21.9 h 10000.0 m (Skyfield, DE421)
-            (1940673600.0, -64.1, -21.9, 10000.0, 0.080771, &[
-                (32349, 30.728381601, 39.865951680),
-                (91262, 217.907885707, -61.557347676),
-                (11767, 359.335117981, -63.562452007),
-                (27989, 12.271747986, 17.942157577),
-                (30438, 49.041462602, 75.094274174),
-                (71683, 158.212201720, 38.113771770),
-                (104214, 263.246281809, -47.458546730),
-            ]),
+            (
+                1940673600.0,
+                -64.1,
+                -21.9,
+                10000.0,
+                0.080771,
+                &[
+                    (32349, 30.728381601, 39.865951680),
+                    (91262, 217.907885707, -61.557347676),
+                    (11767, 359.335117981, -63.562452007),
+                    (27989, 12.271747986, 17.942157577),
+                    (30438, 49.041462602, 75.094274174),
+                    (71683, 158.212201720, 38.113771770),
+                    (104214, 263.246281809, -47.458546730),
+                ],
+            ),
         ];
         let ell = geodesy::Ellipsoid::WGS84;
         let f = StarField::new(&StarsConfig { refraction: false, ..Default::default() }).unwrap();

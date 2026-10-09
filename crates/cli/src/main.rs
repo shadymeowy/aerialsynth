@@ -10,7 +10,12 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "terrain", version, about = "A procedural planet for aerial vision: terrain tiles, flights and camera datasets", after_help = "Start: `terrain config > my.yaml`, edit, `terrain run -c my.yaml`, `terrain view -c my.yaml`.")]
+#[command(
+    name = "terrain",
+    version,
+    about = "A procedural planet for aerial vision: terrain tiles, flights and camera datasets",
+    after_help = "Start: `terrain config > my.yaml`, edit, `terrain run -c my.yaml`, `terrain view -c my.yaml`."
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,

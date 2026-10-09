@@ -6,11 +6,11 @@
 //!   [-0.5, w-0.5] x [-0.5, h-0.5].
 //! * Body frame = FRD (x forward, y right, z down).
 //!
-//! The models and their YAML description follow camodocal's `calib/camera.{h,cpp}` exactly
-//! (formulas after camodocal): `pinhole`, `pinhole_full`, `kannala_brandt`, `mei`,
-//! `scaramuzza`, with the same keys (`model, width, height, intrinsics, distortion, xi,
-//! max_fov_deg, inv_poly, affine, center`). The forward maps are copied verbatim; the inverse
-//! maps (needed for rendering) are solved analytically / by Newton iterations.
+//! The camera YAML schema ([`CameraConfig`]) describes camodocal-style models: `pinhole`,
+//! `pinhole_full`, `kannala_brandt`, `mei`, `scaramuzza`, with the keys `model, width, height,
+//! intrinsics, distortion, xi, max_fov_deg, inv_poly, affine, center`. The forward maps are
+//! compatible with camodocal's formulas; the inverse maps (needed for rendering) are solved
+//! analytically / by Newton iterations.
 
 use anyhow::{bail, Result};
 use glam::{DMat3, DQuat, DVec2, DVec3};
@@ -34,7 +34,7 @@ pub trait CameraModel: Send + Sync + std::fmt::Debug {
     /// The same camera rendered at `s` times the resolution (sub-sample centres line up so that
     /// for odd `s` the central sub-sample coincides with the original pixel centre).
     fn scaled(&self, s: u32) -> Arc<dyn CameraModel>;
-    /// Serializable description (camodocal YAML schema).
+    /// Serializable description (the camera YAML schema, see [`CameraConfig`]).
     fn config(&self) -> CameraConfig;
     /// Projection parameters for the GPU vertex shader (see `GpuCamera`).
     fn gpu(&self) -> GpuCamera;
@@ -58,7 +58,7 @@ fn is_zero(v: &f64) -> bool {
     *v == 0.0
 }
 
-/// Camera intrinsics in camodocal's YAML schema:
+/// Camera intrinsics: the camera YAML schema (camodocal-style models):
 /// ```yaml
 /// model: pinhole            # pinhole | pinhole_full | kannala_brandt | mei | scaramuzza
 /// width: 752
@@ -175,7 +175,14 @@ impl CameraConfig {
                     bail!("camera: scaramuzza needs inv_poly");
                 }
                 Arc::new(Cam::new(
-                    Scaramuzza { inv_poly: self.inv_poly.clone(), c: self.affine[0], d: self.affine[1], e: self.affine[2], center_x: self.center[0], center_y: self.center[1] },
+                    Scaramuzza {
+                        inv_poly: self.inv_poly.clone(),
+                        c: self.affine[0],
+                        d: self.affine[1],
+                        e: self.affine[2],
+                        center_x: self.center[0],
+                        center_y: self.center[1],
+                    },
                     w,
                     h,
                 ))
@@ -627,7 +634,11 @@ impl<M: Proj> Cam<M> {
         let focal = match (m.unproj(pp), m.unproj(pp + DVec2::new(1.0, 0.0)), m.unproj(pp + DVec2::new(0.0, 1.0))) {
             (Some(a), Some(b), Some(c)) => {
                 let ang = 0.5 * (a.angle_between(b) + a.angle_between(c));
-                if ang > 0.0 { 1.0 / ang } else { 500.0 }
+                if ang > 0.0 {
+                    1.0 / ang
+                } else {
+                    500.0
+                }
             }
             _ => 500.0,
         };
@@ -662,14 +673,7 @@ impl<M: Proj> CameraModel for Cam<M> {
     }
     fn scaled(&self, s: u32) -> Arc<dyn CameraModel> {
         let sf = s as f64;
-        Arc::new(Cam {
-            m: self.m.scale(sf),
-            w: self.w * s,
-            h: self.h * s,
-            half_angle: self.half_angle,
-            angle_limit: self.angle_limit,
-            focal: self.focal * sf,
-        })
+        Arc::new(Cam { m: self.m.scale(sf), w: self.w * s, h: self.h * s, half_angle: self.half_angle, angle_limit: self.angle_limit, focal: self.focal * sf })
     }
     fn config(&self) -> CameraConfig {
         self.m.cfg(self.w, self.h)
@@ -771,12 +775,18 @@ mod tests {
     #[test]
     fn all_models_roundtrip() {
         let pts = [(0.0, 0.0), (751.0, 479.0), (376.0, 240.0), (100.0, 400.0), (700.0, 30.0)];
-        // EuRoC cam0 (camodocal config/euroc.yaml)
+        // EuRoC MAV dataset, cam0 calibration
         roundtrip(&cfg("{model: pinhole, width: 752, height: 480, intrinsics: [458.654, 457.296, 367.215, 248.375], distortion: [-0.28340811, 0.07395907, 0.00019359, 1.76187114e-05]}"), &pts);
         roundtrip(&cfg("{model: pinhole_full, width: 752, height: 480, intrinsics: [460, 458, 370, 250], distortion: [0.2, -0.05, 0.0005, -0.0003, 0.01, 0.48, 0.02, 0.005]}"), &pts);
-        roundtrip(&cfg("{model: kannala_brandt, width: 752, height: 480, intrinsics: [190, 190, 376, 240], distortion: [0.0034, 0.0007, -0.0024, 0.0003]}"), &pts);
+        roundtrip(
+            &cfg("{model: kannala_brandt, width: 752, height: 480, intrinsics: [190, 190, 376, 240], distortion: [0.0034, 0.0007, -0.0024, 0.0003]}"),
+            &pts,
+        );
         roundtrip(&cfg("{model: mei, width: 752, height: 480, intrinsics: [700, 700, 376, 240], distortion: [-0.1, 0.05, 0.0002, -0.0001], xi: 1.4}"), &pts);
-        roundtrip(&cfg("{model: scaramuzza, width: 752, height: 480, inv_poly: [283.65, 171.15, -6.0], affine: [1.0, 0.0, 0.0], center: [376, 240]}"), &[(376.5, 240.5), (300.0, 200.0), (600.0, 400.0), (10.0, 20.0)]);
+        roundtrip(
+            &cfg("{model: scaramuzza, width: 752, height: 480, inv_poly: [283.65, 171.15, -6.0], affine: [1.0, 0.0, 0.0], center: [376, 240]}"),
+            &[(376.5, 240.5), (300.0, 200.0), (600.0, 400.0), (10.0, 20.0)],
+        );
     }
 
     #[test]
@@ -787,7 +797,9 @@ mod tests {
         assert!(r.z < 0.0);
         let mei = cfg("{model: mei, width: 800, height: 800, intrinsics: [400, 400, 399.5, 399.5], distortion: [0, 0, 0, 0], xi: 1.2}").build().unwrap();
         assert!(mei.max_half_angle() > PI / 2.0, "{}", mei.max_half_angle());
-        let kbf = cfg("{model: kannala_brandt, width: 800, height: 800, intrinsics: [180, 180, 399.5, 399.5], distortion: [0, 0, 0, 0], max_fov_deg: 160}").build().unwrap();
+        let kbf = cfg("{model: kannala_brandt, width: 800, height: 800, intrinsics: [180, 180, 399.5, 399.5], distortion: [0, 0, 0, 0], max_fov_deg: 160}")
+            .build()
+            .unwrap();
         assert!(kbf.unproject(DVec2::new(0.0, 399.5)).is_none());
     }
 

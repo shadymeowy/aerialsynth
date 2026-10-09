@@ -69,7 +69,8 @@ impl Default for Scenario {
 pub struct CameraSpec {
     /// HDF5 group; calibration and every modality of this camera are written under it.
     pub path: String,
-    /// Camera model in camodocal's schema (pinhole | pinhole_full | kannala_brandt | mei | scaramuzza).
+    /// Camera model in the camera YAML schema (pinhole | pinhole_full | kannala_brandt | mei | scaramuzza;
+    /// see [`CameraConfig`]).
     pub intrinsics: CameraConfig,
     /// Mounting on the body (FRD).
     #[serde(default)]
@@ -138,7 +139,11 @@ impl CameraSpec {
     /// File-name friendly version of the path ("/ovc/left" → "ovc_left").
     pub fn slug(&self) -> String {
         let s: String = self.path.trim_matches('/').chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
-        if s.is_empty() { "camera".into() } else { s }
+        if s.is_empty() {
+            "camera".into()
+        } else {
+            s
+        }
     }
 }
 
@@ -147,7 +152,7 @@ pub fn h5path(p: &str) -> &str {
     p.trim_start_matches('/')
 }
 
-/// Developed camera images: `rgb` u8 [N,H,W,3] (or [N,H,W] when `gray`) + `exposure`.
+/// Developed camera images: `rgb` u8 `[N,H,W,3]` (or `[N,H,W]` when `gray`) + `exposure`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RgbModality {
@@ -169,20 +174,20 @@ pub enum DepthKind {
     Range,
 }
 
-/// `depth` f32 [N,H,W] in metres, +inf = sky.
+/// `depth` f32 `[N,H,W]` in metres, +inf = sky.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DepthModality {
     pub kind: DepthKind,
 }
 
-/// `flow` f32 [N,H,W,2]: forward flow to the next frame of the same camera (dx, dy) in px, and
-/// `flow_valid` u8 [N,H,W] (target visible). The last frame has zero, invalid flow.
+/// `flow` f32 `[N,H,W,2]`: forward flow to the next frame of the same camera (dx, dy) in px, and
+/// `flow_valid` u8 `[N,H,W]` (target visible). The last frame has zero, invalid flow.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FlowModality {}
 
-/// `landcover` u8 [N,H,W] class ids (255 = sky).
+/// `landcover` u8 `[N,H,W]` class ids (255 = sky).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LandcoverModality {}
@@ -322,7 +327,8 @@ impl Default for Compression {
 impl Scenario {
     pub fn load(path: &Path) -> Result<Self> {
         let s = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        let scn: Scenario = if s.trim().is_empty() { Scenario::default() } else { serde_yaml::from_str(&s).with_context(|| format!("parsing {}", path.display()))? };
+        let scn: Scenario =
+            if s.trim().is_empty() { Scenario::default() } else { serde_yaml::from_str(&s).with_context(|| format!("parsing {}", path.display()))? };
         scn.validate().with_context(|| format!("checking {}", path.display()))?;
         Ok(scn)
     }
@@ -375,7 +381,11 @@ impl Scenario {
             // odd supersampling
             let geometry = c.depth.is_some() || c.flow.is_some() || c.landcover.is_some();
             if geometry && c.supersample(&self.render) % 2 == 0 {
-                bail!("camera {}: supersample {} is even; depth / flow / landcover need an odd supersample (pixel-centre sample)", c.path, c.supersample(&self.render));
+                bail!(
+                    "camera {}: supersample {} is even; depth / flow / landcover need an odd supersample (pixel-centre sample)",
+                    c.path,
+                    c.supersample(&self.render)
+                );
             }
             let ss = c.supersample(&self.render);
             if !(1..=9).contains(&ss) || c.events.as_ref().is_some_and(|e| !(1..=9).contains(&e.supersample)) {
@@ -389,13 +399,15 @@ impl Scenario {
                     bail!("camera {}: events need max_px_per_step > 0 and 0 < min_rate_hz <= max_rate_hz", c.path);
                 }
             }
+            #[cfg_attr(not(feature = "gpu"), allow(unused_variables))] // validated here; used by the GPU check
             let model = c.intrinsics.build().with_context(|| format!("camera {}", c.path))?;
             // `backend: gpu` must be able to render the camera (`auto` falls back to the CPU)
             #[cfg(feature = "gpu")]
             if self.render.backend == crate::raster::Backend::Gpu {
                 let frames = std::iter::once(ss).filter(|_| c.has_frames());
                 for s in frames.chain(c.events.as_ref().map(|e| e.supersample)) {
-                    crate::gpu::supports(&*model, s).map_err(|e| anyhow::anyhow!("camera {}: render.backend gpu: {e} (backend auto renders it on the CPU)", c.path))?;
+                    crate::gpu::supports(&*model, s)
+                        .map_err(|e| anyhow::anyhow!("camera {}: render.backend gpu: {e} (backend auto renders it on the CPU)", c.path))?;
                 }
             }
         }

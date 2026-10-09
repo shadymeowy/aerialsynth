@@ -127,7 +127,16 @@ fn ground_at(cache: &TileCache, lat: f64, lon: f64, max_z: u8) -> Option<f64> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn render_thread(sh: Arc<Shared>, scn: Scenario, spec: CameraSpec, scale: f64, ss: u32, store: Arc<TileStore>, svc: Arc<Service>, repaint: egui::Context) -> Result<()> {
+fn render_thread(
+    sh: Arc<Shared>,
+    scn: Scenario,
+    spec: CameraSpec,
+    scale: f64,
+    ss: u32,
+    store: Arc<TileStore>,
+    svc: Arc<Service>,
+    repaint: egui::Context,
+) -> Result<()> {
     let ell = store.meta().ellipsoid();
     let cam_cfg = scaled_camera(&spec.intrinsics, scale);
     let model = cam_cfg.build()?;
@@ -317,7 +326,13 @@ impl CameraView {
                 ui.painter().image(t.id(), r, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
             }
             None => {
-                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "rendering the first frame…", egui::FontId::proportional(16.0), egui::Color32::GRAY);
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "rendering the first frame…",
+                    egui::FontId::proportional(16.0),
+                    egui::Color32::GRAY,
+                );
             }
         }
     }

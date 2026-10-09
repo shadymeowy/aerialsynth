@@ -52,15 +52,7 @@ impl Ctx {
         let p = geodesy::geodetic2ecef(Geodetic::new(lat, lon, 0.0), ell);
         let (sl, cl) = lat.sin_cos();
         let (so, co) = lon.sin_cos();
-        Ctx {
-            p,
-            up: DVec3::new(cl * co, cl * so, sl),
-            east: DVec3::new(-so, co, 0.0),
-            north: DVec3::new(-sl * co, -sl * so, cl),
-            lat,
-            lon,
-            gsd,
-        }
+        Ctx { p, up: DVec3::new(cl * co, cl * so, sl), east: DVec3::new(-so, co, 0.0), north: DVec3::new(-sl * co, -sl * so, cl), lat, lon, gsd }
     }
     /// Point offset by (east, north) meters in the tangent plane (good for small offsets).
     #[inline]
@@ -260,16 +252,13 @@ impl World {
             let p = geodesy::geodetic2ecef(Geodetic::from_deg(h.lat, h.lon, 0.0), &ell);
             (p, h.radius_km * KM, h.strength)
         });
-        let cache_key = serde_yaml::to_string(&cfg).unwrap_or_default().bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3));
+        let cache_key =
+            serde_yaml::to_string(&cfg).unwrap_or_default().bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3));
         World {
             cache_key,
             seed: s,
             cont: Fbm::new(k(1), cw, 7, 2.0, 0.52),
-            cont_warp: [
-                Fbm::new(k(2), cw * 0.8, 3, 2.0, 0.5),
-                Fbm::new(k(3), cw * 0.8, 3, 2.0, 0.5),
-                Fbm::new(k(4), cw * 0.8, 3, 2.0, 0.5),
-            ],
+            cont_warp: [Fbm::new(k(2), cw * 0.8, 3, 2.0, 0.5), Fbm::new(k(3), cw * 0.8, 3, 2.0, 0.5), Fbm::new(k(4), cw * 0.8, 3, 2.0, 0.5)],
             belt: Fbm::new(k(5), r.belt_wavelength_km * KM, 3, 2.0, 0.45),
             belt2: Fbm::new(k(6), r.belt_wavelength_km * KM * 0.43, 3, 2.0, 0.5),
             belt_var: Fbm::new(k(7), r.belt_wavelength_km * KM * 0.3, 3, 2.0, 0.5),
@@ -309,11 +298,7 @@ impl World {
     /// Continent field (>0 land), smooth at ≥100 km scales.
     pub fn continent(&self, p: DVec3, gsd: f64) -> f64 {
         let cw = self.cont.wavelength;
-        let warp = DVec3::new(
-            self.cont_warp[0].eval(p, gsd),
-            self.cont_warp[1].eval(p, gsd),
-            self.cont_warp[2].eval(p, gsd),
-        ) * (self.cfg.continents.warp * cw);
+        let warp = DVec3::new(self.cont_warp[0].eval(p, gsd), self.cont_warp[1].eval(p, gsd), self.cont_warp[2].eval(p, gsd)) * (self.cfg.continents.warp * cw);
         // keep the continental field coarse: octaves down to ~30 km; finer coast detail comes
         // from the hill/micro relief crossing sea level (fractal coastlines at every zoom).
         let gl = gsd.max(15.0 * KM);
@@ -831,7 +816,7 @@ impl World {
         self.terrain_impl(ctx, m, Mode::Full, Some(segs), None)
     }
 
-    /// [`terrain_with`] with precomputed per-area drainage data (identical results).
+    /// [`Self::terrain_with`] with precomputed per-area drainage data (identical results).
     pub fn terrain_with_near(&self, ctx: &Ctx, m: &Macro, segs: &[Seg], near: &NearSegs) -> Terrain {
         self.terrain_impl(ctx, m, Mode::Full, Some(segs), Some(near))
     }
@@ -952,11 +937,8 @@ impl World {
         }
 
         // ---- micro relief
-        let micro = if r.micro_height_m > 0.0 {
-            r.micro_height_m * (0.4 + 0.6 * smoothstep(-0.3, 0.6, rough) + mountain) * self.micro.eval(p, gsd)
-        } else {
-            0.0
-        };
+        let micro =
+            if r.micro_height_m > 0.0 { r.micro_height_m * (0.4 + 0.6 * smoothstep(-0.3, 0.6, rough) + mountain) * self.micro.eval(p, gsd) } else { 0.0 };
 
         let mut h = base + plateau + uplift + mtn + hills + micro + gully;
         let smooth = base + plateau + uplift + amp_m * ridged_low * 0.6 + hill_amp * hl_low;
@@ -995,12 +977,7 @@ impl World {
         }
 
         // ---- rivers: major + minor networks carve valleys, set water level
-        let mut t = Terrain {
-            river_d: f64::MAX,
-            river_hw: 0.0,
-            water: f64::NEG_INFINITY,
-            ..Default::default()
-        };
+        let mut t = Terrain { river_d: f64::MAX, river_hw: 0.0, water: f64::NEG_INFINITY, ..Default::default() };
         let mut floodplain: f64 = 0.0;
         let mut sink_lakes: Vec<(u64, DVec3, f64)> = Vec::new();
         // (no hard land cutoff: switching rivers off at a contour of the smooth continent field
@@ -1191,20 +1168,16 @@ impl World {
         let climate_ok = smoothstep(2.0, 8.0, temp) * (1.0 - smoothstep(27.0, 31.0, temp));
         let wet_ok = smoothstep(0.22, 0.42, moist);
         let irrig = (1.0 - wet_ok) * smoothstep(0.15, 0.6, an) * smoothstep(14.0, 20.0, temp); // dry: pivots
-        let agri = (climate_ok * (wet_ok + 0.7 * irrig) * (0.35 + 0.65 * smoothstep(-0.6, 0.2, an))
+        let agri = (climate_ok
+            * (wet_ok + 0.7 * irrig)
+            * (0.35 + 0.65 * smoothstep(-0.6, 0.2, an))
             * (1.0 - mountain * 0.9)
             * (1.0 - 0.75 * smoothstep(120.0, 320.0, hill_amp * (0.6 + 0.8 * smoothstep(-0.3, 0.6, rough))))
             * self.cfg.landuse.agriculture)
             .clamp(0.0, 1.0);
         let habit = climate_ok * (0.4 + 0.6 * wet_ok) * (1.0 - mountain) * land;
 
-        let style = [
-            0.5 + 0.5 * m.style[0] * 1.4,
-            0.5 + 0.5 * m.style[1] * 1.4,
-            0.5 + 0.5 * m.style[2] * 1.4,
-            0.5 + 0.5 * m.style[3] * 1.4,
-        ]
-        .map(saturate);
+        let style = [0.5 + 0.5 * m.style[0] * 1.4, 0.5 + 0.5 * m.style[1] * 1.4, 0.5 + 0.5 * m.style[2] * 1.4, 0.5 + 0.5 * m.style[3] * 1.4].map(saturate);
 
         // ---- land-use sites (only relevant when such features can be resolved)
         let region_cell = self.cfg.landuse.region_km * KM;

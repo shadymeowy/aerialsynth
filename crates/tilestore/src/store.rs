@@ -112,17 +112,12 @@ impl TileStore {
     }
 
     fn open_impl(path: &Path, writable: bool) -> Result<Self> {
-        let file = if writable { h5::File::open_rw(path) } else { h5::File::open(path) }
-            .with_context(|| format!("opening {}", path.display()))?;
+        let file = if writable { h5::File::open_rw(path) } else { h5::File::open(path) }.with_context(|| format!("opening {}", path.display()))?;
         let format = file.attr_str("format").unwrap_or_default();
         if format != FORMAT {
             bail!("{} is not a terrain tile store (format attr = {format:?})", path.display());
         }
-        let layers = file
-            .attr_str("layers")?
-            .split(',')
-            .filter_map(Layer::from_name)
-            .collect::<Vec<_>>();
+        let layers = file.attr_str("layers")?.split(',').filter_map(Layer::from_name).collect::<Vec<_>>();
         let meta = StoreMeta {
             ellipsoid_a: file.attr("ellipsoid_a")?,
             ellipsoid_b: file.attr("ellipsoid_b")?,
@@ -146,10 +141,11 @@ impl TileStore {
             let n = idx_ds.shape()?[0];
             let idx: Vec<i32> = if n > 0 { idx_ds.read_slice(&[0, 0], &[n, 2])? } else { vec![] };
             let rng: Vec<f32> = if n > 0 { range_ds.read_slice(&[0, 0], &[n, 2])? } else { vec![] };
-            let rows: Vec<(u32, u32)> = idx.chunks_exact(2).map(|c| (c[0] as u32, c[1] as u32)).collect();
+            let rows: Vec<(u32, u32)> = idx.as_chunks::<2>().0.iter().map(|c| (c[0] as u32, c[1] as u32)).collect();
             // rows with a negative index were never completed (interrupted write): skip them
-            let index = idx.chunks_exact(2).enumerate().filter(|(_, c)| c[0] >= 0 && c[1] >= 0).map(|(i, c)| ((c[0] as u32, c[1] as u32), i)).collect();
-            let ranges = rng.chunks_exact(2).map(|c| (c[0], c[1])).collect();
+            let index =
+                idx.as_chunks::<2>().0.iter().enumerate().filter(|(_, c)| c[0] >= 0 && c[1] >= 0).map(|(i, c)| ((c[0] as u32, c[1] as u32), i)).collect();
+            let ranges = rng.as_chunks::<2>().0.iter().map(|c| (c[0], c[1])).collect();
             let mut lds = HashMap::new();
             for l in &meta.layers {
                 if g.exists(l.name()) {
@@ -200,11 +196,7 @@ impl TileStore {
     }
 
     pub fn tiles_at(&self, z: u8) -> Vec<TileId> {
-        self.levels
-            .read()
-            .get(&z)
-            .map(|l| l.rows.iter().filter(|k| l.index.contains_key(k)).map(|&(x, y)| TileId::new(z, x, y)).collect())
-            .unwrap_or_default()
+        self.levels.read().get(&z).map(|l| l.rows.iter().filter(|k| l.index.contains_key(k)).map(|&(x, y)| TileId::new(z, x, y)).collect()).unwrap_or_default()
     }
 
     pub fn tiles(&self) -> Vec<TileId> {
@@ -237,13 +229,7 @@ impl TileStore {
             .deflate(4)
             .fill_value(-1) // rows never written (interrupted write) are recognisable
             .create("index")?;
-        let range_ds = g
-            .new_dataset::<f32>()
-            .shape(&[0, 2])
-            .max_shape(&[None, Some(2)])
-            .chunk(&[1024, 2])
-            .deflate(4)
-            .create("elev_range")?;
+        let range_ds = g.new_dataset::<f32>().shape(&[0, 2]).max_shape(&[None, Some(2)]).chunk(&[1024, 2]).deflate(4).create("elev_range")?;
         let mut layers = HashMap::new();
         for &l in &self.meta.layers {
             let shape = layer_shape(l, 0);
@@ -252,18 +238,25 @@ impl TileStore {
             let mut chunk = shape.clone();
             chunk[0] = 1;
             let ds = match l {
-                Layer::Elevation => g.new_dataset::<f32>().shape(&shape).max_shape(&max).chunk(&chunk).shuffle(true).deflate(DEFLATE_LEVEL as u8).create(l.name())?,
-                Layer::Normal => g.new_dataset::<i8>().shape(&shape).max_shape(&max).chunk(&chunk).shuffle(true).deflate(DEFLATE_LEVEL as u8).create(l.name())?,
+                Layer::Elevation => {
+                    g.new_dataset::<f32>().shape(&shape).max_shape(&max).chunk(&chunk).shuffle(true).deflate(DEFLATE_LEVEL as u8).create(l.name())?
+                }
+                Layer::Normal => {
+                    g.new_dataset::<i8>().shape(&shape).max_shape(&max).chunk(&chunk).shuffle(true).deflate(DEFLATE_LEVEL as u8).create(l.name())?
+                }
                 _ => g.new_dataset::<u8>().shape(&shape).max_shape(&max).chunk(&chunk).shuffle(true).deflate(DEFLATE_LEVEL as u8).create(l.name())?,
             };
-            ds.set_attr_str("description", match l {
-                Layer::Rgb => "satellite-look imagery (baked lighting), sRGB u8",
-                Layer::Albedo => "surface albedo, sRGB-encoded u8",
-                Layer::Elevation => "DSM height above the ellipsoid (m) at pixel centres",
-                Layer::Normal => "unit surface normal (east, north, up) * 127, i8",
-                Layer::Landcover => "land-cover class id (terragen::landcover)",
-                Layer::Emission => "night-time artificial light, linear radiance = 4 * (v/255)^2.2",
-            })?;
+            ds.set_attr_str(
+                "description",
+                match l {
+                    Layer::Rgb => "satellite-look imagery (baked lighting), sRGB u8",
+                    Layer::Albedo => "surface albedo, sRGB-encoded u8",
+                    Layer::Elevation => "DSM height above the ellipsoid (m) at pixel centres",
+                    Layer::Normal => "unit surface normal (east, north, up) * 127, i8",
+                    Layer::Landcover => "land-cover class id (terragen::landcover)",
+                    Layer::Emission => "night-time artificial light, linear radiance = 4 * (v/255)^2.2",
+                },
+            )?;
             layers.insert(l, ds);
         }
         Ok(Level { rows: vec![], index: HashMap::new(), ranges: vec![], idx_ds, range_ds, layers })
@@ -291,13 +284,7 @@ impl TileStore {
         }
         let encoded: Vec<Vec<(Layer, Vec<u8>)>> = tiles
             .par_iter()
-            .map(|t| {
-                layers
-                    .iter()
-                    .filter(|l| t.has(**l))
-                    .map(|&l| (l, codec::encode(t.layer_bytes(l), l.elem_size(), DEFLATE_LEVEL)))
-                    .collect()
-            })
+            .map(|t| layers.iter().filter(|l| t.has(**l)).map(|&l| (l, codec::encode(t.layer_bytes(l), l.elem_size(), DEFLATE_LEVEL))).collect())
             .collect();
         let mut lv = self.levels.write();
         // group by level so each level is resized once
@@ -306,11 +293,10 @@ impl TileStore {
             by_level.entry(t.id.z).or_default().push(i);
         }
         for (z, idxs) in by_level {
-            if !lv.contains_key(&z) {
-                let l = self.create_level(z)?;
-                lv.insert(z, l);
-            }
-            let level = lv.get_mut(&z).unwrap();
+            let level = match lv.entry(z) {
+                std::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
+                std::collections::btree_map::Entry::Vacant(e) => e.insert(self.create_level(z)?),
+            };
             let mut rows = Vec::with_capacity(idxs.len());
             let n0 = level.rows.len();
             let ranges0: Vec<(f32, f32)> = level.ranges.clone();
@@ -417,8 +403,7 @@ impl TileStore {
         }
         for (l, bytes, compressed) in raw {
             let data = if compressed {
-                let d = codec::decode(&bytes, l.elem_size(), l.tile_bytes())
-                    .with_context(|| format!("decoding {id} layer {}", l.name()))?;
+                let d = codec::decode(&bytes, l.elem_size(), l.tile_bytes()).with_context(|| format!("decoding {id} layer {}", l.name()))?;
                 if d.len() != l.tile_bytes() {
                     bail!("corrupt chunk for {id} layer {}", l.name());
                 }

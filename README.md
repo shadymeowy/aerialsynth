@@ -2,11 +2,21 @@
 
 A procedural planet for aerial vision research. `terrain` generates a deterministic world as
 Web-Mercator XYZ tiles, flies cameras and an IMU over it, and writes datasets with exact
-ground truth. A viewer flies over the world in realtime.
+ground truth. A viewer flies over the world in realtime. There is no imagery or elevation data
+anywhere: every pixel comes from the generator, so any place on the planet, at any zoom, can be
+produced on demand and reproduced exactly from a seed.
+
+![Nine views of the generated planet: braided rivers, a mountain range at golden hour, farmland on a curved horizon, a town, a desert coast, fields along a coastline, a red rock canyon, centre-pivot fields and a town at night](showcase/media/mosaic.jpg)
+
+![One frame of a dataset: the RGB camera, its depth and optical flow ground truth, and the event camera](showcase/media/ground_truth.jpg)
+
+<sub>Top: stills from the [showcase video](showcase/README.md), rendered from generated tiles
+only. Bottom: one frame of a dataset with its ground truth: RGB, depth, optical flow (parallax)
+and events.</sub>
 
 - **World:** continents, mountains carved by erosion, rivers, lakes, climate and biomes,
   forests of individual trees, fields, towns with buildings, roads, night lights. Any place,
-  any zoom, generated on demand (on the GPU) into one HDF5 tile store.
+  any zoom, generated on demand (on the GPU, or the CPU) into one HDF5 tile store.
 - **Flights:** spline paths with wind, gusts, turbulence and engine vibration; or your own
   trajectory CSV.
 - **Sensors:**
@@ -17,15 +27,39 @@ ground truth. A viewer flies over the world in realtime.
 - **Viewer:** a map of the tile store and the camera through the dataset renderer, flown
   live.
 
-## Start
+## Requirements
+
+- **Rust** 1.99 or newer (`rust-version` in `Cargo.toml`), via [rustup](https://rustup.rs).
+- **A C compiler and CMake ≥ 3.26.** HDF5 (2.2.0) and zlib are built from source and linked
+  statically (`hdf5-metno-sys`), so no system HDF5 is needed. The first build takes a few
+  minutes.
+- **A GPU** with Vulkan, Metal or DX12 (through [wgpu](https://wgpu.rs)) for speed:
+  - tile generation runs on the GPU when it supports 64-bit float and integer shaders
+    (Vulkan on NVIDIA and recent AMD), else on the CPU. Both build the same world; the CPU is
+    about 10× slower (`tiles.generator`, `docs/gpu.md`);
+  - rendering runs on the GPU when there is one, else on the CPU reference renderer
+    (`render.backend`);
+  - the viewer (`terrain view`) needs a GPU.
+- **Python 3** for the scripts (optional).
+
+It is developed on Linux; other platforms wgpu supports should work but are untested.
+
+## Quick start
 
 ```sh
 cargo build --release                       # the binary: target/release/terrain
+cargo install --path crates/cli             # optional: puts `terrain` on the PATH
+terrain view                                # the default world (seed 1, tiles in out/world.h5)
 terrain config > my.yaml                    # a commented scenario template; edit it
 terrain run -c my.yaml                      # trajectory → tiles → render (→ events)
 terrain view -c my.yaml                     # look around: map, camera (M), flying (F)
 python scripts/check_gt.py out/seq.h5       # check the ground truth of every camera
 ```
+
+Without `-c` every command uses the default scenario. `--seed N` overrides `world.seed`: a
+different planet. A tile store holds exactly one world: a store made with another seed or world
+config is refused (the error names the settings that differ), so give each world its own
+`tiles.file`.
 
 `configs/quick.yaml` is a 10 s smoke test and `configs/dataset.yaml` a fuller dataset.
 `configs/examples/` has night flights, a full moon, an event camera rig, a star tracker, a
@@ -42,7 +76,8 @@ fisheye, a 10 km cruise, a sunset and an IMU check.
 | `terrain config` | the scenario template; `--all` every setting; `-c my.yaml` a scenario with its defaults filled in |
 
 `run`, `tiles`, `view` and `config` read one scenario (`-c`) and take `--seed` (a different
-world) and `-j` (threads); `info` takes just the file.
+world) and `-j` (threads); `info` takes just the file. `terrain <command> --help` lists the
+options.
 
 ## Outputs
 
@@ -54,32 +89,66 @@ world) and `-j` (threads); `info` takes just the file.
   - i64 µs timestamps, self-describing datasets (units, descriptions);
   - optional PNG / NPY export.
 
-Layouts in `docs/formats.md`. Python helpers in `scripts/`: `check_gt.py`, `check_imu.py`,
-`check_events.py` (validation), `view_seq.py`, `view_events.py` (contact sheets),
-`contact.py` (generator previews).
+Both are plain HDF5; layouts in [`docs/formats.md`](docs/formats.md).
 
 ## Documentation
 
 | | |
 |---|---|
-| `docs/scenario.md` | writing scenarios: sections, cameras and modalities, conventions, look |
-| `docs/formats.md` | the tile store and sequence file layouts, validation scripts |
-| `docs/simulation.md` | what is simulated: terrain, rendering, lighting, sensor, IMU, flights; performance, tests |
-| `docs/viewer.md` | the viewer: map and camera views, controls, how it works |
-| `docs/events.md` | event cameras |
-| `docs/stars.md` | stars, planets, Moon: catalogue, astrometry, star ground truth |
-| `docs/gpu.md` | the GPU backend: tile generation and rendering |
+| [`docs/scenario.md`](docs/scenario.md) | writing scenarios: sections, cameras and modalities, conventions, look |
+| [`docs/formats.md`](docs/formats.md) | the tile store and sequence file layouts, validation scripts |
+| [`docs/simulation.md`](docs/simulation.md) | what is simulated: terrain, rendering, lighting, sensor, IMU, flights; performance, tests |
+| [`docs/viewer.md`](docs/viewer.md) | the viewer: map and camera views, controls, snapshots and recordings |
+| [`docs/events.md`](docs/events.md) | event cameras |
+| [`docs/stars.md`](docs/stars.md) | stars, planets, Moon: catalogue, astrometry, star ground truth |
+| [`docs/gpu.md`](docs/gpu.md) | the GPU backend: tile generation and rendering |
 
-## Code
+## Repository layout
 
 ```
 crates/geodesy    ellipsoid, geodetic/ECEF/ENU/NED/AER, XYZ tile math, attitude
 crates/h5         safe wrapper over hdf5-sys (HDF5 2.2.0 bundled)
 crates/tilestore  the HDF5 tile store
-crates/terragen   the world generator
+crates/terragen   the world generator (CPU / GPU)
 crates/render     cameras, flights, level of detail, renderer (CPU / GPU), lighting, sensor, events, IMU, writers
 crates/viewer     terrain view: map and camera views
 crates/cli        the terrain command
+configs/          example scenarios
+docs/             documentation
+scripts/          Python tools: validation, visualization, data builders
+showcase/         the showcase videos
 ```
 
-`cargo test --release` runs the tests (`docs/simulation.md` lists them).
+`cargo test --release` runs the tests ([`docs/simulation.md`](docs/simulation.md#tests) lists
+them).
+
+## Python tools
+
+```sh
+pip install -r scripts/requirements.txt
+```
+
+- `check_gt.py`, `check_imu.py`, `check_events.py`: validation of a sequence file; PASS / FAIL
+  per check ([`docs/formats.md`](docs/formats.md)).
+- `view_seq.py`, `view_events.py`: contact sheets of a sequence's frames and event windows.
+- `contact.py`: contact sheets of generator previews (`terrain tiles --png`).
+- `build_stars.py`, `build_planets.py`: rebuild the bundled star catalogue and ephemeris.
+
+[`showcase/`](showcase/README.md) renders the showcase video and the long-haul airliner flight,
+fully from this repository; it has its own README and requirements. Its fonts (Noto Sans,
+`showcase/fonts/`) are under the SIL Open Font License.
+
+## License
+
+Licensed under the Apache License, Version 2.0 ([LICENSE](LICENSE)).
+
+Bundled data (`crates/render/data/`, built by the scripts above; see
+[`docs/stars.md`](docs/stars.md#data-credits)):
+
+- `stars_v9.bin`: derived from the Hipparcos (ESA 1997; new reduction, van Leeuwen 2007) and
+  Tycho-2 (Høg et al. 2000) catalogues, ESA, obtained from CDS / VizieR (I/239, I/311, I/259).
+- `planets.bin`: a subset of the JPL DE440 planetary ephemeris (Park et al. 2021), public
+  domain.
+
+The astrometry follows ERFA (BSD-3-Clause, derived from IAU SOFA); its nutation series is taken
+from ERFA's `nut00b.c` (license text in [NOTICE](NOTICE)).

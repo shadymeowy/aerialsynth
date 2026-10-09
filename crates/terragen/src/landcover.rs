@@ -20,8 +20,8 @@ pub const BARE: u8 = 16;
 pub const URBAN: u8 = 17;
 
 pub const NAMES: [&str; 18] = [
-    "unknown", "ocean", "lake", "river", "beach", "sand", "rock", "snow", "grass", "shrub", "forest",
-    "crop", "building", "road", "wetland", "tundra", "bare", "urban",
+    "unknown", "ocean", "lake", "river", "beach", "sand", "rock", "snow", "grass", "shrub", "forest", "crop", "building", "road", "wetland", "tundra", "bare",
+    "urban",
 ];
 
 /// True if the class is a water surface (useful for renderers: specular, flat).

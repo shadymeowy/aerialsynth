@@ -32,7 +32,7 @@ pub struct LightingConfig {
     pub sun_elevation_deg: f64,
     /// YYYY-MM-DD
     pub date: String,
-    /// HH:MM[:SS] UTC at trajectory time 0.
+    /// `HH:MM[:SS]` UTC at trajectory time 0.
     pub time_utc: String,
     pub time_scale: f64,
     /// Clock of a time-warped trajectory (varying time-lapse): [trajectory time (s since its
@@ -173,9 +173,8 @@ pub fn solar_position(unix: f64, lat: f64, lon: f64) -> (f64, f64) {
     let l0 = (280.46646 + jc * (36000.76983 + jc * 0.0003032)).rem_euclid(360.0);
     let m = 357.52911 + jc * (35999.05029 - 0.0001537 * jc);
     let e = 0.016708634 - jc * (0.000042037 + 0.0000001267 * jc);
-    let c = (m * deg).sin() * (1.914602 - jc * (0.004817 + 0.000014 * jc))
-        + (2.0 * m * deg).sin() * (0.019993 - 0.000101 * jc)
-        + (3.0 * m * deg).sin() * 0.000289;
+    let c =
+        (m * deg).sin() * (1.914602 - jc * (0.004817 + 0.000014 * jc)) + (2.0 * m * deg).sin() * (0.019993 - 0.000101 * jc) + (3.0 * m * deg).sin() * 0.000289;
     let true_long = l0 + c;
     let omega = 125.04 - 1934.136 * jc;
     let app_long = true_long - 0.00569 - 0.00478 * (omega * deg).sin();
@@ -183,8 +182,7 @@ pub fn solar_position(unix: f64, lat: f64, lon: f64) -> (f64, f64) {
     let eps = eps0 + 0.00256 * (omega * deg).cos();
     let decl = ((eps * deg).sin() * (app_long * deg).sin()).asin();
     let y = (eps * deg / 2.0).tan().powi(2);
-    let eq_time = 4.0
-        / deg
+    let eq_time = 4.0 / deg
         * (y * (2.0 * l0 * deg).sin() - 2.0 * e * (m * deg).sin() + 4.0 * e * y * (m * deg).sin() * (2.0 * l0 * deg).cos()
             - 0.5 * y * y * (4.0 * l0 * deg).sin()
             - 1.25 * e * e * (2.0 * m * deg).sin());
@@ -213,7 +211,11 @@ pub fn solar_position(unix: f64, lat: f64, lon: f64) -> (f64, f64) {
         } else {
             let ca = ((lat.sin() * zen.cos()) - decl.sin()) / (lat.cos() * s);
             let a = ca.clamp(-1.0, 1.0).acos() / deg;
-            if ha > 0.0 { (a + 180.0).rem_euclid(360.0) } else { (540.0 - a).rem_euclid(360.0) }
+            if ha > 0.0 {
+                (a + 180.0).rem_euclid(360.0)
+            } else {
+                (540.0 - a).rem_euclid(360.0)
+            }
         }
     };
     (az * deg, el)
@@ -291,11 +293,7 @@ impl LightingConfig {
             (0.0, -1.0, 0.0)
         };
         let mel = moon_elevation.to_degrees();
-        let moon_direct = if self.moon {
-            2.5e-6 * moon_phase.powf(1.5) * smooth(-0.5, 8.0, mel) * self.moon_intensity
-        } else {
-            0.0
-        };
+        let moon_direct = if self.moon { 2.5e-6 * moon_phase.powf(1.5) * smooth(-0.5, 8.0, mel) * self.moon_intensity } else { 0.0 };
         SunState {
             azimuth: az,
             elevation: el,

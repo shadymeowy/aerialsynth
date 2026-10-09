@@ -17,10 +17,10 @@ use crate::world::{Ctx, World};
 use crate::Config;
 use anyhow::{bail, Result};
 use geodesy::tiles::{gsd_ew, gsd_ns, pixel_to_latlon, TileId};
-use tilestore::TileData;
 use glam::{DVec2, DVec3};
-use host::{gsink, point_in, Cache, Prep, PointKey, PointReq};
+use host::{gsink, point_in, Cache, PointKey, PointReq, Prep};
 use std::sync::{Arc, Mutex};
+use tilestore::TileData;
 use types::*;
 use wgpu::util::DeviceExt;
 
@@ -54,7 +54,11 @@ pub(crate) fn storage<T: bytemuck::Pod>(d: &wgpu::Device, label: &str, data: &[T
     if bytes.is_empty() {
         return d.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size: 256, usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false });
     }
-    d.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: bytes, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST })
+    d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(label),
+        contents: bytes,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    })
 }
 
 /// An output storage buffer of `size` bytes (copyable to a read-back buffer).
@@ -73,7 +77,12 @@ pub(crate) fn read_back<T: bytemuck::Pod>(g: &Gpu, buf: &wgpu::Buffer, n: usize)
     if bytes == 0 {
         return Ok(Vec::new());
     }
-    let rb = g.device.create_buffer(&wgpu::BufferDescriptor { label: Some("read-back"), size: bytes, usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+    let rb = g.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("read-back"),
+        size: bytes,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
     let mut enc = g.device.create_command_encoder(&Default::default());
     enc.copy_buffer_to_buffer(buf, 0, &rb, 0, bytes);
     g.queue.submit([enc.finish()]);
@@ -114,7 +123,8 @@ fn layout(d: &wgpu::Device, label: &str, kinds: &[Bind]) -> wgpu::BindGroupLayou
 }
 
 fn bind(d: &wgpu::Device, l: &wgpu::BindGroupLayout, bufs: &[&wgpu::Buffer]) -> wgpu::BindGroup {
-    let entries: Vec<wgpu::BindGroupEntry> = bufs.iter().enumerate().map(|(i, b)| wgpu::BindGroupEntry { binding: i as u32, resource: b.as_entire_binding() }).collect();
+    let entries: Vec<wgpu::BindGroupEntry> =
+        bufs.iter().enumerate().map(|(i, b)| wgpu::BindGroupEntry { binding: i as u32, resource: b.as_entire_binding() }).collect();
     d.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout: l, entries: &entries })
 }
 
@@ -189,7 +199,7 @@ pub(crate) struct DQuery {
 pub(crate) struct DrainOut {
     pub segs: wgpu::Buffer,
     pub ranges: Vec<[u32; 2]>,
-    pub sinks: Vec<Vec<(DVec3, f64)>>,
+    pub sinks: Vec<SinkPieces>,
 }
 
 /// The GPU tile generator of one world.
@@ -225,7 +235,11 @@ impl GpuGenerator {
         let surface = SurfaceModel::new(&world);
         let d = &gpu.device;
         let (octs, fbms) = tables::build(&world, &surface);
-        let g_cfg = d.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("cfg"), contents: bytemuck::bytes_of(&gpu_cfg(&world, &surface)), usage: wgpu::BufferUsages::UNIFORM });
+        let g_cfg = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cfg"),
+            contents: bytemuck::bytes_of(&gpu_cfg(&world, &surface)),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
         let g_grads = storage(d, "grads", &tables::grads());
         let g_octs = storage(d, "octs", &octs);
         let g_fbms = storage(d, "fbms", &fbms);
@@ -245,14 +259,47 @@ impl GpuGenerator {
         let m_points = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("points"), source: wgpu::ShaderSource::Wgsl(src_points.into()) });
         let m_tile = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("tile"), source: wgpu::ShaderSource::Wgsl(src_tile.into()) });
         let m_drain = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("drainage"), source: wgpu::ShaderSource::Wgsl(src_drain.into()) });
-        let pl_drain = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("drainage"), bind_group_layouts: &[Some(&l_globals), Some(&l_drain), Some(&l_lat)], immediate_size: 0 });
-        let pl_points = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("points"), bind_group_layouts: &[Some(&l_globals), Some(&l_drain), Some(&l_points)], immediate_size: 0 });
-        let pl_tile = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("tile"), bind_group_layouts: &[Some(&l_globals), Some(&l_tables), Some(&l_tile)], immediate_size: 0 });
+        let pl_drain = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("drainage"),
+            bind_group_layouts: &[Some(&l_globals), Some(&l_drain), Some(&l_lat)],
+            immediate_size: 0,
+        });
+        let pl_points = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("points"),
+            bind_group_layouts: &[Some(&l_globals), Some(&l_drain), Some(&l_points)],
+            immediate_size: 0,
+        });
+        let pl_tile = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("tile"),
+            bind_group_layouts: &[Some(&l_globals), Some(&l_tables), Some(&l_tile)],
+            immediate_size: 0,
+        });
         let pipe = |module: &wgpu::ShaderModule, pl: &wgpu::PipelineLayout, entry: &str| {
-            d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some(entry), layout: Some(pl), module, entry_point: Some(entry), compilation_options: Default::default(), cache: cache.as_ref().map(|c| &c.cache) })
+            d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(entry),
+                layout: Some(pl),
+                module,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: cache.as_ref().map(|c| &c.cache),
+            })
         };
         // (the driver compiles each pipeline on its own: in parallel)
-        let names = ["grid_nodes", "pass_a1", "bin_segments", "pass_a2", "region_requests", "town_requests", "pass_b", "open_min_x", "open_min_y", "open_max_x", "open_max_y", "open_apply", "finish"];
+        let names = [
+            "grid_nodes",
+            "pass_a1",
+            "bin_segments",
+            "pass_a2",
+            "region_requests",
+            "town_requests",
+            "pass_b",
+            "open_min_x",
+            "open_min_y",
+            "open_max_x",
+            "open_max_y",
+            "open_apply",
+            "finish",
+        ];
         let dnames = ["lat_enum", "lat_heights", "mark_targets", "lat_targets", "mark_sources", "lat_sources", "gather_count", "gather_scan", "gather_write"];
         let (points, mut tile, mut drain): (wgpu::ComputePipeline, Vec<wgpu::ComputePipeline>, Vec<wgpu::ComputePipeline>) = std::thread::scope(|s| {
             let hs: Vec<_> = names.iter().map(|n| s.spawn(|| pipe(&m_tile, &pl_tile, n))).collect();
@@ -261,7 +308,17 @@ impl GpuGenerator {
             (points, hs.into_iter().map(|h| h.join().expect("pipeline")).collect(), hd.into_iter().map(|h| h.join().expect("pipeline")).collect())
         });
         let mut dk = || drain.remove(0);
-        let dk = DrainKernels { enumerate: dk(), heights: dk(), mark_targets: dk(), targets: dk(), mark_sources: dk(), sources: dk(), count: dk(), scan: dk(), write: dk() };
+        let dk = DrainKernels {
+            enumerate: dk(),
+            heights: dk(),
+            mark_targets: dk(),
+            targets: dk(),
+            mark_sources: dk(),
+            sources: dk(),
+            count: dk(),
+            scan: dk(),
+            write: dk(),
+        };
         if let Some(c) = &cache {
             c.save();
         }
@@ -310,14 +367,15 @@ impl GpuGenerator {
     /// Evaluate points on the GPU (pass A with exact macro fields, see `points.wgsl`): their
     /// results, and for `MODE_REPORT` requests the sink pieces they keep. Points are grouped by
     /// area: one drainage query per group, filtered per point (`DR_KEEP`).
-    fn eval_points(&self, reqs: &[PointReq], lakes: &FxLakes) -> Result<(Vec<GTerrain>, Vec<Vec<(DVec3, f64)>>)> {
+    fn eval_points(&self, reqs: &[PointReq], lakes: &FxLakes) -> Result<(Vec<GTerrain>, Vec<SinkPieces>)> {
         const GROUP: f64 = 30_000.0;
         const GROUPS_PER_PASS: usize = 2048;
         let d = &self.gpu.device;
-        let mut groups: crate::noise::FxHashMap<(u64, (i64, i64, i64)), Vec<usize>> = Default::default();
+        // key: (gsd bits, GROUP-sized cell of the point)
+        let mut groups: crate::noise::FxHashMap<(u64, [i64; 3]), Vec<usize>> = Default::default();
         for (i, r) in reqs.iter().enumerate() {
             let g = (r.ctx.p / GROUP).floor();
-            groups.entry((r.ctx.gsd.to_bits(), (g.x as i64, g.y as i64, g.z as i64))).or_default().push(i);
+            groups.entry((r.ctx.gsd.to_bits(), [g.x as i64, g.y as i64, g.z as i64])).or_default().push(i);
         }
         let mut groups: Vec<_> = groups.into_iter().collect();
         groups.sort_unstable_by_key(|g| g.0);
@@ -326,7 +384,7 @@ impl GpuGenerator {
         let b_vals = storage(d, "lake levels", &vals);
         let empty = output(d, "empty", 256);
         let mut results = vec![GTerrain::default(); reqs.len()];
-        let mut reports: Vec<Vec<(DVec3, f64)>> = vec![Vec::new(); reqs.len()];
+        let mut reports: Vec<SinkPieces> = vec![Vec::new(); reqs.len()];
         for pass in groups.chunks(GROUPS_PER_PASS) {
             let queries: Vec<DQuery> = pass
                 .iter()
@@ -343,7 +401,14 @@ impl GpuGenerator {
             for (g, (_, idx)) in pass.iter().enumerate() {
                 for &i in idx {
                     let r = &reqs[i];
-                    let dr = GDrain { seg0: dr_out.ranges[g][0], nseg: dr_out.ranges[g][1], sink0: sinks.len() as u32, nsink: r.sinks.len() as u32, flags: DR_DIRECT | DR_KEEP, _p: [0; 3] };
+                    let dr = GDrain {
+                        seg0: dr_out.ranges[g][0],
+                        nseg: dr_out.ranges[g][1],
+                        sink0: sinks.len() as u32,
+                        nsink: r.sinks.len() as u32,
+                        flags: DR_DIRECT | DR_KEEP,
+                        _p: [0; 3],
+                    };
                     sinks.extend_from_slice(&r.sinks);
                     pts.push(point_in(&r.ctx, r.mode, dr));
                     order.push(i);
@@ -447,9 +512,40 @@ impl GpuGenerator {
             let gx = g.min(65535);
             [gx, g.div_ceil(gx), 1]
         };
-        let run = |lat: &Lattice, keys_ro: &wgpu::Buffer, enc: &mut wgpu::CommandEncoder, new_list: &wgpu::Buffer, segs: &wgpu::Buffer, b_sinks: &wgpu::Buffer, boxes: &wgpu::Buffer, chunks: &wgpu::Buffer, passes: &[(&wgpu::ComputePipeline, [u32; 3])]| {
+        let run = |lat: &Lattice,
+                   keys_ro: &wgpu::Buffer,
+                   enc: &mut wgpu::CommandEncoder,
+                   new_list: &wgpu::Buffer,
+                   segs: &wgpu::Buffer,
+                   b_sinks: &wgpu::Buffer,
+                   boxes: &wgpu::Buffer,
+                   chunks: &wgpu::Buffer,
+                   passes: &[(&wgpu::ComputePipeline, [u32; 3])]| {
             let g1 = bind(d, &self.k.l_drain, &[&b_dummy(d), &b_dummy(d), &b_dummy(d), &b_dummy(d), &b_dummy(d)]);
-            let g2 = bind(d, &self.k.l_lat, &[&lat.keys, &lat.s, &lat.h, &lat.flags, &lat.tgt, boxes, chunks, new_list, &b_count, segs, &b_chunk_n, &b_range, b_sinks, &b_qboxes, keys_ro, &lat.mark, &lat.work_t, &lat.work_s]);
+            let g2 = bind(
+                d,
+                &self.k.l_lat,
+                &[
+                    &lat.keys,
+                    &lat.s,
+                    &lat.h,
+                    &lat.flags,
+                    &lat.tgt,
+                    boxes,
+                    chunks,
+                    new_list,
+                    &b_count,
+                    segs,
+                    &b_chunk_n,
+                    &b_range,
+                    b_sinks,
+                    &b_qboxes,
+                    keys_ro,
+                    &lat.mark,
+                    &lat.work_t,
+                    &lat.work_s,
+                ],
+            );
             let mut cp = enc.begin_compute_pass(&Default::default());
             cp.set_bind_group(0, &self.globals, &[]);
             cp.set_bind_group(1, &g1, &[]);
@@ -588,7 +684,9 @@ impl GpuGenerator {
                 bail!("GPU generator: host preparation is stuck");
             }
             let mut reqs: Vec<PointReq> = need.drain().map(|(_, r)| r).collect();
-            reqs.sort_unstable_by(|a, b| (a.mode, a.ctx.p.x, a.ctx.p.y, a.ctx.p.z).partial_cmp(&(b.mode, b.ctx.p.x, b.ctx.p.y, b.ctx.p.z)).unwrap_or(std::cmp::Ordering::Equal));
+            reqs.sort_unstable_by(|a, b| {
+                (a.mode, a.ctx.p.x, a.ctx.p.y, a.ctx.p.z).partial_cmp(&(b.mode, b.ctx.p.x, b.ctx.p.y, b.ctx.p.z)).unwrap_or(std::cmp::Ordering::Equal)
+            });
             let (res, reps) = self.eval_points(&reqs, &cache.lattice_lakes)?;
             for ((r, t), rep) in reqs.iter().zip(res).zip(reps) {
                 if r.mode == MODE_REPORT {
@@ -645,7 +743,12 @@ impl GpuGenerator {
         let t_run = std::time::Instant::now();
         let stamp = |what: &str| {
             if prof {
-                eprintln!("  batch of {nt} (z{}..{}): {what} at {:.3} s", ids.iter().map(|i| i.z).min().unwrap_or(0), ids.iter().map(|i| i.z).max().unwrap_or(0), t_run.elapsed().as_secs_f64());
+                eprintln!(
+                    "  batch of {nt} (z{}..{}): {what} at {:.3} s",
+                    ids.iter().map(|i| i.z).min().unwrap_or(0),
+                    ids.iter().map(|i| i.z).max().unwrap_or(0),
+                    t_run.elapsed().as_secs_f64()
+                );
             }
         };
         // ---- drainage pieces (on the GPU) and sink lakes per tile
@@ -670,7 +773,10 @@ impl GpuGenerator {
             tq.iter()
                 .zip(&drain_out.sinks)
                 .map(|(q, pieces)| {
-                    let segs: Vec<crate::world::Seg> = pieces.iter().map(|&(b, hw)| crate::world::Seg { a: b, b, ha: 0.0, hb: 0.0, level: 0, hw, valley: 0.0, hw_b: hw, sink: true }).collect();
+                    let segs: Vec<crate::world::Seg> = pieces
+                        .iter()
+                        .map(|&(b, hw)| crate::world::Seg { a: b, b, ha: 0.0, hb: 0.0, level: 0, hw, valley: 0.0, hw_b: hw, sink: true })
+                        .collect();
                     let mut sinks = Vec::new();
                     for (sid, sc, rad) in World::sink_lakes(&segs) {
                         if (sc - q.center).length() < q.radius + 1.6 * rad + 10.0 {
@@ -696,7 +802,16 @@ impl GpuGenerator {
                 let n = ell.prime_vertical_radius(lat);
                 let (sl, cl) = lat.sin_cos();
                 let b2a2 = (ell.b / ell.a) * (ell.b / ell.a);
-                GRow { ncl: n * cl, z: (n * b2a2) * sl, sl: sl as f32, cl: cl as f32, lat: lat as f32, gsd: gsd_ew(lat, z, N as u32, &ell) as f32, gsd_ns: gsd_ns(lat, z, N as u32, &ell) as f32, _p: 0.0 }
+                GRow {
+                    ncl: n * cl,
+                    z: (n * b2a2) * sl,
+                    sl: sl as f32,
+                    cl: cl as f32,
+                    lat: lat as f32,
+                    gsd: gsd_ew(lat, z, N as u32, &ell) as f32,
+                    gsd_ns: gsd_ns(lat, z, N as u32, &ell) as f32,
+                    _p: 0.0,
+                }
             };
             let col = |px: f64| -> GCol {
                 let (_, lon) = pixel_to_latlon(DVec2::new(px, oy), z, N as u32);
@@ -809,7 +924,27 @@ impl GpuGenerator {
             bind(
                 d,
                 &self.k.l_tile,
-                &[&b_tiles, &b_rows, &b_cols, &b_node_f, &b_node_ids, &b_node_pts, &b_pix, &b_terr, &b_bins, list, &b_counters, &b_lake_req, &b_pixb, &b_scr_a, &b_scr_b, &b_out, &b_ranges, &b_region_req, &b_town_req],
+                &[
+                    &b_tiles,
+                    &b_rows,
+                    &b_cols,
+                    &b_node_f,
+                    &b_node_ids,
+                    &b_node_pts,
+                    &b_pix,
+                    &b_terr,
+                    &b_bins,
+                    list,
+                    &b_counters,
+                    &b_lake_req,
+                    &b_pixb,
+                    &b_scr_a,
+                    &b_scr_b,
+                    &b_out,
+                    &b_ranges,
+                    &b_region_req,
+                    &b_town_req,
+                ],
             )
         };
         let run_passes = |g1: &wgpu::BindGroup, g2: &wgpu::BindGroup, passes: &[(&wgpu::ComputePipeline, [u32; 3])], clear: bool| {
@@ -842,7 +977,11 @@ impl GpuGenerator {
             run_passes(
                 &g1,
                 &g2,
-                &[(&self.k.nodes, [((NG * NG) as u32).div_ceil(64), nt as u32, 1]), (&self.k.a1, [wg(NA2), wg(NA2), nt as u32]), (&self.k.bins, [(NBIN * NBIN) as u32, nt as u32, 1])],
+                &[
+                    (&self.k.nodes, [((NG * NG) as u32).div_ceil(64), nt as u32, 1]),
+                    (&self.k.a1, [wg(NA2), wg(NA2), nt as u32]),
+                    (&self.k.bins, [(NBIN * NBIN) as u32, nt as u32, 1]),
+                ],
                 true,
             );
             let counters: Vec<u32> = read_back(&self.gpu, &b_counters, 8)?;
@@ -1079,12 +1218,16 @@ impl PipelineCache {
             return None;
         }
         let key = wgpu::util::pipeline_cache_key(&gpu.info)?;
-        let dir = std::env::var_os("XDG_CACHE_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".cache")))?.join("terrain");
+        let dir = std::env::var_os("XDG_CACHE_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".cache")))?
+            .join("terrain");
         let path = dir.join(format!("pipelines-{key}.bin"));
         let data = std::fs::read(&path).ok();
         // SAFETY: the data is what `get_data` returned for this adapter key (or nothing); wgpu and
         // the driver validate it and fall back to an empty cache
-        let cache = unsafe { gpu.device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor { label: Some("terrain"), data: data.as_deref(), fallback: true }) };
+        let cache =
+            unsafe { gpu.device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor { label: Some("terrain"), data: data.as_deref(), fallback: true }) };
         Some(PipelineCache { cache, path })
     }
 
@@ -1104,6 +1247,9 @@ impl PipelineCache {
 }
 
 type FxLakes = crate::noise::FxHashMap<u64, Option<f64>>;
+
+/// Sink pieces of a drainage query or `MODE_REPORT` point: (end point, half width), in order.
+type SinkPieces = Vec<(DVec3, f64)>;
 
 /// The lattice lake levels as an open-addressing table (key 0 = empty; NONE_F = no lake).
 fn lake_table(lakes: &FxLakes) -> (Vec<u64>, Vec<f32>) {

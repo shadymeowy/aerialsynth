@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Render event windows of a camera's event stream (`<camera>/events`, sliced with ms_index).
 
-usage: view_events.py SEQ.h5 OUT.png [--camera /dvs] [--at 100,500,1500] [--window-ms 5]
-Positive events red, negative blue (white background), like common event visualizers.
+Windows side by side; positive events red, negative blue on white, like common event
+visualizers. Prints the event count and rate per window.
+
+    python scripts/view_events.py SEQ.h5 OUT.png [--camera /events] [--at 100,500,1500] [--window-ms 5]
 """
 import argparse, os, sys
 import numpy as np, h5py
@@ -10,10 +12,12 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from seqio import camera_with
 
-ap = argparse.ArgumentParser()
-ap.add_argument("seq"); ap.add_argument("out")
-ap.add_argument("--camera", default=None); ap.add_argument("--at", default=None)
-ap.add_argument("--window-ms", type=int, default=5)
+ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument("seq", help="sequence file (HDF5)")
+ap.add_argument("out", help="output PNG")
+ap.add_argument("--camera", default=None, help="camera group (default: the first with events/)")
+ap.add_argument("--at", default=None, help="comma-separated window starts in ms (default: at 1/6, 1/2, 5/6 of the stream)")
+ap.add_argument("--window-ms", type=int, default=5, help="window length in ms")
 a = ap.parse_args()
 f = h5py.File(a.seq, "r")
 path = a.camera or camera_with(f, "events")

@@ -28,17 +28,39 @@ impl Gpu {
             let info = adapter.get_info();
             let features = adapter.features() & (GEN_FEATURES | wgpu::Features::PIPELINE_CACHE);
             let (device, queue) = adapter
-                .request_device(&wgpu::DeviceDescriptor { label: Some("terrain"), required_features: features, required_limits: adapter.limits(), ..Default::default() })
+                .request_device(&wgpu::DeviceDescriptor {
+                    label: Some("terrain"),
+                    required_features: features,
+                    required_limits: adapter.limits(),
+                    ..Default::default()
+                })
                 .await?;
             Ok(Gpu { device, queue, info })
         })
     }
 
-    /// Fails unless the device can run the tile generator.
-    pub fn check_generator(&self) -> Result<()> {
+    /// Fails unless the device has the shader features of the generator's WGSL (f64, i64).
+    pub fn check_shaders(&self) -> Result<()> {
         let missing = GEN_FEATURES - self.device.features();
         if !missing.is_empty() {
             bail!("the GPU ({}) lacks shader features the tile generator needs: {missing:?}", self.info.name);
+        }
+        Ok(())
+    }
+
+    /// Fails unless the device can run the tile generator (its shader features and buffer sizes).
+    pub fn check_generator(&self) -> Result<()> {
+        self.check_shaders()?;
+        // the largest buffer the generator binds: the drainage lattice's points
+        let need = (super::LAT_CAP * 32) as u64;
+        let l = self.device.limits();
+        if l.max_storage_buffer_binding_size < need || l.max_buffer_size < need {
+            bail!(
+                "the GPU ({}) binds at most {} MiB per storage buffer; the tile generator needs {} MiB",
+                self.info.name,
+                l.max_storage_buffer_binding_size.min(l.max_buffer_size) >> 20,
+                need >> 20
+            );
         }
         Ok(())
     }

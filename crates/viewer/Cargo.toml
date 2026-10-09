@@ -2,6 +2,9 @@
 name = "viewer"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
 description = "`terrain view`: map (globe of the tile store) and camera (the dataset renderer, live), flown in realtime"
 
 [dependencies]

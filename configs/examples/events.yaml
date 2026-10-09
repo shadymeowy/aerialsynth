@@ -4,7 +4,7 @@
 # flow ground truth at 20 Hz on its own intrinsics / mounting.
 world: { seed: 1 }
 tiles: { file: out/quick/world.h5, max_zoom: 17, lazy: true }
-trajectory:   # its own flight (sharing the quick one let either scenario overwrite the other's)
+trajectory:   # its own flight file (a shared one would be overwritten by either scenario)
   file: out/events/traj.csv
   synth: { kind: random, altitude_m: 1000, speed_mps: 50, duration_s: 2 }
 cameras:

@@ -14,10 +14,7 @@ pub struct Ellipsoid {
 
 impl Ellipsoid {
     /// WGS84: `a = 6378137 m`, `1/f = 298.257223563`.
-    pub const WGS84: Ellipsoid = Ellipsoid {
-        a: 6_378_137.0,
-        b: 6_378_137.0 * (1.0 - 1.0 / 298.257_223_563),
-    };
+    pub const WGS84: Ellipsoid = Ellipsoid { a: 6_378_137.0, b: 6_378_137.0 * (1.0 - 1.0 / 298.257_223_563) };
 
     /// Build from semi-major axis and inverse flattening. `inv_f` of `0` or `±inf`
     /// yields a sphere of radius `a`.
@@ -25,10 +22,7 @@ impl Ellipsoid {
         if inv_f == 0.0 || inv_f.is_infinite() {
             Self::sphere(a)
         } else {
-            Self {
-                a,
-                b: a * (1.0 - 1.0 / inv_f),
-            }
+            Self { a, b: a * (1.0 - 1.0 / inv_f) }
         }
     }
 

@@ -17,14 +17,14 @@ render:
   backend: gpu   # auto (default) | gpu | cpu
 ```
 
-Build: the `gpu` feature of the `render` crate (on by default).
+Build: the `gpu` feature of the `render` and `terragen` crates (on by default).
 
 ## Split of the work
 
 | stage | where | why |
 |-------|-------|-----|
 | LOD unit selection, tile set (units, neighbours, ancestors) | CPU | tiny; shared code |
-| tile fetch / lazy generation | CPU (`TileCache`) | the generator is CPU code |
+| tile fetch / lazy generation | CPU (`TileCache`); missing tiles from the tile generator (GPU or CPU, below) | |
 | mesh geometry per unit and vertex stride: f64 ECEF vertices (shared `unit_geometry`) | CPU, once; cached on the GPU relative to a per-unit origin | camera-independent |
 | projection through the camera model (pinhole ± distortion, rational, Kannala–Brandt, Mei, Scaramuzza) | GPU vertex shader (`mesh.wgsl`) | per frame only a per-unit offset (f64 on the CPU) is uploaded |
 | rasterization into a supersampled G-buffer (unit, u, v, range) | GPU render pass | |
@@ -38,7 +38,9 @@ the same validity rules as the CPU mesh builder (triangles touching a non-imagea
 dropped) and sets `clip.w = range`, so u, v and range are interpolated perspective-correctly with
 weights 1/range, exactly like the CPU rasterizer.
 
-## Performance (RTX 2080 Ti, warm caches)
+## Performance
+
+On the author's machine (RTX 2080 Ti; CPU: Xeon W-2125, 8 threads), warm caches:
 
 | frame | CPU (8 threads) | GPU |
 |-------|-----------------|-----|
@@ -94,7 +96,7 @@ stars) are emulated with pairs of u32. Shading runs in f32; geometry stays f64 o
 
 ## Validation
 
-`cargo run --release -p render --example gpu_compare SCENARIO.yaml [t] [camera] [out.png]`
+`cargo run --release -p render --example gpu_compare -- SCENARIO.yaml [t] [camera_index] [out.png]`
 renders one frame with both backends, prints the radiance / depth / land-cover differences and
 writes CPU | GPU | |difference| side by side.
 
@@ -127,8 +129,8 @@ and builds the same world:
 * **Batches:** 16 tiles per batch (~25 MB of GPU memory per tile). Kernels: grid nodes → relief
   (and lake requests) → drainage pieces per 16-px bin → rest of pass A (and site requests) →
   pass B (adaptive supersampling) → canopy opening → output layers.
-* **Startup:** the compiled pipelines are kept in `~/.cache/terrain/` (the driver's own shader
-  cache is per executable); after the first run the generator is ready in ~0.1 s.
+* **Startup:** the compiled pipelines are kept in `$XDG_CACHE_HOME/terrain/` (default
+  `~/.cache/terrain/`; the driver's own shader cache is per executable); after the first run the generator is ready in ~0.1 s.
 
 | | CPU (8 threads) | GPU (RTX 2080 Ti) |
 |---|---|---|

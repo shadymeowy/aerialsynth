@@ -32,11 +32,7 @@ fn path_cstr(path: &Path) -> Result<CString> {
         path.as_os_str().as_bytes().to_vec()
     };
     #[cfg(not(unix))]
-    let bytes = path
-        .to_str()
-        .ok_or_else(|| Error::InvalidArgument(format!("non UTF-8 path {path:?}")))?
-        .as_bytes()
-        .to_vec();
+    let bytes = path.to_str().ok_or_else(|| Error::InvalidArgument(format!("non UTF-8 path {path:?}")))?.as_bytes().to_vec();
     CString::new(bytes).map_err(|_| Error::InvalidArgument(format!("path contains NUL: {path:?}")))
 }
 

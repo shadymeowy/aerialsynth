@@ -31,7 +31,15 @@ pub(crate) fn snapshot(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Gener
     let svc = Service::start(store, gen, base_tiles(args.base_zoom), (rayon::current_num_threads() / 2).max(1), || {});
     let mut globe = Globe::new(&device, &queue, ell, args.gpu_tiles);
     let s = map_settings(args);
-    let mut cam = Camera { lat: v[0].to_radians(), lon: v[1].to_radians(), dist: v[2] * 1000.0, heading: v[3].to_radians(), tilt: v[4].to_radians(), fov_y: 40f64.to_radians(), target_h: 0.0 };
+    let mut cam = Camera {
+        lat: v[0].to_radians(),
+        lon: v[1].to_radians(),
+        dist: v[2] * 1000.0,
+        heading: v[3].to_radians(),
+        tilt: v[4].to_radians(),
+        fov_y: 40f64.to_radians(),
+        target_h: 0.0,
+    };
     let t0 = Instant::now();
     let mut calm = 0;
     loop {
@@ -242,7 +250,8 @@ pub(crate) fn headless_device() -> Result<(wgpu::Device, wgpu::Queue)> {
         let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
         desc.backends = wgpu::Backends::PRIMARY;
         let instance = wgpu::Instance::new(desc);
-        let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() }).await?;
+        let adapter =
+            instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() }).await?;
         anyhow::Ok(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("viewer"), required_limits: adapter.limits(), ..Default::default() }).await?)
     })
 }
@@ -259,7 +268,10 @@ pub(crate) fn record(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Generat
     if keys.len() < 2 || keys.windows(2).any(|w| w[1].t <= w[0].t) {
         bail!("{}: at least two keys with increasing t", path.display());
     }
-    if let Some(k) = keys.iter().find(|k| !(k.km > 0.0 && k.fov > 0.0 && k.fov < 180.0) || ![k.t, k.lat, k.lon, k.km, k.heading, k.tilt, k.exag, k.fov].iter().all(|v| v.is_finite())) {
+    if let Some(k) = keys
+        .iter()
+        .find(|k| !(k.km > 0.0 && k.fov > 0.0 && k.fov < 180.0) || ![k.t, k.lat, k.lon, k.km, k.heading, k.tilt, k.exag, k.fov].iter().all(|v| v.is_finite()))
+    {
         bail!("{}: key at t = {}: km must be > 0, fov in (0, 180), every value finite", path.display(), k.t);
     }
     for m in look.iter().filter_map(|k| k.mode.as_deref()) {
@@ -405,7 +417,14 @@ mod tests {
         // the body axes rebuilt from roll / pitch / yaw are the view direction and image down,
         // also looking straight down (gimbal lock: roll and yaw are not unique there)
         let ell = geodesy::Ellipsoid::WGS84;
-        for &(lat, lon, km, heading, tilt) in &[(20.0, 40.0, 15000.0, 0.0, 0.0), (10.0, -70.0, 13000.0, 0.0, 0.0), (7.0, -100.0, 3.0, 30.0, 0.0), (-60.0, 170.0, 50.0, 250.0, 0.0), (7.0, -102.0, 3.0, 90.0, 63.0), (45.0, 10.0, 8.0, 300.0, 80.0)] {
+        for &(lat, lon, km, heading, tilt) in &[
+            (20.0, 40.0, 15000.0, 0.0, 0.0),
+            (10.0, -70.0, 13000.0, 0.0, 0.0),
+            (7.0, -100.0, 3.0, 30.0, 0.0),
+            (-60.0, 170.0, 50.0, 250.0, 0.0),
+            (7.0, -102.0, 3.0, 90.0, 63.0),
+            (45.0, 10.0, 8.0, 300.0, 80.0),
+        ] {
             let mut c = at_time(&[key(0.0, lat, lon, km), key(1.0, lat, lon, km)], 0.0).0;
             (c.heading, c.tilt) = (f64::to_radians(heading), f64::to_radians(tilt));
             let f = c.frame(&ell, 16.0 / 9.0);
@@ -414,7 +433,8 @@ mod tests {
             let q = geodesy::euler_zyx_to_quat(yaw.to_radians(), pitch.to_radians(), roll.to_radians());
             let (sl, cl) = eye.lat.sin_cos();
             let (so, co) = eye.lon.sin_cos();
-            let ned = |v: DVec3| DVec3::new(v.dot(DVec3::new(-sl * co, -sl * so, cl)), v.dot(DVec3::new(-so, co, 0.0)), v.dot(DVec3::new(-cl * co, -cl * so, -sl)));
+            let ned =
+                |v: DVec3| DVec3::new(v.dot(DVec3::new(-sl * co, -sl * so, cl)), v.dot(DVec3::new(-so, co, 0.0)), v.dot(DVec3::new(-cl * co, -cl * so, -sl)));
             let (x, z) = (q * DVec3::X, q * DVec3::Z);
             assert!((x - ned(f.dir)).length() < 1e-6 && (z + ned(f.cam_up)).length() < 1e-6, "{lat} {lon} {heading} {tilt}: {roll} {pitch} {yaw}");
         }

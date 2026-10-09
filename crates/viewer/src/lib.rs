@@ -3,9 +3,9 @@
 //! * **Map:** the tile store as a globe (its own light shader): browse the planet, see what is
 //!   stored, generate as you go. Orbit, or fly.
 //! * **Camera:** a scenario camera rendered by the dataset renderer and sensor, live
-//!   ([`camera`]): what a dataset frame from that pose and time looks like.
+//!   (`camera`): what a dataset frame from that pose and time looks like.
 //!
-//! Both views share the flight (free flight or plane, [`fly`]) and the tile service ([`tiles`]):
+//! Both views share the flight (free flight or plane, `fly`) and the tile service (`tiles`):
 //! the base levels (z0..=`--base-zoom`) are completed on start, and with generation on, the
 //! tiles the view wants are generated and stored in the background.
 
@@ -119,13 +119,15 @@ pub fn run(scn: Scenario, store: Arc<TileStore>, gen: Arc<Generator>, mut opts: 
     eprintln!("view: store {} ({} tiles), seed {}, camera {}", store.path().display(), store.len(), gen.config().seed, spec.path);
     let mut setup = egui_wgpu::WgpuSetupCreateNew::without_display_handle();
     // texture arrays of hundreds of tiles: the adapter's own limits, not the portable defaults
-    setup.device_descriptor = Arc::new(|adapter: &wgpu::Adapter| wgpu::DeviceDescriptor { label: Some("viewer"), required_limits: adapter.limits(), ..Default::default() });
+    setup.device_descriptor =
+        Arc::new(|adapter: &wgpu::Adapter| wgpu::DeviceDescriptor { label: Some("viewer"), required_limits: adapter.limits(), ..Default::default() });
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1500.0, 950.0]).with_title("terrain view"),
         wgpu_options: egui_wgpu::WgpuConfiguration { wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(setup), ..Default::default() },
         ..Default::default()
     };
-    eframe::run_native("terrain view", options, Box::new(move |cc| Ok(Box::new(App::new(cc, scn, spec, opts, store, gen)?)))).map_err(|e| anyhow::anyhow!("{e}"))
+    eframe::run_native("terrain view", options, Box::new(move |cc| Ok(Box::new(App::new(cc, scn, spec, opts, store, gen)?))))
+        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 pub(crate) fn base_tiles(base_zoom: u8) -> Vec<TileId> {
@@ -205,7 +207,14 @@ struct App {
 }
 
 impl App {
-    fn new(cc: &eframe::CreationContext<'_>, scn: Scenario, spec: CameraSpec, opts: ViewOptions, store: Arc<TileStore>, gen: Arc<Generator>) -> Result<App, Box<dyn std::error::Error + Send + Sync>> {
+    fn new(
+        cc: &eframe::CreationContext<'_>,
+        scn: Scenario,
+        spec: CameraSpec,
+        opts: ViewOptions,
+        store: Arc<TileStore>,
+        gen: Arc<Generator>,
+    ) -> Result<App, Box<dyn std::error::Error + Send + Sync>> {
         let rs = cc.wgpu_render_state.as_ref().ok_or("wgpu is not available")?;
         let ell = gen.world.ell;
         let home = gen.config().home.as_ref().map(|h| (h.lat.to_radians(), h.lon.to_radians())).unwrap_or((20f64.to_radians(), 10f64.to_radians()));
@@ -243,7 +252,15 @@ impl App {
             nav,
             fly,
             spawn_agl: flying.then(|| start.map(|s| s.2).unwrap_or(600.0)),
-            orbit: Camera { lat, lon, dist: if start.is_some() { 40_000.0 } else { 2.6 * ell.a }, heading: 0.0, tilt: 0.0, fov_y: 40f64.to_radians(), target_h: 0.0 },
+            orbit: Camera {
+                lat,
+                lon,
+                dist: if start.is_some() { 40_000.0 } else { 2.6 * ell.a },
+                heading: 0.0,
+                tilt: 0.0,
+                fov_y: 40f64.to_radians(),
+                target_h: 0.0,
+            },
             globe: Globe::new(&rs.device, &rs.queue, ell, opts.gpu_tiles),
             s: map_settings(&opts),
             svc,
@@ -339,7 +356,8 @@ impl App {
         ui.horizontal(|ui| {
             let mut tab = self.tab;
             ui.selectable_value(&mut tab, Tab::Map, egui::RichText::new("Map").strong()).on_hover_text("the tile store on a globe (M)");
-            ui.selectable_value(&mut tab, Tab::Camera, egui::RichText::new("Camera").strong()).on_hover_text("the scenario camera through the dataset renderer (M)");
+            ui.selectable_value(&mut tab, Tab::Camera, egui::RichText::new("Camera").strong())
+                .on_hover_text("the scenario camera through the dataset renderer (M)");
             if tab != self.tab {
                 self.set_tab(tab);
             }
@@ -424,7 +442,9 @@ impl App {
                 ui.add(egui::Slider::new(&mut self.s.sun_lat, -23.44..=23.44).text("sun latitude"));
             }
             let g = &self.globe.stats;
-            ui.label(egui::RichText::new(format!("patches {} · finest z{} · GPU tiles {} / {}", g.drawn, g.max_zoom_drawn, g.resident, g.capacity)).small().weak());
+            ui.label(
+                egui::RichText::new(format!("patches {} · finest z{} · GPU tiles {} / {}", g.drawn, g.max_zoom_drawn, g.resident, g.capacity)).small().weak(),
+            );
         });
         if self.nav == Nav::Orbit {
             ui.horizontal_wrapped(|ui| {
@@ -441,7 +461,11 @@ impl App {
                     self.orbit.tilt = 0.0;
                 }
             });
-            ui.label(egui::RichText::new(format!("{:.4}°, {:.4}° · {} up", self.orbit.lat.to_degrees(), self.orbit.lon.to_degrees(), fmt_dist(self.eye_alt))).small().monospace());
+            ui.label(
+                egui::RichText::new(format!("{:.4}°, {:.4}° · {} up", self.orbit.lat.to_degrees(), self.orbit.lon.to_degrees(), fmt_dist(self.eye_alt)))
+                    .small()
+                    .monospace(),
+            );
             if let Some((la, lo)) = self.hover {
                 ui.label(egui::RichText::new(format!("cursor {:.4}°, {:.4}°", la.to_degrees(), lo.to_degrees())).small().weak());
             }
@@ -469,7 +493,11 @@ impl App {
         }
         egui::CollapsingHeader::new(format!("Tiles · {} generated", generated)).default_open(false).show(ui, |ui| {
             ui.add_enabled(self.s.dynamic, egui::Slider::new(&mut self.s.gen_max_zoom, self.s.base_zoom..=19).text("deepest level"));
-            ui.label(egui::RichText::new(format!("{:.1} tiles/s · {} loaded · {} in flight", self.rate, st.loaded.load(Ordering::Relaxed), self.svc.in_flight())).small().weak());
+            ui.label(
+                egui::RichText::new(format!("{:.1} tiles/s · {} loaded · {} in flight", self.rate, st.loaded.load(Ordering::Relaxed), self.svc.in_flight()))
+                    .small()
+                    .weak(),
+            );
             if self.counts_at.elapsed().as_secs_f64() > 1.0 {
                 self.counts = self.svc.store.zooms().into_iter().map(|z| (z, self.svc.store.tiles_at(z).len())).collect();
                 self.counts_at = Instant::now();
@@ -595,7 +623,8 @@ impl App {
         if let Some(id) = self.globe.texture_id {
             ui.painter().image(id, rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
         }
-        let ndc_of = |p: egui::Pos2| DVec2::new(((p.x - rect.left()) / rect.width() * 2.0 - 1.0) as f64, (1.0 - (p.y - rect.top()) / rect.height() * 2.0) as f64);
+        let ndc_of =
+            |p: egui::Pos2| DVec2::new(((p.x - rect.left()) / rect.width() * 2.0 - 1.0) as f64, (1.0 - (p.y - rect.top()) / rect.height() * 2.0) as f64);
         self.hover = resp.hover_pos().and_then(|p| self.globe.pick(&cf, ndc_of(p)));
         if self.nav == Nav::Orbit && resp.double_clicked() {
             if let Some((la, lo)) = resp.interact_pointer_pos().and_then(|p| self.globe.pick(&cf, ndc_of(p))) {

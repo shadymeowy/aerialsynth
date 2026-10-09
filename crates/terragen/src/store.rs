@@ -80,7 +80,11 @@ impl Generator {
             );
         }
         if m.generator_version != GENERATOR_VERSION {
-            let what = if m.generator_version == 0 { "an older generator (version not recorded)".to_string() } else { format!("generator version {}", m.generator_version) };
+            let what = if m.generator_version == 0 {
+                "an older generator (version not recorded)".to_string()
+            } else {
+                format!("generator version {}", m.generator_version)
+            };
             if writing {
                 bail!("{name} was written by {what}, this is version {GENERATOR_VERSION}: new tiles would not match its old ones; use a new tiles file");
             }
@@ -121,7 +125,11 @@ fn diff(a: &Value, b: &Value, path: &str, out: &mut Vec<String>) {
         _ if a != b => {
             let short = |v: &Value| {
                 let s = serde_yaml::to_string(v).unwrap_or_default().trim().replace('\n', " ");
-                if s.chars().count() > 24 { format!("{}…", s.chars().take(24).collect::<String>()) } else { s }
+                if s.chars().count() > 24 {
+                    format!("{}…", s.chars().take(24).collect::<String>())
+                } else {
+                    s
+                }
             };
             out.push(format!("{path} ({} → {})", short(a), short(b)));
         }

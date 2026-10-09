@@ -106,8 +106,7 @@ pub fn perlin3_d(seed: u64, p: DVec3) -> (f64, DVec3) {
     for dz in 0..2i64 {
         for dy in 0..2i64 {
             for (dx, hx) in [(0i64, hx0), (1, hx1)] {
-                let h = mix64(mix64(hx ^ ((iy + dy) as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F))
-                    ^ ((iz + dz) as u64).wrapping_mul(0x1656_67B1_9E37_79F9));
+                let h = mix64(mix64(hx ^ ((iy + dy) as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F)) ^ ((iz + dz) as u64).wrapping_mul(0x1656_67B1_9E37_79F9));
                 let gv = g[(h >> 56) as usize];
                 let d = [f.x - dx as f64, f.y - dy as f64, f.z - dz as f64];
                 val[k] = gv[0] * d[0] + gv[1] * d[1] + gv[2] * d[2];
@@ -139,11 +138,7 @@ pub fn perlin3_d(seed: u64, p: DVec3) -> (f64, DVec3) {
     let gk6 = ga - lerp_g(1) - lerp_g(4) + lerp_g(5);
     let gk7 = -ga + lerp_g(1) + lerp_g(2) - lerp_g(3) + lerp_g(4) - lerp_g(5) - lerp_g(6) + lerp_g(7);
     let gi = ga + gk1 * u + gk2 * v + gk3 * w + gk4 * (u * v) + gk5 * (v * w) + gk6 * (w * u) + gk7 * (u * v * w);
-    let dn = DVec3::new(
-        du * (k1 + k4 * v + k6 * w + k7 * v * w),
-        dv * (k2 + k5 * w + k4 * u + k7 * w * u),
-        dw * (k3 + k6 * u + k5 * v + k7 * u * v),
-    );
+    let dn = DVec3::new(du * (k1 + k4 * v + k6 * w + k7 * v * w), dv * (k2 + k5 * w + k4 * u + k7 * w * u), dw * (k3 + k6 * u + k5 * v + k7 * u * v));
     (n * 1.1, (gi + dn) * 1.1)
 }
 
@@ -539,10 +534,7 @@ pub fn worley2(seed: u64, p: DVec2, cell: f64, jitter: f64) -> Cell2 {
         }
         let (cx, cy) = (ix + dx, iy + dy);
         let h = hash2(seed, cx, cy);
-        let fp = DVec2::new(
-            cx as f64 + 0.5 + jitter * (u01k(h, 1) - 0.5),
-            cy as f64 + 0.5 + jitter * (u01k(h, 2) - 0.5),
-        );
+        let fp = DVec2::new(cx as f64 + 0.5 + jitter * (u01k(h, 1) - 0.5), cy as f64 + 0.5 + jitter * (u01k(h, 2) - 0.5));
         let d = (fp - q).length_squared();
         if d < best.f1 {
             best.f2 = best.f1;

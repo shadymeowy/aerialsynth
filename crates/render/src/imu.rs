@@ -317,7 +317,8 @@ mod tests {
     #[test]
     fn imu_noise_statistics_and_level_flight() {
         let ell = Ellipsoid::WGS84;
-        let sc = SynthConfig { kind: crate::dynamics::PathKind::Line, duration: 60.0, altitude_ref: AltitudeRef::Ellipsoid, altitude: 1000.0, ..Default::default() };
+        let sc =
+            SynthConfig { kind: crate::dynamics::PathKind::Line, duration: 60.0, altitude_ref: AltitudeRef::Ellipsoid, altitude: 1000.0, ..Default::default() };
         let mut sc = sc;
         sc.wind.turbulence = 0.0;
         sc.wind.gust_rate_per_min = 0.0;

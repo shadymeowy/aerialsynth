@@ -64,11 +64,7 @@ pub fn geodetic2ecef(g: Geodetic, ell: &Ellipsoid) -> DVec3 {
     let (sl, cl) = g.lat.sin_cos();
     let (so, co) = g.lon.sin_cos();
     let b2a2 = (ell.b / ell.a) * (ell.b / ell.a);
-    DVec3::new(
-        (n + g.h) * cl * co,
-        (n + g.h) * cl * so,
-        (n * b2a2 + g.h) * sl,
-    )
+    DVec3::new((n + g.h) * cl * co, (n + g.h) * cl * so, (n * b2a2 + g.h) * sl)
 }
 
 /// ECEF (m) → geodetic.
@@ -134,11 +130,7 @@ pub fn ecef2geodetic(p: DVec3, ell: &Ellipsoid) -> Geodetic {
     let (sl, cl) = lat.sin_cos();
     let n = a / (1.0 - e2 * sl * sl).sqrt();
     let h = (w - n * cl) * cl + (z - n * (1.0 - e2) * sl) * sl;
-    Geodetic {
-        lat,
-        lon: p.y.atan2(p.x),
-        h,
-    }
+    Geodetic { lat, lon: p.y.atan2(p.x), h }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -353,13 +345,7 @@ impl LocalFrame {
             LocalConvention::Enu => rot_ecef2enu(origin.lat, origin.lon),
             LocalConvention::Ned => rot_ecef2ned(origin.lat, origin.lon),
         };
-        Self {
-            origin,
-            origin_ecef: geodetic2ecef(origin, &ell),
-            convention,
-            r_ecef2local,
-            ell,
-        }
+        Self { origin, origin_ecef: geodetic2ecef(origin, &ell), convention, r_ecef2local, ell }
     }
 
     /// Rotation with `v_ecef = R * v_local`.
@@ -505,18 +491,12 @@ pub(crate) mod tests {
     }
 
     fn assert_vec(a: DVec3, b: DVec3, tol: f64, what: &str) {
-        assert!(
-            (a - b).abs().max_element() <= tol,
-            "{what}: got {a:?}, want {b:?}, diff {:?}",
-            a - b
-        );
+        assert!((a - b).abs().max_element() <= tol, "{what}: got {a:?}, want {b:?}, diff {:?}", a - b);
     }
 
     fn assert_geo(g: Geodetic, lat: f64, lon: f64, h: f64, tol_rad: f64, tol_m: f64, what: &str) {
         assert!(
-            (g.lat - lat).abs() <= tol_rad
-                && (g.lon - lon).abs() <= tol_rad
-                && (g.h - h).abs() <= tol_m,
+            (g.lat - lat).abs() <= tol_rad && (g.lon - lon).abs() <= tol_rad && (g.h - h).abs() <= tol_m,
             "{what}: got {g:?}, want ({lat}, {lon}, {h}); dlat={:e} dlon={:e} dh={:e}",
             g.lat - lat,
             g.lon - lon,
@@ -530,48 +510,20 @@ pub(crate) mod tests {
         assert!((g.lat_deg() - 39.92).abs() < 1e-12);
         assert!((g.lon_deg() - 32.85).abs() < 1e-12);
         assert_eq!(g.h, 1200.0);
-        assert_eq!(
-            Geodetic::new(1.0, 2.0, 3.0),
-            Geodetic {
-                lat: 1.0,
-                lon: 2.0,
-                h: 3.0
-            }
-        );
+        assert_eq!(Geodetic::new(1.0, 2.0, 3.0), Geodetic { lat: 1.0, lon: 2.0, h: 3.0 });
     }
 
     /// Reference: pymap3d 3.2 `geodetic2ecef(lat_deg, lon_deg, h)`.
     #[test]
     fn geodetic2ecef_vs_pymap3d() {
         let cases = [
-            (
-                (39.92, 32.85, 1200.0),
-                (4115897.96464049, 2657601.65201406, 4071947.0991998757),
-            ),
-            (
-                (-33.8688, 151.2093, 5000.0),
-                (-4649689.653406782, 2555205.7903041113, -3537158.8531592987),
-            ),
-            (
-                (89.999, -120.0, 10000.0),
-                (-55.934256239316795, -96.88097369007322, 6366752.313268944),
-            ),
-            (
-                (0.0, -179.5, -3000.0),
-                (-6374894.254317552, -55632.85933749726, 0.0),
-            ),
-            (
-                (60.0, 10.0, 10000000.0),
-                (8072572.149454638, 1423412.2736645795, 14160731.171783026),
-            ),
-            (
-                (-90.0, 0.0, 0.0),
-                (3.918620924814471e-10, 0.0, -6356752.31424518),
-            ),
-            (
-                (45.0, 45.0, -5000.0),
-                (3191919.145060574, 3191919.1450605737, 4483812.874959988),
-            ),
+            ((39.92, 32.85, 1200.0), (4115897.96464049, 2657601.65201406, 4071947.0991998757)),
+            ((-33.8688, 151.2093, 5000.0), (-4649689.653406782, 2555205.7903041113, -3537158.8531592987)),
+            ((89.999, -120.0, 10000.0), (-55.934256239316795, -96.88097369007322, 6366752.313268944)),
+            ((0.0, -179.5, -3000.0), (-6374894.254317552, -55632.85933749726, 0.0)),
+            ((60.0, 10.0, 10000000.0), (8072572.149454638, 1423412.2736645795, 14160731.171783026)),
+            ((-90.0, 0.0, 0.0), (3.918620924814471e-10, 0.0, -6356752.31424518)),
+            ((45.0, 45.0, -5000.0), (3191919.145060574, 3191919.1450605737, 4483812.874959988)),
         ];
         for ((la, lo, h), (x, y, z)) in cases {
             let p = geodetic2ecef(Geodetic::from_deg(la, lo, h), &WGS84);
@@ -585,60 +537,23 @@ pub(crate) mod tests {
     #[test]
     fn ecef2geodetic_vs_reference() {
         let cases = [
-            (
-                (4198944.0, 2710080.0, 4078442.0),
-                (0.6877236917837433, 0.573148386239883, 80968.39366691113),
-            ),
-            (
-                (-4646678.0, 2553000.0, -3534000.0),
-                (-0.5910339715038466, 2.639191183829611, 166.05464675071596),
-            ),
-            (
-                (1000.0, 2000.0, 6356000.0),
-                (1.5704468779214924, 1.1071487177940904, -751.9235494578057),
-            ),
-            (
-                (16378137.0, 0.0, 100000.0),
-                (0.006121582897332895, 0.0, 10000306.080108143),
-            ),
-            (
-                (3000000.0, 3000000.0, 3000000.0),
-                (0.6193682525067219, 0.7853981633974483, -1174825.1460048922),
-            ),
-            (
-                (20000.0, 0.0, 10.0),
-                (1.0848348103836167, 0.0, -6352073.365657186),
-            ),
-            (
-                (0.0, 0.0, -6357752.314245179),
-                (-1.5707963267948966, 0.0, 999.999999999798),
-            ),
-            (
-                (-1000000.0, 1000000.0, -2000000.0),
-                (-0.9635037114545407, 2.356194490192345, -3914316.202318265),
-            ),
+            ((4198944.0, 2710080.0, 4078442.0), (0.6877236917837433, 0.573148386239883, 80968.39366691113)),
+            ((-4646678.0, 2553000.0, -3534000.0), (-0.5910339715038466, 2.639191183829611, 166.05464675071596)),
+            ((1000.0, 2000.0, 6356000.0), (1.5704468779214924, 1.1071487177940904, -751.9235494578057)),
+            ((16378137.0, 0.0, 100000.0), (0.006121582897332895, 0.0, 10000306.080108143)),
+            ((3000000.0, 3000000.0, 3000000.0), (0.6193682525067219, 0.7853981633974483, -1174825.1460048922)),
+            ((20000.0, 0.0, 10.0), (1.0848348103836167, 0.0, -6352073.365657186)),
+            ((0.0, 0.0, -6357752.314245179), (-1.5707963267948966, 0.0, 999.999999999798)),
+            ((-1000000.0, 1000000.0, -2000000.0), (-0.9635037114545407, 2.356194490192345, -3914316.202318265)),
             ((6378137.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
-            (
-                (40000.0, 0.0, 1000.0),
-                (0.4725960762208234, 0.0, -6337641.066987242),
-            ),
-            (
-                (30000.0, 10000.0, -50.0),
-                (-0.7403801857075114, 0.3217505543966422, -6345036.909391149),
-            ),
-            (
-                (0.0, 0.0, 16356752.31424518),
-                (1.5707963267948966, 0.0, 10000000.0),
-            ),
+            ((40000.0, 0.0, 1000.0), (0.4725960762208234, 0.0, -6337641.066987242)),
+            ((30000.0, 10000.0, -50.0), (-0.7403801857075114, 0.3217505543966422, -6345036.909391149)),
+            ((0.0, 0.0, 16356752.31424518), (1.5707963267948966, 0.0, 10000000.0)),
         ];
         for ((x, y, z), (la, lo, h)) in cases {
             let g = ecef2geodetic(DVec3::new(x, y, z), &WGS84);
             // Points deep inside (|h| > 1000 km) are ill-conditioned; allow slightly more.
-            let (tr, tm) = if h < -1.0e6 {
-                (1e-11, 1e-7)
-            } else {
-                (1e-12, 1e-8)
-            };
+            let (tr, tm) = if h < -1.0e6 { (1e-11, 1e-7) } else { (1e-12, 1e-8) };
             assert_geo(g, la, lo, h, tr, tm, "ecef2geodetic");
         }
     }
@@ -658,10 +573,7 @@ pub(crate) mod tests {
         assert_geo(g, 0.0, -FRAC_PI_2, 123.0, 0.0, 1e-9, "equator");
         // Centre of the earth: nearest surface points are the poles.
         let g = ecef2geodetic(DVec3::ZERO, &WGS84);
-        assert!(
-            (g.lat.abs() - FRAC_PI_2).abs() < 1e-15 && (g.h + b).abs() < 1e-9,
-            "{g:?}"
-        );
+        assert!((g.lat.abs() - FRAC_PI_2).abs() < 1e-15 && (g.h + b).abs() < 1e-9, "{g:?}");
         // Equatorial plane inside the evolute (w < a e²): cos²φ = p(1-e²)/(e²(e²-p)).
         let w = 20000.0;
         let g = ecef2geodetic(DVec3::new(w, 0.0, 0.0), &WGS84);
@@ -674,15 +586,7 @@ pub(crate) mod tests {
         let s = Ellipsoid::sphere(6371000.0);
         let g = ecef2geodetic(DVec3::new(1.0e6, 2.0e6, -3.0e6), &s);
         let r = DVec3::new(1.0e6, 2.0e6, -3.0e6).length();
-        assert_geo(
-            g,
-            (-3.0e6 / r).asin(),
-            2f64.atan(),
-            r - 6371000.0,
-            1e-14,
-            1e-8,
-            "sphere",
-        );
+        assert_geo(g, (-3.0e6 / r).asin(), 2f64.atan(), r - 6371000.0, 1e-14, 1e-8, "sphere");
     }
 
     #[test]
@@ -698,11 +602,7 @@ pub(crate) mod tests {
                 _ => rng.uniform(-FRAC_PI_2, FRAC_PI_2),
             };
             let lon = rng.uniform(-PI, PI);
-            let h = if i % 3 == 0 {
-                rng.uniform(-5000.0, 20000.0)
-            } else {
-                rng.uniform(-5000.0, 1.0e7)
-            };
+            let h = if i % 3 == 0 { rng.uniform(-5000.0, 20000.0) } else { rng.uniform(-5000.0, 1.0e7) };
             let g = Geodetic::new(lat, lon, h);
             let p = geodetic2ecef(g, &WGS84);
             let g2 = ecef2geodetic(p, &WGS84);
@@ -725,19 +625,11 @@ pub(crate) mod tests {
         let mut rng = Rng::new(7);
         for _ in 0..100_000 {
             let r = rng.uniform(1.0e5, 2.0e7);
-            let dir = DVec3::new(
-                rng.uniform(-1.0, 1.0),
-                rng.uniform(-1.0, 1.0),
-                rng.uniform(-1.0, 1.0),
-            )
-            .normalize();
+            let dir = DVec3::new(rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0)).normalize();
             let p = dir * r;
             let g = ecef2geodetic(p, &WGS84);
             let p2 = geodetic2ecef(g, &WGS84);
-            assert!(
-                (p2 - p).length() < 1e-8 * r.max(WGS84.a) / WGS84.a * 10.0,
-                "{p:?} -> {g:?} -> {p2:?}"
-            );
+            assert!((p2 - p).length() < 1e-8 * r.max(WGS84.a) / WGS84.a * 10.0, "{p:?} -> {g:?} -> {p2:?}");
         }
     }
 
@@ -768,40 +660,17 @@ pub(crate) mod tests {
         ];
         for ((la, lo, h), enu, ned, aer) in cases {
             let g = Geodetic::from_deg(la, lo, h);
-            assert_vec(
-                geodetic2enu(g, o, &WGS84),
-                DVec3::from_array(enu),
-                1e-6,
-                "geodetic2enu",
-            );
-            assert_vec(
-                geodetic2ned(g, o, &WGS84),
-                DVec3::from_array(ned),
-                1e-6,
-                "geodetic2ned",
-            );
+            assert_vec(geodetic2enu(g, o, &WGS84), DVec3::from_array(enu), 1e-6, "geodetic2enu");
+            assert_vec(geodetic2ned(g, o, &WGS84), DVec3::from_array(ned), 1e-6, "geodetic2ned");
             let a = geodetic2aer(g, o, &WGS84);
             let want = DVec3::from_array(aer);
-            assert!(
-                (a.x - want.x).abs() < 1e-12 && (a.y - want.y).abs() < 1e-12,
-                "aer {a:?} {want:?}"
-            );
+            assert!((a.x - want.x).abs() < 1e-12 && (a.y - want.y).abs() < 1e-12, "aer {a:?} {want:?}");
             assert!((a.z - want.z).abs() < 1e-6, "aer {a:?} {want:?}");
             // LocalFrame must agree.
             let fe = LocalFrame::new(o, LocalConvention::Enu, WGS84);
             let fn_ = LocalFrame::new(o, LocalConvention::Ned, WGS84);
-            assert_vec(
-                fe.geodetic_to_local(g),
-                DVec3::from_array(enu),
-                1e-6,
-                "LocalFrame ENU",
-            );
-            assert_vec(
-                fn_.geodetic_to_local(g),
-                DVec3::from_array(ned),
-                1e-6,
-                "LocalFrame NED",
-            );
+            assert_vec(fe.geodetic_to_local(g), DVec3::from_array(enu), 1e-6, "LocalFrame ENU");
+            assert_vec(fn_.geodetic_to_local(g), DVec3::from_array(ned), 1e-6, "LocalFrame NED");
         }
     }
 
@@ -811,11 +680,7 @@ pub(crate) mod tests {
     fn local2geodetic_vs_pymap3d() {
         let o = Geodetic::from_deg(39.9, 32.8, 900.0);
         let cases: [([f64; 3], [f64; 3], [f64; 3]); 3] = [
-            (
-                [1000.0, 2000.0, 300.0],
-                [39.91800869432484, 32.811694269070756, 1200.3925914338054],
-                [39.909003140027444, 32.82338767244412, 600.3916972637954],
-            ),
+            ([1000.0, 2000.0, 300.0], [39.91800869432484, 32.811694269070756, 1200.3925914338054], [39.909003140027444, 32.82338767244412, 600.3916972637954]),
             (
                 [-5000.0, 12000.0, -800.0],
                 [40.00805862719269, 32.74144192272254, 113.27453314391312],
@@ -831,36 +696,12 @@ pub(crate) mod tests {
         for (v, genu, gned) in cases {
             let v = DVec3::from_array(v);
             let g = enu2geodetic(v, o, &WGS84);
-            assert_geo(
-                g,
-                genu[0].to_radians(),
-                genu[1].to_radians(),
-                genu[2],
-                tol_rad,
-                1e-6,
-                "enu2geodetic",
-            );
+            assert_geo(g, genu[0].to_radians(), genu[1].to_radians(), genu[2], tol_rad, 1e-6, "enu2geodetic");
             let g = ned2geodetic(v, o, &WGS84);
-            assert_geo(
-                g,
-                gned[0].to_radians(),
-                gned[1].to_radians(),
-                gned[2],
-                tol_rad,
-                1e-6,
-                "ned2geodetic",
-            );
+            assert_geo(g, gned[0].to_radians(), gned[1].to_radians(), gned[2], tol_rad, 1e-6, "ned2geodetic");
             let fe = LocalFrame::new(o, LocalConvention::Enu, WGS84);
             let g = fe.local_to_geodetic(v);
-            assert_geo(
-                g,
-                genu[0].to_radians(),
-                genu[1].to_radians(),
-                genu[2],
-                tol_rad,
-                1e-6,
-                "LocalFrame",
-            );
+            assert_geo(g, genu[0].to_radians(), genu[1].to_radians(), genu[2], tol_rad, 1e-6, "LocalFrame");
         }
     }
 
@@ -911,19 +752,11 @@ pub(crate) mod tests {
         ];
         for (p, enu, ned, aer) in cases {
             let p = DVec3::from_array(p);
-            let (enu, ned, aer) = (
-                DVec3::from_array(enu),
-                DVec3::from_array(ned),
-                DVec3::from_array(aer),
-            );
+            let (enu, ned, aer) = (DVec3::from_array(enu), DVec3::from_array(ned), DVec3::from_array(aer));
             assert_vec(ecef2enu(p, o, &WGS84), enu, 1e-6, "ecef2enu");
             assert_vec(ecef2ned(p, o, &WGS84), ned, 1e-6, "ecef2ned");
             let a = ecef2aer(p, o, &WGS84);
-            assert!(
-                (a.x - aer.x).abs() < 1e-12
-                    && (a.y - aer.y).abs() < 1e-12
-                    && (a.z - aer.z).abs() < 1e-6
-            );
+            assert!((a.x - aer.x).abs() < 1e-12 && (a.y - aer.y).abs() < 1e-12 && (a.z - aer.z).abs() < 1e-6);
             assert_vec(enu2ecef(enu, o, &WGS84), p, 1e-6, "enu2ecef");
             assert_vec(ned2ecef(ned, o, &WGS84), p, 1e-6, "ned2ecef");
             let f = LocalFrame::new(o, LocalConvention::Ned, WGS84);
@@ -936,14 +769,8 @@ pub(crate) mod tests {
     #[test]
     fn aer_and_vectors_vs_pymap3d() {
         let cases = [
-            (
-                [100.0, 200.0, 30.0],
-                [0.4636476090008061, 0.13336767777472905, 225.61028345356954],
-            ),
-            (
-                [-300.0, -50.0, -10.0],
-                [4.547240302970063, -0.032867956565042586, 304.3024810940588],
-            ),
+            ([100.0, 200.0, 30.0], [0.4636476090008061, 0.13336767777472905, 225.61028345356954]),
+            ([-300.0, -50.0, -10.0], [4.547240302970063, -0.032867956565042586, 304.3024810940588]),
         ];
         for (enu, aer) in cases {
             let (enu, aer) = (DVec3::from_array(enu), DVec3::from_array(aer));
@@ -954,12 +781,7 @@ pub(crate) mod tests {
             assert_vec(aer2ned(aer), ned, 1e-10, "aer2ned");
         }
         // Due north / due west.
-        assert_vec(
-            enu2aer(DVec3::new(0.0, 10.0, 0.0)),
-            DVec3::new(0.0, 0.0, 10.0),
-            0.0,
-            "north",
-        );
+        assert_vec(enu2aer(DVec3::new(0.0, 10.0, 0.0)), DVec3::new(0.0, 0.0, 10.0), 0.0, "north");
         let w = enu2aer(DVec3::new(-10.0, 0.0, 0.0));
         assert!((w.x - 1.5 * PI).abs() < 1e-15);
 
@@ -989,12 +811,7 @@ pub(crate) mod tests {
             assert_vec(rot_ecef2ned(lat, lon) * up, -DVec3::Z, 1e-15, "up in NED");
             // Up vector is the ellipsoid normal: parallel to gradient (x/a², y/a², z/b²).
             let p = geodetic2ecef(Geodetic::new(lat, lon, 0.0), &WGS84);
-            let grad = DVec3::new(
-                p.x / WGS84.a.powi(2),
-                p.y / WGS84.a.powi(2),
-                p.z / WGS84.b.powi(2),
-            )
-            .normalize();
+            let grad = DVec3::new(p.x / WGS84.a.powi(2), p.y / WGS84.a.powi(2), p.z / WGS84.b.powi(2)).normalize();
             assert_vec(grad, up, 1e-14, "normal");
         }
     }
@@ -1004,31 +821,13 @@ pub(crate) mod tests {
         let mut rng = Rng::new(11);
         for conv in [LocalConvention::Enu, LocalConvention::Ned] {
             for _ in 0..1000 {
-                let o = Geodetic::new(
-                    rng.uniform(-1.5, 1.5),
-                    rng.uniform(-PI, PI),
-                    rng.uniform(-100.0, 3000.0),
-                );
+                let o = Geodetic::new(rng.uniform(-1.5, 1.5), rng.uniform(-PI, PI), rng.uniform(-100.0, 3000.0));
                 let f = LocalFrame::new(o, conv, WGS84);
-                let l = DVec3::new(
-                    rng.uniform(-5e4, 5e4),
-                    rng.uniform(-5e4, 5e4),
-                    rng.uniform(-1e4, 1e4),
-                );
-                assert_vec(
-                    f.ecef_to_local(f.local_to_ecef(l)),
-                    l,
-                    1e-8,
-                    "local round trip",
-                );
+                let l = DVec3::new(rng.uniform(-5e4, 5e4), rng.uniform(-5e4, 5e4), rng.uniform(-1e4, 1e4));
+                assert_vec(f.ecef_to_local(f.local_to_ecef(l)), l, 1e-8, "local round trip");
                 let g = f.local_to_geodetic(l);
                 assert_vec(f.geodetic_to_local(g), l, 1e-8, "geodetic round trip");
-                assert_vec(
-                    f.vec_ecef_to_local(f.vec_local_to_ecef(l)),
-                    l,
-                    1e-9,
-                    "vec round trip",
-                );
+                assert_vec(f.vec_ecef_to_local(f.vec_local_to_ecef(l)), l, 1e-9, "vec round trip");
                 assert_vec(f.local_to_ecef(DVec3::ZERO), f.origin_ecef, 0.0, "origin");
                 let g0 = f.local_to_geodetic(DVec3::ZERO);
                 assert_geo(g0, o.lat, o.lon, o.h, 1e-14, 1e-8, "origin geodetic");
@@ -1071,11 +870,7 @@ pub(crate) mod tests {
         // Oblique ray from 3 km at 45°N: intersection lies on the surface.
         let mut rng = Rng::new(5);
         for _ in 0..1000 {
-            let g = Geodetic::new(
-                rng.uniform(-1.4, 1.4),
-                rng.uniform(-PI, PI),
-                rng.uniform(500.0, 10_000.0),
-            );
+            let g = Geodetic::new(rng.uniform(-1.4, 1.4), rng.uniform(-PI, PI), rng.uniform(500.0, 10_000.0));
             let p = geodetic2ecef(g, &e);
             let az = rng.uniform(0.0, 2.0 * PI);
             let el = rng.uniform(-FRAC_PI_2, -0.3);

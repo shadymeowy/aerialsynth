@@ -14,8 +14,9 @@ itself (`cargo run --release -p terragen --example ground`).
 
 The CSV (`t,lat,lon,h,roll,pitch,yaw`, 10 Hz) is what `terrain run` reads as `trajectory.file`;
 route.json holds the phases, the sparse polyline and the ground clearance for the composer.
+make_airliner.py runs this itself when the route section or this file changed.
 """
-import json, math, os, subprocess, sys
+import argparse, json, math, os, subprocess
 import numpy as np, yaml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -33,7 +34,7 @@ def ground_heights(pts, seed=1):
         subprocess.run(["cargo", "build", "--release", "-p", "terragen", "--example", "ground"], cwd=ROOT, check=True)
     inp = "".join(f"{a:.7f} {b:.7f} 60\n" for a, b in pts)
     out = subprocess.run([GROUND, str(seed)], input=inp, capture_output=True, text=True, check=True).stdout.split("\n")
-    return np.array([float(l.split()[0]) for l in out if l.strip()])
+    return np.array([float(line.split()[0]) for line in out if line.strip()])
 
 
 def unit(lat, lon):
@@ -251,7 +252,9 @@ def clearance(out, seed=1, every_s=20.0):
 
 
 def main():
-    story = yaml.safe_load(open(sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "airliner.yaml")))
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("story", nargs="?", default=os.path.join(HERE, "airliner.yaml"), help="storyboard with a `route:` section")
+    story = yaml.safe_load(open(ap.parse_args().story))
     cfg = story["route"]
     d = os.path.join(ROOT, cfg.get("out", "out/airliner"))
     os.makedirs(d, exist_ok=True)

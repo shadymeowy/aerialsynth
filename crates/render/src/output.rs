@@ -15,7 +15,7 @@
 //! <camera.path>/
 //!     calib/              intrinsics [4] (4-parameter models), distortion_coeffs, resolution
 //!                         i64 [2] = (W, H), T_body_cam f64 [4,4] row-major camera → body;
-//!                         attrs model, camera_yaml (full camodocal camera description)
+//!                         attrs model, camera_yaml (full camera description, camera YAML schema)
 //!     t                   i64 [N]     frame timestamps (µs since the sequence start)
 //!     pose/               camera pose at the frame times: position_ecef [N,3], q_ecef_cam [N,4]
 //!     rgb                 u8  [N,H,W,3] (or [N,H,W] gray)     ← rgb
@@ -296,7 +296,7 @@ pub struct Frame<'a> {
 }
 
 fn luma(rgb: &[u8]) -> Vec<u8> {
-    rgb.chunks_exact(3).map(|c| (0.299 * c[0] as f64 + 0.587 * c[1] as f64 + 0.114 * c[2] as f64).round() as u8).collect()
+    rgb.as_chunks::<3>().0.iter().map(|c| (0.299 * c[0] as f64 + 0.587 * c[1] as f64 + 0.114 * c[2] as f64).round() as u8).collect()
 }
 
 /// Writer of one camera group (datasets sized for `n` frames up front, chunk = one frame).
@@ -491,7 +491,13 @@ pub struct PngWriter {
 
 impl PngWriter {
     pub fn new(dir: &Path, spec: &crate::scenario::CameraSpec, t0: f64) -> Result<Self> {
-        for (on, sub) in [(spec.rgb.is_some(), "rgb"), (spec.depth.is_some(), "depth"), (spec.flow.is_some(), "flow"), (spec.flow.is_some(), "flow_valid"), (spec.landcover.is_some(), "landcover")] {
+        for (on, sub) in [
+            (spec.rgb.is_some(), "rgb"),
+            (spec.depth.is_some(), "depth"),
+            (spec.flow.is_some(), "flow"),
+            (spec.flow.is_some(), "flow_valid"),
+            (spec.landcover.is_some(), "landcover"),
+        ] {
             if on {
                 std::fs::create_dir_all(dir.join(sub))?;
             }

@@ -1,6 +1,8 @@
-// Render one frame with the CPU and the GPU backend and compare them:
-//   gpu_compare SCENARIO.yaml [T_SECONDS] [CAMERA_INDEX] [OUT.png]
-// (the scenario's tiles must exist, e.g. after `terrain run`). Writes CPU | GPU | |difference|.
+//! Renders one frame with the CPU and the GPU backend and compares them (radiance, depth, land
+//! cover, timings); writes CPU | GPU | |difference| as a PNG. The scenario's tiles and trajectory
+//! must exist (e.g. after `terrain run`). `SPLIT=1` also compares the lamp-flicker split.
+//!
+//!     cargo run --release -p render --example gpu_compare -- SCENARIO.yaml [T_SECONDS] [CAMERA_INDEX] [OUT.png]
 use render::pipeline;
 use render::raster::Backend;
 use render::scenario::Scenario;
@@ -73,8 +75,15 @@ fn main() -> anyhow::Result<()> {
         }
     }
     if !fc.flicker_cos.is_empty() || !fg.flicker_cos.is_empty() {
-        let d = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(x, y)| (x - y).abs() as f64).sum::<f64>() / a.iter().map(|x| x.abs() as f64).sum::<f64>().max(1e-12);
-        println!("flicker split: cos {:.2}% sin {:.2}% (lens {} {})", 100.0 * d(&fc.flicker_cos, &fg.flicker_cos), 100.0 * d(&fc.flicker_sin, &fg.flicker_sin), fc.flicker_cos.len(), fg.flicker_cos.len());
+        let d =
+            |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(x, y)| (x - y).abs() as f64).sum::<f64>() / a.iter().map(|x| x.abs() as f64).sum::<f64>().max(1e-12);
+        println!(
+            "flicker split: cos {:.2}% sin {:.2}% (lens {} {})",
+            100.0 * d(&fc.flicker_cos, &fg.flicker_cos),
+            100.0 * d(&fc.flicker_sin, &fg.flicker_sin),
+            fc.flicker_cos.len(),
+            fg.flicker_cos.len()
+        );
     }
     let nan = |f: &render::FrameOut| f.radiance.iter().filter(|v| !v.is_finite()).count();
     println!("non-finite radiance: cpu {} gpu {}", nan(&fc), nan(&fg));

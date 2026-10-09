@@ -10,6 +10,17 @@ fn gpu() -> Option<std::sync::Arc<Gpu>> {
     match shared() {
         Ok(g) if g.check_generator().is_ok() => Some(g),
         _ => {
+            eprintln!("no GPU that runs the tile generator: skipped");
+            None
+        }
+    }
+}
+
+/// A device for the WGSL primitives alone (f64 / i64 shaders, any buffer limits).
+fn shaders() -> Option<std::sync::Arc<Gpu>> {
+    match shared() {
+        Ok(g) if g.check_shaders().is_ok() => Some(g),
+        _ => {
             eprintln!("no GPU with f64 / i64 shaders: skipped");
             None
         }
@@ -51,7 +62,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 #[test]
 fn noise_matches_the_cpu() {
-    let Some(g) = gpu() else { return };
+    let Some(g) = shaders() else { return };
     let w = World::new(crate::Config::default());
     let s = SurfaceModel::new(&w);
     let (octs, fbms) = tables::build(&w, &s);
@@ -71,7 +82,14 @@ fn noise_matches_the_cpu() {
     }
     let src = format!("{}{}{}", tables::wgsl_consts(), NOISE_WGSL, NOISE_TEST);
     let module = g.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("noise-test"), source: wgpu::ShaderSource::Wgsl(src.into()) });
-    let pipe = g.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: None, layout: None, module: &module, entry_point: Some("main"), compilation_options: Default::default(), cache: None });
+    let pipe = g.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: None,
+        module: &module,
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
     let b_grads = storage(&g.device, "grads", &tables::grads());
     let b_octs = storage(&g.device, "octs", &octs);
     let b_fbms = storage(&g.device, "fbms", &fbms);
@@ -90,7 +108,10 @@ fn noise_matches_the_cpu() {
     let bg1 = g.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: &pipe.get_bind_group_layout(1),
-        entries: &[wgpu::BindGroupEntry { binding: 0, resource: b_pts.as_entire_binding() }, wgpu::BindGroupEntry { binding: 1, resource: b_out.as_entire_binding() }],
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: b_pts.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: b_out.as_entire_binding() },
+        ],
     });
     let mut enc = g.device.create_command_encoder(&Default::default());
     {

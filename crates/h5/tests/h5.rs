@@ -293,15 +293,7 @@ fn extensible_tile_store() {
         // Grow without writing: unwritten tile reads as the fill value.
         rgb.resize(&[8, T, T, 3]).unwrap();
 
-        let elev = z
-            .new_dataset::<f32>()
-            .shape(&[10, 10])
-            .max_shape(&[None, None])
-            .chunk(&[4, 4])
-            .deflate(4)
-            .fill_value(-9999.0)
-            .create("elev")
-            .unwrap();
+        let elev = z.new_dataset::<f32>().shape(&[10, 10]).max_shape(&[None, None]).chunk(&[4, 4]).deflate(4).fill_value(-9999.0).create("elev").unwrap();
         // Hyperslab crossing chunk boundaries.
         let blk: Vec<f32> = (0..15).map(|x| x as f32).collect();
         elev.write_slice(&blk, &[3, 2], &[3, 5]).unwrap();
@@ -379,14 +371,8 @@ fn raw_chunk_io() {
         assert!(rgb.write_chunk_raw(&[0, 1, 0, 0], 0, &[1, 2, 3]).is_err());
 
         // f32 elevation, deflate only.
-        let e1 = f
-            .new_dataset::<f32>()
-            .shape(&[0, 64, 64])
-            .max_shape(&[None, Some(64), Some(64)])
-            .chunk(&[1, 64, 64])
-            .deflate(5)
-            .create("elev_deflate")
-            .unwrap();
+        let e1 =
+            f.new_dataset::<f32>().shape(&[0, 64, 64]).max_shape(&[None, Some(64), Some(64)]).chunk(&[1, 64, 64]).deflate(5).create("elev_deflate").unwrap();
         // f32 elevation, shuffle + deflate (shuffle matters for 4-byte types).
         let e2 = f
             .new_dataset::<f32>()
@@ -398,14 +384,7 @@ fn raw_chunk_io() {
             .create("elev_shuffle")
             .unwrap();
         // u16, shuffle + deflate, 2D chunks 32x32 inside a 64x96 dataset.
-        let u = f
-            .new_dataset::<u16>()
-            .shape(&[64, 96])
-            .chunk(&[32, 32])
-            .shuffle(true)
-            .deflate(9)
-            .create("u16")
-            .unwrap();
+        let u = f.new_dataset::<u16>().shape(&[64, 96]).chunk(&[32, 32]).shuffle(true).deflate(9).create("u16").unwrap();
         e1.resize(&[2, 64, 64]).unwrap();
         e2.resize(&[2, 64, 64]).unwrap();
         for k in 0..2usize {
@@ -421,14 +400,7 @@ fn raw_chunk_io() {
             }
         }
         // A chunk written through the normal pipeline, for read_chunk_raw.
-        let n = f
-            .new_dataset::<i16>()
-            .shape(&[8, 8])
-            .chunk(&[4, 8])
-            .shuffle(true)
-            .deflate(3)
-            .create("normal")
-            .unwrap();
+        let n = f.new_dataset::<i16>().shape(&[8, 8]).chunk(&[4, 8]).shuffle(true).deflate(3).create("normal").unwrap();
         let v: Vec<i16> = (0..64).map(|i| i * 100 - 3000).collect();
         n.write_all(&v).unwrap();
     }
@@ -478,13 +450,7 @@ fn concurrent_reads() {
     let n = 32usize;
     {
         let f = File::create(&p).unwrap();
-        let d = f
-            .new_dataset::<u8>()
-            .shape(&[n, T, T, 3])
-            .chunk(&[1, T, T, 3])
-            .deflate(1)
-            .create("rgb")
-            .unwrap();
+        let d = f.new_dataset::<u8>().shape(&[n, T, T, 3]).chunk(&[1, T, T, 3]).deflate(1).create("rgb").unwrap();
         for i in 0..n {
             d.write_slice(&tile(i as u8), &[i, 0, 0, 0], &[1, T, T, 3]).unwrap();
         }
@@ -539,14 +505,7 @@ fn write_pycheck_file() {
         .deflate(6)
         .create("rgb_pipeline")
         .unwrap();
-    let b = z
-        .new_dataset::<u8>()
-        .shape(&[0, T, T, 3])
-        .max_shape(&[None, Some(T), Some(T), Some(3)])
-        .chunk(&[1, T, T, 3])
-        .deflate(6)
-        .create("rgb_raw")
-        .unwrap();
+    let b = z.new_dataset::<u8>().shape(&[0, T, T, 3]).max_shape(&[None, Some(T), Some(T), Some(3)]).chunk(&[1, T, T, 3]).deflate(6).create("rgb_raw").unwrap();
     for i in 0..3usize {
         a.resize(&[i + 1, T, T, 3]).unwrap();
         a.write_slice(&tile(i as u8), &[i, 0, 0, 0], &[1, T, T, 3]).unwrap();

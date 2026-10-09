@@ -1,9 +1,17 @@
-"""Camera models of camodocal's calib/camera.cpp (camodocal formulas), vectorized with numpy.
+"""Camera models of aerialsynth (camodocal formulas), vectorized with numpy.
 
-Independent re-implementation used to validate rendered ground truth. `Camera.from_calib` reads
-a camera's `calib` group of a sequence HDF5 (its `camera_yaml` attribute, camodocal schema:
-model, intrinsics, distortion, xi, max_fov_deg, inv_poly, affine, center).
-project(P[...,3]) -> (u, v); unproject(u, v) -> unit rays.
+An independent re-implementation of the renderer's camera models, used to validate rendered
+ground truth (check_gt.py). Models: pinhole (radial-tangential k1 k2 p1 p2), pinhole_full
+(rational k1..k6 + p1 p2), kannala_brandt (equidistant fisheye, k2..k5), mei (unified
+omnidirectional, xi + radial-tangential) and scaramuzza (OCamCalib polynomial).
+
+`Camera.from_calib` reads a camera's `calib` group of a sequence HDF5: its `camera_yaml`
+attribute, in this project's camodocal-style camera schema (model, intrinsics, distortion, xi,
+max_fov_deg, inv_poly, affine, center). `Camera.from_dict` takes the same keys as a dict.
+
+    cam = Camera.from_calib(h5file["/cam0/calib"])
+    u, v = cam.project(P)        # P[..., 3] in the camera frame -> pixel coordinates
+    rays = cam.unproject(u, v)   # pixel coordinates -> unit rays [..., 3]
 """
 import numpy as np
 

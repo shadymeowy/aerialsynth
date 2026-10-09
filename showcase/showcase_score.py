@@ -2,8 +2,8 @@
 """An original score for the showcase video (out/showcase/showcase.mp4), synthesised here (no
 samples) and muxed under it:
 
-    ~/.venv/bin/python showcase/showcase_score.py      # → out/showcase/showcase_music.wav, showcase_music.mp4
-    ~/.venv/bin/python showcase/showcase_score.py VIDEO [OUT]
+    python showcase/showcase_score.py              # → out/showcase/showcase_music.wav, showcase_music.mp4
+    python showcase/showcase_score.py VIDEO [OUT]  # under another video (OUT: default VIDEO_music.mp4)
 
 Electronic, 120 bpm in A minor: four-on-the-floor kick, hats and clap, a rolling bass pumped by the
 kick, a 16th-note pluck arpeggio, pads, bells and a lead motif. The beat grid is laid on the cuts
@@ -13,8 +13,9 @@ hour and dusk, a sparse night section (no drums) for the night, stars and event 
 back into the full groove with the lead for the rivers, the peak through the steep turns, and a
 settling end over the last landscapes into the outro. The cuts come from the clips in
 out/showcase/clips (make_showcase.py); without them the sections are spread over the video.
+Needs numpy, scipy (through soundtrack.py, whose instruments it shares) and ffmpeg.
 """
-import math, os, subprocess, sys, wave
+import argparse, math, os, subprocess, sys, wave
 import numpy as np
 import yaml
 
@@ -204,7 +205,7 @@ def score(total, cuts):
                 if g("sub"):
                     add(mus, t, bass_note(midi(root - 12), span, 0.0), gain=g("sub") * 0.9)
                 if g("bell"):
-                    for j in range(2):
+                    for _ in range(2):
                         if RNG.uniform() < 0.75:
                             add(mus, t + RNG.integers(0, 8) * BEAT, bell(midi(RNG.choice(notes[1:]) + 24)), pan=RNG.uniform(-0.8, 0.8), gain=g("bell") * 1.4)
             # drums
@@ -255,8 +256,12 @@ def score(total, cuts):
 
 
 def main():
-    src = sys.argv[1] if len(sys.argv) > 1 else os.path.join(OUT, "showcase.mp4")
-    out = sys.argv[2] if len(sys.argv) > 2 else os.path.splitext(src)[0] + "_music.mp4"
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("video", nargs="?", default=os.path.join(OUT, "showcase.mp4"), help="the video (default: out/showcase/showcase.mp4)")
+    ap.add_argument("out", nargs="?", default=None, help="output video (default: VIDEO_music.mp4; the WAV next to it)")
+    a = ap.parse_args()
+    src = a.video
+    out = a.out or os.path.splitext(src)[0] + "_music.mp4"
     total = duration(src)
     cuts = cut_times(src)
     if cuts is None:  # (another video: the sections spread over it)

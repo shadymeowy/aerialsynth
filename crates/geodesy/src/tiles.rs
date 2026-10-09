@@ -55,9 +55,7 @@ impl TileId {
     /// `true` if `z <= MAX_ZOOM` and `x, y < 2^z`.
     #[inline]
     pub fn is_valid(&self) -> bool {
-        self.z <= MAX_ZOOM
-            && (self.x as u64) < tiles_per_side(self.z)
-            && (self.y as u64) < tiles_per_side(self.z)
+        self.z <= MAX_ZOOM && (self.x as u64) < tiles_per_side(self.z) && (self.y as u64) < tiles_per_side(self.z)
     }
 
     /// Parent tile at `z - 1`, or `None` at zoom 0.
@@ -72,18 +70,9 @@ impl TileId {
     /// # Panics
     /// If `self.z >= MAX_ZOOM`.
     pub fn children(&self) -> [TileId; 4] {
-        assert!(
-            self.z < MAX_ZOOM,
-            "children of zoom {} exceed MAX_ZOOM",
-            self.z
-        );
+        assert!(self.z < MAX_ZOOM, "children of zoom {} exceed MAX_ZOOM", self.z);
         let (z, x, y) = (self.z + 1, 2 * self.x, 2 * self.y);
-        [
-            TileId::new(z, x, y),
-            TileId::new(z, x + 1, y),
-            TileId::new(z, x, y + 1),
-            TileId::new(z, x + 1, y + 1),
-        ]
+        [TileId::new(z, x, y), TileId::new(z, x + 1, y), TileId::new(z, x, y + 1), TileId::new(z, x + 1, y + 1)]
     }
 
     /// Ancestor at zoom `z` (the tile itself if `z == self.z`).
@@ -100,26 +89,15 @@ impl TileId {
     pub fn bounds(&self) -> LatLonBounds {
         let n = tiles_per_side(self.z) as f64;
         let (lat_max, lon_min) = uv_to_latlon(DVec2::new(self.x as f64 / n, self.y as f64 / n));
-        let (lat_min, lon_max) = uv_to_latlon(DVec2::new(
-            (self.x as f64 + 1.0) / n,
-            (self.y as f64 + 1.0) / n,
-        ));
-        LatLonBounds {
-            lat_min,
-            lat_max,
-            lon_min,
-            lon_max,
-        }
+        let (lat_min, lon_max) = uv_to_latlon(DVec2::new((self.x as f64 + 1.0) / n, (self.y as f64 + 1.0) / n));
+        LatLonBounds { lat_min, lat_max, lon_min, lon_max }
     }
 
     /// `(lat, lon)` in radians of the tile centre **in Mercator space** (the image centre).
     /// Its latitude is slightly poleward of the mean of the latitude bounds.
     pub fn center(&self) -> (f64, f64) {
         let n = tiles_per_side(self.z) as f64;
-        uv_to_latlon(DVec2::new(
-            (self.x as f64 + 0.5) / n,
-            (self.y as f64 + 0.5) / n,
-        ))
+        uv_to_latlon(DVec2::new((self.x as f64 + 0.5) / n, (self.y as f64 + 0.5) / n))
     }
 
     /// Tile offset by `(dx, dy)` at the same zoom. `x` wraps around the antimeridian; returns
@@ -296,8 +274,7 @@ pub fn tiles_in_bounds(b: &LatLonBounds, z: u8) -> Vec<TileId> {
         }
     }
 
-    ys.flat_map(|y| xs.iter().map(move |&x| TileId::new(z, x as u32, y as u32)))
-        .collect()
+    ys.flat_map(|y| xs.iter().map(move |&x| TileId::new(z, x as u32, y as u32))).collect()
 }
 
 /// Fractional zoom at which [`gsd_ew`] at `lat` equals `gsd_m`:
@@ -310,9 +287,7 @@ pub fn zoom_for_gsd_f(lat: f64, gsd_m: f64, ts: u32, ell: &Ellipsoid) -> f64 {
 /// (returns `max_z` if even that zoom is too coarse).
 pub fn zoom_for_gsd(lat: f64, gsd_m: f64, ts: u32, ell: &Ellipsoid, max_z: u8) -> u8 {
     let max_z = max_z.min(MAX_ZOOM);
-    (0..=max_z)
-        .find(|&z| gsd_ew(lat, z, ts, ell) <= gsd_m)
-        .unwrap_or(max_z)
+    (0..=max_z).find(|&z| gsd_ew(lat, z, ts, ell) <= gsd_m).unwrap_or(max_z)
 }
 
 #[cfg(test)]
@@ -338,10 +313,7 @@ mod tests {
         let uv = latlon_to_uv(MAX_MERCATOR_LAT_RAD, -PI);
         assert!(uv.x.abs() < 1e-15 && uv.y.abs() < 1e-14, "{uv:?}");
         let uv = latlon_to_uv(-MAX_MERCATOR_LAT_RAD, PI);
-        assert!(
-            (uv.x - 1.0).abs() < 1e-15 && (uv.y - 1.0).abs() < 1e-14,
-            "{uv:?}"
-        );
+        assert!((uv.x - 1.0).abs() < 1e-15 && (uv.y - 1.0).abs() < 1e-14, "{uv:?}");
     }
 
     #[test]
@@ -399,15 +371,7 @@ mod tests {
     fn hierarchy() {
         let t = TileId::new(10, 605, 387);
         let c = t.children();
-        assert_eq!(
-            c,
-            [
-                TileId::new(11, 1210, 774),
-                TileId::new(11, 1211, 774),
-                TileId::new(11, 1210, 775),
-                TileId::new(11, 1211, 775)
-            ]
-        );
+        assert_eq!(c, [TileId::new(11, 1210, 774), TileId::new(11, 1211, 774), TileId::new(11, 1210, 775), TileId::new(11, 1211, 775)]);
         for ch in c {
             assert_eq!(ch.parent(), Some(t));
             assert_eq!(ch.quadkey()[..10], t.quadkey());
@@ -432,19 +396,10 @@ mod tests {
         assert_eq!(t.neighbor(-1, 0), Some(TileId::new(3, 7, 0)));
         assert_eq!(t.neighbor(1, 1), Some(TileId::new(3, 1, 1)));
         assert_eq!(t.neighbor(0, -1), None);
-        assert_eq!(
-            TileId::new(3, 7, 7).neighbor(1, 0),
-            Some(TileId::new(3, 0, 7))
-        );
+        assert_eq!(TileId::new(3, 7, 7).neighbor(1, 0), Some(TileId::new(3, 0, 7)));
         assert_eq!(TileId::new(3, 7, 7).neighbor(0, 1), None);
-        assert_eq!(
-            TileId::new(3, 2, 2).neighbor(-17, 3),
-            Some(TileId::new(3, 1, 5))
-        );
-        assert_eq!(
-            TileId::new(0, 0, 0).neighbor(5, 0),
-            Some(TileId::new(0, 0, 0))
-        );
+        assert_eq!(TileId::new(3, 2, 2).neighbor(-17, 3), Some(TileId::new(3, 1, 5)));
+        assert_eq!(TileId::new(0, 0, 0).neighbor(5, 0), Some(TileId::new(0, 0, 0)));
         assert_eq!(TileId::new(3, 9, 0).neighbor(0, 0), None);
     }
 
@@ -475,9 +430,7 @@ mod tests {
         assert!((xy.y - 4854323.698611295).abs() < 1e-6);
         // World extent: ±π R.
         let xy = mercator_xy(MAX_MERCATOR_LAT_RAD, PI);
-        assert!(
-            (xy.x - PI * WEB_MERCATOR_R).abs() < 1e-6 && (xy.y - PI * WEB_MERCATOR_R).abs() < 1e-6
-        );
+        assert!((xy.x - PI * WEB_MERCATOR_R).abs() < 1e-6 && (xy.y - PI * WEB_MERCATOR_R).abs() < 1e-6);
     }
 
     #[test]
@@ -536,12 +489,7 @@ mod tests {
     #[test]
     fn tiles_in_bounds_cases() {
         // A tile's own bounds give exactly that tile.
-        for t in [
-            TileId::new(10, 605, 387),
-            TileId::new(0, 0, 0),
-            TileId::new(5, 31, 0),
-            TileId::new(17, 0, 131071),
-        ] {
+        for t in [TileId::new(10, 605, 387), TileId::new(0, 0, 0), TileId::new(5, 31, 0), TileId::new(17, 0, 131071)] {
             assert_eq!(tiles_in_bounds(&t.bounds(), t.z), vec![t]);
             // ...and its 4 children one level down.
             let mut v = tiles_in_bounds(&t.bounds(), t.z + 1);
@@ -551,45 +499,22 @@ mod tests {
             assert_eq!(v, c);
         }
         // Whole world.
-        let world = LatLonBounds {
-            lat_min: -PI / 2.0,
-            lat_max: PI / 2.0,
-            lon_min: -PI,
-            lon_max: PI,
-        };
+        let world = LatLonBounds { lat_min: -PI / 2.0, lat_max: PI / 2.0, lon_min: -PI, lon_max: PI };
         assert_eq!(tiles_in_bounds(&world, 3).len(), 64);
         // Small box around Ankara at z=10.
         let d = 0.01f64.to_radians();
         let (lat, lon) = (39.92f64.to_radians(), 32.85f64.to_radians());
-        let b = LatLonBounds {
-            lat_min: lat - d,
-            lat_max: lat + d,
-            lon_min: lon - d,
-            lon_max: lon + d,
-        };
+        let b = LatLonBounds { lat_min: lat - d, lat_max: lat + d, lon_min: lon - d, lon_max: lon + d };
         assert_eq!(tiles_in_bounds(&b, 10), vec![TileId::new(10, 605, 387)]);
         // Antimeridian crossing: 179E .. 179W at z=3 -> x = 7 then 0.
-        let b = LatLonBounds {
-            lat_min: 0.1,
-            lat_max: 0.2,
-            lon_min: 179f64.to_radians(),
-            lon_max: (-179f64).to_radians(),
-        };
-        assert_eq!(
-            tiles_in_bounds(&b, 3),
-            vec![TileId::new(3, 7, 3), TileId::new(3, 0, 3)]
-        );
+        let b = LatLonBounds { lat_min: 0.1, lat_max: 0.2, lon_min: 179f64.to_radians(), lon_max: (-179f64).to_radians() };
+        assert_eq!(tiles_in_bounds(&b, 3), vec![TileId::new(3, 7, 3), TileId::new(3, 0, 3)]);
         // Every reported tile intersects the box; tiles of a random box are complete.
         let mut rng = Rng::new(17);
         for _ in 0..200 {
             let la0 = rng.uniform(-1.4, 1.3);
             let lo0 = rng.uniform(-PI, 3.0);
-            let b = LatLonBounds {
-                lat_min: la0,
-                lat_max: la0 + 0.05,
-                lon_min: lo0,
-                lon_max: lo0 + 0.1,
-            };
+            let b = LatLonBounds { lat_min: la0, lat_max: la0 + 0.05, lon_min: lo0, lon_max: lo0 + 0.1 };
             let z = 9;
             let v = tiles_in_bounds(&b, z);
             for _ in 0..50 {
@@ -608,7 +533,12 @@ mod tests {
     #[test]
     fn tiles_in_bounds_wraps_longitudes() {
         let b = |a: f64, c: f64| LatLonBounds { lat_min: 0.1, lat_max: 0.2, lon_min: a.to_radians(), lon_max: c.to_radians() };
-        let xs = |v: Vec<TileId>| { let mut x: Vec<u32> = v.iter().map(|t| t.x).collect(); x.sort(); x.dedup(); x };
+        let xs = |v: Vec<TileId>| {
+            let mut x: Vec<u32> = v.iter().map(|t| t.x).collect();
+            x.sort();
+            x.dedup();
+            x
+        };
         assert_eq!(xs(tiles_in_bounds(&b(179.9, 180.1), 8)), vec![0, 255]);
         assert_eq!(xs(tiles_in_bounds(&b(-180.1, -179.9), 8)), vec![0, 255]);
         assert_eq!(xs(tiles_in_bounds(&b(-200.0, 200.0), 3)).len(), 8);

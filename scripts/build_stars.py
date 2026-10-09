@@ -113,9 +113,9 @@ def to_j2000(ra, de, ep, pmra, pmde):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("catdir")
-    ap.add_argument("--vmax", type=float, default=9.0)
-    ap.add_argument("-o", "--out", required=True)
+    ap.add_argument("catdir", help="directory with the downloaded catalogue files")
+    ap.add_argument("--vmax", type=float, default=9.0, help="faintest Johnson V magnitude kept")
+    ap.add_argument("-o", "--out", required=True, help="output file (e.g. crates/render/data/stars_v9.bin)")
     a = ap.parse_args()
     rows = hipparcos(a.catdir)
     print(f"Hipparcos: {len(rows)}", file=sys.stderr)

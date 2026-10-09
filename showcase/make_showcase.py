@@ -5,6 +5,7 @@
     python showcase/make_showcase.py --only coast     # (re)render one shot and its clip
     python showcase/make_showcase.py --compose-only   # no rendering: re-compose changed clips, assemble
     python showcase/make_showcase.py --stills         # quick framing check: small frames per shot
+    python showcase/make_showcase.py --help           # every option (--force, --full-compose, --story, …)
 
 Shots are described in storyboard.yaml (scenario overrides on base.yaml). Each shot is rendered
 by `terrain run` into out/showcase/<id>/ (scenario.yaml, traj.csv, seq.h5) — the globe shot by
@@ -13,7 +14,7 @@ resolved scenario changed. Composition (captions, cross-fades, 2x2 panels, the
 tile map) is done here and piped into ffmpeg (H.264). Needs: numpy, h5py, pyyaml, pillow,
 matplotlib (colour maps), ffmpeg, and the release build of `terrain` (cargo build --release).
 """
-import argparse, copy, csv, hashlib, math, os, subprocess, sys, time
+import argparse, copy, csv, hashlib, os, subprocess, time
 import numpy as np, h5py, yaml
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
@@ -319,7 +320,7 @@ def depth_to_rgb(depth, cmap):
     return out, 0.0
 
 
-def events_to_rgb(ev, t_us, window_us, w, h, ptr):
+def events_to_rgb(ev, t_us, window_us, w, h):
     """Events in (t - window, t]: ON red, OFF blue on a dark background (captions stay legible)."""
     x, y, t, p = ev
     i1 = np.searchsorted(t, t_us, "right")
@@ -494,7 +495,7 @@ def modality_frames(shot, f, video):
         rgb = g["rgb"][k]
         dep, dmax = depth_to_rgb(g["depth"][k], cmap)
         flo = flow_to_rgb(parallax(min(k, n - 2)), rad_max)
-        evi, ne = events_to_rgb(evs, ts[k], 10_000, ew, eh, None)
+        evi, _ = events_to_rgb(evs, ts[k], 10_000, ew, eh)
         tiles = [(rgb, "RGB"), (dep, f"Depth · 0 – {dmax / 1000:.1f} km" if dmax >= 1000 else f"Depth · 0 – {dmax:.0f} m"),
                  (flo, flow_label), (evi, "Events · 10 ms · ON red / OFF blue")]
         canvas = Image.new("RGB", (W, H))
@@ -518,7 +519,7 @@ def events_frames(shot, f, video):
     w, h = (int(v) for v in g["calib/resolution"][:])
     k0 = int(round(shot.get("offset", 0.0) * fps))
     for k in range(k0, len(ts)):
-        evi, _ = events_to_rgb(evs, ts[k], shot.get("window_ms", 10) * 1000, w, h, None)
+        evi, _ = events_to_rgb(evs, ts[k], shot.get("window_ms", 10) * 1000, w, h)
         yield fit(evi, W, H)
 
 
@@ -754,8 +755,7 @@ def assemble(base, story, out_mp4, shots_scn):
     as clips too, then everything is joined in one ffmpeg pass with `crossfade`-second fades
     (xfade) — minutes instead of re-composing every frame from the sequences."""
     video = story["video"]
-    W, H, fps = video["width"], video["height"], video["fps"]
-    xf = video["crossfade"]
+    fps, xf = video["fps"], video["crossfade"]
     d = os.path.join(OUT, "clips")
     ids = [s["id"] for s in story["shots"]]
     # each shot's clip by name (any position number; the newest if several)
@@ -798,7 +798,7 @@ def assemble(base, story, out_mp4, shots_scn):
     print(f"wrote {out_mp4}: {len(parts)} parts, {total:.1f} s")
 
 
-def compose(base, story, out_mp4, shots_scn, preview_seconds=None):
+def compose(base, story, out_mp4, shots_scn):
     video = story["video"]
     W, H, fps = video["width"], video["height"], video["fps"]
     xf = int(round(video["crossfade"] * fps))

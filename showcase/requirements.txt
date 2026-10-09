@@ -1,0 +1,15 @@
+# Python packages for the showcase videos (showcase/):
+#   pip install -r showcase/requirements.txt
+# Also needed, outside pip:
+#   - ffmpeg and ffprobe with libx264 (system package), for encoding and muxing;
+#   - the release build of `terrain` (cargo build --release);
+#   - for the airliner callouts (soundtrack.py), the Piper voice en_US-ljspeech-high
+#     (.onnx + .onnx.json) from https://huggingface.co/rhasspy/piper-voices, at
+#     ~/.cache/piper/en_US-ljspeech-high.onnx or wherever $PIPER_VOICE points.
+numpy
+h5py
+PyYAML
+Pillow>=8.2         # ImageDraw.rounded_rectangle, text anchors
+matplotlib>=3.5     # colour maps (matplotlib.colormaps)
+scipy               # audio synthesis and filtering (soundtrack.py, showcase_score.py)
+piper-tts           # text-to-speech for the airliner callouts (soundtrack.py)

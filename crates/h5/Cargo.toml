@@ -2,6 +2,10 @@
 name = "h5"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Small safe wrapper over the HDF5 C library (statically linked hdf5-sys): files, groups, N-d datasets, attributes"
 
 [dependencies]
 hdf5-sys.workspace = true
@@ -10,4 +14,4 @@ thiserror.workspace = true
 parking_lot = "0.12"
 
 [dev-dependencies]
-flate2 = "1"
+flate2.workspace = true

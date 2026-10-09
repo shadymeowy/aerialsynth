@@ -11,7 +11,7 @@ fails or nothing could be checked.
   must help, |I0 - warp(I1)| ≤ max(4 DN, the unwarped difference) (measured ~2 DN: sensor
   noise plus motion blur).
 
-usage: check_gt.py SEQ.h5 [--camera /cam0] [--frames 0,10,20]
+    python scripts/check_gt.py SEQ.h5 [--camera /cam0] [--frames 0,10,20]
 """
 import argparse, os, sys
 import numpy as np, h5py
@@ -135,8 +135,10 @@ def check_camera(f, path, frames_arg, pose_path):
                     f"|I0 - warp(I1)| {err:5.2f} DN (≤ max({PHOTO_DN:g}, unwarped {base:5.2f}))")
 
 
-ap = argparse.ArgumentParser()
-ap.add_argument("seq"); ap.add_argument("--camera", default=None); ap.add_argument("--frames", default=None)
+ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument("seq", help="sequence file (HDF5)")
+ap.add_argument("--camera", default=None, help="camera group (default: every camera)")
+ap.add_argument("--frames", default=None, help="comma-separated frame indices for the flow checks (default: about 7 spread over the sequence)")
 a = ap.parse_args()
 f = h5py.File(a.seq, "r")
 pose_path = (scenario(f).get("output") or {}).get("pose", {}).get("path", "/pose")

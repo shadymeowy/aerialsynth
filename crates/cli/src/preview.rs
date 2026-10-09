@@ -11,11 +11,7 @@ pub fn layer_rgb(t: &TileData, layer: &str, emin: f32, emax: f32) -> Vec<u8> {
         let c: [u8; 3] = match layer {
             "rgb" => [t.rgb[3 * k], t.rgb[3 * k + 1], t.rgb[3 * k + 2]],
             "albedo" => [t.albedo[3 * k], t.albedo[3 * k + 1], t.albedo[3 * k + 2]],
-            "normal" => [
-                (t.normal[3 * k] as i32 + 128) as u8,
-                (t.normal[3 * k + 1] as i32 + 128) as u8,
-                (t.normal[3 * k + 2] as i32 + 128) as u8,
-            ],
+            "normal" => [(t.normal[3 * k] as i32 + 128) as u8, (t.normal[3 * k + 1] as i32 + 128) as u8, (t.normal[3 * k + 2] as i32 + 128) as u8],
             "landcover" => terragen::landcover::palette(t.landcover[k]),
             "hillshade" => {
                 let nx = t.normal[3 * k] as f32 / 127.0;

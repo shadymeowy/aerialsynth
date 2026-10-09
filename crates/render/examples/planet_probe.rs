@@ -1,5 +1,7 @@
-//! Apparent topocentric azimuth / elevation (no refraction), V and radius of the planets and the
-//! Moon (for validation against Skyfield). planet_probe UNIX LAT_DEG LON_DEG H_M DUT1
+//! Apparent topocentric azimuth / elevation (no refraction), V magnitude, radius and phase of the
+//! planets and the Moon, one line per body (for validation against Skyfield).
+//!
+//!     cargo run --release -p render --example planet_probe -- UNIX LAT_DEG LON_DEG H_M DUT1
 use geodesy::frames::{ecef2enuv, geodetic2ecef, Geodetic};
 use geodesy::Ellipsoid;
 use render::stars::astro::Sky;

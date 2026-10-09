@@ -2,16 +2,15 @@
 
 ## Terrain (`crates/terragen`)
 
-Generated on the GPU by default (`tiles.generator`; the same world as the CPU generator, see
-`docs/gpu.md`).
+Generated on the GPU when it supports 64-bit shaders, else on the CPU (`tiles.generator`; both
+build the same world, see `docs/gpu.md`).
 
 - **Determinism:** a pure function of (seed, config, position), using f64 3D noise on the
   ellipsoid surface. There are no seams or pole problems.
 - **Band limiting:** fields are band-limited by the pixel GSD, so coarse zooms approximate the
   average of fine ones. Large-scale fields are sampled on a 16-px grid aligned to tile corners.
   Whether a field comes from the grid or per pixel depends on the zoom only, so neighbouring
-  tiles always take the same path (generator version 3; version 2 decided it per tile and
-  left north-south seams at a few latitudes).
+  tiles always take the same path.
 - **Landforms:**
   - continents and shelves, home-region land bias
   - mountain belts (ridged multifractal with domain warp) carved by dendritic erosion gullies
@@ -41,9 +40,9 @@ Generated on the GPU by default (`tiles.generator`; the same world as the CPU ge
 
 - **Geometry:**
   - CPU reference rasterizer; tile meshes are built on the fly from the elevation layer
-  - generic `CameraModel` trait implementing all of camodocal's `calib/camera.cpp` models, with
-    the same YAML schema (`model`, `width`, `height`, `intrinsics`, `distortion`, `xi`,
-    `max_fov_deg`, `inv_poly`, `affine`, `center`):
+  - generic `CameraModel` trait with camodocal-style models, configured by the camera YAML
+    schema (`model`, `width`, `height`, `intrinsics`, `distortion`, `xi`, `max_fov_deg`,
+    `inv_poly`, `affine`, `center`; `docs/scenario.md`):
     - `pinhole` and `pinhole_full` (OpenCV rational)
     - `kannala_brandt`
     - `mei`
@@ -98,7 +97,9 @@ Generated on the GPU by default (`tiles.generator`; the same world as the CPU ge
   - engine-harmonic and band-limited broadband vibration
   - optional stabilized gimbal (the whole sensor platform: `/pose` is then the gimbal frame)
 
-## Performance (8 cores)
+## Performance
+
+On the author's machine (Xeon W-2125, 8 threads; RTX 2080 Ti):
 
 | task | speed |
 |------|-------|

@@ -36,11 +36,11 @@ pub use raw::lock;
 pub use sys::h5i::hid_t;
 pub use types::H5Type;
 
-#[allow(unused)]
-fn _assert_send_sync() {
+// Compile-time check that the handle types are `Send + Sync`.
+const _: fn() = || {
     fn f<T: Send + Sync>() {}
     f::<File>();
     f::<Group>();
     f::<Dataset>();
     f::<Error>();
-}
+};

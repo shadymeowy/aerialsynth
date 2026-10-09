@@ -1,5 +1,7 @@
-//! Apparent topocentric azimuth / elevation of catalogue stars (for validation against Skyfield).
-//! star_probe UNIX LAT_DEG LON_DEG H_M DUT1 [refraction 0|1] [nstars]
+//! Apparent topocentric azimuth / elevation of the first catalogue stars, one line per star (for
+//! validation against Skyfield).
+//!
+//!     cargo run --release -p render --example star_probe -- UNIX LAT_DEG LON_DEG H_M DUT1 [REFRACTION 0|1] [NSTARS]
 use geodesy::frames::{ecef2enuv, geodetic2ecef, Geodetic};
 use geodesy::Ellipsoid;
 use render::stars::{StarField, StarsConfig};

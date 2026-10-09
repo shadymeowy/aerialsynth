@@ -2,6 +2,10 @@
 name = "terrain"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Command-line front end of aerialsynth: procedural planet tiles, synthetic flights and rendered aerial camera datasets"
 
 [[bin]]
 name = "terrain"
@@ -10,13 +14,11 @@ path = "src/main.rs"
 [dependencies]
 geodesy.workspace = true
 terragen.workspace = true
-glam.workspace = true
 anyhow.workspace = true
 rayon.workspace = true
 clap.workspace = true
 image.workspace = true
 indicatif.workspace = true
-serde.workspace = true
 serde_yaml.workspace = true
 render.workspace = true
 tilestore.workspace = true

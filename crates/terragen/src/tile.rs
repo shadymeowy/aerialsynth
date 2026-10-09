@@ -188,7 +188,7 @@ impl Generator {
         }
     }
 
-    /// "GPU (<adapter>)" or "CPU": where tiles are generated.
+    /// `"GPU (<adapter>)"` or `"CPU"`: where tiles are generated.
     pub fn backend_name(&self) -> String {
         #[cfg(feature = "gpu")]
         if let Some(g) = self.gpu() {
@@ -218,7 +218,11 @@ impl Generator {
             return Ok(g
                 .terrain_points(pts)?
                 .iter()
-                .map(|t| PointTerrain { ground: t.ground as f64, water: if t.water_kind != 0 { t.water as f64 } else { f64::NEG_INFINITY }, water_kind: t.water_kind as u8 })
+                .map(|t| PointTerrain {
+                    ground: t.ground as f64,
+                    water: if t.water_kind != 0 { t.water as f64 } else { f64::NEG_INFINITY },
+                    water_kind: t.water_kind as u8,
+                })
                 .collect());
         }
         let ell = self.world.ell;
@@ -499,138 +503,138 @@ impl Generator {
                     static CACHES: std::cell::RefCell<(u64, Caches)> = std::cell::RefCell::new((0, Caches::default()));
                 }
                 CACHES.with(|cc| {
-                let mut cc = cc.borrow_mut();
-                if cc.0 != self.world.cache_key {
-                    *cc = (self.world.cache_key, Caches::default());
-                }
-                cc.1.trim();
-                let caches = &mut cc.1;
-                let mut row = Vec::with_capacity(na);
-                let gsd = row_gsd[j];
-                let fw = gsd / ss as f64;
-                for i in 0..na {
-                    let pf = {
-                        let px = ox + i as f64 - 1.0 + 0.5;
-                        let py = oy + j as f64 - 1.0 + 0.5;
-                        let (lat, lon) = pixel_to_latlon(DVec2::new(px, py), z, n as u32);
-                        let p = Ctx::new(lat, lon, gsd, &ell).p;
-                        if use_grid {
-                            let mut f = self.surface.pixel_fields_part(p, gsd, Some((pf_cut, false)), false);
-                            let u = px / G - gk0x as f64;
-                            let v = py / G - gk0y as f64;
-                            let (i0, j0) = ((u.floor() as usize).clamp(1, ng - 3), (v.floor() as usize).clamp(1, ng - 3));
-                            let (wx, wy) = (catmull_rom_weights(u - i0 as f64), catmull_rom_weights(v - j0 as f64));
-                            for (b, wyb) in wy.iter().enumerate() {
-                                for (a, wxa) in wx.iter().enumerate() {
-                                    let w = wxa * wyb;
-                                    let node = &nodes[(j0 + b - 1) * ng + i0 + a - 1].pf_low;
-                                    for (fk, nk) in f.iter_mut().zip(node) {
-                                        *fk += w * nk;
+                    let mut cc = cc.borrow_mut();
+                    if cc.0 != self.world.cache_key {
+                        *cc = (self.world.cache_key, Caches::default());
+                    }
+                    cc.1.trim();
+                    let caches = &mut cc.1;
+                    let mut row = Vec::with_capacity(na);
+                    let gsd = row_gsd[j];
+                    let fw = gsd / ss as f64;
+                    for i in 0..na {
+                        let pf = {
+                            let px = ox + i as f64 - 1.0 + 0.5;
+                            let py = oy + j as f64 - 1.0 + 0.5;
+                            let (lat, lon) = pixel_to_latlon(DVec2::new(px, py), z, n as u32);
+                            let p = Ctx::new(lat, lon, gsd, &ell).p;
+                            if use_grid {
+                                let mut f = self.surface.pixel_fields_part(p, gsd, Some((pf_cut, false)), false);
+                                let u = px / G - gk0x as f64;
+                                let v = py / G - gk0y as f64;
+                                let (i0, j0) = ((u.floor() as usize).clamp(1, ng - 3), (v.floor() as usize).clamp(1, ng - 3));
+                                let (wx, wy) = (catmull_rom_weights(u - i0 as f64), catmull_rom_weights(v - j0 as f64));
+                                for (b, wyb) in wy.iter().enumerate() {
+                                    for (a, wxa) in wx.iter().enumerate() {
+                                        let w = wxa * wyb;
+                                        let node = &nodes[(j0 + b - 1) * ng + i0 + a - 1].pf_low;
+                                        for (fk, nk) in f.iter_mut().zip(node) {
+                                            *fk += w * nk;
+                                        }
                                     }
                                 }
+                                let mut pf = PixFields::from_parts(f, p, gsd, Some(pf_cut));
+                                // the forest stand: known when the four nodes around agree
+                                let st = nodes[j0 * ng + i0].stand;
+                                if nodes[j0 * ng + i0 + 1].stand == st && nodes[(j0 + 1) * ng + i0].stand == st && nodes[(j0 + 1) * ng + i0 + 1].stand == st {
+                                    pf.stand_id = Some(st);
+                                }
+                                pf
+                            } else {
+                                self.surface.pixel_fields(p, gsd)
                             }
-                            let mut pf = PixFields::from_parts(f, p, gsd, Some(pf_cut));
-                            // the forest stand: known when the four nodes around agree
-                            let st = nodes[j0 * ng + i0].stand;
-                            if nodes[j0 * ng + i0 + 1].stand == st && nodes[(j0 + 1) * ng + i0].stand == st && nodes[(j0 + 1) * ng + i0 + 1].stand == st {
-                                pf.stand_id = Some(st);
-                            }
-                            pf
-                        } else {
-                            self.surface.pixel_fields(p, gsd)
-                        }
-                    };
-                    // one sample at sub-pixel (sx, sy): the surface and the bare ground
-                    let sample = |sx: usize, sy: usize, caches: &mut Caches| -> (Surface, f64) {
-                        let fxo = (sx as f64 + 0.5) / ss as f64 - 0.5;
-                        let fyo = (sy as f64 + 0.5) / ss as f64 - 0.5;
-                        // neighbours for bilinear interpolation
-                        let (ii, jj) = (i as isize, j as isize);
-                        let i0 = if fxo < 0.0 { ii - 1 } else { ii };
-                        let j0 = if fyo < 0.0 { jj - 1 } else { jj };
-                        let fx = if fxo < 0.0 { 1.0 + fxo } else { fxo };
-                        let fy = if fyo < 0.0 { 1.0 + fyo } else { fyo };
-                        let nb = [at(i0, j0), at(i0 + 1, j0), at(i0, j0 + 1), at(i0 + 1, j0 + 1)];
-                        let t = at(ii, jj);
-                        let ground = bilerp(nb.map(|t| t.ground), fx, fy);
-                        let mut wl = f64::NEG_INFINITY;
-                        let mut wk = water::NONE;
-                        for t in nb {
-                            if t.water_kind != water::NONE && t.water > wl {
-                                wl = t.water;
-                                wk = t.water_kind;
-                            }
-                        }
-                        let rd = bilerp(nb.map(|t| t.river_d.clamp(-1e6, 1e6)), fx, fy);
-                        let rhw = nb.iter().map(|t| t.river_hw).fold(0.0, f64::max);
-                        let rl = bilerp(nb.map(|t| if t.river_hw > 0.0 { t.river_level } else { ground }), fx, fy);
-                        let road_major = bilerp(nb.map(|t| t.road_major.clamp(-1e6, 1e6)), fx, fy);
-                        let road_minor = bilerp(nb.map(|t| t.road_minor.clamp(-1e6, 1e6)), fx, fy);
-                        let mut tt = *t;
-                        tt.region.edge = bilerp(nb.map(|t| t.region.edge.min(1e6)), fx, fy);
-                        let local = Local {
-                            t: &tt,
-                            ground,
-                            water: wl,
-                            water_kind: wk,
-                            river_d: rd,
-                            river_hw: rhw,
-                            river_level: rl,
-                            road_major,
-                            road_minor,
-                            slope: slope[j * na + i],
-                            fw,
                         };
-                        let px = ox + i as f64 - 1.0 + 0.5 + fxo;
-                        let py = oy + j as f64 - 1.0 + 0.5 + fyo;
-                        let (lat, lon) = pixel_to_latlon(DVec2::new(px, py), z, n as u32);
-                        let ctx = Ctx::new(lat, lon, gsd, &ell);
-                        (self.surface.eval(&self.world, caches, &ctx, &local, &pf), ground)
-                    };
-                    let mut acc_a = DVec3::ZERO;
-                    let mut acc_e = DVec3::ZERO;
-                    let mut acc_h = 0.0;
-                    let mut acc_l = 0.0;
-                    let mut acc_g = 0.0;
-                    let mut counts = [0u16; 32];
-                    let mut add = |(s, ground): (Surface, f64)| {
-                        acc_a += s.albedo;
-                        acc_e += s.emission;
-                        acc_h += s.height;
-                        acc_l += s.lit;
-                        acc_g += ground;
-                        counts[(s.class as usize).min(31)] += 1;
-                    };
-                    let mut taken = ss * ss;
-                    if adaptive {
-                        // the diagonal pair first; the other two only where it disagrees
-                        let s0 = sample(0, 0, caches);
-                        let s1 = sample(1, 1, caches);
-                        let similar = s0.0.class == s1.0.class
-                            && (s0.0.albedo - s1.0.albedo).abs().max_element() < 0.012
-                            && (s0.0.emission - s1.0.emission).abs().max_element() < 0.02
-                            && (s0.0.height - s1.0.height).abs() < 0.15
-                            && (s0.0.lit - s1.0.lit).abs() < 0.05;
-                        add(s0);
-                        add(s1);
-                        if similar {
-                            taken = 2;
+                        // one sample at sub-pixel (sx, sy): the surface and the bare ground
+                        let sample = |sx: usize, sy: usize, caches: &mut Caches| -> (Surface, f64) {
+                            let fxo = (sx as f64 + 0.5) / ss as f64 - 0.5;
+                            let fyo = (sy as f64 + 0.5) / ss as f64 - 0.5;
+                            // neighbours for bilinear interpolation
+                            let (ii, jj) = (i as isize, j as isize);
+                            let i0 = if fxo < 0.0 { ii - 1 } else { ii };
+                            let j0 = if fyo < 0.0 { jj - 1 } else { jj };
+                            let fx = if fxo < 0.0 { 1.0 + fxo } else { fxo };
+                            let fy = if fyo < 0.0 { 1.0 + fyo } else { fyo };
+                            let nb = [at(i0, j0), at(i0 + 1, j0), at(i0, j0 + 1), at(i0 + 1, j0 + 1)];
+                            let t = at(ii, jj);
+                            let ground = bilerp(nb.map(|t| t.ground), fx, fy);
+                            let mut wl = f64::NEG_INFINITY;
+                            let mut wk = water::NONE;
+                            for t in nb {
+                                if t.water_kind != water::NONE && t.water > wl {
+                                    wl = t.water;
+                                    wk = t.water_kind;
+                                }
+                            }
+                            let rd = bilerp(nb.map(|t| t.river_d.clamp(-1e6, 1e6)), fx, fy);
+                            let rhw = nb.iter().map(|t| t.river_hw).fold(0.0, f64::max);
+                            let rl = bilerp(nb.map(|t| if t.river_hw > 0.0 { t.river_level } else { ground }), fx, fy);
+                            let road_major = bilerp(nb.map(|t| t.road_major.clamp(-1e6, 1e6)), fx, fy);
+                            let road_minor = bilerp(nb.map(|t| t.road_minor.clamp(-1e6, 1e6)), fx, fy);
+                            let mut tt = *t;
+                            tt.region.edge = bilerp(nb.map(|t| t.region.edge.min(1e6)), fx, fy);
+                            let local = Local {
+                                t: &tt,
+                                ground,
+                                water: wl,
+                                water_kind: wk,
+                                river_d: rd,
+                                river_hw: rhw,
+                                river_level: rl,
+                                road_major,
+                                road_minor,
+                                slope: slope[j * na + i],
+                                fw,
+                            };
+                            let px = ox + i as f64 - 1.0 + 0.5 + fxo;
+                            let py = oy + j as f64 - 1.0 + 0.5 + fyo;
+                            let (lat, lon) = pixel_to_latlon(DVec2::new(px, py), z, n as u32);
+                            let ctx = Ctx::new(lat, lon, gsd, &ell);
+                            (self.surface.eval(&self.world, caches, &ctx, &local, &pf), ground)
+                        };
+                        let mut acc_a = DVec3::ZERO;
+                        let mut acc_e = DVec3::ZERO;
+                        let mut acc_h = 0.0;
+                        let mut acc_l = 0.0;
+                        let mut acc_g = 0.0;
+                        let mut counts = [0u16; 32];
+                        let mut add = |(s, ground): (Surface, f64)| {
+                            acc_a += s.albedo;
+                            acc_e += s.emission;
+                            acc_h += s.height;
+                            acc_l += s.lit;
+                            acc_g += ground;
+                            counts[(s.class as usize).min(31)] += 1;
+                        };
+                        let mut taken = ss * ss;
+                        if adaptive {
+                            // the diagonal pair first; the other two only where it disagrees
+                            let s0 = sample(0, 0, caches);
+                            let s1 = sample(1, 1, caches);
+                            let similar = s0.0.class == s1.0.class
+                                && (s0.0.albedo - s1.0.albedo).abs().max_element() < 0.012
+                                && (s0.0.emission - s1.0.emission).abs().max_element() < 0.02
+                                && (s0.0.height - s1.0.height).abs() < 0.15
+                                && (s0.0.lit - s1.0.lit).abs() < 0.05;
+                            add(s0);
+                            add(s1);
+                            if similar {
+                                taken = 2;
+                            } else {
+                                add(sample(1, 0, caches));
+                                add(sample(0, 1, caches));
+                            }
                         } else {
-                            add(sample(1, 0, caches));
-                            add(sample(0, 1, caches));
-                        }
-                    } else {
-                        for sy in 0..ss {
-                            for sx in 0..ss {
-                                add(sample(sx, sy, caches));
+                            for sy in 0..ss {
+                                for sx in 0..ss {
+                                    add(sample(sx, sy, caches));
+                                }
                             }
                         }
+                        let inv = 1.0 / taken as f64;
+                        let class = counts.iter().enumerate().max_by_key(|(_, c)| **c).map(|(k, _)| k as u8).unwrap_or(0);
+                        row.push(PixB { emission: acc_e * inv, albedo: acc_a * inv, height: acc_h * inv, ground: acc_g * inv, lit: acc_l * inv, class });
                     }
-                    let inv = 1.0 / taken as f64;
-                    let class = counts.iter().enumerate().max_by_key(|(_, c)| **c).map(|(k, _)| k as u8).unwrap_or(0);
-                    row.push(PixB { emission: acc_e * inv, albedo: acc_a * inv, height: acc_h * inv, ground: acc_g * inv, lit: acc_l * inv, class });
-                }
-                row
+                    row
                 })
             })
             .collect();

@@ -87,21 +87,13 @@ mod tests {
     fn euler_matches_matrix_product() {
         let mut rng = Rng::new(21);
         for _ in 0..2000 {
-            let (yaw, pitch, roll) = (
-                rng.uniform(-PI, PI),
-                rng.uniform(-1.5, 1.5),
-                rng.uniform(-PI, PI),
-            );
+            let (yaw, pitch, roll) = (rng.uniform(-PI, PI), rng.uniform(-1.5, 1.5), rng.uniform(-PI, PI));
             let q = euler_zyx_to_quat(yaw, pitch, roll);
             let m = rz(yaw) * ry(pitch) * rx(roll);
             assert!(DMat3::from_quat(q).abs_diff_eq(m, 1e-14));
             let (y2, p2, r2) = quat_to_euler_zyx(q);
-            assert!(
-                (y2 - yaw).abs() < 1e-12 && (p2 - pitch).abs() < 1e-12 && (r2 - roll).abs() < 1e-12
-            );
-            assert!(
-                dmat3_to_quat(&m).abs_diff_eq(q, 1e-14) || dmat3_to_quat(&m).abs_diff_eq(-q, 1e-14)
-            );
+            assert!((y2 - yaw).abs() < 1e-12 && (p2 - pitch).abs() < 1e-12 && (r2 - roll).abs() < 1e-12);
+            assert!(dmat3_to_quat(&m).abs_diff_eq(q, 1e-14) || dmat3_to_quat(&m).abs_diff_eq(-q, 1e-14));
         }
     }
 
@@ -127,17 +119,9 @@ mod tests {
         let mut rng = Rng::new(8);
         for _ in 0..1000 {
             let (lat, lon) = (rng.uniform(-FRAC_PI_2, FRAC_PI_2), rng.uniform(-PI, PI));
-            let q_nb = euler_zyx_to_quat(
-                rng.uniform(-PI, PI),
-                rng.uniform(-1.5, 1.5),
-                rng.uniform(-PI, PI),
-            );
+            let q_nb = euler_zyx_to_quat(rng.uniform(-PI, PI), rng.uniform(-1.5, 1.5), rng.uniform(-PI, PI));
             let q_eb = body2ned_to_body2ecef(q_nb, lat, lon);
-            let v_b = DVec3::new(
-                rng.uniform(-1.0, 1.0),
-                rng.uniform(-1.0, 1.0),
-                rng.uniform(-1.0, 1.0),
-            );
+            let v_b = DVec3::new(rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0));
             // Consistent with the vector rotation helpers.
             let v_e = ned2ecefv(q_nb * v_b, lat, lon);
             assert!((q_eb * v_b).abs_diff_eq(v_e, 1e-14));

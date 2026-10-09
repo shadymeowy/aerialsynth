@@ -1,6 +1,8 @@
-//! Tiles from the GPU and the CPU generator side by side: `cargo run --release -p terragen
-//! --example gpu_vs_cpu -- OUT.png z/x/y ...` writes one row per tile: GPU rgb, CPU rgb,
-//! |difference| × 10, GPU emission (night lights).
+//! Tiles from the GPU and the CPU generator side by side: one row per tile with GPU rgb, CPU rgb,
+//! |difference| × 10 and GPU emission (night lights). Needs a GPU with 64-bit float / integer
+//! shader support.
+//!
+//!     cargo run --release -p terragen --example gpu_vs_cpu -- OUT.png Z/X/Y [Z/X/Y ...]
 use geodesy::tiles::TileId;
 
 fn main() -> anyhow::Result<()> {

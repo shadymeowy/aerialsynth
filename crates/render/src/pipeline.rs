@@ -199,12 +199,7 @@ pub fn plan_missing(scn: &Scenario, poses: &[Pose], store: &TileStore) -> Result
     let ell = store.meta().ellipsoid();
     let win = Window::new(scn, poses)?;
     let max_zoom = scn.tiles.max_zoom;
-    let params = LodParams {
-        min_zoom: scn.tiles.min_zoom,
-        max_zoom,
-        texel_px: scn.render.texel_px,
-        ..Default::default()
-    };
+    let params = LodParams { min_zoom: scn.tiles.min_zoom, max_zoom, texel_px: scn.render.texel_px, ..Default::default() };
     let oracle = DryRunOracle { store, max_zoom };
     let mut want: BTreeSet<TileId> = BTreeSet::new();
     for spec in &scn.cameras {
@@ -319,7 +314,19 @@ fn compute_flow(points: &[Option<DVec3>], w: usize, h: usize, cam_b: &CamPose, d
 /// Motion blur: re-project the frame's points with sub-frame poses across the exposure window
 /// and integrate the radiance along the image-space paths.
 #[allow(clippy::too_many_arguments)]
-fn motion_blur(sensor: &Sensor, radiance: Vec<f32>, points: &[Option<DVec3>], sample_offset: f64, cam: &CamPose, poses: &[Pose], spec: &CameraSpec, t: f64, exposure: f64, ell: &Ellipsoid, model: &dyn CameraModel) -> Vec<f32> {
+fn motion_blur(
+    sensor: &Sensor,
+    radiance: Vec<f32>,
+    points: &[Option<DVec3>],
+    sample_offset: f64,
+    cam: &CamPose,
+    poses: &[Pose],
+    spec: &CameraSpec,
+    t: f64,
+    exposure: f64,
+    ell: &Ellipsoid,
+    model: &dyn CameraModel,
+) -> Vec<f32> {
     let Some(rgb) = &spec.rgb else { return radiance };
     let mb = &rgb.sensor.motion_blur;
     if !mb.enabled || exposure <= 0.0 {
@@ -382,7 +389,16 @@ struct Pending {
 
 /// The frame modalities of one camera. `progress(done, total)` in frames.
 #[allow(clippy::too_many_arguments)]
-fn render_camera(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], win: Window, cache: Arc<TileCache>, ell: Ellipsoid, file: &h5::File, progress: &dyn Fn(usize, usize)) -> Result<usize> {
+fn render_camera(
+    scn: &Scenario,
+    spec: &CameraSpec,
+    poses: &[Pose],
+    win: Window,
+    cache: Arc<TileCache>,
+    ell: Ellipsoid,
+    file: &h5::File,
+    progress: &dyn Fn(usize, usize),
+) -> Result<usize> {
     let model = spec.intrinsics.build()?;
     let (w, h) = (model.width() as usize, model.height() as usize);
     let times = frame_times(scn, spec, win);
@@ -451,7 +467,9 @@ fn render_camera(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], win: Window,
         // camera poses across the open shutter, for star trails
         let star_track = |span: f64| -> Vec<CamPose> {
             let k = if span > 0.0 { 17 } else { 1 };
-            (0..k).map(|i| if k == 1 { cam } else { trajectory::interpolate(poses, t + span * (i as f64 / (k - 1) as f64 - 0.5)).camera(&spec.extrinsics, &ell) }).collect()
+            (0..k)
+                .map(|i| if k == 1 { cam } else { trajectory::interpolate(poses, t + span * (i as f64 / (k - 1) as f64 - 0.5)).camera(&spec.extrinsics, &ell) })
+                .collect()
         };
         let (rgb, exposure) = match sensor.as_mut() {
             Some(s) => {
@@ -463,7 +481,17 @@ fn render_camera(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], win: Window,
                 if sun.stars {
                     let mb = &spec.rgb.as_ref().unwrap().sensor.motion_blur;
                     let span = if mb.enabled { ex.time * mb.shutter } else { 0.0 };
-                    stars_gt = renderer.stars().render_track(&mut radiance, &frame.points, (w, h), model.as_ref(), &star_track(span), &cam, sun.unix, &ell, &scn.render.atmosphere);
+                    stars_gt = renderer.stars().render_track(
+                        &mut radiance,
+                        &frame.points,
+                        (w, h),
+                        model.as_ref(),
+                        &star_track(span),
+                        &cam,
+                        sun.unix,
+                        &ell,
+                        &scn.render.atmosphere,
+                    );
                 }
                 let rgb = s.develop(&radiance, &ex, k as u64);
                 s.meter(&radiance);
@@ -471,7 +499,8 @@ fn render_camera(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], win: Window,
             }
             None => {
                 if sun.stars && spec.stars.is_some() {
-                    stars_gt = renderer.stars().render_track(&mut [], &frame.points, (w, h), model.as_ref(), &[cam], &cam, sun.unix, &ell, &scn.render.atmosphere);
+                    stars_gt =
+                        renderer.stars().render_track(&mut [], &frame.points, (w, h), model.as_ref(), &[cam], &cam, sun.unix, &ell, &scn.render.atmosphere);
                 }
                 (None, None)
             }
@@ -521,7 +550,13 @@ pub struct RenderReport {
 /// Create the sequence file: body ground truth, every camera's calibration and frame
 /// modalities, the IMU. Event streams are added by [`render_events`].
 /// `progress(camera path, done, total)` in frames.
-pub fn render_sequence(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, gen: Option<Arc<Generator>>, progress: &dyn Fn(&str, usize, usize)) -> Result<RenderReport> {
+pub fn render_sequence(
+    scn: &Scenario,
+    poses: &[Pose],
+    store: Arc<TileStore>,
+    gen: Option<Arc<Generator>>,
+    progress: &dyn Fn(&str, usize, usize),
+) -> Result<RenderReport> {
     let ell = store.meta().ellipsoid();
     let win = Window::new(scn, poses)?;
     let cache = tile_cache(scn, store, gen);
@@ -563,7 +598,13 @@ pub fn render_sequence(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, ge
 
 /// Simulate every camera with an `events` modality into the existing sequence file.
 /// `progress(camera path, simulated s, total s)`. Returns (camera path, statistics) per camera.
-pub fn render_events(scn: &Scenario, poses: &[Pose], store: Arc<TileStore>, gen: Option<Arc<Generator>>, progress: &dyn Fn(&str, f64, f64)) -> Result<Vec<(String, crate::events::EventStats)>> {
+pub fn render_events(
+    scn: &Scenario,
+    poses: &[Pose],
+    store: Arc<TileStore>,
+    gen: Option<Arc<Generator>>,
+    progress: &dyn Fn(&str, f64, f64),
+) -> Result<Vec<(String, crate::events::EventStats)>> {
     let ell = store.meta().ellipsoid();
     let win = Window::new(scn, poses)?;
     let cache = tile_cache(scn, store, gen);

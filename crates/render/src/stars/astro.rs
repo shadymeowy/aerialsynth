@@ -256,9 +256,16 @@ fn kepler(el: &[[f64; 6]; 2], t: f64) -> (DVec3, DVec3) {
     (r * DVec3::new(x, y, 0.0), r * DVec3::new(vx, vy, 0.0))
 }
 
-const EMB: [[f64; 6]; 2] = [[1.00000261, 0.01671123, -0.00001531, 100.46457166, 102.93768193, 0.0], [0.00000562, -0.00004392, -0.01294668, 35999.37244981, 0.32327364, 0.0]];
-const JUPITER: [[f64; 6]; 2] = [[5.20288700, 0.04838624, 1.30439695, 34.39644051, 14.72847983, 100.47390909], [-0.00011607, -0.00013253, -0.00183714, 3034.74612775, 0.21252668, 0.20469106]];
-const SATURN: [[f64; 6]; 2] = [[9.53667594, 0.05386179, 2.48599187, 49.95424423, 92.59887831, 113.66242448], [-0.00125060, -0.00050991, 0.00193609, 1222.49362201, -0.41897216, -0.28867794]];
+const EMB: [[f64; 6]; 2] =
+    [[1.00000261, 0.01671123, -0.00001531, 100.46457166, 102.93768193, 0.0], [0.00000562, -0.00004392, -0.01294668, 35999.37244981, 0.32327364, 0.0]];
+const JUPITER: [[f64; 6]; 2] = [
+    [5.20288700, 0.04838624, 1.30439695, 34.39644051, 14.72847983, 100.47390909],
+    [-0.00011607, -0.00013253, -0.00183714, 3034.74612775, 0.21252668, 0.20469106],
+];
+const SATURN: [[f64; 6]; 2] = [
+    [9.53667594, 0.05386179, 2.48599187, 49.95424423, 92.59887831, 113.66242448],
+    [-0.00125060, -0.00050991, 0.00193609, 1222.49362201, -0.41897216, -0.28867794],
+];
 
 /// Barycentric position (AU) and velocity (AU/day) of the Earth in ICRS axes, and its
 /// heliocentric position (AU). `t`: TT (≈ TDB) Julian centuries since J2000.
@@ -329,7 +336,15 @@ impl Sky {
             }
             _ => earth_barycentric(t),
         };
-        Sky { gcrs_to_itrs: w * rz(gast) * m, earth_pos: pos, earth_vel_c: vel / C_AU_DAY, sun_to_earth: helio.normalize(), sun_dist: helio.length(), years: t * 100.0, jd_tt }
+        Sky {
+            gcrs_to_itrs: w * rz(gast) * m,
+            earth_pos: pos,
+            earth_vel_c: vel / C_AU_DAY,
+            sun_to_earth: helio.normalize(),
+            sun_dist: helio.length(),
+            years: t * 100.0,
+            jd_tt,
+        }
     }
 
     /// Observer velocity (units of c, GCRS axes) of an Earth-fixed point at ECEF `pos` (m):
@@ -342,7 +357,7 @@ impl Sky {
 
 /// Atmospheric refraction (rad) to add to the geometric elevation `el` (rad) of a star, for
 /// pressure `p_hpa` and temperature `t_k` at the observer: Green's A tan z + B tan³ z model
-/// (ERFA refco, dry air, λ = 0.574 µm) above 15° elevation, Sæmundsson's formula below, blended.
+/// (ERFA refco, dry air, λ = 0.574 µm) above 20° elevation, Sæmundsson's formula below 10°, blended between.
 pub fn refraction(el: f64, p_hpa: f64, t_k: f64) -> f64 {
     if p_hpa <= 0.0 {
         return 0.0;

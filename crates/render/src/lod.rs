@@ -282,7 +282,7 @@ mod tests {
         assert!(!units.is_empty());
         let zmax = units.iter().map(|u| u.id.z).max().unwrap();
         // ~1500 m altitude, f ≈ 457 px -> ground pixel ≈ 3.3 m -> zoom 15/16
-        assert!(zmax >= 15 && zmax <= 17, "zmax {zmax}");
+        assert!((15..=17).contains(&zmax), "zmax {zmax}");
         // everything selected must be near the camera (nadir view)
         for u in &units {
             let (lat, lon) = u.id.center();

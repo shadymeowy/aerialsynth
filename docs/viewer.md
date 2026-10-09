@@ -18,10 +18,11 @@ terrain view -c configs/view.yaml --camera-view    # fly the camera through the 
 Both views share one flight and one tile store. By default the tiles a view wants are
 generated in the background and stored (`--no-generate`: stored tiles only, the store opened
 read-only, so a store of another generator version can be viewed). On start, levels
-z0..=`--base-zoom` (4) are completed for the whole planet (341 tiles, ~4 min on 8 threads).
+z0..=`--base-zoom` (4) are completed for the whole planet (341 tiles; low zooms are the
+slowest tiles to generate, see `docs/gpu.md`).
 
-Run it on the machine's own display (on this machine the local X server is `:1`). Over SSH X
-forwarding it runs, but slowly.
+The viewer needs a GPU (wgpu: Vulkan, Metal or DX12). Run it on the machine's own display;
+over SSH X forwarding it runs, but slowly.
 
 ## Controls
 
@@ -61,7 +62,7 @@ forwarding it runs, but slowly.
 | `--supersample N` | 1 | camera supersampling |
 | `--exag`, `--mode` | 1, surface | map relief exaggeration and shading |
 | `--gpu-tiles` | 1536 | map tiles on the GPU (768 KB each) |
-| `--snapshot PNG --view … --wait S --size WxH` | | a headless map view into a PNG (below) |
+| `--snapshot PNG --view … --wait S --size WxH` | `--view 20,10,16000,0,0`, `--wait 600`, `--size 1280x800` | a headless map view into a PNG (below) |
 | `--record DIR --path FILE --fps N --until S` | 25 fps | a headless keyframed map flight into PNG frames (below) |
 
 ## How it works
@@ -161,7 +162,9 @@ look:     # switches of the shading mode and tile borders, dissolving over `fade
 terrain view -c configs/view.yaml --record out/dive --path showcase/globe/dive.yaml --size 1920x1080
 ```
 
-## Performance (RTX 2080 Ti, Xeon W-2125)
+## Performance
+
+On the author's machine (RTX 2080 Ti, Xeon W-2125):
 
 | | |
 |---|---|

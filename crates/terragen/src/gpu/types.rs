@@ -110,7 +110,6 @@ pub(crate) struct GSeg {
     pub _p: [u32; 2],
 }
 
-
 /// `Sink` of world.wgsl.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Default)]
@@ -300,7 +299,8 @@ pub(crate) const TF_ROADS_GRID: u32 = 8;
 
 pub(crate) const MODE_FULL: u32 = 0;
 pub(crate) const MODE_NOLAKES: u32 = 1;
-/// relief only (the drainage lattice heights, `drain.wgsl`)
+/// relief only (the drainage lattice heights, `drain.wgsl`); only selected on the GPU side,
+/// listed here to mirror `world.wgsl`'s mode constants
 #[allow(dead_code)]
 pub(crate) const MODE_RELIEF: u32 = 2;
 pub(crate) const MODE_REPORT: u32 = 3;

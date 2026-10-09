@@ -9,9 +9,9 @@
 //! straight-edge rasterization is accurate to a small fraction of a pixel.
 
 use crate::atmo::{AtmoParams, Atmosphere};
-use crate::lighting::{LightingConfig, SunState};
 use crate::cache::TileCache;
 use crate::camera::CameraModel;
+use crate::lighting::{LightingConfig, SunState};
 use crate::lod::{LodParams, Selector, Unit};
 use crate::trajectory::CamPose;
 use geodesy::tiles::{gsd_ew, TileId};
@@ -385,9 +385,7 @@ impl TileView {
                 let e = &t.emission[3 * k..3 * k + 3];
                 Some(DVec3::new(lut[e[0] as usize], lut[e[1] as usize], lut[e[2] as usize]))
             }
-            Which::Normal if !t.normal.is_empty() => {
-                Some(DVec3::new(t.normal[3 * k] as f64, t.normal[3 * k + 1] as f64, t.normal[3 * k + 2] as f64) / 127.0)
-            }
+            Which::Normal if !t.normal.is_empty() => Some(DVec3::new(t.normal[3 * k] as f64, t.normal[3 * k + 1] as f64, t.normal[3 * k + 2] as f64) / 127.0),
             _ => None,
         }
     }
@@ -520,6 +518,7 @@ pub struct Renderer {
     /// unit rays of the supersampled grid (camera frame)
     pub(crate) rays: Vec<[f32; 3]>,
     /// unique id of this renderer (GPU-side caches of its ray table)
+    #[cfg_attr(not(feature = "gpu"), allow(dead_code))]
     pub(crate) id: u64,
     /// Add the stars in `render` (instantaneous). The frame pipeline turns this off and adds
     /// them along the exposure track after motion blur (`stars()`).
@@ -558,16 +557,24 @@ impl Renderer {
             .collect();
         static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Renderer { model, model_ss, settings, ell, cache, geometry_only: false, split_flicker: false, radiance_only: false, rays, id, stars_in_render: true, star_field: Default::default() }
+        Renderer {
+            model,
+            model_ss,
+            settings,
+            ell,
+            cache,
+            geometry_only: false,
+            split_flicker: false,
+            radiance_only: false,
+            rays,
+            id,
+            stars_in_render: true,
+            star_field: Default::default(),
+        }
     }
 
     pub fn select_units(&self, cam: &CamPose) -> Vec<Unit> {
-        let params = LodParams {
-            min_zoom: self.settings.min_zoom,
-            max_zoom: self.settings.max_zoom,
-            texel_px: self.settings.texel_px,
-            ..Default::default()
-        };
+        let params = LodParams { min_zoom: self.settings.min_zoom, max_zoom: self.settings.max_zoom, texel_px: self.settings.texel_px, ..Default::default() };
         let sel = Selector::new(cam, self.model.as_ref(), self.ell, &params, self.cache.as_ref());
         sel.select()
     }
@@ -610,7 +617,6 @@ impl Renderer {
         self.cache.prefetch(&need);
         let shadows_needed = !self.geometry_only && self.settings.shading == Shading::Relit && self.settings.lighting.shadows && sun_state.direct > 1e-4;
         TileView::new(need.iter().filter_map(|id| self.cache.get(*id).map(|t| (*id, t))).collect(), shadows_needed)
-
     }
 
     /// Grid meshes of the units (camera-model projected vertices, skirts), f64 throughout.
@@ -766,9 +772,7 @@ impl Renderer {
                     return None;
                 }
                 // per quad row y range = union of its two vertex rows
-                let row_y = (0..ny - 1)
-                    .map(|j| (row_y[j].0.min(row_y[j + 1].0), row_y[j].1.max(row_y[j + 1].1)))
-                    .collect();
+                let row_y = (0..ny - 1).map(|j| (row_y[j].0.min(row_y[j + 1].0), row_y[j].1.max(row_y[j + 1].1))).collect();
                 Some(Mesh { unit_idx: ui as u32, nx, ny, verts, skirt, bbox, row_y })
             })
             .collect()
@@ -1039,8 +1043,20 @@ impl Renderer {
                     // ~9% of the render time)
                     let fx = px.x - 16.0 * (px.x * 0.0625).floor();
                     let fy = px.y - 16.0 * (px.y * 0.0625).floor();
-                    let tx = if dir.x > 1e-9 { (16.0 - fx) / dir.x } else if dir.x < -1e-9 { fx / -dir.x } else { f64::MAX };
-                    let ty = if dir.y > 1e-9 { (16.0 - fy) / dir.y } else if dir.y < -1e-9 { fy / -dir.y } else { f64::MAX };
+                    let tx = if dir.x > 1e-9 {
+                        (16.0 - fx) / dir.x
+                    } else if dir.x < -1e-9 {
+                        fx / -dir.x
+                    } else {
+                        f64::MAX
+                    };
+                    let ty = if dir.y > 1e-9 {
+                        (16.0 - fy) / dir.y
+                    } else if dir.y < -1e-9 {
+                        fy / -dir.y
+                    } else {
+                        f64::MAX
+                    };
                     let adv = tx.min(ty) + 0.05;
                     px += dir * adv;
                     dist += adv * texel;
@@ -1085,7 +1101,21 @@ impl Renderer {
     /// Shading context of one pixel: texture footprint and the affine colour transform
     /// `radiance = tex * mul + add + emission * emis` (lighting and atmosphere folded in).
     #[allow(clippy::too_many_arguments)]
-    fn pixel_shade(&self, view: &TileView, atmo: &Atmosphere, sun_state: &SunState, z: u8, gx: f64, gy: f64, range: f64, dir_w: DVec3, alpha: f64, cam_pos: DVec3, h_cam: f64, shadow: f64) -> PixShade {
+    fn pixel_shade(
+        &self,
+        view: &TileView,
+        atmo: &Atmosphere,
+        sun_state: &SunState,
+        z: u8,
+        gx: f64,
+        gy: f64,
+        range: f64,
+        dir_w: DVec3,
+        alpha: f64,
+        cam_pos: DVec3,
+        h_cam: f64,
+        shadow: f64,
+    ) -> PixShade {
         let lat = lat_of(gy, z);
         let lon = lon_of(gx, z);
         let (sl, cl) = lat.sin_cos();
@@ -1118,10 +1148,7 @@ impl Renderer {
                 let n = (east * n_enu.x + north * n_enu.y + up * n_enu.z).normalize();
                 let ndl = n.dot(atmo.sun_dir).max(0.0);
                 let ndm = n.dot(atmo.moon_dir).max(0.0);
-                (
-                    atmo.sun_color() * (ndl * 1.25 * shadow) + atmo.moon_color() * (ndm * 1.25) + sky_amb * (0.6 + 0.4 * n.dot(up)),
-                    DVec3::ZERO,
-                )
+                (atmo.sun_color() * (ndl * 1.25 * shadow) + atmo.moon_color() * (ndm * 1.25) + sky_amb * (0.6 + 0.4 * n.dot(up)), DVec3::ZERO)
             }
         };
         // light of the nearby lamps falling on everything around them (walls, roofs, yards, trees):
@@ -1165,19 +1192,7 @@ impl Renderer {
         } else {
             (1.0, (0.0, 0.0))
         };
-        PixShade {
-            flicker,
-            flicker_mod,
-            z,
-            range,
-            lam,
-            aniso,
-            hdir,
-            major_texels: major / texel,
-            mul: mul * t,
-            add: add * t + ins,
-            emis: t * sun_state.lights,
-        }
+        PixShade { flicker, flicker_mod, z, range, lam, aniso, hdir, major_texels: major / texel, mul: mul * t, add: add * t + ins, emis: t * sun_state.lights }
     }
 
     /// Filtered texture fetch (trilinear across pyramid levels, anisotropic taps) for a sample
@@ -1262,7 +1277,7 @@ struct PixShade {
 
 /// Rasterize one triangle into a band of the G-buffer (rows [y0, y0+rows)).
 #[inline]
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
 fn raster_tri(a: &Vert, b: &Vert, c: &Vert, unit: u32, buf: &mut [GSample], w: usize, y0: usize, rows: usize) {
     if !(a.ok && b.ok && c.ok) {
         return;

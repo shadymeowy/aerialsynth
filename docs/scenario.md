@@ -15,7 +15,7 @@ output       the sequence file: body pose rate, time window, PNG export, compres
 ```
 
 - **Optional:** every section and nearly every key is optional; a camera needs its `path` and
-  `intrinsics` (model, width, height, intrinsics). Unknown keys are errors, so a typo is not
+  `intrinsics` (model, width, height and the model's parameters). Unknown keys are errors, so a typo is not
   silently ignored.
 - **Units** are in the key: `altitude_m`, `speed_mps`, `duration_s`, `rate_hz`, `tau_s`,
   `visibility_km`, `sun_elevation_deg`, … The exceptions are `lat` / `lon` (degrees) and
@@ -36,7 +36,7 @@ fisheye, 10 km cruise, sunset, IMU check).
 ## Cameras and modalities
 
 `cameras` is a list. Each camera has:
-- intrinsics (camodocal schema);
+- intrinsics (the camera YAML schema below);
 - extrinsics;
 - an HDF5 group `path`;
 - the modalities it produces, as subsections. An omitted subsection means the camera does
@@ -69,7 +69,24 @@ output: { file: out/seq.h5, pose: { path: /pose, rate_hz: 200 } }
   (the ground truth is the central sub-sample).
 - **Group paths** are free-form; nothing assumes a particular dataset layout.
 - **Camera models:** `pinhole`, `pinhole_full` (OpenCV rational), `kannala_brandt`, `mei`,
-  `scaramuzza`. Fields of view beyond 180° are supported.
+  `scaramuzza` (camodocal-style models and naming). Fields of view beyond 180° are supported.
+  The schema of `intrinsics` (also stored per camera as the `camera_yaml` attribute of the
+  sequence file):
+
+  ```yaml
+  model: pinhole                  # pinhole | pinhole_full | kannala_brandt | mei | scaramuzza
+  width: 752
+  height: 480
+  intrinsics: [fx, fy, cx, cy]    # kannala_brandt: [mu, mv, u0, v0]; mei: [gamma1, gamma2, u0, v0];
+                                  # scaramuzza: none (inv_poly, affine, center instead)
+  distortion: [k1, k2, p1, p2]    # pinhole, mei; pinhole_full: [k1, k2, p1, p2, k3, k4, k5, k6];
+                                  # kannala_brandt: [k2, k3, k4, k5]; omitted = none
+  xi: 0.0                         # mei
+  max_fov_deg: 0.0                # kannala_brandt (0 = unlimited)
+  inv_poly: [...]                 # scaramuzza: world-to-image polynomial in theta
+  affine: [C, D, E]               # scaramuzza
+  center: [cx, cy]                # scaramuzza
+  ```
 - **More:** star ground truth: `stars: {}` (`docs/stars.md`); event cameras: `docs/events.md`.
 
 ## Conventions
@@ -106,4 +123,4 @@ output: { file: out/seq.h5, pose: { path: /pose, rate_hz: 200 } }
 | `render.lighting` | `mode: clock` (sun / moon from `date`, `time_utc`; the clock runs at `time_scale`, or follows `time_map`: [trajectory time, clock] pairs for a time-warped trajectory, i.e. a time-lapse of varying speed), `lights_intensity`, `moon_intensity`, `night_sky`, `light_pollution` |
 | `render.atmosphere.visibility_km`, `inscatter` | haze |
 | `cameras[].rgb.sensor.exposure.target` | overall brightness |
-| `cameras[].rgb.sensor.tone` | `saturation`, `white_balance`, `curve` (`srgb`/`filmic`/`gamma`) |
+| `cameras[].rgb.sensor.tone` | `saturation`, `white_balance`, `curve` (`srgb`/`filmic`/`gamma`/`linear`) |

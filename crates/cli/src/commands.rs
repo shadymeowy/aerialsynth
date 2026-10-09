@@ -30,7 +30,7 @@ fn bar(len: usize, what: &str) -> ProgressBar {
 }
 
 fn synth(s: &Scenario, out: &Path) -> Result<()> {
-    let gen = pipeline::generator(&s)?;
+    let gen = pipeline::generator(s)?;
     let home = s.world.home.clone().unwrap_or_default();
     let ell = gen.world.ell;
     // ground reference for AGL flights: smooth terrain sampled at ~200 m resolution
@@ -141,7 +141,13 @@ fn gen_tiles(s: &Scenario, gen: &Generator, tiles: Vec<TileId>, force: bool) -> 
         b.set_position(done as u64);
     })?;
     b.finish();
-    eprintln!("generated {n} tiles ({} requested) in {:.1}s → {} ({} tiles total)", tiles.len(), t0.elapsed().as_secs_f64(), s.tiles.file.display(), store.len());
+    eprintln!(
+        "generated {n} tiles ({} requested) in {:.1}s → {} ({} tiles total)",
+        tiles.len(),
+        t0.elapsed().as_secs_f64(),
+        s.tiles.file.display(),
+        store.len()
+    );
     Ok(())
 }
 
@@ -159,7 +165,7 @@ fn do_render(s: &Scenario) -> Result<()> {
         bail!("nothing to render: the scenario has no `cameras` and no `imu`");
     }
     let poses = load_poses(s)?;
-    let gen = Arc::new(pipeline::generator(&s)?);
+    let gen = Arc::new(pipeline::generator(s)?);
     let store = open_store(s, &gen)?;
     let b = bar(0, "render");
     b.set_style(ProgressStyle::with_template("render {msg:12} {bar:40} {pos}/{len} [{elapsed_precise} < {eta_precise}] {per_sec}").unwrap());
@@ -187,7 +193,7 @@ fn do_events(s: &Scenario) -> Result<()> {
         bail!("no camera has an `events` modality");
     }
     let poses = load_poses(s)?;
-    let gen = Arc::new(pipeline::generator(&s)?);
+    let gen = Arc::new(pipeline::generator(s)?);
     let store = open_store(s, &gen)?;
     let b = ProgressBar::new(1000);
     b.set_style(ProgressStyle::with_template("events {msg:12} {bar:40} {percent}% [{elapsed_precise} < {eta_precise}]").unwrap());
@@ -199,10 +205,7 @@ fn do_events(s: &Scenario) -> Result<()> {
     b.finish();
     eprintln!("simulated events in {:.1}s → {}", t0.elapsed().as_secs_f64(), s.output.file.display());
     for (cam, st) in &res {
-        eprintln!(
-            "  {cam}/events: {} events; {} renders ({:.1}s), {} sensor steps ({:.1}s)",
-            st.events, st.renders, st.render_s, st.steps, st.step_s
-        );
+        eprintln!("  {cam}/events: {} events; {} renders ({:.1}s), {} sensor steps ({:.1}s)", st.events, st.renders, st.render_s, st.steps, st.step_s);
     }
     Ok(())
 }
@@ -326,6 +329,7 @@ pub struct TilesArgs {
     pub force: bool,
     /// Preview instead: generate a mosaic straight into PNGs (<PREFIX>_<layer>.png; no store).
     #[arg(long, value_name = "PREFIX", help_heading = "Preview")]
+    #[allow(rustdoc::invalid_html_tags)] // the doc comment is the CLI help text
     pub png: Option<PathBuf>,
     /// Preview: zoom level.
     #[arg(long, default_value_t = 14, help_heading = "Preview")]

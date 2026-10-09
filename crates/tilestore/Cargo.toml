@@ -2,6 +2,10 @@
 name = "tilestore"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "XYZ terrain tile pyramid stored in a single HDF5 file"
 
 [dependencies]
 geodesy.workspace = true

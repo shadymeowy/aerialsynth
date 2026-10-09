@@ -1,4 +1,7 @@
-// Headless GPU bring-up check: adapter info and the limits the backend relies on.
+//! Headless GPU bring-up check: prints the adapter info and the device limits the renderer's GPU
+//! backend relies on.
+//!
+//!     cargo run --release -p render --example gpu_probe
 fn main() -> anyhow::Result<()> {
     let g = render::gpu::device::Gpu::new()?;
     println!("{:?}", g.info);

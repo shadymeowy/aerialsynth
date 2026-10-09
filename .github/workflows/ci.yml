@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to a branch / PR cancels the run it supersedes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  python:
+    name: Python syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 -m compileall -q scripts showcase
+
+  # Clippy and the tests in one job: HDF5 is built from source (hdf5-metno-sys, features static +
+  # zlib: CMake and a C compiler, both on the runner image) and its build-script output is shared
+  # between the clippy and the build / test steps instead of being compiled twice.
+  test:
+    name: clippy + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # PRs read master's cache but do not write their own.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --release -- -D warnings
+
+      - name: Build
+        run: cargo build --release --workspace --all-targets
+
+      # No Vulkan driver here (the runner has no GPU, and the variables hide any ICD the image
+      # might ship): the GPU tests skip themselves and the generator falls back to the CPU.
+      - name: Test (CPU)
+        env:
+          VK_DRIVER_FILES: /nonexistent.json
+          VK_ICD_FILENAMES: /nonexistent.json
+        run: cargo test --release --workspace
+
+      # Lavapipe (Mesa's software Vulkan) runs the GPU tests that fit its limits: the event
+      # sensor against the CPU sensor and the WGSL noise against the CPU noise. The full GPU tile
+      # generator needs 256 MiB storage bindings (lavapipe allows 128 MiB): there it falls back to
+      # the CPU, so the tile comparisons stay on GPU machines.
+      - name: Install lavapipe
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
+
+      - name: Test (GPU on lavapipe)
+        shell: bash
+        run: |
+          cargo test --release --workspace -- --nocapture gpu::events:: gpu::tests::noise_matches_the_cpu 2>&1 | tee gpu-tests.log
+          # the tests return early without an adapter: make sure they did run
+          if grep -q "skipped" gpu-tests.log; then
+            echo "::error::GPU tests were skipped: lavapipe gave no usable adapter"
+            exit 1
+          fi

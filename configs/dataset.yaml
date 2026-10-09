@@ -28,7 +28,7 @@ render:
   atmosphere: { visibility_km: 45 }
 cameras:
   - path: /cam0
-    intrinsics:            # camodocal schema (pinhole | pinhole_full | kannala_brandt | mei | scaramuzza)
+    intrinsics:            # camera YAML schema, docs/scenario.md (pinhole | pinhole_full | kannala_brandt | mei | scaramuzza)
       model: pinhole
       width: 752
       height: 480

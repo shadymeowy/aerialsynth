@@ -139,7 +139,15 @@ pub(crate) struct Prep<'a> {
 
 impl<'a> Prep<'a> {
     pub fn new(w: &'a World, c: &'a mut Cache) -> Self {
-        Prep { w, c, need: FxHashMap::default(), missing: 0, towns_pending: FxHashSet::default(), towns_info_pending: FxHashSet::default(), pending: FxHashMap::default() }
+        Prep {
+            w,
+            c,
+            need: FxHashMap::default(),
+            missing: 0,
+            towns_pending: FxHashSet::default(),
+            towns_info_pending: FxHashSet::default(),
+            pending: FxHashMap::default(),
+        }
     }
 
     /// The point evaluation `mode` at `ctx`, if done; else it is requested (its inputs are
@@ -257,13 +265,7 @@ impl<'a> Prep<'a> {
             return None;
         }
         let ground = tc.ground as f64;
-        let v = if tc.water_kind != W_NONE || ground < 1.0 {
-            None
-        } else if rim < ground - 4.0 {
-            None
-        } else {
-            Some((rim - 0.7).max(ground + 1.0))
-        };
+        let v = if tc.water_kind != W_NONE || ground < 1.0 || rim < ground - 4.0 { None } else { Some((rim - 0.7).max(ground + 1.0)) };
         self.c.lakes.insert(key, v);
         v
     }
@@ -288,7 +290,6 @@ impl<'a> Prep<'a> {
         v
     }
 }
-
 
 impl<'a> Prep<'a> {
     // ------------------------------------------------------------ land-use regions and towns

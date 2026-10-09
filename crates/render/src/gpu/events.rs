@@ -85,8 +85,16 @@ impl GpuEventSensor {
         let gpu = device::shared()?;
         let d = &gpu.device;
         let n = cpu.px.len() as u32;
-        let module = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("events"), source: wgpu::ShaderSource::Wgsl(include_str!("events.wgsl").into()) });
-        let pipe = d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some("events"), layout: None, module: &module, entry_point: Some("main"), compilation_options: Default::default(), cache: None });
+        let module = d
+            .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("events"), source: wgpu::ShaderSource::Wgsl(include_str!("events.wgsl").into()) });
+        let pipe = d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("events"),
+            layout: None,
+            module: &module,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
         use wgpu::BufferUsages as U;
         let st = U::STORAGE | U::COPY_SRC | U::COPY_DST;
         let state = buffer(d, "ev state", n as u64 * 16, st);
@@ -102,7 +110,26 @@ impl GpuEventSensor {
         let count_read = buffer(d, "events n", 4, U::MAP_READ | U::COPY_DST);
         let params_cap = 16;
         let params = buffer(d, "ev params", params_cap as u64 * PSTRIDE, U::UNIFORM | U::COPY_DST);
-        Ok(GpuEventSensor { gpu, cpu, n, pipe, state, backup, consts, keys, split: [false; 2], ev, ev_read, count_read, cap, params, params_cap, queue: vec![], t_last: None, slot: 0 })
+        Ok(GpuEventSensor {
+            gpu,
+            cpu,
+            n,
+            pipe,
+            state,
+            backup,
+            consts,
+            keys,
+            split: [false; 2],
+            ev,
+            ev_read,
+            count_read,
+            cap,
+            params,
+            params_cap,
+            queue: vec![],
+            t_last: None,
+            slot: 0,
+        })
     }
 
     /// Slot of the current keyframe (bookkeeping for the caller).
@@ -130,7 +157,7 @@ impl GpuEventSensor {
         }
     }
 
-    /// Queue a sensor step at time `t` (s) with the radiance (1 - a) · key[k0] + a · key[1 - k0]
+    /// Queue a sensor step at time `t` (s) with the radiance `(1 - a) · key[k0] + a · key[1 - k0]`
     /// at flicker phase omega · t. The first step initialises the pixels.
     pub fn push(&mut self, t: f64, k0: usize, a: f32, omega: f64) {
         let c = &self.cpu.cfg;
@@ -211,7 +238,11 @@ impl GpuEventSensor {
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: &self.params, offset: i as u64 * PSTRIDE, size: wgpu::BufferSize::new(std::mem::size_of::<StepP>() as u64) }),
+                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                buffer: &self.params,
+                                offset: i as u64 * PSTRIDE,
+                                size: wgpu::BufferSize::new(std::mem::size_of::<StepP>() as u64),
+                            }),
                         },
                         wgpu::BindGroupEntry { binding: 1, resource: self.state.as_entire_binding() },
                         wgpu::BindGroupEntry { binding: 2, resource: self.consts.as_entire_binding() },
@@ -269,18 +300,23 @@ impl GpuEventSensor {
         for (s, ev) in self.queue.drain(..).zip(per) {
             match s.span {
                 Some((t0, t)) => {
-                // atomics append in arbitrary order: restore the CPU's (row-major) order, so that
-                // the stable time sort and the rate controller are deterministic
-                let mut ev = ev;
-                ev.sort_unstable_by_key(|e| (e.y, e.x, e.t_us));
-                out.extend(self.cpu.finish_step(t0, t, ev))
-            }
+                    // atomics append in arbitrary order: restore the CPU's (row-major) order, so that
+                    // the stable time sort and the rate controller are deterministic
+                    let mut ev = ev;
+                    ev.sort_unstable_by_key(|e| (e.y, e.x, e.t_us));
+                    out.extend(self.cpu.finish_step(t0, t, ev))
+                }
                 None => self.cpu.t_prev = self.t_last,
             }
         }
         if prof {
             let t = c0.elapsed().as_secs_f64();
-            eprintln!("[events gpu] {nq} steps, {count} events: gpu {:.1} ms, read-back {:.1} ms, cpu finish {:.1} ms", t_gpu * 1e3, (t_read - t_gpu) * 1e3, (t - t_read) * 1e3);
+            eprintln!(
+                "[events gpu] {nq} steps, {count} events: gpu {:.1} ms, read-back {:.1} ms, cpu finish {:.1} ms",
+                t_gpu * 1e3,
+                (t_read - t_gpu) * 1e3,
+                (t - t_read) * 1e3
+            );
         }
         Ok(out)
     }
@@ -292,7 +328,15 @@ mod tests {
     use crate::events::EventConfig;
 
     fn quiet() -> EventConfig {
-        EventConfig { contrast_sigma: 0.0, shot_noise_hz: 0.0, leak_hz: 0.0, refractory_us: 0.0, hot_pixel_fraction: 0.0, timestamp_jitter_us: 0.0, ..Default::default() }
+        EventConfig {
+            contrast_sigma: 0.0,
+            shot_noise_hz: 0.0,
+            leak_hz: 0.0,
+            refractory_us: 0.0,
+            hot_pixel_fraction: 0.0,
+            timestamp_jitter_us: 0.0,
+            ..Default::default()
+        }
     }
 
     fn sensor(cfg: EventConfig, w: usize, h: usize) -> Option<GpuEventSensor> {

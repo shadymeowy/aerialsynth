@@ -5,6 +5,7 @@
     python showcase/make_airliner.py --stills          # framing check: 3 small frames per segment → out/airliner/stills.png
     python showcase/make_airliner.py --only s03_nadir  # (re)render some segments (ids as printed), no video
     python showcase/make_airliner.py --compose-only    # no rendering: compose and assemble
+    python showcase/make_airliner.py --force           # re-render even if up to date
 
 One flight (`route.py`: a trajectory CSV from lift-off to touchdown), shown as one continuous
 time-lapse: `flight.speed` sets the playback speed along the route (real time at take-off and
@@ -59,8 +60,7 @@ class Route:
         self.data = np.loadtxt(self.csv, delimiter=",", skiprows=1)  # t, lat, lon, h, roll, pitch, yaw
         self.lines = open(self.csv).read().splitlines()
         self.takeoff = datetime.datetime.fromisoformat(str(story["route"]["takeoff_utc"]))
-        tr = np.array(self.meta["track"])
-        self.track = tr  # lat, lon, t, h (sparse)
+        self.track = np.array(self.meta["track"])  # lat, lon, t, h (sparse)
 
     def window(self, t_first, t_last):
         """CSV text of the rows in [t_first, t_last] (route time), times from 0."""
@@ -80,7 +80,6 @@ class Route:
         dn, de = rt.ellipsoid_steps(d[k - 1:k + 2, 1], d[k - 1:k + 2, 2])
         v = float(np.hypot(dn, de).sum() / (d[k + 1, 0] - d[k - 1, 0]))
         return lat, lon, h, v
-
 
 
 def region_map(story, base):
@@ -172,7 +171,7 @@ def globe_frames(shot, scn, video, route, band):
     fov = math.radians(shot.get("fov", 40.0))
     f = (H / 2) / math.tan(fov / 2)
     tr = route.track
-    P = geo2ecef(tr[:, 0], tr[:, 1], np.maximum(tr[:, 3], 0) * 0 + 2000.0)
+    P = geo2ecef(tr[:, 0], tr[:, 1], np.full(len(tr), 2000.0))  # (the line drawn 2 km above the ellipsoid)
     T = tr[:, 2] / tr[-1, 2]
     d0, d1 = shot.get("draw", [2.0, 8.0])
     labels = shot.get("labels", [])
@@ -325,7 +324,6 @@ def map_card_frames(story, base, route, video, card, seconds):
         yield np.asarray(canvas.convert("RGB"))
 
 
-
 def encode(path, frames, video):
     ff = ms.ffmpeg_writer(path, video)
     for fr in frames:
@@ -351,7 +349,6 @@ def assemble(parts, video, out_mp4):
             "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_mp4]
     subprocess.run(cmd, check=True)
     print(f"wrote {out_mp4}: {len(parts)} parts, {t + dur[-1]:.1f} s")
-
 
 
 class Timeline:
@@ -548,12 +545,12 @@ def stills_sheet(done, path):
 def main():
     global STORY
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--only", nargs="*", help="render only these segments (or globe)")
-    ap.add_argument("--compose-only", action="store_true")
-    ap.add_argument("--stills", action="store_true")
-    ap.add_argument("--force", action="store_true")
-    ap.add_argument("--story", default=STORY)
-    ap.add_argument("--out", default=os.path.join(OUT, "airliner.mp4"))
+    ap.add_argument("--only", nargs="*", help="render only these segments (ids as printed, or globe); no video")
+    ap.add_argument("--compose-only", action="store_true", help="render nothing: compose the clips and assemble the video")
+    ap.add_argument("--stills", action="store_true", help="framing check (3 small frames per segment) → out/airliner/stills.png")
+    ap.add_argument("--force", action="store_true", help="re-render even if up to date")
+    ap.add_argument("--story", default=STORY, help="storyboard (default: showcase/airliner.yaml)")
+    ap.add_argument("--out", default=os.path.join(OUT, "airliner.mp4"), help="output video")
     a = ap.parse_args()
     STORY = a.story
     story = yaml.safe_load(open(STORY))

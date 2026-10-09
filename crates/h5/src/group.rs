@@ -35,12 +35,7 @@ fn path_prefixes(path: &str) -> Vec<String> {
     out
 }
 
-unsafe extern "C" fn collect_link(
-    _group: hid_t,
-    name: *const c_char,
-    _info: *const sys::h5l::H5L_info2_t,
-    data: *mut c_void,
-) -> herr_t {
+unsafe extern "C" fn collect_link(_group: hid_t, name: *const c_char, _info: *const sys::h5l::H5L_info2_t, data: *mut c_void) -> herr_t {
     // SAFETY: `data` is the &mut Vec<String> passed to H5Literate2, `name` a
     // valid C string for the duration of the callback.
     unsafe {
@@ -67,9 +62,7 @@ impl Group {
         let c = cstr(name)?;
         let _g = lock();
         // SAFETY: valid location id and C string, under the lock.
-        let id = unsafe {
-            sys::h5g::H5Gcreate2(self.id(), c.as_ptr(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT)
-        };
+        let id = unsafe { sys::h5g::H5Gcreate2(self.id(), c.as_ptr(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT) };
         Ok(Group { h: Handle::check(id, "H5Gcreate2", || describe_child(self.id(), name))? })
     }
 

@@ -13,12 +13,7 @@ use crate::group::Group;
 use crate::raw::{check, clear_errors, cstr, describe_child, lock, Handle};
 use crate::types::H5Type;
 
-unsafe extern "C" fn collect_attr(
-    _loc: hid_t,
-    name: *const c_char,
-    _info: *const sys::h5a::H5A_info_t,
-    data: *mut c_void,
-) -> herr_t {
+unsafe extern "C" fn collect_attr(_loc: hid_t, name: *const c_char, _info: *const sys::h5a::H5A_info_t, data: *mut c_void) -> herr_t {
     // SAFETY: `data` is the &mut Vec<String> passed to H5Aiterate2, `name` a
     // valid C string for the duration of the callback.
     unsafe {
@@ -33,25 +28,14 @@ unsafe extern "C" fn collect_attr(
 ///
 /// # Safety
 /// Caller holds the lock; `buf` must point to data matching `mtype`×npoints(space).
-unsafe fn write_attr(
-    loc: hid_t,
-    name: &str,
-    ftype: hid_t,
-    mtype: hid_t,
-    space: &Handle,
-    buf: *const c_void,
-) -> Result<()> {
+unsafe fn write_attr(loc: hid_t, name: &str, ftype: hid_t, mtype: hid_t, space: &Handle, buf: *const c_void) -> Result<()> {
     let c = cstr(name)?;
     let ctx = || describe_child(loc, name);
     unsafe {
         if sys::h5a::H5Aexists(loc, c.as_ptr()) > 0 {
             check(sys::h5a::H5Adelete(loc, c.as_ptr()), "H5Adelete", ctx)?;
         }
-        let a = Handle::check(
-            sys::h5a::H5Acreate2(loc, c.as_ptr(), ftype, space.id(), H5P_DEFAULT, H5P_DEFAULT),
-            "H5Acreate2",
-            ctx,
-        )?;
+        let a = Handle::check(sys::h5a::H5Acreate2(loc, c.as_ptr(), ftype, space.id(), H5P_DEFAULT, H5P_DEFAULT), "H5Acreate2", ctx)?;
         check(sys::h5a::H5Awrite(a.id(), mtype, buf), "H5Awrite", ctx)?;
     }
     Ok(())
@@ -97,11 +81,7 @@ pub trait Attrs {
         let _g = lock();
         // SAFETY: under the lock; `value` is one T matching its native type.
         unsafe {
-            let s = Handle::check(
-                sys::h5s::H5Screate(sys::h5s::H5S_class_t::H5S_SCALAR),
-                "H5Screate",
-                || describe_child(loc, name),
-            )?;
+            let s = Handle::check(sys::h5s::H5Screate(sys::h5s::H5S_class_t::H5S_SCALAR), "H5Screate", || describe_child(loc, name))?;
             write_attr(loc, name, T::native_type(), T::native_type(), &s, &value as *const T as *const c_void)
         }
     }
@@ -113,11 +93,7 @@ pub trait Attrs {
         let dims = [values.len() as sys::h5::hsize_t];
         // SAFETY: under the lock; `values` has dims[0] elements of T.
         unsafe {
-            let s = Handle::check(
-                sys::h5s::H5Screate_simple(1, dims.as_ptr(), ptr::null()),
-                "H5Screate_simple",
-                || describe_child(loc, name),
-            )?;
+            let s = Handle::check(sys::h5s::H5Screate_simple(1, dims.as_ptr(), ptr::null()), "H5Screate_simple", || describe_child(loc, name))?;
             write_attr(loc, name, T::native_type(), T::native_type(), &s, values.as_ptr() as *const c_void)
         }
     }
@@ -134,11 +110,7 @@ pub trait Attrs {
         // SAFETY: under the lock; a vlen string buffer is an array of char*
         // (here one pointer, valid for the call).
         unsafe {
-            let s = Handle::check(
-                sys::h5s::H5Screate(sys::h5s::H5S_class_t::H5S_SCALAR),
-                "H5Screate",
-                ctx,
-            )?;
+            let s = Handle::check(sys::h5s::H5Screate(sys::h5s::H5S_class_t::H5S_SCALAR), "H5Screate", ctx)?;
             write_attr(loc, name, t.id(), t.id(), &s, &p as *const *const c_char as *const c_void)
         }
     }
@@ -149,10 +121,7 @@ pub trait Attrs {
         let _g = lock();
         let (a, _s, n) = open_attr(loc, name)?;
         if n != 1 {
-            return Err(Error::InvalidArgument(format!(
-                "{}: attribute has {n} elements, expected 1",
-                describe_child(loc, name)
-            )));
+            return Err(Error::InvalidArgument(format!("{}: attribute has {n} elements, expected 1", describe_child(loc, name))));
         }
         let mut v = T::default();
         // SAFETY: one element of T's native type.
@@ -185,10 +154,7 @@ pub trait Attrs {
         let ctx = || describe_child(loc, name);
         let (a, s, n) = open_attr(loc, name)?;
         if n != 1 {
-            return Err(Error::InvalidArgument(format!(
-                "{}: string attribute has {n} elements, expected 1",
-                ctx()
-            )));
+            return Err(Error::InvalidArgument(format!("{}: string attribute has {n} elements, expected 1", ctx())));
         }
         // SAFETY: all under the lock. For vlen strings we read one char*
         // (allocated by HDF5) and release it with H5Treclaim; for fixed
@@ -202,32 +168,15 @@ pub trait Attrs {
             if is_vlen {
                 let mt = vlen_str_type(sys::h5t::H5Tget_cset(ft.id()), ctx)?;
                 let mut p: *mut c_char = ptr::null_mut();
-                check(
-                    sys::h5a::H5Aread(a.id(), mt.id(), &mut p as *mut *mut c_char as *mut c_void),
-                    "H5Aread(vlen str)",
-                    ctx,
-                )?;
-                let out = if p.is_null() {
-                    String::new()
-                } else {
-                    CStr::from_ptr(p).to_string_lossy().into_owned()
-                };
-                sys::h5t::H5Treclaim(
-                    mt.id(),
-                    s.id(),
-                    H5P_DEFAULT,
-                    &mut p as *mut *mut c_char as *mut c_void,
-                );
+                check(sys::h5a::H5Aread(a.id(), mt.id(), &mut p as *mut *mut c_char as *mut c_void), "H5Aread(vlen str)", ctx)?;
+                let out = if p.is_null() { String::new() } else { CStr::from_ptr(p).to_string_lossy().into_owned() };
+                sys::h5t::H5Treclaim(mt.id(), s.id(), H5P_DEFAULT, &mut p as *mut *mut c_char as *mut c_void);
                 Ok(out)
             } else {
                 let size = sys::h5t::H5Tget_size(ft.id());
                 let mt = Handle::check(sys::h5t::H5Tcopy(ft.id()), "H5Tcopy", ctx)?;
                 let mut buf = vec![0u8; size];
-                check(
-                    sys::h5a::H5Aread(a.id(), mt.id(), buf.as_mut_ptr() as *mut c_void),
-                    "H5Aread(fixed str)",
-                    ctx,
-                )?;
+                check(sys::h5a::H5Aread(a.id(), mt.id(), buf.as_mut_ptr() as *mut c_void), "H5Aread(fixed str)", ctx)?;
                 if let Some(z) = buf.iter().position(|&b| b == 0) {
                     buf.truncate(z);
                 }

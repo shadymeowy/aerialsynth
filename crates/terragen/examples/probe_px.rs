@@ -1,5 +1,12 @@
-// Dev check: terrain/climate values at a point: probe_px LAT LON [GSD]
-// or list the rivers ending in closed basins within ~R km: probe_px sinks LAT LON R
+//! Terrain / climate values of the default world at points:
+//!
+//!     cargo run --release -p terragen --example probe_px -- LAT LON [GSD_M]
+//!     cargo run --release -p terragen --example probe_px -- scan LAT0 LAT1 LON0 LON1 STEP_DEG
+//!     cargo run --release -p terragen --example probe_px -- sinks LAT LON R_KM
+//!
+//! The first prints the world fields at one point (default 5 m pixels); `scan` prints one line of
+//! features per grid point (200 m pixels) to look for places; `sinks` lists the rivers ending in
+//! closed basins within about `R_KM` km.
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let g = terragen::Generator::new(terragen::Config::default());

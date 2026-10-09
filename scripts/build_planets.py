@@ -14,7 +14,6 @@ per axis; then per interval and axis the constant term as f64 and the others as 
 """
 import argparse, struct, sys
 import numpy as np
-from jplephem.spk import SPK
 
 BODIES = [(0, 10), (0, 1), (0, 2), (0, 3), (0, 4), (0, 5), (0, 6), (0, 7), (0, 8), (3, 301)]
 EMRAT = 81.30056822149722  # DE440 Earth/Moon mass ratio
@@ -22,11 +21,12 @@ EMRAT = 81.30056822149722  # DE440 Earth/Moon mass ratio
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("bsp")
-    ap.add_argument("--start", type=float, default=2447892.5, help="JD (default 1990-01-01)")
-    ap.add_argument("--end", type=float, default=2473459.5, help="JD (default 2060-01-01)")
-    ap.add_argument("-o", "--out", required=True)
+    ap.add_argument("bsp", help="JPL SPK kernel (de440s.bsp)")
+    ap.add_argument("--start", type=float, default=2447892.5, help="first JD (TDB; default 1990-01-01)")
+    ap.add_argument("--end", type=float, default=2473459.5, help="last JD (TDB; default 2060-01-01)")
+    ap.add_argument("-o", "--out", required=True, help="output file (crates/render/data/planets.bin)")
     a = ap.parse_args()
+    from jplephem.spk import SPK  # (pip install jplephem)
     k = SPK.open(a.bsp)
     out = [b"PLANETS1", struct.pack("<Id", len(BODIES), EMRAT)]
     worst = 0.0

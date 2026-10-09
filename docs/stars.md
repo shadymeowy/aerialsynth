@@ -93,9 +93,9 @@ system barycentres: Jupiter's and Saturn's centres lie within ~200–300 km of t
 * The ground-truth position is the planet's centre, not the light centroid of a phase.
 * Not drawn: the Galilean moons, Saturn's ring shadows, the planets' flattening.
 
-**The Moon.** The Moon is drawn by the sky, as before. Its position and phase, which also drive
-moonlight, now come from DE440 (topocentric, with sea-level refraction) instead of mean elements
-(~0.5°). It appears in the star ground truth at exactly the drawn position: observer on the
+**The Moon.** The Moon is drawn by the sky. Its position and phase, which also drive
+moonlight, come from DE440 (topocentric, with sea-level refraction; mean elements, ~0.5°,
+outside 1990–2060). It appears in the star ground truth at exactly the drawn position: observer on the
 ellipsoid, UT1 = UTC, within ~2″ of the camera's true view.
 
 **Ground-truth ids.** Planets and the Moon have id `1<<30 | NAIF id`: 199 Mercury, 299 Venus,
@@ -119,9 +119,9 @@ Each render takes the catalogue through the following chain:
 8. Camera frame.
 9. Camera model (any model, including fisheye).
 
-The algorithms follow ERFA / IAU SOFA. The Earth's barycentric velocity comes from Keplerian
-elements with the Sun's reflex motion (Jupiter, Saturn), which is good to about 0.01″ in
-aberration.
+The algorithms follow ERFA / IAU SOFA. The Earth's barycentric position and velocity come from
+DE440 (above); outside 1990–2060, from Keplerian elements with the Sun's reflex motion (Jupiter,
+Saturn), which is good to about 0.01″ in aberration.
 
 Refraction uses the ERFA `refco` model (Green's A tan z + B tan³ z: dry air, 0.574 µm) above
 20° elevation, and Sæmundsson's formula below 10°, blended in between. Pressure and temperature

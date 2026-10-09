@@ -73,7 +73,7 @@ pub struct Surface {
 
 /// Smooth noise fields evaluated once per pixel and shared by its sub-samples. The fields that
 /// only some surfaces need (rock strata, forest stands, fields, water) are completed on first use
-/// (see [`SurfaceModel::pf_lazy`]).
+/// (see `SurfaceModel::pf_lazy`).
 #[derive(Clone, Debug, Default)]
 pub struct PixFields {
     pub detail: f64,
@@ -205,18 +205,6 @@ fn point_light(d2: f64, amp: f64, sigma: f64, fw: f64) -> f64 {
 fn site_ctx(world: &World, pt: DVec3, gsd: f64) -> Ctx {
     let g = geodesy::ecef2geodetic(pt, &world.ell);
     Ctx::new(g.lat, g.lon, gsd, &world.ell)
-}
-
-#[allow(dead_code)]
-fn tangent_frame(c: DVec3) -> (DVec3, DVec3, DVec3) {
-    let up = c.normalize();
-    let mut east = DVec3::Z.cross(up);
-    if east.length_squared() < 1e-12 {
-        east = DVec3::X;
-    }
-    let east = east.normalize();
-    let north = up.cross(east);
-    (up, east, north)
 }
 
 pub struct Palette {
@@ -553,7 +541,17 @@ impl SurfaceModel {
     /// ±`range` cells of p's cell (cached per cell). Complete for `range` 2: a town reaches at
     /// most ~1.16 cells from its centre, which is within 0.8 cells of its site.
     #[allow(clippy::too_many_arguments)]
-    fn select_town(&self, world: &World, cache: &mut Caches, p: DVec3, gsd: f64, slope: f64, clear: f64, pf: &PixFields, range: i64) -> Option<(TownInfo, f64)> {
+    fn select_town(
+        &self,
+        world: &World,
+        cache: &mut Caches,
+        p: DVec3,
+        gsd: f64,
+        slope: f64,
+        clear: f64,
+        pf: &PixFields,
+        range: i64,
+    ) -> Option<(TownInfo, f64)> {
         let cell = world.cfg.landuse.town_cell_km * 1000.0;
         let qf = (p / cell).floor();
         let key = (qf.x as i64, qf.y as i64, qf.z as i64);
@@ -751,8 +749,11 @@ impl SurfaceModel {
         {
             let dry_p = smoothstep(0.05, 0.55, perlin3(0x3EAD, p / 60.0) + 0.5 * perlin3(0x3EAE, p / 22.0)) * band(30.0, gsd) * cover;
             col = mixc(col, col * DVec3::new(1.16, 1.06, 0.80), 0.45 * dry_p);
-            col *= 1.0 + (0.10 * perlin3(0x3EB1, p / 12.0) * band(12.0, gsd) + 0.08 * perlin3(0x3EB2, p / 4.0) * band(4.0, gsd)
-                + 0.06 * perlin3(0x3EB3, p / 1.3) * band(1.3, gsd)) * cover;
+            col *= 1.0
+                + (0.10 * perlin3(0x3EB1, p / 12.0) * band(12.0, gsd)
+                    + 0.08 * perlin3(0x3EB2, p / 4.0) * band(4.0, gsd)
+                    + 0.06 * perlin3(0x3EB3, p / 1.3) * band(1.3, gsd))
+                    * cover;
         }
         // drainage lines: moister, greener, darker channels; dry bright spurs
         if t.gully != 0.0 {
@@ -827,8 +828,10 @@ impl SurfaceModel {
         // cloud or fog lying on the land)
         // follows the terrain: a snow line in altitude (temperature), lingering longer in gullies
         // and hollows; noise only roughens it (a strong noise term drew blobs unrelated to the land)
-        let snow_t = temp + 1.0 * snow_n - 1.6 * smoothstep(0.1, 0.8, -t.gully) + 0.6 * smoothstep(0.2, 0.8, t.gully)
-            + 0.5 * perlin3(0x5E0, p / 60.0) * band(60.0, gsd) + 0.25 * perlin3(0x5E1, p / 18.0) * band(18.0, gsd);
+        let snow_t = temp + 1.0 * snow_n - 1.6 * smoothstep(0.1, 0.8, -t.gully)
+            + 0.6 * smoothstep(0.2, 0.8, t.gully)
+            + 0.5 * perlin3(0x5E0, p / 60.0) * band(60.0, gsd)
+            + 0.25 * perlin3(0x5E1, p / 18.0) * band(18.0, gsd);
         let snow = smoothstep(-2.6, -2.8, snow_t) * (1.0 - 0.75 * smoothstep(0.9, 1.6, slope));
         if snow > 0.0 {
             col = mixc(col, pal.snow * (1.0 + 0.03 * detail), snow);
@@ -901,7 +904,13 @@ impl SurfaceModel {
                     height += fh * a - 0.6 * micro_relief * a;
                     field_cov = a;
                     if a > 0.5 {
-                        class = if edge_kind == 1 { lc::FOREST } else if edge_kind == 2 { lc::ROAD } else { lc::CROP };
+                        class = if edge_kind == 1 {
+                            lc::FOREST
+                        } else if edge_kind == 2 {
+                            lc::ROAD
+                        } else {
+                            lc::CROP
+                        };
                     }
                 }
             }
@@ -925,11 +934,8 @@ impl SurfaceModel {
         // towns avoid steep relief, judged from the relief type (smooth), not the slope of each
         // pixel: that cut houses in half along every terrace edge and gully wall
         let town_slope = 0.12 + 0.75 * t.rock_expect;
-        let town_sel = if t.town.id != 0 && world.cfg.landuse.towns > 0.0 {
-            self.select_town(world, cache, p, gsd, town_slope, river_clear, pf, 2)
-        } else {
-            None
-        };
+        let town_sel =
+            if t.town.id != 0 && world.cfg.landuse.towns > 0.0 { self.select_town(world, cache, p, gsd, town_slope, river_clear, pf, 2) } else { None };
         let town_urban = town_sel.map_or(0.0, |x| x.1);
         let town_px = town_sel.and_then(|(town, _)| self.town(&town, p, gsd, fw, town_slope, river_clear, world.cfg.satellite.shadows, pf));
         let town_cov = town_px.map_or(0.0, |x| x.2);
@@ -943,7 +949,7 @@ impl SurfaceModel {
             let fpu = 0.5 + 0.5 * fpat;
             // forests where the patch field is below the cover fraction (crisp but noisy edges)
             let edge = 0.03 + 0.6 * band(30.0, gsd).min(1.0) * 0.0;
-            let forest = smoothstep(-edge, edge, base_cover - fpu) ;
+            let forest = smoothstep(-edge, edge, base_cover - fpu);
             // savanna / steppe scattered trees
             let savanna = smoothstep(0.18, 0.35, wet) * (1.0 - smoothstep(0.55, 0.7, wet)) * smoothstep(12.0, 20.0, temp) * 0.12;
             let groves = 0.04 * smoothstep(0.15, 0.3, wet);
@@ -958,13 +964,15 @@ impl SurfaceModel {
             let gully_scrub = 0.55 * smoothstep(0.2, 0.9, -t.gully) * smoothstep(0.2, 0.5, wet) * natural_ok * (1.0 - field_cov);
             dens *= 1.0 - smoothstep(0.9, 1.4, slope);
             dens *= 1.0 - smoothstep(0.0, 0.6, t.mountain * smoothstep(-2.0, -6.0, temp)); // tree line
-            // no trees standing in the snow: they end below the snow line
+                                                                                           // no trees standing in the snow: they end below the snow line
             dens *= 1.0 - smoothstep(-1.2, -2.4, temp + 1.0 * snow_n);
             dens *= not_urban;
             // shrubs / bushes in steppe, maquis and rocky slopes (texture of natural ground)
             let shrub_clim = smoothstep(0.15, 0.3, wet) * (1.0 - smoothstep(0.6, 0.8, wet)) * smoothstep(2.0, 10.0, temp);
             let shrub_patch = smoothstep(-0.2, 0.5, patch + 0.4 * pf.land);
-            let shrub = ((0.45 * shrub_clim * shrub_patch * (1.0 - forest) * natural_ok.max(0.4 * rock) * (1.0 - field_cov) + gully_scrub) * veg.tree_density * not_urban)
+            let shrub = ((0.45 * shrub_clim * shrub_patch * (1.0 - forest) * natural_ok.max(0.4 * rock) * (1.0 - field_cov) + gully_scrub)
+                * veg.tree_density
+                * not_urban)
                 .clamp(0.0, 0.7);
             // forest stands (~240 m, irregular borders): each of its own age (crown size, height),
             // tone and conifer / broadleaf mix, with small canopy gaps; one lattice of identical
@@ -987,7 +995,17 @@ impl SurfaceModel {
                 let dry = 1.0 - smoothstep(0.3, 0.5, wet);
                 let tall = 0.5 + 0.5 * st[3];
                 let layers = [
-                    TreeLayer { cell: 5.5, seed: 0x7EE1, density: dens * conifer, closure: dens, height: 14.0 + 10.0 * tall, color: pal.crown_conifer, conifer: 1.0, scale, tone: stand_tone },
+                    TreeLayer {
+                        cell: 5.5,
+                        seed: 0x7EE1,
+                        density: dens * conifer,
+                        closure: dens,
+                        height: 14.0 + 10.0 * tall,
+                        color: pal.crown_conifer,
+                        conifer: 1.0,
+                        scale,
+                        tone: stand_tone,
+                    },
                     TreeLayer {
                         cell: 8.5,
                         seed: 0x7EE2,
@@ -999,8 +1017,28 @@ impl SurfaceModel {
                         scale,
                         tone: stand_tone,
                     },
-                    TreeLayer { cell: 13.0, seed: 0x7EE3, density: dens * tropic, closure: dens, height: 22.0 + 14.0 * tall, color: pal.crown_tropic, conifer: 0.0, scale, tone: stand_tone },
-                    TreeLayer { cell: 3.2, seed: 0x7EE4, density: shrub, closure: 0.0, height: 1.6, color: pal.shrub, conifer: 0.0, scale: 1.0, tone: DVec3::ONE },
+                    TreeLayer {
+                        cell: 13.0,
+                        seed: 0x7EE3,
+                        density: dens * tropic,
+                        closure: dens,
+                        height: 22.0 + 14.0 * tall,
+                        color: pal.crown_tropic,
+                        conifer: 0.0,
+                        scale,
+                        tone: stand_tone,
+                    },
+                    TreeLayer {
+                        cell: 3.2,
+                        seed: 0x7EE4,
+                        density: shrub,
+                        closure: 0.0,
+                        height: 1.6,
+                        color: pal.shrub,
+                        conifer: 0.0,
+                        scale: 1.0,
+                        tone: DVec3::ONE,
+                    },
                 ];
                 // forest floor: shaded litter and understory, not sunlit grass, between the crowns
                 let floor = smoothstep(0.25, 0.8, dens);
@@ -1287,10 +1325,7 @@ impl SurfaceModel {
                     // density is evaluated per pixel: where it falls (stand / field edges) a crown
                     // would be clipped into a wall or a spike; fade it out with the margin instead
                     let fade = smoothstep(0.0, 0.3, (layer.density - u) / layer.density.max(1e-6));
-                    let c = DVec2::new(
-                        (ix + dx) as f64 + 0.5 + 0.8 * (u01k(h, 1) - 0.5),
-                        (iy + dy) as f64 + 0.5 + 0.8 * (u01k(h, 2) - 0.5),
-                    ) * layer.cell;
+                    let c = DVec2::new((ix + dx) as f64 + 0.5 + 0.8 * (u01k(h, 1) - 0.5), (iy + dy) as f64 + 0.5 + 0.8 * (u01k(h, 2) - 0.5)) * layer.cell;
                     // crowns grow with the stand density: dense forest closes its canopy
                     let r = layer.cell * (0.36 + 0.24 * u01k(h, 4)) * (1.0 + 0.55 * smoothstep(0.35, 0.9, layer.closure)) * layer.scale;
                     let d = (q - c).length();
@@ -1365,7 +1400,19 @@ impl SurfaceModel {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn field_explicit(&self, cache: &mut Caches, r: &RegionInfo, t: &Terrain, q: DVec2, p: DVec3, gsd: f64, fw: f64, cult: f64, tint: DVec3, pf: &PixFields) -> Option<(DVec3, f64, f64, u8)> {
+    fn field_explicit(
+        &self,
+        cache: &mut Caches,
+        r: &RegionInfo,
+        t: &Terrain,
+        q: DVec2,
+        p: DVec3,
+        gsd: f64,
+        fw: f64,
+        cult: f64,
+        tint: DVec3,
+        pf: &PixFields,
+    ) -> Option<(DVec3, f64, f64, u8)> {
         let pal = &self.pal;
         // field id, within-field coords (along, across), distance to boundary
         let (id, fx, fy, edge, inside, fc) = match r.style {
@@ -1447,9 +1494,10 @@ impl SurfaceModel {
         // both depend on the field only (the mask's shortest octave is resolved at any gsd ≤
         // 100 m), so they are kept per field instead of being evaluated for every sample;
         // neighbouring fields often grow the same crop: drawn from a coarse crop-cluster cell
-        let (mask, cluster) = *cache.fields.entry([c3.x.to_bits(), c3.y.to_bits(), c3.z.to_bits(), r.split.to_bits()]).or_insert_with(|| {
-            (self.cultivated_mask(c3, gsd), worley2(r.split.to_bits() ^ 0xC1C, fc, 700.0, 1.0).id)
-        });
+        let (mask, cluster) = *cache
+            .fields
+            .entry([c3.x.to_bits(), c3.y.to_bits(), c3.z.to_bits(), r.split.to_bits()])
+            .or_insert_with(|| (self.cultivated_mask(c3, gsd), worley2(r.split.to_bits() ^ 0xC1C, fc, 700.0, 1.0).id));
         if mask >= cult || u01k(id, 5) < 0.06 {
             return None;
         }
@@ -1507,9 +1555,7 @@ impl SurfaceModel {
             col *= 0.94 + 0.12 * u01k(id, 8);
             col *= tint;
             // within-field variation (soil moisture, growth, management) at several scales
-            col *= 1.0 + 0.10 * self.pf_lazy(pf, PF_FIELD_VAR)
-                + 0.12 * perlin3(id, p / 35.0) * band(35.0, gsd)
-                + 0.08 * perlin3(id ^ 1, p / (0.8 * r.fw));
+            col *= 1.0 + 0.10 * self.pf_lazy(pf, PF_FIELD_VAR) + 0.12 * perlin3(id, p / 35.0) * band(35.0, gsd) + 0.08 * perlin3(id ^ 1, p / (0.8 * r.fw));
             // growth zones (soil, moisture): greener / yellower patches of tens of metres
             let gz = perlin3(id ^ 0x6A0, p / 55.0) * band(55.0, gsd);
             col = mixc(col, col * DVec3::new(1.12, 1.04, 0.82), 0.5 * smoothstep(0.0, 0.6, gz));
@@ -1624,14 +1670,23 @@ impl SurfaceModel {
         if qa.length() > r * 2.0 {
             return (0.0, 2.0);
         }
-        let n1 = 0.32 * perlin3(town.seed ^ 0x71, p / (0.9 * r)) + 0.18 * perlin3(town.seed ^ 0x72, p / (0.35 * r)) * band(0.35 * r, gsd)
-            + 0.08 * pf.warp2;
+        let n1 = 0.32 * perlin3(town.seed ^ 0x71, p / (0.9 * r)) + 0.18 * perlin3(town.seed ^ 0x72, p / (0.35 * r)) * band(0.35 * r, gsd) + 0.08 * pf.warp2;
         let rel = qa.length() / (r * (1.0 + n1)).max(1.0);
         ((1.0 - smoothstep(0.3, 1.0, rel)) * (1.0 - smoothstep(0.45, 0.8, slope)) * clear, rel)
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn town(&self, town: &TownInfo, p: DVec3, gsd: f64, fw: f64, slope: f64, clear: f64, shadows: bool, pf: &PixFields) -> Option<(DVec3, f64, f64, u8, f64, DVec3)> {
+    fn town(
+        &self,
+        town: &TownInfo,
+        p: DVec3,
+        gsd: f64,
+        fw: f64,
+        slope: f64,
+        clear: f64,
+        shadows: bool,
+        pf: &PixFields,
+    ) -> Option<(DVec3, f64, f64, u8, f64, DVec3)> {
         let pal = &self.pal;
         let d = p - town.center;
         let q0 = DVec2::new(d.dot(town.ex), d.dot(town.ey));
@@ -1658,17 +1713,23 @@ impl SurfaceModel {
         let (bix, bqx, bsx) = cell(0, q.x);
         let (biy, bqy, bsy) = cell(1, q.y);
         let sw = town.street * 0.7; // lots start beyond the widest street (a verge along narrower ones)
-        // streets exist where the town is dense enough; outskirts keep only some of them. Decided
-        // per street segment (axis, line, and the segment along it), so the blocks on both sides
-        // agree, and per axis, so streets end square at a crossing; crisp: a street is there or
-        // not (a fading street left half-transparent asphalt with half-masked trees on it)
+                                    // streets exist where the town is dense enough; outskirts keep only some of them. Decided
+                                    // per street segment (axis, line, and the segment along it), so the blocks on both sides
+                                    // agree, and per axis, so streets end square at a crossing; crisp: a street is there or
+                                    // not (a fading street left half-transparent asphalt with half-masked trees on it)
         let near_x = bix + (bqx > bsx - bqx) as i64; // nearest line across x and across y
         let near_y = biy + (bqy > bsy - bqy) as i64;
         // each street segment exists or not as a whole: decided with the town density at its
         // midpoint (per-pixel density faded streets in and out along a density contour, and the
         // houses of the blocks beside them were cut along it)
         let urban_at = |dq: DVec2| self.town_urban(town, p + town.ex * dq.x + town.ey * dq.y, gsd, slope, clear, pf).0;
-        let seg_here = |h: u64, u: f64| -> f64 { if u > 0.15 + 0.12 * u01k(h, 4) && !(u < 0.45 && u01k(h, 3) < 0.4) { 1.0 } else { 0.0 } };
+        let seg_here = |h: u64, u: f64| -> f64 {
+            if u > 0.15 + 0.12 * u01k(h, 4) && !(u < 0.45 && u01k(h, 3) < 0.4) {
+                1.0
+            } else {
+                0.0
+            }
+        };
         let ymid = 0.5 * (line(1, biy) + line(1, biy + 1));
         let xmid = 0.5 * (line(0, bix) + line(0, bix + 1));
         let seg_x = |i: i64| seg_here(hash2(town.seed ^ 0x57, i, biy), urban_at(DVec2::new(line(0, i), ymid) - q));
@@ -1727,8 +1788,7 @@ impl SurfaceModel {
             let built = u01k(lh, 3) < urban_lot.powf(0.7) * 1.05 && access > 0.5;
             if built || urban_lot > 0.65 {
                 cov_lot = 1.0;
-                let yard = mixc(mixc(pal.grass_wet, pal.soil[0], 0.3 + 0.4 * u01k(lh, 10)), pal.concrete, 0.25 * central)
-                    * (1.0 + 0.2 * pf.detail);
+                let yard = mixc(mixc(pal.grass_wet, pal.soil[0], 0.3 + 0.4 * u01k(lh, 10)), pal.concrete, 0.25 * central) * (1.0 + 0.2 * pf.detail);
                 col = yard;
                 if built {
                     // building footprint inside the lot (sometimes L-shaped)

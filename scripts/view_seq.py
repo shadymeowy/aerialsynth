@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Visualize frames of one camera of a sequence file: rgb | depth | flow (HSV) | flow validity
-(whichever the camera has).
+"""Visualize frames of one camera of a sequence file, one row per frame: rgb | depth (log,
+colour mapped) | flow (HSV) | flow validity | land cover (pseudo-colour), whichever the camera
+has.
 
-usage: view_seq.py SEQ.h5 OUT.png [--camera /cam0] [--frames 0,10,20]
+    python scripts/view_seq.py SEQ.h5 OUT.png [--camera /cam0] [--frames 0,10,20]
 """
 import argparse, colorsys, os, sys
 import numpy as np, h5py
@@ -28,8 +29,11 @@ def depth_to_rgb(d):
         out[..., 2] = (255 * t).astype(np.uint8); out[~fin] = (40, 40, 60)
     return out
 
-ap = argparse.ArgumentParser()
-ap.add_argument("seq"); ap.add_argument("out"); ap.add_argument("--camera", default=None); ap.add_argument("--frames", default=None)
+ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument("seq", help="sequence file (HDF5)")
+ap.add_argument("out", help="output PNG")
+ap.add_argument("--camera", default=None, help="camera group (default: the first with frames)")
+ap.add_argument("--frames", default=None, help="comma-separated frame indices (default: first, middle, last)")
 a = ap.parse_args()
 f = h5py.File(a.seq, "r")
 path = a.camera or next(p for p in cameras(f) if "t" in f[p])

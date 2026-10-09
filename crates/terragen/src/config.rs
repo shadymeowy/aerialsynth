@@ -223,14 +223,7 @@ pub struct Landuse {
 }
 impl Default for Landuse {
     fn default() -> Self {
-        Landuse {
-            agriculture: 1.0,
-            towns: 1.0,
-            roads: 1.0,
-            buildings_in_dsm: true,
-            region_km: 7.0,
-            town_cell_km: 6.0,
-        }
+        Landuse { agriculture: 1.0, towns: 1.0, roads: 1.0, buildings_in_dsm: true, region_km: 7.0, town_cell_km: 6.0 }
     }
 }
 

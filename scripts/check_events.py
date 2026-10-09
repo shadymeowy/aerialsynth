@@ -4,14 +4,16 @@ invariants (coordinates inside the sensor, binary polarity, sorted timestamps in
 sequence, ms_index consistent with t) and print rate / polarity / hot-pixel statistics. Exits
 non-zero if an invariant fails or the file has no event stream to check.
 
-usage: check_events.py SEQ.h5 [--camera /dvs]
+    python scripts/check_events.py SEQ.h5 [--camera /events]
 """
 import argparse, os, sys
 import numpy as np, h5py
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from seqio import cameras, scenario
 
-ap = argparse.ArgumentParser(); ap.add_argument("seq"); ap.add_argument("--camera", default=None)
+ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument("seq", help="sequence file (HDF5)")
+ap.add_argument("--camera", default=None, help="camera group (default: every camera with events/)")
 a = ap.parse_args()
 f = h5py.File(a.seq, "r")
 pose_path = (scenario(f).get("output") or {}).get("pose", {}).get("path", "/pose")

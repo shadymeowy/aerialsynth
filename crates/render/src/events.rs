@@ -65,7 +65,7 @@ pub struct EventConfig {
     /// High-pass (bias_hpf): the reference level relaxes towards the signal with this corner
     /// frequency (Hz), suppressing slow changes. 0 = off.
     pub hpf_hz: f64,
-    /// Offset added before the log: L = ln(gain * lum + eps) (dark current).
+    /// Offset added before the log: L = ln(gain * lum + log_eps) (dark current).
     pub log_eps: f64,
     pub gain: f64,
 
@@ -203,9 +203,7 @@ impl EventSensor {
             .collect();
         // hot pixels: random positions, rate spread, polarity bias
         let nh = (cfg.hot_pixel_fraction * n as f64).round() as usize;
-        let hot = (0..nh)
-            .map(|_| ((rng.next() % n as u64) as usize, cfg.hot_pixel_hz * (0.3 + 1.4 * rng.uniform()), 0.2 + 0.6 * rng.uniform()))
-            .collect();
+        let hot = (0..nh).map(|_| ((rng.next() % n as u64) as usize, cfg.hot_pixel_hz * (0.3 + 1.4 * rng.uniform()), 0.2 + 0.6 * rng.uniform())).collect();
         EventSensor { w, px, hot, t_prev: None, n_steps: 0, rng, cfg }
     }
 
@@ -449,7 +447,8 @@ impl Key {
     fn point(&self, k: usize, model: &dyn CameraModel) -> DVec3 {
         let w = model.width() as usize;
         let o = self.frame.sample_offset;
-        self.frame.points[k].unwrap_or_else(|| self.cam.cam_to_world(model.unproject(DVec2::new((k % w) as f64 + o, (k / w) as f64 + o)).unwrap_or(DVec3::Z) * 1e7))
+        self.frame.points[k]
+            .unwrap_or_else(|| self.cam.cam_to_world(model.unproject(DVec2::new((k % w) as f64 + o, (k / w) as f64 + o)).unwrap_or(DVec3::Z) * 1e7))
     }
 }
 
@@ -544,7 +543,16 @@ pub struct EventStats {
 /// sequence start) into `<spec.path>/events` of the open sequence file.
 /// `progress(t_done, t_total)`.
 #[allow(clippy::too_many_arguments)]
-pub fn simulate(scn: &Scenario, spec: &CameraSpec, poses: &[Pose], cache: Arc<TileCache>, ell: Ellipsoid, file: &h5::File, (t_start, t_end): (f64, f64), progress: &dyn Fn(f64, f64)) -> Result<EventStats> {
+pub fn simulate(
+    scn: &Scenario,
+    spec: &CameraSpec,
+    poses: &[Pose],
+    cache: Arc<TileCache>,
+    ell: Ellipsoid,
+    file: &h5::File,
+    (t_start, t_end): (f64, f64),
+    progress: &dyn Fn(f64, f64),
+) -> Result<EventStats> {
     let Some(ec) = &spec.events else { bail!("camera {} has no events modality", spec.path) };
     if poses.len() < 2 {
         bail!("event simulation needs a trajectory");
@@ -725,7 +733,8 @@ mod noise_tests {
     #[test]
     fn low_light_bandwidth_delays_events() {
         // a sudden brightening: the bright pixel reacts within ~1 ms, the dark one much later
-        let cfg = EventConfig { contrast_sigma: 0.0, shot_noise_hz: 0.0, leak_hz: 0.0, hot_pixel_fraction: 0.0, timestamp_jitter_us: 0.0, ..Default::default() };
+        let cfg =
+            EventConfig { contrast_sigma: 0.0, shot_noise_hz: 0.0, leak_hz: 0.0, hot_pixel_fraction: 0.0, timestamp_jitter_us: 0.0, ..Default::default() };
         let first = |lum0: f32| -> f64 {
             let mut s = EventSensor::new(cfg.clone(), 1, 1);
             s.step(0.0, &s.log_image(&[lum0; 3]));

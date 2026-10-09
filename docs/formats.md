@@ -19,7 +19,6 @@ Both files are HDF5 and open in h5py or any HDF5 reader. `terrain info FILE` sum
 
 - **Chunks:** one tile per chunk, compressed with shuffle + deflate. Compression runs in parallel
   and is written with HDF5 direct chunk I/O. The bundled HDF5 is 2.2.0 (via `hdf5-metno-sys`).
-- **Readers:** files open in h5py or any HDF5 reader.
 - **Growth:** rows can be appended in any order, so a store grows lazily.
 - **One world per store:** a store records the world config and generator version of its
   tiles. Every command refuses a store of another world, naming the settings that differ.
@@ -74,9 +73,11 @@ trajectory; the root attribute `t0` holds it in trajectory seconds). Every datas
   frame is the common rig frame of all sensors.
 - **PNG export:** `output.png_dir` additionally writes `<png_dir>/<camera>/{rgb,depth,flow,
   flow_valid,landcover}/NNNNNN.*`, `frames.csv` and `camera.yaml` per camera.
-- **camodocal:** its H5 reader expects the M3ED layout (`/ovc/left/data`, `/ovc/ts`, ...). The
-  data types are the same (i64 µs timestamps, u16/i64/i8 events, f64 calibration); the reader
-  needs to take the group / dataset names from its config, and to read RGB or set `rgb.gray`.
+- **Reading:** everything is plain HDF5 with fixed dataset names under configurable group
+  paths. The data types follow common event / VIO datasets such as M3ED (i64 µs timestamps,
+  u16 / i64 / i8 events, f64 calibration), but the layout is this project's own: a reader
+  written for another layout needs the group and dataset names above. The scripts in
+  `scripts/` read sequences with h5py.
 - **Compression:** `output.compression` sets the deflate level (shuffle + gzip, as in h5py) and
   `float_keep_bits`, an optional lossy rounding of depth/flow mantissas. 16 bits gives a max
   relative error of 7.6e-6 and shrinks depth/flow by ~35–40%. Flow is exactly recomputable from

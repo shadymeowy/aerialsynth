@@ -2,7 +2,11 @@
 """The airliner video's sound: an original ambient score and the aircraft, synthesised from the
 flight itself, mixed and muxed into the video.
 
-    ~/.venv/bin/python showcase/soundtrack.py      # → out/airliner/soundtrack.wav, airliner_sound.mp4
+    python showcase/soundtrack.py                         # → out/airliner/soundtrack.wav, airliner_sound.mp4
+    python showcase/soundtrack.py showcase/airliner.yaml  # (another storyboard)
+
+Run it after make_airliner.py; without the video's clips it writes only a preview WAV (from the
+planned clip lengths).
 
 Music (generated here, no samples): D dorian at 76 bpm, slow pads, a plucked arpeggio with a
 ping-pong echo, sub bass and sparse bells in a long reverb; sections follow the video (globe,
@@ -14,10 +18,14 @@ level and pitch follow the thrust schedule of the flight phase, airflow noise fr
 airspeed, gear up / down, the gear rumble on final, touchdown (thump, tyre chirps) and the
 reversers. Sound follows the moment shown: the faster the playback, the more the aircraft
 recedes to a cabin hum and the music leads; at real time the music ducks under the engines.
-Needs numpy, scipy and piper-tts (voice: ~/.cache/piper/en_US-ljspeech-high.onnx from
-huggingface.co/rhasspy/piper-voices).
+
+Needs numpy, scipy, ffmpeg and Piper (pip install piper-tts; the `piper` executable is looked
+up next to the Python interpreter, then on PATH) with the LJSpeech voice from
+https://huggingface.co/rhasspy/piper-voices (en/en_US/ljspeech/high: the .onnx model and its
+.onnx.json config side by side). The voice path is $PIPER_VOICE, by default
+~/.cache/piper/en_US-ljspeech-high.onnx. Synthesised callouts are cached in out/airliner/voice/.
 """
-import json, math, os, subprocess, sys
+import argparse, math, os, shutil, subprocess, sys, wave
 import numpy as np
 import yaml
 from scipy import signal
@@ -177,7 +185,7 @@ def music(total, cues):
                 add(buf, tt, pluck(midi(m)), pan=0.35 * math.sin(j * 1.3), gain=acc * float(level("arp", tt)))
         # bells: a high chord tone now and then
         lb = float(level("bell", t0))
-        for j in range(2):
+        for _ in range(2):
             if RNG.uniform() < 0.7:
                 add(buf, t0 + RNG.integers(0, 8) * beat, bell(midi(RNG.choice(notes[2:]) + 24)), pan=RNG.uniform(-0.8, 0.8), gain=lb)
         k += 1
@@ -193,7 +201,7 @@ def music(total, cues):
 
 
 # ----------------------------------------------------------------------------- the aircraft
-def aircraft(total, off, tl, route, video):
+def aircraft(total, off, tl, route):
     """Aircraft sound over the video (`off`: video time of the flight's first frame)."""
     n = int(total * SR)
     T = route.meta["duration_s"]
@@ -281,8 +289,20 @@ def aircraft(total, off, tl, route, video):
 
 
 # ----------------------------------------------------------------------------- callouts
-VOICE = os.path.expanduser("~/.cache/piper/en_US-ljspeech-high.onnx")  # LJSpeech (public domain), Piper model (MIT)
-PIPER = os.path.join(os.path.dirname(sys.executable), "piper")
+# the Piper voice: LJSpeech (public-domain recordings), from rhasspy/piper-voices
+VOICE = os.path.expanduser(os.environ.get("PIPER_VOICE", "~/.cache/piper/en_US-ljspeech-high.onnx"))
+
+
+def piper_executable():
+    """The `piper` command: next to this interpreter (a virtualenv's bin/), else on PATH."""
+    local = os.path.join(os.path.dirname(sys.executable), "piper")
+    exe = local if os.path.exists(local) else shutil.which("piper")
+    if exe is None:
+        raise SystemExit("piper not found: pip install piper-tts (or put `piper` on PATH)")
+    if not os.path.exists(VOICE):
+        raise SystemExit(f"Piper voice not found: {VOICE} (download en_US-ljspeech-high.onnx and .onnx.json "
+                         "from huggingface.co/rhasspy/piper-voices, or set PIPER_VOICE)")
+    return exe
 
 
 def phrase(text):
@@ -292,8 +312,8 @@ def phrase(text):
     os.makedirs(d, exist_ok=True)
     wav = os.path.join(d, "".join(c if c.isalnum() else "_" for c in text.lower()) + ".wav")
     if not os.path.exists(wav):
-        subprocess.run([PIPER, "-m", VOICE, "--length-scale", "0.82", "-f", wav], input=text, text=True, check=True, capture_output=True)
-    import wave
+        subprocess.run([piper_executable(), "-m", VOICE, "--length-scale", "0.82", "-f", wav], input=text, text=True,
+                       check=True, capture_output=True)
     with wave.open(wav) as w:
         x = np.frombuffer(w.readframes(w.getnframes()), "<i2").astype(float) / 32768
         sr = w.getframerate()
@@ -330,7 +350,9 @@ def callouts(total, off, tl, route):
 
 
 def main():
-    story_path = sys.argv[1] if len(sys.argv) > 1 else ma.STORY
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("story", nargs="?", default=ma.STORY, help="the airliner storyboard (default: showcase/airliner.yaml)")
+    story_path = ap.parse_args().story
     story = yaml.safe_load(open(story_path))
     ma.STORY = story_path
     video = story["video"]
@@ -350,7 +372,7 @@ def main():
             "landing": off + tl.end - 12, "outro": float(starts[3])}
     print("cues", {k: round(v, 1) for k, v in cues.items()}, "total", round(total, 1), flush=True)
     mus = music(total, cues)
-    air = aircraft(total, off, tl, route, video)
+    air = aircraft(total, off, tl, route)
     voice = callouts(total, off, tl, route)
     # loudness: the aircraft at take-off ≈ -16 dBFS RMS, the music ≈ -20 dBFS; near real time
     # (take-off, landing) the music ducks ~10 dB under the engines
@@ -364,9 +386,6 @@ def main():
     rt_ = signal.sosfiltfilt(signal.butter(2, 0.5, fs=SR, output="sos"), rt_)
     duck = 1.0 - 0.85 * np.clip(rt_, 0, 1)  # (-16 dB at real time)
     mix = mus * duck + air + voice * 0.5
-    if os.environ.get("SOUND_STEMS"):  # (levels of both stems at 20 Hz, for checking the mix)
-        m = mus.shape[1] // 2400 * 2400
-        np.save(os.path.join(ma.OUT, "stems_rms.npy"), np.stack([np.sqrt(np.mean(x[:, :m].reshape(2, -1, 2400) ** 2, axis=(0, 2))) for x in (mus * duck, air)]))
     # fades, soft limit, -1 dBFS peak
     n = mix.shape[1]
     fade = np.ones(n)
@@ -376,7 +395,6 @@ def main():
     mix *= 0.89 / np.max(np.abs(mix))
     wav = os.path.join(ma.OUT, "soundtrack.wav")
     pcm = (mix.T * 32767).astype("<i2")
-    import wave
     with wave.open(wav, "wb") as w:
         w.setnchannels(2)
         w.setsampwidth(2)

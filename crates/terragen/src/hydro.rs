@@ -48,10 +48,15 @@ struct FlowPt {
     active: bool,
 }
 
+/// Per-thread cache key of a lattice point: (level / world key, lattice cell x, y, z).
+type LatticeKey = (u64, i64, i64, i64);
+/// A lattice cell (x, y, z).
+type Cell = (i64, i64, i64);
+
 thread_local! {
-    static PTS: RefCell<FxHashMap<(u64, i64, i64, i64), FlowPt>> = RefCell::new(FxHashMap::default());
-    static TGT: RefCell<FxHashMap<(u64, i64, i64, i64), Option<(i64, i64, i64)>>> = RefCell::new(FxHashMap::default());
-    static SRC: RefCell<FxHashMap<(u64, i64, i64, i64), bool>> = RefCell::new(FxHashMap::default());
+    static PTS: RefCell<FxHashMap<LatticeKey, FlowPt>> = RefCell::new(FxHashMap::default());
+    static TGT: RefCell<FxHashMap<LatticeKey, Option<Cell>>> = RefCell::new(FxHashMap::default());
+    static SRC: RefCell<FxHashMap<LatticeKey, bool>> = RefCell::new(FxHashMap::default());
 }
 
 impl World {
@@ -315,13 +320,15 @@ impl World {
                         let Some(tc) = self.flow_target(lvl, c) else { continue };
                         let tp = self.flow_point(lvl, tc);
                         let (hw, valley) = width(c);
-                        let seg = |a: DVec3, b: DVec3, ha: f64, hb: f64, hw: f64, hw_b: f64| Seg { a, b, ha, hb, level: lvl as u8, hw, valley, hw_b, sink: false };
+                        let seg =
+                            |a: DVec3, b: DVec3, ha: f64, hb: f64, hw: f64, hw_b: f64| Seg { a, b, ha, hb, level: lvl as u8, hw, valley, hw_b, sink: false };
                         let mid = 0.5 * (fp.s + tp.s);
                         let hmid = 0.5 * (fp.h + tp.h);
                         // a source (nothing drains into it): straight from the source point to the
                         // middle of its edge, where the bends start
                         if self.is_source(lvl, c) {
-                            out.push(seg(fp.s, mid, fp.h, hmid, 0.08 * hw, hw)); // widening from a spring
+                            out.push(seg(fp.s, mid, fp.h, hmid, 0.08 * hw, hw));
+                            // widening from a spring
                         }
                         match self.flow_target(lvl, tc) {
                             // the bend at the downstream node: a quadratic curve from the middle

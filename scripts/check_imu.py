@@ -21,9 +21,9 @@ Tolerances (exit 1 if one fails; measured with configs/examples/imu_check.yaml, 
   200 Hz: the unresolved vibration),
 * white noise and bias walk per sample: 0.8 to 1.25 times the configured σ.
 
-usage: check_imu.py SEQ.h5
+    python scripts/check_imu.py SEQ.h5
 """
-import os, sys
+import argparse, os, sys
 import numpy as np, h5py, yaml
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from seqio import quat_to_R, scenario
@@ -51,7 +51,10 @@ def rot_log(R):
     return v * k[..., None]
 
 
-f = h5py.File(sys.argv[1], "r")
+ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument("seq", help="sequence file (HDF5) with an imu section and /pose")
+args = ap.parse_args()
+f = h5py.File(args.seq, "r")
 scn = scenario(f)
 imu_cfg = scn.get("imu")
 if not imu_cfg:

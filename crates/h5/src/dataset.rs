@@ -42,16 +42,7 @@ pub struct DatasetBuilder<'a, T: H5Type> {
 
 impl<'a, T: H5Type> DatasetBuilder<'a, T> {
     pub(crate) fn new(parent: &'a Group) -> Self {
-        DatasetBuilder {
-            parent,
-            shape: None,
-            max_shape: None,
-            chunk: None,
-            deflate: None,
-            shuffle: false,
-            fill_value: None,
-            _t: PhantomData,
-        }
+        DatasetBuilder { parent, shape: None, max_shape: None, chunk: None, deflate: None, shuffle: false, fill_value: None, _t: PhantomData }
     }
 
     /// Initial shape (required).
@@ -94,10 +85,7 @@ impl<'a, T: H5Type> DatasetBuilder<'a, T> {
     /// Create the dataset. Intermediate groups in `name` are created as
     /// needed. Fails if the dataset already exists.
     pub fn create(self, name: &str) -> Result<Dataset> {
-        let shape = self
-            .shape
-            .clone()
-            .ok_or_else(|| Error::InvalidArgument(format!("dataset {name:?}: shape not set")))?;
+        let shape = self.shape.clone().ok_or_else(|| Error::InvalidArgument(format!("dataset {name:?}: shape not set")))?;
         let rank = shape.len();
         let inval = |m: String| Error::InvalidArgument(format!("dataset {name:?}: {m}"));
         let maxdims: Vec<hsize_t> = match &self.max_shape {
@@ -109,9 +97,7 @@ impl<'a, T: H5Type> DatasetBuilder<'a, T> {
                 m.iter().map(|d| d.map_or(H5S_UNLIMITED, |x| x as hsize_t)).collect()
             }
         };
-        let needs_chunk = self.deflate.is_some()
-            || self.shuffle
-            || maxdims.iter().zip(&shape).any(|(&m, &s)| m != s as hsize_t);
+        let needs_chunk = self.deflate.is_some() || self.shuffle || maxdims.iter().zip(&shape).any(|(&m, &s)| m != s as hsize_t);
         if let Some(c) = &self.chunk {
             if c.len() != rank {
                 return Err(inval(format!("chunk rank {} != shape rank {rank}", c.len())));
@@ -137,16 +123,8 @@ impl<'a, T: H5Type> DatasetBuilder<'a, T> {
         // point to `rank` elements; `fill` is a valid T matching the native
         // type passed alongside it.
         unsafe {
-            let space = Handle::check(
-                sys::h5s::H5Screate_simple(rank as _, dims.as_ptr(), maxdims.as_ptr()),
-                "H5Screate_simple",
-                ctx,
-            )?;
-            let dcpl = Handle::check(
-                sys::h5p::H5Pcreate(*sys::h5p::H5P_CLS_DATASET_CREATE),
-                "H5Pcreate(dcpl)",
-                ctx,
-            )?;
+            let space = Handle::check(sys::h5s::H5Screate_simple(rank as _, dims.as_ptr(), maxdims.as_ptr()), "H5Screate_simple", ctx)?;
+            let dcpl = Handle::check(sys::h5p::H5Pcreate(*sys::h5p::H5P_CLS_DATASET_CREATE), "H5Pcreate(dcpl)", ctx)?;
             if let Some(c) = &self.chunk {
                 let c = to_hsize(c);
                 check(sys::h5p::H5Pset_chunk(dcpl.id(), rank as _, c.as_ptr()), "H5Pset_chunk", ctx)?;
@@ -158,35 +136,11 @@ impl<'a, T: H5Type> DatasetBuilder<'a, T> {
                 check(sys::h5p::H5Pset_deflate(dcpl.id(), l as _), "H5Pset_deflate", ctx)?;
             }
             if let Some(fill) = &self.fill_value {
-                check(
-                    sys::h5p::H5Pset_fill_value(
-                        dcpl.id(),
-                        T::native_type(),
-                        fill as *const T as *const c_void,
-                    ),
-                    "H5Pset_fill_value",
-                    ctx,
-                )?;
+                check(sys::h5p::H5Pset_fill_value(dcpl.id(), T::native_type(), fill as *const T as *const c_void), "H5Pset_fill_value", ctx)?;
             }
-            let lcpl = Handle::check(
-                sys::h5p::H5Pcreate(*sys::h5p::H5P_CLS_LINK_CREATE),
-                "H5Pcreate(lcpl)",
-                ctx,
-            )?;
-            check(
-                sys::h5p::H5Pset_create_intermediate_group(lcpl.id(), 1),
-                "H5Pset_create_intermediate_group",
-                ctx,
-            )?;
-            let id = sys::h5d::H5Dcreate2(
-                loc,
-                c_name.as_ptr(),
-                T::native_type(),
-                space.id(),
-                lcpl.id(),
-                dcpl.id(),
-                H5P_DEFAULT,
-            );
+            let lcpl = Handle::check(sys::h5p::H5Pcreate(*sys::h5p::H5P_CLS_LINK_CREATE), "H5Pcreate(lcpl)", ctx)?;
+            check(sys::h5p::H5Pset_create_intermediate_group(lcpl.id(), 1), "H5Pset_create_intermediate_group", ctx)?;
+            let id = sys::h5d::H5Dcreate2(loc, c_name.as_ptr(), T::native_type(), space.id(), lcpl.id(), dcpl.id(), H5P_DEFAULT);
             Ok(Dataset { h: Handle::check(id, "H5Dcreate2", ctx)? })
         }
     }
@@ -222,18 +176,10 @@ impl Dataset {
         let space = self.space()?;
         // SAFETY: valid dataspace id; buffers sized to the queried rank.
         unsafe {
-            let rank = check(
-                sys::h5s::H5Sget_simple_extent_ndims(space.id()),
-                "H5Sget_simple_extent_ndims",
-                || self.ctx(),
-            )? as usize;
+            let rank = check(sys::h5s::H5Sget_simple_extent_ndims(space.id()), "H5Sget_simple_extent_ndims", || self.ctx())? as usize;
             let mut dims = vec![0 as hsize_t; rank];
             let mut max = vec![0 as hsize_t; rank];
-            check(
-                sys::h5s::H5Sget_simple_extent_dims(space.id(), dims.as_mut_ptr(), max.as_mut_ptr()),
-                "H5Sget_simple_extent_dims",
-                || self.ctx(),
-            )?;
+            check(sys::h5s::H5Sget_simple_extent_dims(space.id(), dims.as_mut_ptr(), max.as_mut_ptr()), "H5Sget_simple_extent_dims", || self.ctx())?;
             Ok((dims, max))
         }
     }
@@ -245,12 +191,7 @@ impl Dataset {
 
     /// Maximum shape (`None` = unlimited).
     pub fn max_shape(&self) -> Result<Vec<Option<usize>>> {
-        Ok(self
-            .dims()?
-            .1
-            .into_iter()
-            .map(|d| if d == H5S_UNLIMITED { None } else { Some(d as usize) })
-            .collect())
+        Ok(self.dims()?.1.into_iter().map(|d| if d == H5S_UNLIMITED { None } else { Some(d as usize) }).collect())
     }
 
     /// Chunk shape, or `None` for non-chunked layouts.
@@ -259,21 +200,13 @@ impl Dataset {
         let rank = self.dims()?.0.len();
         // SAFETY: valid ids under the lock; `chunk` has room for `rank` dims.
         unsafe {
-            let dcpl = Handle::check(
-                sys::h5d::H5Dget_create_plist(self.id()),
-                "H5Dget_create_plist",
-                || self.ctx(),
-            )?;
+            let dcpl = Handle::check(sys::h5d::H5Dget_create_plist(self.id()), "H5Dget_create_plist", || self.ctx())?;
             let layout = sys::h5p::H5Pget_layout(dcpl.id());
             if layout != sys::h5d::H5D_layout_t::H5D_CHUNKED {
                 return Ok(None);
             }
             let mut chunk = vec![0 as hsize_t; rank.max(1)];
-            check(
-                sys::h5p::H5Pget_chunk(dcpl.id(), rank as _, chunk.as_mut_ptr()),
-                "H5Pget_chunk",
-                || self.ctx(),
-            )?;
+            check(sys::h5p::H5Pget_chunk(dcpl.id(), rank as _, chunk.as_mut_ptr()), "H5Pget_chunk", || self.ctx())?;
             chunk.truncate(rank);
             Ok(Some(chunk.into_iter().map(|d| d as usize).collect()))
         }
@@ -298,11 +231,7 @@ impl Dataset {
         let _g = lock();
         let rank = self.dims()?.0.len();
         if new_shape.len() != rank {
-            return Err(Error::InvalidArgument(format!(
-                "resize {}: rank {} != dataset rank {rank}",
-                self.ctx(),
-                new_shape.len()
-            )));
+            return Err(Error::InvalidArgument(format!("resize {}: rank {} != dataset rank {rank}", self.ctx(), new_shape.len())));
         }
         let d = to_hsize(new_shape);
         // SAFETY: valid dataset id; `d` has `rank` elements.
@@ -319,20 +248,14 @@ impl Dataset {
         let rank = dims.len();
         let bad = |m: String| Error::InvalidArgument(format!("{}: {m}", self.ctx()));
         if offset.len() != rank || count.len() != rank {
-            return Err(bad(format!(
-                "offset/count rank {}/{} != dataset rank {rank}",
-                offset.len(),
-                count.len()
-            )));
+            return Err(bad(format!("offset/count rank {}/{} != dataset rank {rank}", offset.len(), count.len())));
         }
         if buf_len != prod(count) {
             return Err(bad(format!("buffer length {buf_len} != prod(count {count:?})")));
         }
         for i in 0..rank {
             if (offset[i] + count[i]) as hsize_t > dims[i] {
-                return Err(bad(format!(
-                    "selection offset {offset:?} count {count:?} exceeds shape {dims:?}"
-                )));
+                return Err(bad(format!("selection offset {offset:?} count {count:?} exceeds shape {dims:?}")));
             }
         }
         if buf_len == 0 {
@@ -343,22 +266,11 @@ impl Dataset {
         unsafe {
             let fspace = self.space()?;
             check(
-                sys::h5s::H5Sselect_hyperslab(
-                    fspace.id(),
-                    sys::h5s::H5S_seloper_t::H5S_SELECT_SET,
-                    o.as_ptr(),
-                    ptr::null(),
-                    c.as_ptr(),
-                    ptr::null(),
-                ),
+                sys::h5s::H5Sselect_hyperslab(fspace.id(), sys::h5s::H5S_seloper_t::H5S_SELECT_SET, o.as_ptr(), ptr::null(), c.as_ptr(), ptr::null()),
                 "H5Sselect_hyperslab",
                 || self.ctx(),
             )?;
-            let mspace = Handle::check(
-                sys::h5s::H5Screate_simple(rank as _, c.as_ptr(), ptr::null()),
-                "H5Screate_simple",
-                || self.ctx(),
-            )?;
+            let mspace = Handle::check(sys::h5s::H5Screate_simple(rank as _, c.as_ptr(), ptr::null()), "H5Screate_simple", || self.ctx())?;
             Ok(Some((fspace, mspace)))
         }
     }
@@ -368,16 +280,7 @@ impl Dataset {
         let _g = lock();
         let Some((fs, ms)) = self.select(offset, count, data.len())? else { return Ok(()) };
         // SAFETY: memory space has exactly data.len() elements of T's native type.
-        let r = unsafe {
-            sys::h5d::H5Dwrite(
-                self.id(),
-                T::native_type(),
-                ms.id(),
-                fs.id(),
-                H5P_DEFAULT,
-                data.as_ptr() as *const c_void,
-            )
-        };
+        let r = unsafe { sys::h5d::H5Dwrite(self.id(), T::native_type(), ms.id(), fs.id(), H5P_DEFAULT, data.as_ptr() as *const c_void) };
         check(r, "H5Dwrite(hyperslab)", || self.ctx())?;
         Ok(())
     }
@@ -388,16 +291,7 @@ impl Dataset {
         let _g = lock();
         let Some((fs, ms)) = self.select(offset, count, out.len())? else { return Ok(()) };
         // SAFETY: memory space has exactly out.len() elements of T's native type.
-        let r = unsafe {
-            sys::h5d::H5Dread(
-                self.id(),
-                T::native_type(),
-                ms.id(),
-                fs.id(),
-                H5P_DEFAULT,
-                out.as_mut_ptr() as *mut c_void,
-            )
-        };
+        let r = unsafe { sys::h5d::H5Dread(self.id(), T::native_type(), ms.id(), fs.id(), H5P_DEFAULT, out.as_mut_ptr() as *mut c_void) };
         check(r, "H5Dread(hyperslab)", || self.ctx())?;
         Ok(())
     }
@@ -425,16 +319,7 @@ impl Dataset {
             return Ok(v);
         }
         // SAFETY: H5S_ALL/H5S_ALL selects the full extent == v.len() elements.
-        let r = unsafe {
-            sys::h5d::H5Dread(
-                self.id(),
-                T::native_type(),
-                H5S_ALL,
-                H5S_ALL,
-                H5P_DEFAULT,
-                v.as_mut_ptr() as *mut c_void,
-            )
-        };
+        let r = unsafe { sys::h5d::H5Dread(self.id(), T::native_type(), H5S_ALL, H5S_ALL, H5P_DEFAULT, v.as_mut_ptr() as *mut c_void) };
         check(r, "H5Dread(all)", || self.ctx())?;
         Ok(v)
     }
@@ -475,16 +360,7 @@ impl Dataset {
         let off = self.chunk_offset(chunk_offset)?;
         // SAFETY: valid dataset id; `off` has rank elements; `bytes` is valid
         // for bytes.len() bytes.
-        let r = unsafe {
-            sys::h5d::H5Dwrite_chunk(
-                self.id(),
-                H5P_DEFAULT,
-                filter_mask,
-                off.as_ptr(),
-                bytes.len(),
-                bytes.as_ptr() as *const c_void,
-            )
-        };
+        let r = unsafe { sys::h5d::H5Dwrite_chunk(self.id(), H5P_DEFAULT, filter_mask, off.as_ptr(), bytes.len(), bytes.as_ptr() as *const c_void) };
         check(r, "H5Dwrite_chunk", || format!("{} chunk {chunk_offset:?}", self.ctx()))?;
         Ok(())
     }
@@ -501,29 +377,11 @@ impl Dataset {
         // buffer of exactly that size.
         unsafe {
             let mut size: usize = 0;
-            check(
-                sys::h5d::H5Dread_chunk2(
-                    self.id(),
-                    H5P_DEFAULT,
-                    off.as_ptr(),
-                    &mut filters,
-                    ptr::null_mut(),
-                    &mut size,
-                ),
-                "H5Dread_chunk2(size)",
-                ctx,
-            )?;
+            check(sys::h5d::H5Dread_chunk2(self.id(), H5P_DEFAULT, off.as_ptr(), &mut filters, ptr::null_mut(), &mut size), "H5Dread_chunk2(size)", ctx)?;
             let mut buf = vec![0u8; size];
             let mut size2 = size;
             check(
-                sys::h5d::H5Dread_chunk2(
-                    self.id(),
-                    H5P_DEFAULT,
-                    off.as_ptr(),
-                    &mut filters,
-                    buf.as_mut_ptr() as *mut c_void,
-                    &mut size2,
-                ),
+                sys::h5d::H5Dread_chunk2(self.id(), H5P_DEFAULT, off.as_ptr(), &mut filters, buf.as_mut_ptr() as *mut c_void, &mut size2),
                 "H5Dread_chunk2",
                 ctx,
             )?;

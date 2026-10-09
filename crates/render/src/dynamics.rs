@@ -11,6 +11,7 @@
 //! * attitude deviations (2nd-order roll / pitch / yaw responses to turbulence),
 //! * camera vibration: engine harmonics + broadband airframe resonance,
 //! * optional stabilized gimbal (camera isolated from body roll/pitch with a lag).
+//!
 //! The record is written at `rate` Hz so the renderer can reconstruct sub-frame motion.
 
 use crate::trajectory::Pose;
@@ -65,15 +66,7 @@ pub struct WindConfig {
 
 impl Default for WindConfig {
     fn default() -> Self {
-        WindConfig {
-            speed: 5.0,
-            direction_deg: 270.0,
-            turbulence: 0.8,
-            length_scale: 250.0,
-            gust_rate_per_min: 0.6,
-            gust_amplitude: 3.0,
-            gust_length: 120.0,
-        }
+        WindConfig { speed: 5.0, direction_deg: 270.0, turbulence: 0.8, length_scale: 250.0, gust_rate_per_min: 0.6, gust_amplitude: 3.0, gust_length: 120.0 }
     }
 }
 
@@ -143,14 +136,7 @@ pub struct VibrationConfig {
 
 impl Default for VibrationConfig {
     fn default() -> Self {
-        VibrationConfig {
-            harmonic_deg: 0.04,
-            harmonic_hz: 38.0,
-            harmonic_jitter: 0.05,
-            broadband_deg: 0.03,
-            broadband_hz: 12.0,
-            broadband_damping: 0.15,
-        }
+        VibrationConfig { harmonic_deg: 0.04, harmonic_hz: 38.0, harmonic_jitter: 0.05, broadband_deg: 0.03, broadband_hz: 12.0, broadband_damping: 0.15 }
     }
 }
 
@@ -537,6 +523,7 @@ fn control_points(cfg: &SynthConfig, length: f64, ell: &Ellipsoid, origin: Geode
 
 /// Run the flight recorder. `ground(points)` gives the terrain height at (lat, lon) points
 /// (radians) for AGL mode.
+#[allow(clippy::type_complexity)]
 pub fn simulate(cfg: &SynthConfig, home: (f64, f64), ell: &Ellipsoid, ground: Option<&(dyn Fn(&[(f64, f64)]) -> Vec<f64> + Sync)>) -> Vec<Record> {
     let g = 9.80665;
     let dt = cfg.dt.clamp(1e-4, 0.01);
@@ -862,7 +849,16 @@ mod tests {
     #[test]
     fn local_frame_heading_far_from_origin() {
         let ell = Ellipsoid::WGS84;
-        let mut cfg = SynthConfig { kind: PathKind::Line, heading_deg: 90.0, speed: 100.0, duration: 500.0, rate: 10.0, altitude_ref: AltitudeRef::Ellipsoid, altitude: 1000.0, ..Default::default() };
+        let mut cfg = SynthConfig {
+            kind: PathKind::Line,
+            heading_deg: 90.0,
+            speed: 100.0,
+            duration: 500.0,
+            rate: 10.0,
+            altitude_ref: AltitudeRef::Ellipsoid,
+            altitude: 1000.0,
+            ..Default::default()
+        };
         cfg.wind.speed = 0.0;
         cfg.wind.turbulence = 0.0;
         cfg.wind.gust_rate_per_min = 0.0;
@@ -890,7 +886,15 @@ mod tests {
     #[test]
     fn imu_truth_is_consistent() {
         let ell = Ellipsoid::WGS84;
-        let cfg = SynthConfig { kind: PathKind::Circle, duration: 30.0, altitude_ref: AltitudeRef::Ellipsoid, altitude: 1000.0, radius: 600.0, rate: 200.0, ..Default::default() };
+        let cfg = SynthConfig {
+            kind: PathKind::Circle,
+            duration: 30.0,
+            altitude_ref: AltitudeRef::Ellipsoid,
+            altitude: 1000.0,
+            radius: 600.0,
+            rate: 200.0,
+            ..Default::default()
+        };
         let recs = simulate(&cfg, (39.9, 32.8), &ell, None);
         let dtr = 1.0 / cfg.rate;
         let mut max_err: f64 = 0.0;

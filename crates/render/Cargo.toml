@@ -2,6 +2,10 @@
 name = "render"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Aerial sensor simulation over the generated planet: camera models, CPU / GPU renderer, sensor, events, IMU and HDF5 dataset output"
 
 [dependencies]
 geodesy.workspace = true
@@ -16,10 +20,13 @@ rayon.workspace = true
 parking_lot.workspace = true
 image.workspace = true
 wgpu = { workspace = true, optional = true }
-pollster = { workspace = true, optional = true }
 bytemuck = { workspace = true, optional = true }
 
 [features]
 default = ["gpu"]
 # wgpu backend (headless) of the renderer
-gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
+gpu = ["dep:wgpu", "dep:bytemuck"]
+
+[[example]]
+name = "gpu_probe"
+required-features = ["gpu"]

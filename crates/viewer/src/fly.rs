@@ -97,7 +97,13 @@ impl FlyCam {
                 if v.length_squared() > 1.0 {
                     v = v.normalize();
                 }
-                let k = if inp.boost { 5.0 } else if inp.slow { 0.2 } else { 1.0 };
+                let k = if inp.boost {
+                    5.0
+                } else if inp.slow {
+                    0.2
+                } else {
+                    1.0
+                };
                 self.pos += v * (self.speed * k * dt);
             }
             FlyMode::Plane => {

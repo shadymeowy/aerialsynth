@@ -2,6 +2,10 @@
 name = "terragen"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Deterministic, lazily evaluable procedural planet: terrain, climate, drainage, land cover and towns as XYZ tiles (CPU and wgpu)"
 
 [dependencies]
 geodesy.workspace = true
@@ -22,3 +26,7 @@ gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
 
 [dev-dependencies]
 image.workspace = true
+
+[[example]]
+name = "gpu_vs_cpu"
+required-features = ["gpu"]

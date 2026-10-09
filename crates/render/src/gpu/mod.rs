@@ -14,13 +14,13 @@ pub mod tiles;
 use crate::lighting::SunState;
 use crate::lod::Unit;
 use crate::raster::{FrameOut, Renderer, Shading, TileView};
-use rayon::prelude::*;
 use crate::trajectory::CamPose;
 use bytemuck::{Pod, Zeroable};
 use device::Gpu;
 use geodesy::tiles::TileId;
 use glam::DVec3;
 use parking_lot::Mutex;
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use tiles::TilePool;
@@ -164,7 +164,8 @@ impl Ctx {
     fn new() -> anyhow::Result<Ctx> {
         let gpu = device::shared()?;
         let d = &gpu.device;
-        let gmod = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("mesh"), source: wgpu::ShaderSource::Wgsl(include_str!("mesh.wgsl").into()) });
+        let gmod =
+            d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("mesh"), source: wgpu::ShaderSource::Wgsl(include_str!("mesh.wgsl").into()) });
         let gbuf_pipe = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("gbuf"),
             layout: None,
@@ -196,7 +197,8 @@ impl Ctx {
             multiview_mask: None,
             cache: None,
         });
-        let smod = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("shade"), source: wgpu::ShaderSource::Wgsl(include_str!("shade.wgsl").into()) });
+        let smod =
+            d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("shade"), source: wgpu::ShaderSource::Wgsl(include_str!("shade.wgsl").into()) });
         let shade_pipe = d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("shade"),
             layout: None,
@@ -205,7 +207,18 @@ impl Ctx {
             compilation_options: Default::default(),
             cache: None,
         });
-        Ok(Ctx { gpu, meshes: HashMap::new(), mesh_bytes: 0, indices: HashMap::new(), frame: 0, gbuf_pipe, shade_pipe, pools: HashMap::new(), targets: None, rays: Vec::new() })
+        Ok(Ctx {
+            gpu,
+            meshes: HashMap::new(),
+            mesh_bytes: 0,
+            indices: HashMap::new(),
+            frame: 0,
+            gbuf_pipe,
+            shade_pipe,
+            pools: HashMap::new(),
+            targets: None,
+            rays: Vec::new(),
+        })
     }
 
     fn ensure_targets(&mut self, w: u32, h: u32, ow: u32, oh: u32) {
@@ -349,13 +362,21 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
     let mut mesh_uploads = 0;
     for (key, v, origin, nx, ny) in built {
         let bytes = (v.len() * std::mem::size_of::<Vertex>()) as u64;
-        let vb = c.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("mesh"), contents: bytemuck::cast_slice(&v), usage: wgpu::BufferUsages::VERTEX });
+        let vb = c.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("mesh"),
+            contents: bytemuck::cast_slice(&v),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
         c.mesh_bytes += bytes;
         c.meshes.insert(key, CachedMesh { vb, origin, nx, ny, bytes, last: frame });
         mesh_uploads += 1;
         if !c.indices.contains_key(&(nx, ny)) {
             let ix = grid_indices(nx, ny);
-            let ib = c.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("grid idx"), contents: bytemuck::cast_slice(&ix), usage: wgpu::BufferUsages::INDEX });
+            let ib = c.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("grid idx"),
+                contents: bytemuck::cast_slice(&ix),
+                usage: wgpu::BufferUsages::INDEX,
+            });
             c.indices.insert((nx, ny), (ib, ix.len() as u32));
         }
     }
@@ -390,7 +411,11 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
         // ancestors by zoom; the rest fall back to coarser data in the shader
         static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-            eprintln!("render[gpu]: a frame needs {} tiles, the GPU pool holds {}; the excess is drawn from coarser data (raise gpu::POOL_SLOTS)", refs.len(), pool.slots);
+            eprintln!(
+                "render[gpu]: a frame needs {} tiles, the GPU pool holds {}; the excess is drawn from coarser data (raise gpu::POOL_SLOTS)",
+                refs.len(),
+                pool.slots
+            );
         }
         let own: std::collections::HashSet<TileId> = units.iter().map(|u| u.data).collect();
         refs.sort_by_key(|(id, _)| (!own.contains(id), std::cmp::Reverse(id.z), *id));
@@ -400,7 +425,11 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
     let (table, mask) = tiles::lookup_table(&resident);
     if !c.rays.iter().any(|(id, _)| *id == r.id) {
         let rv: Vec<[f32; 4]> = r.rays.iter().map(|q| [q[0], q[1], q[2], 0.0]).collect();
-        let b = c.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("rays"), contents: bytemuck::cast_slice(&rv), usage: wgpu::BufferUsages::STORAGE });
+        let b = c.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("rays"),
+            contents: bytemuck::cast_slice(&rv),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
         if c.rays.len() >= 8 {
             c.rays.remove(0);
         }
@@ -477,7 +506,12 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
         rt0: [rt.x_axis.x as f32, rt.y_axis.x as f32, rt.z_axis.x as f32, 0.0],
         rt1: [rt.x_axis.y as f32, rt.y_axis.y as f32, rt.z_axis.y as f32, 0.0],
         rt2: [rt.x_axis.z as f32, rt.y_axis.z as f32, rt.z_axis.z as f32, 0.0],
-        p: [[gc.p[0], gc.p[1], gc.p[2], gc.p[3]], [gc.p[4], gc.p[5], gc.p[6], gc.p[7]], [gc.p[8], gc.p[9], gc.p[10], gc.p[11]], [gc.p[12], gc.p[13], gc.p[14], gc.p[15]]],
+        p: [
+            [gc.p[0], gc.p[1], gc.p[2], gc.p[3]],
+            [gc.p[4], gc.p[5], gc.p[6], gc.p[7]],
+            [gc.p[8], gc.p[9], gc.p[10], gc.p[11]],
+            [gc.p[12], gc.p[13], gc.p[14], gc.p[15]],
+        ],
         lim: [gc.angle_limit.cos() as f32, half_lim.cos() as f32, w as f32, h as f32],
         kind: [gc.kind, 0, 0, 0],
     };
@@ -523,7 +557,10 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
             let bg = d.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
                 layout: &c.gbuf_pipe.get_bind_group_layout(0),
-                entries: &[wgpu::BindGroupEntry { binding: 0, resource: gu.as_entire_binding() }, wgpu::BindGroupEntry { binding: 1, resource: draws_b.as_entire_binding() }],
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: gu.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: draws_b.as_entire_binding() },
+                ],
             });
             rp.set_pipeline(&c.gbuf_pipe);
             rp.set_bind_group(0, &bg, &[]);

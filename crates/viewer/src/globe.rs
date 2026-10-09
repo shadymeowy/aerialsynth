@@ -331,10 +331,18 @@ impl Globe {
                 }),
             }],
         });
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("globe"), source: wgpu::ShaderSource::Wgsl(include_str!("globe.wgsl").into()) });
-        let layout_t = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("terrain"), bind_group_layouts: &[Some(&bgl0), Some(&bgl1)], immediate_size: 0 });
-        let layout_s = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("sky"), bind_group_layouts: &[Some(&bgl0)], immediate_size: 0 });
-        let target = |blend: Option<wgpu::BlendState>| [Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::Rgba8Unorm, blend, write_mask: wgpu::ColorWrites::ALL })];
+        let module = device
+            .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("globe"), source: wgpu::ShaderSource::Wgsl(include_str!("globe.wgsl").into()) });
+        let layout_t = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("terrain"),
+            bind_group_layouts: &[Some(&bgl0), Some(&bgl1)],
+            immediate_size: 0,
+        });
+        let layout_s =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("sky"), bind_group_layouts: &[Some(&bgl0)], immediate_size: 0 });
+        let target = |blend: Option<wgpu::BlendState>| {
+            [Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::Rgba8Unorm, blend, write_mask: wgpu::ColorWrites::ALL })]
+        };
         let ms = wgpu::MultisampleState { count: SAMPLES, mask: !0, alpha_to_coverage_enabled: false };
         let pipe_terrain = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("terrain"),
@@ -375,7 +383,12 @@ impl Globe {
                 bias: Default::default(),
             }),
             multisample: ms,
-            fragment: Some(wgpu::FragmentState { module: &module, entry_point: Some("fs_sky"), compilation_options: Default::default(), targets: &target(None) }),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_sky"),
+                compilation_options: Default::default(),
+                targets: &target(None),
+            }),
             multiview_mask: None,
             cache: None,
         });
@@ -502,12 +515,7 @@ impl Globe {
             Some(l) => l,
             None => {
                 // the least recently used tile not drawn this frame (keep the coarsest levels)
-                let victim = self
-                    .resident
-                    .iter()
-                    .filter(|(t, s)| s.last < self.frame && t.z > 2)
-                    .min_by_key(|(_, s)| s.last)
-                    .map(|(t, _)| *t);
+                let victim = self.resident.iter().filter(|(t, s)| s.last < self.frame && t.z > 2).min_by_key(|(_, s)| s.last).map(|(t, _)| *t);
                 let Some(v) = victim else { return };
                 self.resident.remove(&v).unwrap().layer
             }
@@ -912,7 +920,12 @@ fn frustum_planes(m: &DMat4) -> [DVec4; 4] {
 }
 
 fn buffer(device: &wgpu::Device, label: &str, data: &[u8], usage: wgpu::BufferUsages) -> wgpu::Buffer {
-    let b = device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size: data.len() as u64, usage: usage | wgpu::BufferUsages::COPY_DST, mapped_at_creation: true });
+    let b = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: data.len() as u64,
+        usage: usage | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: true,
+    });
     b.slice(..).get_mapped_range_mut().expect("mapped at creation").copy_from_slice(data);
     b.unmap();
     b

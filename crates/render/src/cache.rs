@@ -45,9 +45,7 @@ impl TileCache {
 
     /// Is the tile available (stored, cached, or generatable)?
     pub fn available(&self, id: TileId) -> bool {
-        self.store.contains(id)
-            || self.inner.lock().map.contains_key(&id)
-            || (self.generator.is_some() && id.z <= self.lazy_max_zoom)
+        self.store.contains(id) || self.inner.lock().map.contains_key(&id) || (self.generator.is_some() && id.z <= self.lazy_max_zoom)
     }
 
     pub fn get(&self, id: TileId) -> Option<Arc<TileData>> {

@@ -141,9 +141,7 @@ impl TileData {
             Layer::Landcover => self.landcover = b,
             Layer::Emission => self.emission = b,
             Layer::Normal => self.normal = b.into_iter().map(|x| x as i8).collect(),
-            Layer::Elevation => {
-                self.elevation = b.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
-            }
+            Layer::Elevation => self.elevation = b.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect(),
         }
     }
 

@@ -19,7 +19,7 @@ plus a per-millisecond index; we use the same data types.
 | C. Linearized brightness constancy | `dL/dt = −∇L · flow` from one render + exact flow | very cheap | ignores occlusions and non-linear changes; poor for large motion |
 | D. A on the GPU, *implemented* | A with the keyframes rendered and the pixel model run on the GPU (`render.backend: gpu`, the default `auto` when there is a GPU; `docs/gpu.md`) | ~11–15x faster than A on the CPU; same events statistically | random numbers not bit-identical to the CPU |
 
-A is the implementation, on the CPU or (D) the GPU. B was implemented and measured (commit 3138801): the reprojection
+A is the implementation, on the CPU or (D) the GPU. B was implemented and measured: the reprojection
 itself is exact (image shifts match the geometric flow, identity warps are exact), but a
 pixel is a box integral of texture with detail near its Nyquist frequency, and under a
 sub-pixel shift that integral changes in ways no interpolation of the integrated image can
@@ -31,7 +31,7 @@ maps correlate at 0.92 with A, at 0.63x the count). C has the same problem in a 
 
 Per pixel, the processing chain is the following. Prophesee bias names are in brackets.
 
-1. **Photoreceptor input:** `L = ln(gain · lum + eps)`. `eps` acts as dark current: it limits
+1. **Photoreceptor input:** `L = ln(gain · lum + log_eps)`. `log_eps` acts as dark current: it limits
    contrast in the dark and makes shot noise dominate there.
 2. **Photoreceptor bandwidth** (`bias_fo`): a first-order low-pass on `L` whose 3 dB cutoff
    grows with photocurrent and saturates: `cutoff_hz · I/(I + cutoff_half_lum)`, floored at
@@ -98,7 +98,7 @@ The depth / flow of an event camera come from a separate geometry-only render at
 hot pixels, background activity) is seeded from `seed` mixed with the camera path, so two event
 cameras with the same settings get independent noise.
 
-Performance of the CPU backend on 8 cores (VGA, supersample 2, `max_px_per_step` 0.5,
+Performance of the CPU backend on the author's machine (Xeon W-2125, 8 threads; VGA, supersample 2, `max_px_per_step` 0.5,
 ~1000 m AGL flight with engine vibration): about 100 s of compute per simulated second, for
 ~520 renders per simulated second; the sensor model runs in parallel (~3 ms per step) and is
 not the bottleneck. The GPU backend renders the keyframes ~15x and runs the sensor steps ~11x
@@ -118,8 +118,3 @@ show (activity spectrum peaks at 100/200/300 Hz). These steps need no extra rend
 renderer returns the lamp light as `radiance + cos(ωt)·A + sin(ωt)·B` (exact; checked against
 direct renders to 1e-11), so only image motion triggers renders, plus one every 0.25 s for a
 still camera (so a hover keeps its batches of steps short and follows lighting changes).
-
-## Possible next steps
-
-- **Cheaper keyframes:** with the GPU backend (option D, done) the cost is still the keyframe
-  renders, which scale with image motion; reprojecting keyframes (B) lost too many events.

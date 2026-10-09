@@ -1,8 +1,11 @@
 //! Terrain heights at points: `lat lon [gsd_m]` per line on stdin (degrees; default 30 m),
 //! `surface ground water_kind` per line on stdout (m above the ellipsoid); with `--cover`, the
 //! land-cover class name and the height of what stands on the ground (trees, buildings; m) at
-//! the given gsd as fourth and fifth columns (CPU, slower). Used by showcase/route.py
-//! for the airliner's airports and terrain clearance.
+//! the given gsd as fourth and fifth columns (CPU, slower). An optional positional argument sets
+//! the world seed (default config otherwise). Used by `showcase/route.py` for the airliner's
+//! airports and terrain clearance.
+//!
+//!     echo "47.0 8.0" | cargo run --release -p terragen --example ground -- [SEED] [--cover]
 use std::io::{BufRead, Write};
 
 fn main() -> anyhow::Result<()> {
