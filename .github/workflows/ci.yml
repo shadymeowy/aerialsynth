@@ -117,6 +117,19 @@ jobs:
           save-if: ${{ github.event_name != 'pull_request' }}
       - name: Build
         run: cargo build --release --workspace --all-targets
+      - name: DEBUG render
+        if: matrix.os == 'macos-15-intel'
+        continue-on-error: true
+        env:
+          AS_DEBUG_DUMP: ${{ runner.temp }}/dump
+        run: |
+          cargo run --release -p render --example gpu_probe || true
+          cargo test --release -p aerialsynth-core --lib gpu_matches_cpu -- --nocapture 2>&1 | grep -E "DEBUG|test |result|panicked|mean" || true
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'macos-15-intel'
+        with:
+          name: debug-render
+          path: ${{ runner.temp }}/dump
       - name: Test
         run: cargo test --release --workspace --no-fail-fast
       - name: cargo install
