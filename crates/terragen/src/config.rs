@@ -277,3 +277,150 @@ impl Config {
         serde_yaml::to_string(self).unwrap_or_default()
     }
 }
+
+/// Largest `tile_supersample`: the cost grows with its square (4: 16 samples per pixel).
+pub const MAX_TILE_SUPERSAMPLE: u32 = 4;
+
+impl Config {
+    /// Check that every value is usable: lengths and wavelengths finite and > 0, amplitudes and
+    /// densities finite and >= 0, the planet a real ellipsoid. Errors name the key, e.g.
+    /// `world.hydro.levels[0].cell_km must be > 0`.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        let mut errs: Vec<String> = Vec::new();
+        let mut check = |key: &str, v: f64, ok: bool, need: &str| {
+            if !v.is_finite() || !ok {
+                errs.push(format!("world.{key} must be {need} (is {v})"));
+            }
+        };
+        // lengths, wavelengths, cell sizes: > 0
+        let mut pos = |key: &str, v: f64| check(key, v, v > 0.0, "finite and > 0");
+        let p = &self.planet;
+        pos("planet.a", p.a);
+        pos("continents.wavelength_km", self.continents.wavelength_km);
+        pos("relief.belt_wavelength_km", self.relief.belt_wavelength_km);
+        pos("relief.gully_wavelength_m", self.relief.gully_wavelength_m);
+        for (i, l) in self.hydro.levels.iter().enumerate() {
+            pos(&format!("hydro.levels[{i}].cell_km"), l.cell_km);
+        }
+        pos("hydro.lake_cell_km", self.hydro.lake_cell_km);
+        pos("landuse.region_km", self.landuse.region_km);
+        pos("landuse.town_cell_km", self.landuse.town_cell_km);
+        if let Some(h) = &self.home {
+            pos("home.radius_km", h.radius_km);
+        }
+        // amplitudes, densities, multipliers: >= 0
+        let mut nonneg = |key: &str, v: f64| check(key, v, v >= 0.0, "finite and >= 0");
+        let r = &self.relief;
+        nonneg("continents.warp", self.continents.warp);
+        nonneg("relief.mountain_height_m", r.mountain_height_m);
+        nonneg("relief.hill_height_m", r.hill_height_m);
+        nonneg("relief.micro_height_m", r.micro_height_m);
+        nonneg("relief.mesas", r.mesas);
+        nonneg("relief.dune_height_m", r.dune_height_m);
+        nonneg("relief.erosion", r.erosion);
+        for (i, l) in self.hydro.levels.iter().enumerate() {
+            nonneg(&format!("hydro.levels[{i}].width_m[0]"), l.width_m[0]);
+            nonneg(&format!("hydro.levels[{i}].width_m[1]"), l.width_m[1]);
+            nonneg(&format!("hydro.levels[{i}].valley_m"), l.valley_m);
+            nonneg(&format!("hydro.levels[{i}].meander"), l.meander);
+            nonneg(&format!("hydro.levels[{i}].max_depth_m"), l.max_depth_m);
+        }
+        nonneg("hydro.lake_density", self.hydro.lake_density);
+        nonneg("vegetation.tree_density", self.vegetation.tree_density);
+        nonneg("landuse.agriculture", self.landuse.agriculture);
+        nonneg("landuse.towns", self.landuse.towns);
+        nonneg("landuse.roads", self.landuse.roads);
+        nonneg("albedo.saturation", self.albedo.saturation);
+        nonneg("albedo.brightness", self.albedo.brightness);
+        let s = &self.satellite;
+        nonneg("satellite.ambient", s.ambient);
+        nonneg("satellite.direct", s.direct);
+        nonneg("satellite.exposure", s.exposure);
+        // ranges and plain finite values
+        let mut within = |key: &str, v: f64, lo: f64, hi: f64| check(key, v, (lo..=hi).contains(&v), &format!("in [{lo}, {hi}]"));
+        if let Some(h) = &self.home {
+            within("home.lat", h.lat, -90.0, 90.0);
+            within("home.strength", h.strength, 0.0, 1.0);
+        }
+        within("satellite.sun_elevation_deg", s.sun_elevation_deg, -90.0, 90.0);
+        within("satellite.haze", s.haze, 0.0, 1.0);
+        let mut finite = |key: &str, v: f64| check(key, v, true, "finite");
+        finite("continents.threshold", self.continents.threshold);
+        if let Some(h) = &self.home {
+            finite("home.lon", h.lon);
+        }
+        for (i, l) in self.hydro.levels.iter().enumerate() {
+            finite(&format!("hydro.levels[{i}].wet_moisture"), l.wet_moisture);
+        }
+        let c = &self.climate;
+        finite("climate.equator_temp_c", c.equator_temp_c);
+        finite("climate.pole_drop_c", c.pole_drop_c);
+        finite("climate.lapse_rate_c_per_km", c.lapse_rate_c_per_km);
+        finite("climate.moisture_bias", c.moisture_bias);
+        finite("satellite.sun_azimuth_deg", s.sun_azimuth_deg);
+        // inverse flattening: 0 or inf (a sphere) or > 1 (b = a (1 - 1/inv_f) > 0)
+        if !(p.inv_f == 0.0 || p.inv_f == f64::INFINITY || (p.inv_f.is_finite() && p.inv_f > 1.0)) {
+            errs.push(format!("world.planet.inv_f must be 0 (a sphere) or > 1 (is {})", p.inv_f));
+        }
+        for (i, l) in self.hydro.levels.iter().enumerate() {
+            if l.width_m[1] < l.width_m[0] {
+                errs.push(format!("world.hydro.levels[{i}].width_m must be [min, max] with min <= max (is {:?})", l.width_m));
+            }
+        }
+        if !(1..=MAX_TILE_SUPERSAMPLE).contains(&self.tile_supersample) {
+            errs.push(format!("world.tile_supersample must be 1..={MAX_TILE_SUPERSAMPLE} (is {})", self.tile_supersample));
+        }
+        match errs.len() {
+            0 => Ok(()),
+            1 => anyhow::bail!("{}", errs[0]),
+            _ => anyhow::bail!("{} (and {} more: {})", errs[0], errs.len() - 1, errs[1..].join("; ")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn err(f: impl FnOnce(&mut Config)) -> String {
+        let mut c = Config::default();
+        f(&mut c);
+        match c.validate() {
+            Ok(()) => panic!("accepted"),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    #[test]
+    fn defaults_are_valid() {
+        Config::default().validate().unwrap();
+        Config { home: None, tile_supersample: 1, ..Config::default() }.validate().unwrap();
+        let mut sphere = Config::default();
+        sphere.planet.inv_f = 0.0;
+        sphere.validate().unwrap();
+        sphere.planet.inv_f = f64::INFINITY;
+        sphere.validate().unwrap();
+    }
+
+    #[test]
+    fn bad_values_name_their_key() {
+        assert!(err(|c| c.planet.a = 0.0).starts_with("world.planet.a must be finite and > 0"));
+        assert!(err(|c| c.planet.a = f64::NAN).starts_with("world.planet.a"));
+        assert!(err(|c| c.planet.inv_f = 0.5).starts_with("world.planet.inv_f"));
+        assert!(err(|c| c.planet.inv_f = -300.0).starts_with("world.planet.inv_f"));
+        assert!(err(|c| c.tile_supersample = 64).starts_with("world.tile_supersample must be 1..=4"));
+        assert!(err(|c| c.tile_supersample = 0).starts_with("world.tile_supersample"));
+        assert!(err(|c| c.hydro.levels[0].cell_km = 0.0).starts_with("world.hydro.levels[0].cell_km must be finite and > 0"));
+        assert!(err(|c| c.hydro.levels[2].cell_km = f64::INFINITY).starts_with("world.hydro.levels[2].cell_km"));
+        assert!(err(|c| c.continents.wavelength_km = 0.0).starts_with("world.continents.wavelength_km"));
+        assert!(err(|c| c.landuse.town_cell_km = 0.0).starts_with("world.landuse.town_cell_km"));
+        assert!(err(|c| c.hydro.lake_cell_km = 0.0).starts_with("world.hydro.lake_cell_km"));
+        assert!(err(|c| c.relief.mountain_height_m = -1.0).starts_with("world.relief.mountain_height_m must be finite and >= 0"));
+        assert!(err(|c| c.satellite.haze = 2.0).starts_with("world.satellite.haze"));
+        let two = err(|c| {
+            c.planet.a = 0.0;
+            c.landuse.region_km = -1.0;
+        });
+        assert!(two.contains("and 1 more") && two.contains("world.landuse.region_km"), "{two}");
+    }
+}

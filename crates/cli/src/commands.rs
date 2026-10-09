@@ -339,16 +339,16 @@ pub struct TilesArgs {
     #[arg(long, value_name = "PREFIX", help_heading = "Preview")]
     #[allow(rustdoc::invalid_html_tags)] // the doc comment is the CLI help text
     pub png: Option<PathBuf>,
-    /// Preview: zoom level.
+    /// Preview: zoom level (at most tiles.max_zoom).
     #[arg(long, default_value_t = 14, help_heading = "Preview")]
     pub zoom: u8,
-    /// Preview: mosaic size in tiles per side.
+    /// Preview: mosaic size in tiles per side (at most 32).
     #[arg(long, default_value_t = 4, help_heading = "Preview")]
     pub size: u32,
     /// Preview: centre lat,lon (deg; default: the world's home).
     #[arg(long, allow_hyphen_values = true, help_heading = "Preview")]
     pub at: Option<String>,
-    /// Preview: layers (rgb, albedo, elevation, normal, landcover, hillshade).
+    /// Preview: layers (rgb, albedo, elevation, normal, landcover, hillshade, emission).
     #[arg(long, default_value = "rgb", help_heading = "Preview")]
     pub layers: String,
 }
@@ -365,7 +365,8 @@ pub fn tiles(a: TilesArgs) -> Result<()> {
     let s = setup(&a.common)?;
     if let Some(prefix) = &a.png {
         let at = a.at.as_deref().map(|v| parse_floats(v, 2, "--at lat,lon")).transpose()?.map(|v| (v[0], v[1]));
-        return crate::preview::mosaic(s.world.clone(), at, a.zoom, a.size, &a.layers, prefix);
+        let layers = crate::preview::check_args(a.zoom, s.tiles.max_zoom, a.size, &a.layers, at)?;
+        return crate::preview::mosaic(s.world.clone(), at, a.zoom, a.size, &layers, prefix);
     }
     let gen = pipeline::generator(&s)?;
     let flight = a.list.is_none() && a.bbox.is_none();
@@ -422,6 +423,7 @@ pub struct ViewArgs {
 /// The world on a globe (map) and through a camera (the dataset renderer), flown live.
 pub fn view(a: ViewArgs) -> Result<()> {
     let s = setup(&a.common)?;
+    viewer::check_options(&a.view, s.tiles.max_zoom)?;
     let gen = pipeline::generator(&s)?;
     // (read-only without generation: a store of another generator version can be viewed)
     let store = if a.view.no_generate {

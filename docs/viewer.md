@@ -19,7 +19,8 @@ Both views share one flight and one tile store. By default the tiles a view want
 generated in the background and stored (`--no-generate`: stored tiles only, the store opened
 read-only, so a store of another generator version can be viewed). On start, levels
 z0..=`--base-zoom` (4) are completed for the whole planet (341 tiles; low zooms are the
-slowest tiles to generate, see `docs/gpu.md`).
+slowest tiles to generate, see `docs/gpu.md`). `--base-zoom` is at most 8 (87,381 tiles) and
+`tiles.max_zoom`.
 
 The viewer needs a GPU (wgpu: Vulkan, Metal or DX12). Run it on the machine's own display;
 over SSH X forwarding it runs, but slowly.
@@ -56,7 +57,7 @@ over SSH X forwarding it runs, but slowly.
 | `--fly free\|plane` | | start flying instead of orbiting |
 | `--start lat,lon,agl` | home, 600 m | where to start (deg, deg, m above the ground) |
 | `--no-generate` | | stored tiles only (read-only) |
-| `--max-zoom`, `--base-zoom` | `tiles.max_zoom`, 4 | deepest generated level (map and camera; the camera renders no deeper than `tiles.max_zoom`); levels completed on start |
+| `--max-zoom`, `--base-zoom` | `tiles.max_zoom`, 4 (at most 8) | deepest generated level (map and camera; the camera renders no deeper than `tiles.max_zoom`); levels completed on start |
 | `--camera PATH` | first camera with `rgb` | the scenario camera; without one, a 960×540 forward camera |
 | `--scale F` | ≤ 960 px wide | camera resolution factor (pinhole-type models) |
 | `--supersample N` | 1 | camera supersampling |

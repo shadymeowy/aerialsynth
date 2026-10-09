@@ -17,6 +17,12 @@ output       the sequence file: body pose rate, time window, PNG export, compres
 - **Optional:** every section and nearly every key is optional; a camera needs its `path` and
   `intrinsics` (model, width, height and the model's parameters). Unknown keys are errors, so a typo is not
   silently ignored.
+- **Checked values:** a scenario is checked when it loads, and every error names its key.
+  World lengths, wavelengths and cell sizes (`world.planet.a`, `continents.wavelength_km`,
+  `hydro.levels[i].cell_km`, `landuse.town_cell_km`, …) must be finite and > 0, amplitudes and
+  densities >= 0; `world.planet.inv_f` is 0 (a sphere) or > 1; `world.tile_supersample` is
+  1..=4. Rates (`frame_rate`, `rate_hz`) and durations must be finite and > 0, and no time
+  series may exceed 10 million samples.
 - **Units** are in the key: `altitude_m`, `speed_mps`, `duration_s`, `rate_hz`, `tau_s`,
   `visibility_km`, `sun_elevation_deg`, … The exceptions are `lat` / `lon` (degrees) and
   dimensionless factors.

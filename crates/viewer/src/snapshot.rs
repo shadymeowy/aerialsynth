@@ -28,7 +28,7 @@ pub(crate) fn snapshot(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Gener
     let (w, h) = parse_size(&args.size)?;
     let (device, queue) = headless_device()?;
     let ell = gen.world.ell;
-    let svc = Service::start(store, gen, base_tiles(args.base_zoom), (rayon::current_num_threads() / 2).max(1), || {});
+    let svc = Service::start(store, gen, base_tiles(args.base_zoom()), (rayon::current_num_threads() / 2).max(1), || {});
     let mut globe = Globe::new(&device, &queue, ell, args.gpu_tiles);
     let s = map_settings(args);
     let mut cam = Camera {
@@ -289,7 +289,7 @@ pub(crate) fn record(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Generat
     let (device, queue) = headless_device()?;
     let ell = gen.world.ell;
     let mut ground = Ground { store: store.clone(), gen: gen.clone(), z: GROUND_ZOOM, tiles: HashMap::new() };
-    let svc = Service::start(store, gen, base_tiles(args.base_zoom), (rayon::current_num_threads() / 2).max(1), || {});
+    let svc = Service::start(store, gen, base_tiles(args.base_zoom()), (rayon::current_num_threads() / 2).max(1), || {});
     let mut globe = Globe::new(&device, &queue, ell, args.gpu_tiles);
     let base = map_settings(args);
     let settings = |(mode, borders): (Option<String>, bool), exag: f64| {

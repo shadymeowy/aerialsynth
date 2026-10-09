@@ -140,7 +140,8 @@ struct PassA {
 }
 
 impl Generator {
-    /// A generator on the GPU when there is one (`Backend::Auto`).
+    /// A generator on the GPU when there is one (`Backend::Auto`). The config is not checked:
+    /// use [`Generator::try_new`] for configs from users.
     pub fn new(cfg: Config) -> Self {
         Self::with_backend(cfg, Backend::Auto)
     }
@@ -158,8 +159,15 @@ impl Generator {
         }
     }
 
-    /// A generator on `backend`; `Backend::Gpu` fails without a suitable GPU.
+    /// A generator on the GPU when there is one, for a validated config ([`Config::validate`]).
+    pub fn try_new(cfg: Config) -> anyhow::Result<Self> {
+        Self::try_with_backend(cfg, Backend::Auto)
+    }
+
+    /// A generator on `backend` for a validated config ([`Config::validate`]); `Backend::Gpu`
+    /// fails without a suitable GPU.
     pub fn try_with_backend(cfg: Config, backend: Backend) -> anyhow::Result<Self> {
+        cfg.validate()?;
         if backend == Backend::Gpu {
             #[cfg(feature = "gpu")]
             crate::gpu::shared()?.check_generator()?;

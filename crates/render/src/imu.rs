@@ -215,14 +215,22 @@ impl Truth<'_> {
 /// Synthesize the IMU over [t0, t1] (trajectory time). Sample k at t is the mean over the
 /// centred window [t - dt/2, t + dt/2] (delta-velocity / delta-angle semantics, no delay).
 pub fn synthesize(cfg: &ImuConfig, poses: &[Pose], truth: Option<&[ImuTruth]>, ell: &Ellipsoid, t0: f64, t1: f64) -> Result<ImuData> {
-    if cfg.rate_hz <= 0.0 {
-        bail!("imu.rate_hz must be > 0");
+    if !(cfg.rate_hz.is_finite() && cfg.rate_hz > 0.0) {
+        bail!("imu.rate_hz must be finite and > 0");
     }
     if poses.len() < 2 || poses[poses.len() - 1].t - poses[0].t < 1e-3 {
         bail!("imu: the trajectory must span at least 1 ms (2 poses)");
     }
     let dt = 1.0 / cfg.rate_hz;
-    let n = ((t1 - t0) / dt).floor() as usize + 1;
+    let n = ((t1 - t0) / dt).floor() + 1.0;
+    if !(n >= 1.0 && n <= crate::scenario::MAX_SAMPLES as f64) {
+        bail!(
+            "imu: {n:.3e} samples at {} Hz over [{t0}, {t1}] s (1 ..= {}): lower imu.rate_hz or shorten the output window",
+            cfg.rate_hz,
+            crate::scenario::MAX_SAMPLES
+        );
+    }
+    let n = n as usize;
     let r_bi = cfg.extrinsics.r_body_imu();
     let lever = DVec3::from_array(cfg.extrinsics.translation);
     let mut rng = Rng(cfg.seed ^ 0x1A0);
