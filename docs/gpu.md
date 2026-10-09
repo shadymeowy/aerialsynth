@@ -148,7 +148,7 @@ Low-zoom tiles are the most work per tile on both backends, for two reasons:
 ## Troubleshooting
 
 - **No suitable GPU:** with `backend: auto` (the default) generation and rendering fall back to
-  the CPU with a one-line warning; `backend: gpu` makes it an error instead. Tile generation
+  the CPU; `backend: gpu` makes a missing GPU an error instead. Tile generation
   needs 64-bit float and integer shaders and 256 MiB storage buffers; adapters without them
   (many integrated GPUs, software Vulkan, Metal on macOS) use the CPU generator, while
   rendering may still run on the GPU.
