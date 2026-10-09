@@ -21,7 +21,8 @@ const LINK_FILE: &str = if cfg!(windows) {
 fn lib_dir() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
     let deps = exe.parent().unwrap();
-    [deps.parent().unwrap(), deps].into_iter().find(|d| d.join(LINK_FILE).exists()).unwrap_or_else(|| panic!("{LINK_FILE} not built")).to_path_buf()
+    let dir = [deps.parent().unwrap(), deps].into_iter().find(|d| d.join(LINK_FILE).exists()).unwrap_or_else(|| panic!("{LINK_FILE} not built")).to_path_buf();
+    dir
 }
 
 /// The command compiling `src` into the executable `bin`, linked against the library in
