@@ -218,7 +218,8 @@ fn sources() -> (String, String, String) {
     let w = World::new(Config::default());
     let (_, pal) = tables::palette(&SurfaceModel::new(&w).pal);
     let points = format!("{consts}{NOISE_WGSL}{WORLD_WGSL}{POINTS_WGSL}");
-    let tile = format!("{consts}{pal}{NOISE_WGSL}{WORLD_WGSL}{TILE_A_WGSL}{SURFACE_WGSL}{TILE_B_WGSL}");
+    let classes = crate::landcover::WGSL;
+    let tile = format!("{consts}{pal}{classes}{NOISE_WGSL}{WORLD_WGSL}{TILE_A_WGSL}{SURFACE_WGSL}{TILE_B_WGSL}");
     let drain = format!("{consts}{NOISE_WGSL}{WORLD_WGSL}{DRAIN_WGSL}");
     (points, tile, drain)
 }
@@ -274,14 +275,19 @@ impl GpuGenerator {
             immediate_size: 0,
         });
         let pipe = |module: &wgpu::ShaderModule, pl: &wgpu::PipelineLayout, entry: &str| {
-            d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            let t = std::time::Instant::now();
+            let p = d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(entry),
                 layout: Some(pl),
                 module,
                 entry_point: Some(entry),
                 compilation_options: Default::default(),
                 cache: cache.as_ref().map(|c| &c.cache),
-            })
+            });
+            if std::env::var_os("TERRAGEN_PROFILE").is_some() {
+                eprintln!("  pipeline {entry}: {:.1} s", t.elapsed().as_secs_f64());
+            }
+            p
         };
         // (the driver compiles each pipeline on its own: in parallel)
         let names = [

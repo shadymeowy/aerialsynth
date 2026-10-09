@@ -130,16 +130,30 @@ and builds the same world:
   (and lake requests) → drainage pieces per 16-px bin → rest of pass A (and site requests) →
   pass B (adaptive supersampling) → canopy opening → output layers.
 * **Startup:** the compiled pipelines are kept in `$XDG_CACHE_HOME/terrain/` (default
-  `~/.cache/terrain/`; the driver's own shader cache is per executable); after the first run the generator is ready in ~0.1 s.
+  `~/.cache/terrain/`; the driver's own shader cache is per executable); after the first run the
+  generator is ready in ~0.1 s. The first compilation (new install, new driver, changed shaders)
+  takes ~25–30 s, set by pass B (`TERRAGEN_PROFILE=1` prints each pipeline's time). The driver
+  inlines every call, so the shaders call the big functions (the surface model, the pixel-field
+  fBm, a town) from one site each: with five call sites of the surface model pass B took
+  ~150 s. `terrain view` compiles in the background and generates on the CPU meanwhile
+  (`Generator::prepare_gpu_in_background`).
 
 | | CPU (8 threads) | GPU (RTX 2080 Ti) |
 |---|---|---|
 | 64 tiles at z15 / z13 (cold caches) | 12.7 s / 13.5 s (5 tiles/s) | 1.1 s (60 tiles/s) |
-| v0.1.0's `configs/quick.yaml` (10 s, 640 × 512): planned tiles (357, z0–z17) | 57.6 s | 5.7 s |
+| the 0.2.0 `configs/quick.yaml` (10 s, 640 × 512): planned tiles (357, z0–z17) | 57.6 s | 5.7 s |
 | its completion (280 tiles: margins around coarse tiles of unknown range, which the dry runs no longer add: now 2 tiles) | 148 s | 13 s |
 | `terrain view` snapshot from an empty store (592 tiles: the whole globe at z0–z4 and the view's tiles) | 323 s | 33 s |
+| base levels z0–z4 (341 tiles; `examples/base_levels`, loaded machine) | ~620 s (z3–z4 ~0.5 tiles/s) | 25 s (z3–z4 9–14 tiles/s) |
+| `terrain view`, empty store: first tiles drawn (warm / cold pipeline cache) | z0 in 0.4–0.8 s | ~1 s / ~1 s (was 2 s / 137–157 s) |
+| `terrain view --view fly:39.9,32.8,600,0,-12`, empty store: the view's 1321 tiles in | | 29 s (was 51 s: the base levels went first) |
 
-Low-zoom tiles are the most work per tile on both backends, for two reasons:
+On the RTX 6000 Ada of a shared server, cold pipeline cache, globe snapshot from an empty store:
+first tiles 157 s → 0.7 s, the view's tiles 172 s → 29 s, all base levels 188 s → 45 s.
+
+Low-zoom tiles are the most work per tile on both backends (`TERRAGEN_PROFILE=1`: a batch of
+four polar z3/z4 tiles takes 0.3–0.8 s on the GPU, ~0.6 s of it for 30,000–40,000 land-use
+regions, each needing a point evaluation with the finest drainage network), for two reasons:
 * **Polar pixels:** a Mercator pixel of z3 at 80° is 3.4 km, so lakes and land-use regions
   switch on over thousands of kilometres.
 * **Lake levels:** every lake's level takes 11 terrain evaluations with the finest drainage
@@ -151,6 +165,16 @@ Low-zoom tiles are the most work per tile on both backends, for two reasons:
   Python bindings: an index, a PCI bus id (`0000:83:00.0`) or part of the adapter name
   (`AERIALSYNTH_GPU=6000`). Without it the first high-performance adapter is used. A value
   that matches no single GPU is an error that lists the adapters (`AERIALSYNTH_GPU=list`).
+- **No GPU at all:** `AERIALSYNTH_GPU=none` hides every GPU: tile generation, rendering and the
+  event sensor run on the CPU (`backend: gpu` and the viewer then fail). For a GPU whose driver
+  misbehaves, or to compare against the CPU reference.
+- **A GPU that renders wrongly:** with `render.backend: auto` the renderer first draws a 32 × 24
+  test frame of a synthetic tile on the GPU and on the CPU (once per process: 15–30 ms after
+  the GPU renderer's start-up, ~0.3 s on Windows' software WARP device). A GPU whose frame
+  clearly differs (no terrain, wrong depth, land cover or brightness) is not used: a one-line
+  warning (`render.backend auto: the GPU (…) renders a test frame wrongly (…); rendering on the
+  CPU`) and the CPU renders. Seen on the virtual GPU of macOS VMs on Intel hosts ("Apple
+  Paravirtual device"), which renders nothing. `backend: gpu` skips the check.
 
 - **No suitable GPU:** with `backend: auto` (the default) generation and rendering fall back to
   the CPU; `backend: gpu` makes a missing GPU an error instead. Tile generation

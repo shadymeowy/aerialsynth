@@ -43,33 +43,39 @@ fn pf_single(lam: f32, split: u32, cut: f32) -> bool {
 
 /// Pixel field `i` (or a part of it, `SurfaceModel::pixel_field`).
 fn pixel_field(i: u32, p: vec3<f64>, gsd: f32, split: u32, cut: f32) -> f32 {
-    switch i {
-        case 0u: { return pf_fbm(FBM_DETAIL, 1.0lf, p, gsd, split, cut); }
-        case 1u: { return pf_fbm(FBM_PATCH, 1.0lf, p, gsd, split, cut); }
-        case 2u: { return pf_fbm(FBM_LAND, 1.0lf, p, gsd, split, cut) * fbm_norm(FBM_LAND) * 1.8; }
-        case 3u: { return pf_fbm(FBM_STRATA, 1.0lf, p, gsd, split, cut); }
-        case 4u: { return pf_fbm(FBM_STRATA, 1.7lf, p, gsd, split, cut); }
-        case 5u: { return pf_fbm(FBM_SNOW, 1.0lf, p, gsd, split, cut); }
-        case 6u: { return pf_fbm(FBM_FOREST, 1.0lf, p, gsd, split, cut) * fbm_norm(FBM_FOREST) * 1.8; }
-        case 7u: {
-            var v = pf_fbm(FBM_PATCH, 0.3lf, p, gsd, split, cut);
-            if (pf_single(1200.0, split, cut)) {
-                v += 0.5 * perlin3(0x57Alu, p / 1200.0lf) * band(1200.0, gsd);
-            }
-            return v;
+    if (i >= 13u) {
+        if (pf_single(180.0, split, cut)) {
+            return perlin3(0x57A1lu + u64(i - 13u), p / 180.0lf);
         }
-        case 8u: { return pf_fbm(FBM_FIELD_VAR, 1.0lf, p, gsd, split, cut); }
-        case 9u: { return pf_fbm(FBM_FIELD_VAR, 1.7lf, p, gsd, split, cut); }
-        case 10u: { return pf_fbm(FBM_FIELD_VAR, 3.0lf, p, gsd, split, cut); }
-        case 11u: { return pf_fbm(FBM_WARP2, 1.0lf, p, gsd, split, cut); }
-        case 12u: { return pf_fbm(FBM_PATCH, 0.37lf, p, gsd, split, cut); }
-        default: {
-            if (pf_single(180.0, split, cut)) {
-                return perlin3(0x57A1lu + u64(i - 13u), p / 180.0lf);
-            }
-            return 0.0;
-        }
+        return 0.0;
     }
+    // the fBm and its scale per field, then one call (the driver inlines every call site of
+    // the fBm: one per field made pass B take minutes to compile)
+    var f = FBM_DETAIL;
+    var k = 1.0lf;
+    switch i {
+        case 1u: { f = FBM_PATCH; }
+        case 2u: { f = FBM_LAND; }
+        case 3u: { f = FBM_STRATA; }
+        case 4u: { f = FBM_STRATA; k = 1.7lf; }
+        case 5u: { f = FBM_SNOW; }
+        case 6u: { f = FBM_FOREST; }
+        case 7u: { f = FBM_PATCH; k = 0.3lf; }
+        case 8u: { f = FBM_FIELD_VAR; }
+        case 9u: { f = FBM_FIELD_VAR; k = 1.7lf; }
+        case 10u: { f = FBM_FIELD_VAR; k = 3.0lf; }
+        case 11u: { f = FBM_WARP2; }
+        case 12u: { f = FBM_PATCH; k = 0.37lf; }
+        default: {}
+    }
+    var v = pf_fbm(f, k, p, gsd, split, cut);
+    if (i == 2u || i == 6u) {
+        v = v * fbm_norm(f) * 1.8;
+    }
+    if (i == 7u && pf_single(1200.0, split, cut)) {
+        v += 0.5 * perlin3(0x57Alu, p / 1200.0lf) * band(1200.0, gsd);
+    }
+    return v;
 }
 
 /// Forest stand at `p` given the stand warp (`SurfaceModel::stand_id`).
@@ -94,24 +100,7 @@ fn grid_nodes_surface(ti: TileInfo, k: u32, ctx: Ctx, nb: u32, ib: u32) {
 
 @group(0) @binding(4) var<storage, read> pal: array<vec4<f32>>;
 
-const LC_UNKNOWN: u32 = 0u;
-const LC_OCEAN: u32 = 1u;
-const LC_LAKE: u32 = 2u;
-const LC_RIVER: u32 = 3u;
-const LC_BEACH: u32 = 4u;
-const LC_SAND: u32 = 5u;
-const LC_ROCK: u32 = 6u;
-const LC_SNOW: u32 = 7u;
-const LC_GRASS: u32 = 8u;
-const LC_SHRUB: u32 = 9u;
-const LC_FOREST: u32 = 10u;
-const LC_CROP: u32 = 11u;
-const LC_BUILDING: u32 = 12u;
-const LC_ROAD: u32 = 13u;
-const LC_WETLAND: u32 = 14u;
-const LC_TUNDRA: u32 = 15u;
-const LC_BARE: u32 = 16u;
-const LC_URBAN: u32 = 17u;
+// (the class ids LC_* come from classes.wgsl, generated from landcover.rs)
 
 /// Field system of a land-use region (`RegionInfo`).
 struct Region {
@@ -1343,27 +1332,41 @@ struct TownOut {
 
 fn town_eval(town: Town, p: vec3<f64>, gsd: f32, fw: f32, slope: f32, clear: f32, detail: f32, warp2: f32) -> TownOut {
     var o: TownOut;
-    o.px = town_core(town, p, gsd, fw, slope, clear, detail, warp2);
     o.shadow = 0.0;
-    if (!o.px.ok) {
-        return o;
-    }
     var shadow = 0.0;
-    if ((cfg.flags & CF_SHADOWS) != 0u && o.px.shadow_ok) {
-        // march toward the sun
-        for (var k = 1; k <= 4; k++) {
-            let dist_s = f32(k) * 3.5;
-            let need = dist_s * cfg.sun_tan;
-            let sp = p + vec3<f64>(town.sun.xyz * dist_s);
-            let b = town_core(town, sp, gsd, 0.01, 0.0, 1.0, detail, warp2);
-            var hh = 0.0;
-            if (b.ok) {
-                hh = b.h * b.cov;
+    // k = 0: the pixel; k = 1..4: the march toward the sun (one call site of `town_core`: the
+    // driver inlines each)
+    for (var k = 0; k <= 4; k++) {
+        let dist_s = f32(k) * 3.5;
+        var sp = p;
+        var fw_k = fw;
+        var slope_k = slope;
+        var clear_k = clear;
+        if (k > 0) {
+            sp = p + vec3<f64>(town.sun.xyz * dist_s);
+            fw_k = 0.01;
+            slope_k = 0.0;
+            clear_k = 1.0;
+        }
+        let b = town_core(town, sp, gsd, fw_k, slope_k, clear_k, detail, warp2);
+        if (k == 0) {
+            o.px = b;
+            if (!b.ok) {
+                return o;
             }
-            if (hh > need) {
-                shadow = 0.75 * o.px.resolved;
+            if (!((cfg.flags & CF_SHADOWS) != 0u && b.shadow_ok)) {
                 break;
             }
+            continue;
+        }
+        let need = dist_s * cfg.sun_tan;
+        var hh = 0.0;
+        if (b.ok) {
+            hh = b.h * b.cov;
+        }
+        if (hh > need) {
+            shadow = 0.75 * o.px.resolved;
+            break;
         }
     }
     o.shadow = shadow * (1.0 - o.px.street * 0.5);

@@ -331,8 +331,8 @@ impl Globe {
                 }),
             }],
         });
-        let module = device
-            .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("globe"), source: wgpu::ShaderSource::Wgsl(include_str!("globe.wgsl").into()) });
+        let module =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("globe"), source: wgpu::ShaderSource::Wgsl(globe_source().into()) });
         let layout_t = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("terrain"),
             bind_group_layouts: &[Some(&bgl0), Some(&bgl1)],
@@ -875,7 +875,13 @@ impl Globe {
 
     /// True when nothing the view wants is loading, generating or waiting for upload.
     pub fn settled(&self, svc: &Service) -> bool {
-        self.pending.is_empty() && svc.in_flight() == 0 && self.stats.want_load == 0 && (self.stats.want_gen == 0) && svc.base_pending() == 0
+        self.view_complete() && svc.in_flight() == 0 && svc.base_pending() == 0
+    }
+
+    /// True when every tile the view wants is resident (base levels elsewhere may still be
+    /// generating).
+    pub fn view_complete(&self) -> bool {
+        self.pending.is_empty() && self.stats.want_load == 0 && self.stats.want_gen == 0
     }
 
     /// Ray from the eye through normalized device coordinates hit with the ellipsoid (lat, lon).
@@ -968,5 +974,23 @@ fn srgb_to_linear(c: f64) -> f64 {
         c / 12.92
     } else {
         ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// The globe shader: the land-cover class table (generated WGSL, its palette) and `globe.wgsl`.
+fn globe_source() -> String {
+    format!("{}{}", terragen::landcover::WGSL, include_str!("globe.wgsl"))
+}
+
+#[cfg(test)]
+mod wgsl_tests {
+    /// The globe shader parses and validates (naga), without a GPU.
+    #[test]
+    fn shader_validates() {
+        let src = super::globe_source();
+        let m = naga::front::wgsl::parse_str(&src).unwrap_or_else(|e| panic!("{}", e.emit_to_string(&src)));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+            .validate(&m)
+            .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&src)));
     }
 }

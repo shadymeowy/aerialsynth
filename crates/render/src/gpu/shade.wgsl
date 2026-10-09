@@ -268,10 +268,6 @@ fn block_max(p: GP) -> vec2<f32> {
     return vec2<f32>(textureLoad(t_bmax, vec2<i32>((p.ix & 255) >> 4u, (p.iy & 255) >> 4u), i32(e & 0xFFFFu), 0).r, 1.0);
 }
 
-fn is_water(c: u32) -> bool {
-    return c == 1u || c == 2u || c == 3u;
-}
-
 fn prime_vertical(sl: f32) -> f32 {
     return u.ell.x / sqrt(1.0 - u.ell.y * sl * sl);
 }
@@ -549,14 +545,23 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32) -> PS {
             mul += e.xyz * (0.2 * u.sun.z);
         }
     }
-    if has(F_RELIT) && has(F_GLINT) && is_water(landcover(p)) {
+    // the class's material (lc_material, generated from terragen::landcover): self-emission
+    // with the lights, the glint of water and other glossy classes (as raster.rs)
+    var mat = vec4<f32>(0.0);
+    if has(F_RELIT) {
+        mat = lc_material(landcover(p));
+    }
+    if mat.w > 0.0 && u.sun.z > 1e-3 {
+        mul += vec3<f32>(mat.w * u.sun.z);
+    }
+    if has(F_GLINT) && mat.x > 0.0 {
         let sun = u.sun_dir.xyz;
         let hv = normalize(v + sun);
         let nh = max(dot(up, hv), 0.0);
-        let fres = 0.02 + 0.98 * pow(1.0 - max(dot(v, up), 0.0), 5.0);
+        let fres = mat.y + (1.0 - mat.y) * pow(1.0 - max(dot(v, up), 0.0), 5.0);
         let sky_c = sky(normalize(dir_w - up * 2.0 * dot(dir_w, up)), up);
-        mul *= 1.0 - fres;
-        add += sky_c * fres + u.sun_col.xyz * (shadow * 1.5 * pow(nh, 300.0));
+        mul *= 1.0 - mat.x * fres;
+        add += (sky_c * fres + u.sun_col.xyz * (shadow * 1.5 * pow(nh, mat.z))) * mat.x;
     }
     let p_w = u.cam_pos.xyz - v * range;
     var h_pt: f32;

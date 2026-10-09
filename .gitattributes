@@ -1,0 +1,8 @@
+# LF everywhere, also in Windows checkouts: tests compare generated files (the C header) byte for
+# byte with the committed ones.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.h5 binary
+*.bin binary
+*.ttf binary

@@ -155,7 +155,7 @@ impl TileCache {
         Ok(out)
     }
 
-    fn insert(&self, id: TileId, t: Arc<TileData>) {
+    pub(crate) fn insert(&self, id: TileId, t: Arc<TileData>) {
         let mut g = self.inner.lock();
         g.tick += 1;
         let tick = g.tick;

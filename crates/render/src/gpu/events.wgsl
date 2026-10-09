@@ -118,7 +118,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) 
     if pr.a != 0.0 {
         r += pr.a * (rad(1u, i) - r);
     }
-    let lin = log(pr.gain * (0.2126 * r.x + 0.7152 * r.y + 0.0722 * r.z) + pr.eps);
+    // (luminance clamped at 0: interpolated / flickering radiance can dip below 0, and the log of
+    // a negative number is NaN, whose handling differs between GPUs)
+    let lin = log(pr.gain * max(0.2126 * r.x + 0.7152 * r.y + 0.0722 * r.z, 0.0) + pr.eps);
     var p = st[i];
     if pr.mode == 0u {
         st[i] = St(lin, lin, 3.0e38, 0.0);

@@ -211,7 +211,9 @@ impl EventSensor {
     pub fn log_image(&self, radiance: &[f32]) -> Vec<f32> {
         let g = self.cfg.gain as f32;
         let eps = self.cfg.log_eps as f32;
-        radiance.par_chunks_exact(3).map(|c| (g * (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) + eps).ln()).collect()
+        // luminance clamped at 0 (as in the GPU sensor): interpolated or flickering radiance can
+        // dip below 0, whose log would be NaN
+        radiance.par_chunks_exact(3).map(|c| (g * (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]).max(0.0) + eps).ln()).collect()
     }
 
     fn poisson(&mut self, mean: f64) -> u32 {
