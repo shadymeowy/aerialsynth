@@ -472,7 +472,7 @@ fn render_camera(
         if let Some(r) = &spec.rgb {
             sun.exposure = ex_pre.map(|e| e.time).unwrap_or(r.sensor.exposure.base_time);
         }
-        let frame = renderer.render(&cam, &sun);
+        let frame = renderer.try_render(&cam, &sun)?;
         let mut stars_gt = vec![];
         // camera poses across the open shutter, for star trails
         let star_track = |span: f64| -> Vec<CamPose> {

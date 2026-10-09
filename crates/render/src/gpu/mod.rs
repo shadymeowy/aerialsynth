@@ -154,10 +154,13 @@ struct Ctx {
     rays: Vec<(u64, wgpu::Buffer)>,
 }
 
-static CTX: OnceLock<Mutex<Ctx>> = OnceLock::new();
+static CTX: OnceLock<Result<Mutex<Ctx>, String>> = OnceLock::new();
 
-fn ctx() -> &'static Mutex<Ctx> {
-    CTX.get_or_init(|| Mutex::new(Ctx::new().expect("GPU backend: no usable GPU (render.backend: gpu)")))
+fn ctx() -> anyhow::Result<&'static Mutex<Ctx>> {
+    match CTX.get_or_init(|| Ctx::new().map(Mutex::new).map_err(|e| format!("{e:#}"))) {
+        Ok(c) => Ok(c),
+        Err(e) => anyhow::bail!("render.backend gpu: no usable GPU ({e})"),
+    }
 }
 
 impl Ctx {
@@ -312,7 +315,7 @@ fn neighbour_mask(t: TileId, view: &TileView) -> u16 {
 }
 
 /// Render one frame on the GPU (same output as the CPU path).
-pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
+pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Result<FrameOut> {
     let prof = std::env::var_os("RENDER_PROFILE").is_some();
     let t0 = std::time::Instant::now();
     let ss = r.settings.supersample.max(1);
@@ -339,8 +342,9 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
         })
         .collect();
 
-    let mut guard = ctx().lock();
+    let mut guard = ctx()?.lock();
     let c = &mut *guard;
+    c.gpu.check()?;
     c.frame += 1;
     let frame = c.frame;
     c.ensure_targets(w, h, ow, oh);
@@ -614,20 +618,23 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
         enc.copy_buffer_to_buffer(&tg.out[k], 0, &tg.read[k], 0, (ow * oh * 16) as u64);
     }
     queue.submit([enc.finish()]);
-    for &k in &bufs {
-        tg.read[k].slice(..).map_async(wgpu::MapMode::Read, |r| r.expect("GPU read-back"));
+    let slices: Vec<wgpu::BufferSlice<'_>> = bufs.iter().map(|&k| tg.read[k].slice(..)).collect();
+    if let Err(e) = c.gpu.map_read(&slices) {
+        for &k in &bufs {
+            tg.read[k].unmap(); // (a buffer mapped before the failure must not stay mapped)
+        }
+        return Err(e.context("render.backend gpu"));
     }
-    d.poll(wgpu::PollType::wait_indefinitely()).expect("GPU poll");
     let t_gpu = t0.elapsed().as_secs_f64();
     // ---------------- read back into a FrameOut
     let n = (ow * oh) as usize;
-    let get = |k: usize| -> Vec<[f32; 4]> {
-        let v = bytemuck::cast_slice::<u8, [f32; 4]>(&tg.read[k].slice(..).get_mapped_range().expect("GPU read-back map")).to_vec();
+    let get = |k: usize| -> anyhow::Result<Vec<[f32; 4]>> {
+        let v = bytemuck::cast_slice::<u8, [f32; 4]>(&tg.read[k].slice(..).get_mapped_range()?).to_vec();
         tg.read[k].unmap();
-        v
+        Ok(v)
     };
-    let rad = get(0);
-    let geo = if need_geo { get(1) } else { Vec::new() };
+    let rad = get(0)?;
+    let geo = if need_geo { get(1)? } else { Vec::new() };
     let cs = (ss / 2) as usize;
     let mut out = FrameOut {
         width: ow,
@@ -664,7 +671,7 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
         }
     }
     if split {
-        let (fc, fs) = (get(2), get(3));
+        let (fc, fs) = (get(2)?, get(3)?);
         out.flicker_cos = fc.iter().flat_map(|v| [v[0], v[1], v[2]]).collect();
         out.flicker_sin = fs.iter().flat_map(|v| [v[0], v[1], v[2]]).collect();
     }
@@ -682,5 +689,5 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> FrameOut {
             t0.elapsed().as_secs_f64() - t_gpu
         );
     }
-    out
+    Ok(out)
 }

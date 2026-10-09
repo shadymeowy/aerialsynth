@@ -21,6 +21,9 @@ pub struct Generator {
     /// the GPU generator, compiled on first use (Err: unavailable)
     #[cfg(feature = "gpu")]
     gpu: std::sync::OnceLock<Result<crate::gpu::GpuGenerator, String>>,
+    /// `Backend::Auto` after a failed GPU batch: the CPU generates from then on
+    #[cfg(feature = "gpu")]
+    gpu_failed: std::sync::atomic::AtomicBool,
 }
 
 /// Where tiles are generated. The GPU generator (`terragen::gpu`) builds the same world as the
@@ -156,6 +159,8 @@ impl Generator {
             backend,
             #[cfg(feature = "gpu")]
             gpu: std::sync::OnceLock::new(),
+            #[cfg(feature = "gpu")]
+            gpu_failed: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -183,7 +188,9 @@ impl Generator {
         if self.backend == Backend::Cpu {
             return None;
         }
-        if self.backend == Backend::Auto && !crate::gpu::shared().is_ok_and(|g| g.check_generator().is_ok()) {
+        if self.backend == Backend::Auto
+            && (self.gpu_failed.load(std::sync::atomic::Ordering::Relaxed) || !crate::gpu::shared().is_ok_and(|g| g.check_generator().is_ok()))
+        {
             return None;
         }
         match self.gpu.get_or_init(|| crate::gpu::GpuGenerator::new(self.world.cfg.clone()).map_err(|e| format!("{e:#}"))) {
@@ -205,17 +212,37 @@ impl Generator {
         "CPU".into()
     }
 
-    /// Generate tiles: on the GPU in batches, or on the CPU in parallel.
+    /// A failed GPU call: with `Backend::Auto` a warning, and the CPU generates from now on
+    /// (`Ok`); else the error.
+    #[cfg(feature = "gpu")]
+    fn on_gpu_failure(&self, e: anyhow::Error) -> anyhow::Result<()> {
+        if self.backend != Backend::Auto {
+            return Err(e);
+        }
+        if !self.gpu_failed.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            eprintln!("warning: GPU tile generation failed ({e:#}); generating on the CPU from now on");
+        }
+        Ok(())
+    }
+
+    /// Generate tiles: on the GPU in batches, or on the CPU in parallel. With `Backend::Auto`,
+    /// a failed GPU batch is generated on the CPU (and so is everything after it).
     pub fn tiles(&self, ids: &[TileId]) -> anyhow::Result<Vec<TileData>> {
+        let mut out = Vec::with_capacity(ids.len());
         #[cfg(feature = "gpu")]
         if let Some(g) = self.gpu() {
-            let mut out = Vec::with_capacity(ids.len());
             for chunk in ids.chunks(GPU_BATCH) {
-                out.extend(g.tiles(chunk)?);
+                match g.tiles(chunk) {
+                    Ok(t) => out.extend(t),
+                    Err(e) => {
+                        self.on_gpu_failure(e)?;
+                        break;
+                    }
+                }
             }
-            return Ok(out);
         }
-        Ok(ids.par_iter().map(|&id| self.tile_cpu(id)).collect())
+        out.par_extend(ids[out.len()..].par_iter().map(|&id| self.tile_cpu(id)));
+        Ok(out)
     }
 
     /// Pass A at points (lat, lon in radians, pixel size in metres): the bare ground and the
@@ -223,15 +250,19 @@ impl Generator {
     pub fn terrain_points(&self, pts: &[(f64, f64, f64)]) -> anyhow::Result<Vec<PointTerrain>> {
         #[cfg(feature = "gpu")]
         if let Some(g) = self.gpu() {
-            return Ok(g
-                .terrain_points(pts)?
-                .iter()
-                .map(|t| PointTerrain {
-                    ground: t.ground as f64,
-                    water: if t.water_kind != 0 { t.water as f64 } else { f64::NEG_INFINITY },
-                    water_kind: t.water_kind as u8,
-                })
-                .collect());
+            match g.terrain_points(pts) {
+                Ok(v) => {
+                    return Ok(v
+                        .iter()
+                        .map(|t| PointTerrain {
+                            ground: t.ground as f64,
+                            water: if t.water_kind != 0 { t.water as f64 } else { f64::NEG_INFINITY },
+                            water_kind: t.water_kind as u8,
+                        })
+                        .collect())
+                }
+                Err(e) => self.on_gpu_failure(e)?,
+            }
         }
         let ell = self.world.ell;
         Ok(pts

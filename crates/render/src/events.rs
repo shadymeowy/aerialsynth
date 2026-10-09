@@ -590,16 +590,16 @@ pub fn simulate(
     let lighting = &scn.render.lighting;
     let omega = lighting.flicker.omega();
     let cam_at = |t: f64| trajectory::interpolate(poses, t).camera(ext, &ell);
-    let render_key = |t: f64, st: &mut EventStats| -> Key {
+    let render_key = |t: f64, st: &mut EventStats| -> Result<Key> {
         let pose = trajectory::interpolate(poses, t);
         let cam = pose.camera(ext, &ell);
         let mut sun = lighting.sun_at(t - tr0, pose.geo.lat, pose.geo.lon);
         sun.exposure = 0.0; // events see instantaneous light
         let c0 = std::time::Instant::now();
-        let frame = renderer.render(&cam, &sun);
+        let frame = renderer.try_render(&cam, &sun)?;
         st.render_s += c0.elapsed().as_secs_f64();
         st.renders += 1;
-        Key { t, cam, frame }
+        Ok(Key { t, cam, frame })
     };
     // one batch of sensor steps: (time, key weights) with key k1 = None before the first render
     let mut run = |k0: &Key, k1: Option<&Key>, times: &[f64], st: &mut EventStats, writer: &mut EventWriter| -> Result<()> {
@@ -625,7 +625,7 @@ pub fn simulate(
     let (dt_min, dt_max) = (1.0 / ec.max_rate_hz.max(1.0), 1.0 / ec.min_rate_hz.max(1e-3));
 
     progress(0.0, t_end - t_start);
-    let mut k0 = render_key(t_start, &mut st);
+    let mut k0 = render_key(t_start, &mut st)?;
     run(&k0, None, &[t_start], &mut st, &mut writer)?;
     let mut dt = dt_min * 4.0;
     while k0.t < t_end {
@@ -656,7 +656,7 @@ pub fn simulate(
             }
         }
         let t1 = *times.last().unwrap();
-        let k1 = render_key(t1, &mut st);
+        let k1 = render_key(t1, &mut st)?;
         run(&k0, Some(&k1), &times, &mut st, &mut writer)?;
         k0 = k1;
         progress(k0.t - t_start, t_end - t_start);
