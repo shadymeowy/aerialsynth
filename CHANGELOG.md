@@ -9,6 +9,16 @@
     (`as_open`, `as_tile`, `as_close`, layer descriptions, per-thread error messages).
   - Python: the `aerialsynth` package (maturin, one `cp310-abi3` wheel for CPython ≥ 3.10)
     returning numpy arrays; `World(tiles_file, config, seed).tile(z, x, y, layer)`.
+- **Platforms:** CI builds and tests on Linux, macOS (Apple silicon and Intel) and Windows
+  (MSVC), including `cargo install --path crates/cli`. On Windows the C runtime is linked
+  statically (no Visual C++ redistributable needed).
+- **Release artifacts** (attached to each `v*` release):
+  - Python wheels (`cp310-abi3`) for manylinux_2_28 x86_64 and aarch64, macOS arm64 and x86_64
+    (macOS ≥ 11) and Windows x86_64;
+  - `terrain-<version>-<target>` archives with the `terrain` CLI and the C library (shared and
+    static, header, example) for the same platforms.
+
+  All are self-contained: HDF5 and zlib are linked statically, only system libraries are needed.
 
 ## 0.1.0 — 2026-10-09
 
