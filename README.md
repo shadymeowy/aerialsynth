@@ -71,7 +71,8 @@ silicon and Intel, and Windows):
   - the viewer (`terrain view`) needs a GPU.
 - **Python 3** for the scripts (optional).
 
-It is developed on Linux; macOS and Windows are built and tested in CI (without a GPU).
+It is developed on Linux; macOS and Windows are built and tested in CI (on virtual or software
+GPUs: tiles are generated on the CPU there).
 
 ## Quick start
 
