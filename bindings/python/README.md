@@ -39,6 +39,17 @@ aerialsynth.LAYERS["normal"]   # LayerInfo(name='normal', dtype=dtype('int8'), c
 | `landcover` | uint8 | 256 × 256 | class id: 0 unknown, 1 ocean, 2 lake, 3 river, 4 beach, 5 sand, 6 rock, 7 snow, 8 grass, 9 shrub, 10 forest, 11 crop, 12 building, 13 road, 14 wetland, 15 tundra, 16 bare, 17 urban |
 | `emission` | uint8 | 256 × 256 × 3 | night lights, linear radiance = 16 (v/255)³ |
 
+## Install
+
+Linux x86_64 (glibc 2.28 or newer, CPython 3.10 or newer): the wheel attached to each
+[GitHub release](https://github.com/shadymeowy/aerialsynth/releases):
+
+```sh
+pip install aerialsynth-0.1.0-cp310-abi3-manylinux_2_28_x86_64.whl
+```
+
+A GPU is optional: without a suitable one, tiles are generated on the CPU.
+
 ## Build
 
 One wheel (`cp310-abi3`, the stable ABI) serves CPython 3.10 and newer. It needs the Rust

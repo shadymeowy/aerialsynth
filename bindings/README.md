@@ -113,6 +113,11 @@ maturin build --release -o dist          # dist/aerialsynth-0.1.0-cp310-abi3-<pl
 pip install dist/aerialsynth-*.whl pytest && pytest tests
 ```
 
+Release wheels (`manylinux_2_28`, any Linux x86_64 with glibc 2.28 or newer) are built by
+`.github/workflows/wheels.yml` in a manylinux container and attached to the GitHub release of
+each `v*` tag; the same build runs locally with
+`docker run quay.io/pypa/manylinux_2_28_x86_64` and `maturin build --release --manylinux 2_28`.
+
 The extension uses the stable ABI (PyO3 `abi3-py310`): one wheel for CPython 3.10 and newer.
 It returns tiles as `bytearray`s and the Python layer views them with `np.frombuffer` (writable
 arrays, no copy), so the extension needs no numpy C API; numpy is the only dependency.
