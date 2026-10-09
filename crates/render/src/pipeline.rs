@@ -428,6 +428,8 @@ fn render_camera(
         None => None,
     };
     let keep_bits = scn.output.compression.float_keep_bits;
+    let lc_map = scn.output.landcover;
+    let lc_lut = lc_map.lut();
     let mut emit = |p: Pending, mut flow: Option<(Vec<f32>, Vec<u8>)>| -> Result<()> {
         let mut depth = spec.depth.as_ref().map(|d| match d.kind {
             DepthKind::Z => p.depth_z.clone(),
@@ -441,6 +443,9 @@ fn render_camera(
                 output::round_mantissa(f, k);
             }
         }
+        // output.landcover: the class ids as configured (v2 is the identity)
+        let lc_mapped = (spec.landcover.is_some() && lc_map != terragen::landcover::Mapping::V2)
+            .then(|| p.landcover.iter().map(|&c| lc_lut[c as usize]).collect::<Vec<u8>>());
         let fr = Frame {
             index: p.index,
             t: p.t,
@@ -449,7 +454,7 @@ fn render_camera(
             exposure: p.exposure,
             depth: depth.as_deref(),
             flow: flow.as_ref().map(|(f, v)| (f.as_slice(), v.as_slice())),
-            landcover: spec.landcover.as_ref().map(|_| p.landcover.as_slice()),
+            landcover: spec.landcover.as_ref().map(|_| lc_mapped.as_deref().unwrap_or(&p.landcover)),
             stars: spec.stars.as_ref().map(|_| p.stars.as_slice()),
         };
         writer.write(&fr)?;

@@ -1,0 +1,173 @@
+name: Release binaries
+
+# The `terrain` CLI and the C library (libaerialsynth: shared + static, with the header) per
+# platform, as terrain-<version>-<target>.tar.gz (.zip on Windows), attached to the GitHub release
+# of a `v*` tag. HDF5 and zlib are compiled from source and linked statically: the binaries need
+# only system libraries (checked below), and each archive is unpacked and smoke-tested (the CLI,
+# the C tile example linked against the shared and against the static library, the C render
+# example).
+#
+#   x86_64 / aarch64-unknown-linux-gnu   built in the manylinux_2_28 container: glibc >= 2.28
+#   aarch64 / x86_64-apple-darwin        macOS >= 11.0
+#   x86_64-pc-windows-msvc               static C runtime: no Visual C++ redistributable needed
+on:
+  push:
+    tags: ["v*"]
+  # a change of the release pipeline is tried on its pull request (nothing is attached there)
+  pull_request:
+    paths: [".github/workflows/release.yml", ".github/scripts/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-latest, image: quay.io/pypa/manylinux_2_28_x86_64 }
+          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm, image: quay.io/pypa/manylinux_2_28_aarch64 }
+          - { target: aarch64-apple-darwin, runner: macos-latest }
+          - { target: x86_64-apple-darwin, runner: macos-15-intel }
+          - { target: x86_64-pc-windows-msvc, runner: windows-latest }
+    defaults:
+      run:
+        shell: bash
+    env:
+      TARGET: ${{ matrix.target }}
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"
+          else v="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"; fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          echo "version $v"
+
+      - name: Build (manylinux_2_28 container)
+        if: matrix.image
+        run: |
+          docker run --rm -v "$PWD":/io -w /io -e CARGO_TERM_COLOR ${{ matrix.image }} bash -euc '
+            curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            . "$HOME/.cargo/env"
+            cmake --version | head -n 1
+            .github/scripts/release-build.sh ${{ matrix.target }} '"$VERSION"'
+            chown -R '"$(id -u):$(id -g)"' target dist'
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ !matrix.image }}
+      - name: Build
+        if: ${{ !matrix.image }}
+        run: .github/scripts/release-build.sh "$TARGET" "$VERSION"
+
+      # --- the unpacked archive: dependencies and a smoke test -------------------------------
+      - name: Unpack
+        run: |
+          mkdir -p "$RUNNER_TEMP/pkg"
+          cd "$RUNNER_TEMP/pkg"
+          if [[ "$TARGET" == *windows* ]]; then 7z x -bso0 "$GITHUB_WORKSPACE"/dist/terrain-*.zip
+          else tar xzf "$GITHUB_WORKSPACE"/dist/terrain-*.tar.gz; fi
+          echo "PKG=$RUNNER_TEMP/pkg/terrain-$VERSION-$TARGET" >> "$GITHUB_ENV"
+          find . -type f | sort
+
+      - name: Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          for f in "$PKG/bin/terrain" "$PKG/lib/libaerialsynth.so"; do
+            echo "$f:"; readelf -d "$f" | grep NEEDED
+            echo "  newest glibc symbol: $(objdump -T "$f" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -n 1)"
+            if readelf -d "$f" | grep NEEDED | grep -vE '\[(libc|libm|libdl|librt|libpthread|libgcc_s|libutil|ld-linux[^]]*)\.so[^]]*\]'; then
+              echo "::error::$f needs a non-system library"; exit 1
+            fi
+          done
+
+      - name: Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          for f in "$PKG/bin/terrain" "$PKG/lib/libaerialsynth.dylib"; do
+            otool -L "$f"
+            otool -l "$f" | grep -A4 LC_BUILD_VERSION | grep -E 'minos|sdk'
+            # (the library's own id, its first line, is @rpath/libaerialsynth.dylib)
+            if otool -L "$f" | tail -n +2 | grep -vE '^[[:space:]]+(/usr/lib/|/System/Library/|@rpath/libaerialsynth\.dylib )'; then
+              echo "::error::$f links a non-system library"; exit 1
+            fi
+          done
+
+      - name: Dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          python -m pip install -q pefile
+          python .github/scripts/pe_deps.py "$PKG/bin/terrain.exe" "$PKG/lib/aerialsynth.dll"
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+
+      - name: Smoke test
+        run: |
+          cd "$RUNNER_TEMP"
+          "$PKG/bin/terrain" --version
+          "$PKG/bin/terrain" config > scenario.yaml
+          "$PKG/bin/terrain" tiles --png preview --zoom 3 --size 1 --layers rgb,elevation
+          ls -l preview*
+          read -ra libs < "$PKG/lib/native-static-libs.txt"
+          printf 'world: { seed: 4, tile_supersample: 1 }\ntiles: { max_zoom: 6 }\n' > world.yaml
+          if [[ "$TARGET" == *windows* ]]; then
+            cl -nologo -W4 -WX -D_CRT_SECURE_NO_WARNINGS "$PKG/examples/tile.c" -I "$PKG/include" "$PKG/lib/aerialsynth.dll.lib" -Fe:tile_shared.exe
+            cl -nologo -W4 -WX -MT -D_CRT_SECURE_NO_WARNINGS "$PKG/examples/tile.c" -I "$PKG/include" "$PKG/lib/aerialsynth.lib" "${libs[@]}" -Fe:tile_static.exe
+            cl -nologo -W4 -WX -D_CRT_SECURE_NO_WARNINGS "$PKG/examples/render.c" -I "$PKG/include" "$PKG/lib/aerialsynth.dll.lib" -Fe:render.exe
+            cp "$PKG/lib/aerialsynth.dll" .
+            ./tile_shared.exe store/a.h5 world.yaml 3 5 3
+            ./tile_static.exe store/b.h5 world.yaml 3 5 3
+            ./render.exe store/c.h5 world.yaml 45 10 1500 render.ppm
+          else
+            cc -std=c99 -Wall -Wextra -Werror "$PKG/examples/tile.c" -I "$PKG/include" -L "$PKG/lib" -laerialsynth -Wl,-rpath,"$PKG/lib" -o tile_shared
+            cc -std=c99 -Wall -Wextra -Werror "$PKG/examples/tile.c" -I "$PKG/include" "$PKG/lib/libaerialsynth.a" "${libs[@]}" -o tile_static
+            cc -std=c99 -Wall -Wextra -Werror "$PKG/examples/render.c" -I "$PKG/include" -L "$PKG/lib" -laerialsynth -Wl,-rpath,"$PKG/lib" -o render
+            ./tile_shared store/a.h5 world.yaml 3 5 3
+            ./tile_static store/b.h5 world.yaml 3 5 3
+            ./render store/c.h5 world.yaml 45 10 1500 render.ppm
+          fi
+          ls -l render.ppm
+          "$PKG/bin/terrain" info store/a.h5
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: terrain-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Attach to the release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: terrain-*
+          merge-multiple: true
+          path: dist
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dist
+          gh release upload "${GITHUB_REF_NAME}" dist/* --clobber --repo "${GITHUB_REPOSITORY}"

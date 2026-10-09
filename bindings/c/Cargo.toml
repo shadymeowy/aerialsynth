@@ -18,3 +18,7 @@ aerialsynth-core.workspace = true
 [dev-dependencies]
 # regenerates the header in tests/header.rs (it must match include/aerialsynth.h)
 cbindgen = { version = "0.29", default-features = false }
+
+[target.'cfg(windows)'.dev-dependencies]
+# finds MSVC's cl.exe for tests/c_example.rs
+cc = "1"

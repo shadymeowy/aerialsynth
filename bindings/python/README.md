@@ -57,7 +57,7 @@ aerialsynth.LAYERS["normal"]   # LayerInfo(name='normal', dtype=dtype('int8'), c
 | `albedo` | uint8 | 256 × 256 × 3 | unlit surface colour, sRGB encoded |
 | `elevation` | float32 | 256 × 256 | DSM (ground, canopy, buildings, water), m above the WGS84 ellipsoid, at pixel centres |
 | `normal` | int8 | 256 × 256 × 3 | unit normal (east, north, up) × 127 |
-| `landcover` | uint8 | 256 × 256 | class id: 0 unknown, 1 ocean, 2 lake, 3 river, 4 beach, 5 sand, 6 rock, 7 snow, 8 grass, 9 shrub, 10 forest, 11 crop, 12 building, 13 road, 14 wetland, 15 tundra, 16 bare, 17 urban |
+| `landcover` | uint8 | 256 × 256 | class id: 0 unknown, 1 ocean, 2 lake, 3 river, 4 beach, 5 sand, 6 rock, 7 snow, 8 grass, 9 shrub, 10 forest, 11 crop, 12 building, 13 road, 14 wetland, 15 tundra, 16 bare, 17 urban; classes v2 add 20–110 (`docs/formats.md`) |
 | `emission` | uint8 | 256 × 256 × 3 | night lights, linear radiance = 16 (v/255)³ |
 
 ## Rendering
@@ -116,19 +116,32 @@ tiles in view are generated into the store when missing (like `terrain run` with
 
 ## Install
 
-Linux x86_64 (glibc 2.28 or newer, CPython 3.10 or newer): the wheel attached to each
-[GitHub release](https://github.com/shadymeowy/aerialsynth/releases):
+From the wheels attached to each
+[GitHub release](https://github.com/shadymeowy/aerialsynth/releases): one wheel per platform,
+for CPython 3.10 and newer (`cp310-abi3`, the stable ABI). Each is self-contained (HDF5 and
+zlib are linked statically; nothing else to install besides numpy):
+
+| platform | wheel |
+|---|---|
+| Linux x86_64 (glibc ≥ 2.28) | `aerialsynth-<version>-cp310-abi3-manylinux_2_28_x86_64.whl` |
+| Linux aarch64 (glibc ≥ 2.28) | `aerialsynth-<version>-cp310-abi3-manylinux_2_28_aarch64.whl` |
+| macOS Apple silicon (≥ 11) | `aerialsynth-<version>-cp310-abi3-macosx_11_0_arm64.whl` |
+| macOS Intel (≥ 11) | `aerialsynth-<version>-cp310-abi3-macosx_11_0_x86_64.whl` |
+| Windows x86_64 | `aerialsynth-<version>-cp310-abi3-win_amd64.whl` |
 
 ```sh
-pip install aerialsynth-0.1.0-cp310-abi3-manylinux_2_28_x86_64.whl
+pip install https://github.com/shadymeowy/aerialsynth/releases/download/v0.2.0/aerialsynth-0.2.0-cp310-abi3-manylinux_2_28_x86_64.whl
 ```
 
-A GPU is optional: without a suitable one, tiles are generated and images rendered on the CPU.
+A GPU is optional: without a suitable one, images are rendered on the CPU, and tiles are
+generated on the CPU (on macOS always: Metal has no 64-bit floats). Other platforms: build from
+source (below).
 
 ## Build
 
 One wheel (`cp310-abi3`, the stable ABI) serves CPython 3.10 and newer. It needs the Rust
-toolchain of the workspace, a C compiler and CMake (HDF5 is built from source), and
+toolchain of the workspace, a C compiler and CMake (HDF5 is built from source; per platform see
+the [main README](../../README.md#requirements)), and
 [maturin](https://www.maturin.rs):
 
 ```sh

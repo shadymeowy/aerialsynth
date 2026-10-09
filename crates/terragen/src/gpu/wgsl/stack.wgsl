@@ -832,15 +832,15 @@ fn layer_canopy(s: ptr<function, Stack>) {
     if (tr.cov > 0.0) {
         let stv = s_pf_lazy(s, PF_STAND);
         let tc = tr.col * vec3<f32>(1.0 + 0.10 * stv, 1.0 + 0.14 * stv, 1.0 + 0.05 * stv);
-        var cls = 44u;
+        var cls = LC_MIXED_FOREST;
         if (dens < 0.05 && shrub > dens) {
             cls = LC_SHRUB;
         } else if (tropic > 0.5 && wet > 0.6) {
-            cls = 40u;
+            cls = LC_TROPICAL_RAINFOREST;
         } else if (conifer > 0.7) {
-            cls = 43u;
+            cls = LC_NEEDLELEAF_FOREST;
         } else if (conifer < 0.3) {
-            cls = 42u;
+            cls = LC_BROADLEAF_FOREST;
         }
         var ly = layer_paint(tr.cov, tc, cls);
         ly.dh = tr.h;

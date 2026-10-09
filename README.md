@@ -34,22 +34,45 @@ and events.</sub>
 - **Viewer:** a map of the tile store and the camera through the dataset renderer, flown
   live; and a dataset viewer and exporter (`terrain show`, `terrain export`).
 
+## Install
+
+Prebuilt, self-contained (HDF5 and zlib linked statically: nothing else to install) for Linux
+(x86_64, aarch64; glibc ≥ 2.28), macOS (Apple silicon, Intel; macOS ≥ 11) and Windows (x86_64),
+attached to each [GitHub release](https://github.com/shadymeowy/aerialsynth/releases):
+
+- `terrain-<version>-<target>.tar.gz` / `.zip`: the `terrain` CLI (`bin/`) and the C library
+  (`lib/`, `include/`; [`bindings/`](bindings/README.md#c));
+- `aerialsynth-<version>-cp310-abi3-<platform>.whl`: the Python package, CPython ≥ 3.10
+  ([`bindings/python`](bindings/python/README.md#install)).
+
 ## Requirements
+
+To build from source (`cargo build`, `cargo install`; CI builds and tests Linux, macOS on Apple
+silicon and Intel, and Windows):
 
 - **Rust** 1.99 or newer (`rust-version` in `Cargo.toml`), via [rustup](https://rustup.rs).
 - **A C compiler and CMake ≥ 3.26.** HDF5 (2.2.0) and zlib are built from source and linked
   statically (`hdf5-metno-sys`), so no system HDF5 is needed. The first build takes a few
   minutes.
+  - Linux: gcc or clang (`build-essential`, `cmake`; on older distributions CMake from
+    `pip install cmake`).
+  - macOS: the Xcode Command Line Tools (`xcode-select --install`) and CMake (`brew install
+    cmake`).
+  - Windows: the Visual Studio Build Tools ("Desktop development with C++": MSVC and the
+    Windows SDK; rustup's default `x86_64-pc-windows-msvc` toolchain) and CMake (bundled with
+    the Build Tools, or from cmake.org). The C runtime is linked statically
+    (`.cargo/config.toml`), so the binaries need no Visual C++ redistributable.
 - **A GPU** with Vulkan, Metal or DX12 (through [wgpu](https://wgpu.rs)) for speed:
   - tile generation runs on the GPU when it supports 64-bit float and integer shaders
-    (Vulkan on NVIDIA and recent AMD), else on the CPU. Both build the same world; the CPU is
-    about 10× slower (`tiles.generator`, `docs/gpu.md`);
+    (Vulkan on NVIDIA and recent AMD; not Metal, which has no 64-bit floats), else on the CPU.
+    Both build the same world; the CPU is about 10× slower (`tiles.generator`, `docs/gpu.md`);
   - rendering runs on the GPU when there is one, else on the CPU reference renderer
     (`render.backend`);
   - the viewer (`terrain view`) needs a GPU.
 - **Python 3** for the scripts (optional).
 
-It is developed on Linux; other platforms wgpu supports should work but are untested.
+It is developed on Linux; macOS and Windows are built and tested in CI (macOS on Apple silicon
+and Windows on the runners' virtual or software GPUs, macOS on Intel on the CPU only).
 
 ## Quick start
 
@@ -81,6 +104,7 @@ fisheye, a 10 km cruise, a sunset and an IMU check.
 | `terrain view` | the viewer: map and camera, flown live; generates as you go (`docs/viewer.md`) |
 | `terrain show SEQ.h5` | look at a dataset: every modality of a camera on a timeline (depth, flow, land cover, events, stars), the pose, IMU and trajectory, pixel values; `--snapshot` renders it without a window (`docs/show.md`) |
 | `terrain export SEQ.h5 --out DIR\|FILE.mp4` | PNG sequences or videos (ffmpeg) of a camera's modalities, one per modality or `--side-by-side` with legends |
+| `terrain survey` | find diverse places (coasts, mountains, towns, rivers, deserts, …) and render stills of each: `OUT/NN_<lat>_<lon>_<view>.png`, a labelled `OUT/sheet.jpg`, `OUT/places.csv`; `--count 24 --seed-places N`, `--views oblique,nadir,high`, `--places FILE.csv` re-renders a list (regression stills) |
 | `terrain info FILE` | summarize a tile store or a sequence file |
 | `terrain config` | the scenario template; `--all` every setting; `-c my.yaml` a scenario with its defaults filled in |
 
