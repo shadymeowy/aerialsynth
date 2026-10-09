@@ -2,13 +2,14 @@
 
 Two videos of aerialsynth, both fully reproducible from this folder. Everything in them is
 rendered from generated tiles: there is no imagery or elevation data anywhere, and the sound is
-synthesised by the scripts here.
+synthesised by the scripts here. Both are also attached to the
+[v0.1.0 release](https://github.com/shadymeowy/aerialsynth/releases/tag/v0.1.0).
 
-- **The feature showcase** (`out/showcase/showcase_music.mp4`, about 4.5 min): 46 short
+- **The feature showcase** ([YouTube](https://youtu.be/SkTq4ph64l4); `out/showcase/showcase_music.mp4`, 4:35): 46 short
   shots of the planet of seed 1, one feature each (landscapes, light, night sky, sensor
   modalities, camera models, tiles on demand), with an original electronic score.
   Made by `make_showcase.py` (video) and `showcase_score.py` (music).
-- **The long-haul flight** (`out/airliner/airliner_sound.mp4`, about 4 min): one airliner flight
+- **The long-haul flight** ([YouTube](https://youtu.be/ByafGs-iNug); `out/airliner/airliner_sound.mp4`, 3:49): one airliner flight
   from a tropical lake district on the equator to a tundra basin inside an arctic ice sheet,
   8,100 km in 9 h 46 min, shown as one continuous time-lapse with an ambient score, engine
   sound and cockpit callouts. Made by `route.py` (trajectory), `make_airliner.py` (video) and

@@ -14,6 +14,11 @@ produced on demand and reproduced exactly from a seed.
 only. Bottom: one frame of a dataset with its ground truth: RGB, depth, optical flow (parallax)
 and events.</sub>
 
+**Videos:** [the feature showcase](https://youtu.be/SkTq4ph64l4) (4:35) and
+[a long-haul airliner flight](https://youtu.be/ByafGs-iNug) from the equator to the arctic
+(3:49), also downloadable from the
+[v0.1.0 release](https://github.com/shadymeowy/aerialsynth/releases/tag/v0.1.0).
+
 - **World:** continents, mountains carved by erosion, rivers, lakes, climate and biomes,
   forests of individual trees, fields, towns with buildings, roads, night lights. Any place,
   any zoom, generated on demand (on the GPU, or the CPU) into one HDF5 tile store.
