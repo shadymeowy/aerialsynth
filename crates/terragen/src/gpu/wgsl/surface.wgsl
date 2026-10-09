@@ -313,6 +313,8 @@ struct Local {
     road_minor: f32,
     slope: f32,
     fw: f32,
+    /// the pixel's block (instance lists: `inst_list(f, (*s).l.blk, (*s).c.p)`)
+    blk: u32,
 }
 
 struct Surface {

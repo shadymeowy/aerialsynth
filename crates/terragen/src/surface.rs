@@ -61,6 +61,8 @@ pub struct Local<'a> {
     pub slope: f64,
     /// Sub-sample filter width (m) for analytic edge antialiasing.
     pub fw: f64,
+    /// the instance lists of the pixel's block (per family; empty: not known)
+    pub inst: &'a [Vec<crate::instances::Instance>],
 }
 
 #[derive(Clone, Copy, Debug, Default)]

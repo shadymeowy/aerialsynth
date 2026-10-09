@@ -401,7 +401,7 @@ fn pass_a1(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocat
         } else {
             m = macro_at(ctx.p, ctx.gsd);
         }
-        let rl = relief(ctx, m, pre);
+        let rl = relief(ctx, m, pre, ti.bin0 + wg.y * NBIN + wg.x);
         let b = (ti.pix0 + j * NA2 + i) * PIX_F;
         pix_a[b + 0u] = m.cont;
         pix_a[b + 1u] = m.plateau;
@@ -681,4 +681,94 @@ fn pass_a2(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id)
     dr.nsink = ti.nsink;
     dr.flags = 0u;
     terr[ti.pix0 + j * NA2 + i] = terrain_rest(ctx, m, pre, rl, MODE_FULL, dr);
+}
+
+// ---------------------------------------------------------------- instance lists per bin
+
+/// An instance in a bin's list (`GInst`).
+struct GInst {
+    center: vec4<f64>,
+    id: u64,
+    _p: u64,
+    v0: vec4<f32>,
+    v1: vec4<f32>,
+}
+
+/// per (bin, family): the number of instances; their records (INST_K per list)
+@group(2) @binding(20) var<storage, read_write> inst_n: array<u32>;
+@group(2) @binding(21) var<storage, read_write> inst_v: array<GInst>;
+
+/// The instances of family `f` near `p`: the list of block `blk` (a bin of the tile), else a
+/// scan.
+fn inst_list(f: u32, blk: u32, p: vec3<f64>) -> InstList {
+    if (blk == 0xffffffffu) {
+        return inst_scan(f, p, 0.0);
+    }
+    var l: InstList;
+    let b = blk * NFAM + f;
+    l.n = min(inst_n[b], INST_K);
+    for (var k = 0u; k < l.n; k++) {
+        let g = inst_v[b * INST_K + k];
+        l.items[k].id = g.id;
+        l.items[k].center = g.center.xyz;
+        l.items[k].v = array<f32, 8>(g.v0.x, g.v0.y, g.v0.z, g.v0.w, g.v1.x, g.v1.y, g.v1.z, g.v1.w);
+    }
+    return l;
+}
+
+/// Centre and radius of bin `bin` of a tile (the pass-A pixel centres it covers, + a pixel).
+struct BinDisc {
+    c: vec3<f64>,
+    r: f32,
+}
+
+fn bin_disc(ti: TileInfo, bin: u32) -> BinDisc {
+    let bx = bin % NBIN;
+    let by = bin / NBIN;
+    let i0 = bx * 16u;
+    let j0 = by * 16u;
+    let i1 = min(i0 + 15u, NA2 - 1u);
+    let j1 = min(j0 + 15u, NA2 - 1u);
+    let rm = rows[ti.row_a + (j0 + j1) / 2u];
+    var o: BinDisc;
+    o.c = row_col_ctx(rm, cols[ti.col_a + (i0 + i1) / 2u], rm.gsd).p;
+    var radius = 0.0;
+    for (var k = 0u; k < 4u; k++) {
+        let ii = select(i0, i1, (k & 1u) != 0u);
+        let jj = select(j0, j1, (k & 2u) != 0u);
+        let rr = rows[ti.row_a + jj];
+        radius = max(radius, dist64(row_col_ctx(rr, cols[ti.col_a + ii], rr.gsd).p, o.c));
+    }
+    o.r = radius + max(rows[ti.row_a + j0].gsd, rows[ti.row_a + j1].gsd);
+    return o;
+}
+
+/// The instances of every family that can reach each bin (`instances::lists`).
+@compute @workgroup_size(64)
+fn instance_lists(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let ti = tiles[gid.z];
+    let k = gid.x;
+    if (NFAM == 0u || k >= NBIN * NBIN * NFAM) {
+        return;
+    }
+    let bin = k / NFAM;
+    let f = k % NFAM;
+    let d = bin_disc(ti, bin);
+    var over = false;
+    let l = inst_scan_n(f, d.c, d.r, &over);
+    if (over) {
+        atomicAdd(&counters[7], 1u);
+    }
+    let b = (ti.bin0 + bin) * NFAM + f;
+    inst_n[b] = l.n;
+    for (var q = 0u; q < l.n; q++) {
+        let it = l.items[q];
+        var g: GInst;
+        g.center = vec4<f64>(it.center, 0.0lf);
+        g.id = it.id;
+        g._p = 0lu;
+        g.v0 = vec4<f32>(it.v[0], it.v[1], it.v[2], it.v[3]);
+        g.v1 = vec4<f32>(it.v[4], it.v[5], it.v[6], it.v[7]);
+        inst_v[b * INST_K + q] = g;
+    }
 }

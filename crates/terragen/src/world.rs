@@ -21,6 +21,8 @@ pub struct NearSegs<'a> {
     pub h_max: f64,
     /// `World::sink_lakes` of the full piece list
     pub sinks: &'a [(u64, DVec3, f64)],
+    /// the instances of the relief families that can reach the area
+    pub inst: &'a [Vec<crate::instances::Instance>],
 }
 
 /// What `terrain_impl` evaluates.
@@ -990,7 +992,7 @@ impl World {
 
         // ---- the kits' relief operators (volcanoes, karst, dunes …)
         if !crate::kits::KITS.is_empty() {
-            let rin = crate::kits::ReliefIn { ctx, m, temp: temp0, moist, mountain, sand, mesa, smooth };
+            let rin = crate::kits::ReliefIn { ctx, m, temp: temp0, moist, mountain, sand, mesa, smooth, inst: near_segs.map(|n| n.inst) };
             crate::kits::relief(self, &rin, &mut h);
         }
 

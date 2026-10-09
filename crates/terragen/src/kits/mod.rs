@@ -14,6 +14,10 @@ use crate::world::{Ctx, Macro};
 
 // ---- kit modules: replace your line (keep the blank lines between them: merges stay clean)
 
+/// a test-only kit exercising every hook (the guide's worked example)
+#[cfg(test)]
+mod example;
+
 // mod desert;
 
 // mod volcanic;
@@ -58,6 +62,9 @@ pub static KITS: &[&Kit] = &[
     // &settlements::KIT,
 
     // &transport::KIT,
+
+    #[cfg(test)]
+    &example::KIT,
 ];
 
 /// Inputs of a pass-A relief operator (per pixel centre and per drainage lattice point).
@@ -74,6 +81,19 @@ pub struct ReliefIn<'a> {
     pub mesa: f64,
     /// smooth (≥ 5 km) elevation (m)
     pub smooth: f64,
+    /// the instance lists of the area (per family; relief families only), if known
+    pub inst: Option<&'a [Vec<crate::instances::Instance>]>,
+}
+
+impl ReliefIn<'_> {
+    /// The instances of family `f` near the point (`FAM_*` index; WGSL `inst_list(f, r.blk,
+    /// c.p)`).
+    pub fn instances(&self, w: &crate::world::World, f: usize) -> std::borrow::Cow<'_, [crate::instances::Instance]> {
+        match self.inst {
+            Some(l) if f < l.len() => std::borrow::Cow::Borrowed(&l[f][..]),
+            _ => std::borrow::Cow::Owned(crate::instances::near(w, f, self.ctx.p, 0.0)),
+        }
+    }
 }
 
 /// A kit.

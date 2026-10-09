@@ -358,6 +358,7 @@ fn sample_b(ti: TileInfo, i: u32, j: u32, sx: u32, sy: u32, slope: f32, gsd: f32
     l.eco_edge = bilerp4(ee * es, fx, fy);
     l.slope = slope;
     l.fw = gsd / f32(ss);
+    l.blk = ti.bin0 + ((j + 1u) / 16u) * NBIN + (i + 1u) / 16u;
     let r = rows[ti.row_b + j * ss + sy];
     let c = cols[ti.col_b + i * ss + sx];
     let ctx = row_col_ctx(r, c, gsd);

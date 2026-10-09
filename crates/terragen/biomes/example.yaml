@@ -1,0 +1,6 @@
+# The test-only example kit (kits/example.rs): a biome never picked (weight 0) with a layer of
+# the kit's kernel.
+- id: example_biome
+  weight: 0
+  layers:
+    - { slot: zonal, kernel: example_rings, params: { radius: 30 }, class: bare }

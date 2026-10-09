@@ -601,7 +601,7 @@ struct Relief {
     gully_n: f32,
 }
 
-fn relief(c: Ctx, m: Macro, pre: Pre) -> Relief {
+fn relief(c: Ctx, m: Macro, pre: Pre, blk: u32) -> Relief {
     let p = c.p;
     let gsd = c.gsd;
     let s = m.cont;
@@ -716,6 +716,7 @@ fn relief(c: Ctx, m: Macro, pre: Pre) -> Relief {
     rin.sand = sand;
     rin.mesa = mesa;
     rin.smooth_h = smooth_h;
+    rin.blk = blk;
     kits_relief(c, m, rin, &h);
 
     o.h = h;
@@ -740,6 +741,8 @@ struct ReliefIn {
     sand: f32,
     mesa: f32,
     smooth_h: f32,
+    /// the pixel's block (instance lists: `inst_list(f, r.blk, c.p)`), 0xffffffff: none
+    blk: u32,
 }
 
 /// Pass-A result at a pixel centre (`Terrain`; the land-use sites as ids and edge distance).

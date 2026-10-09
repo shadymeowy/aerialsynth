@@ -310,6 +310,15 @@ impl<'a> Stack<'a> {
         self.col *= k;
     }
 
+    /// The instances of family `f` (`instances::families` index; WGSL
+    /// `inst_list(f, (*s).l.blk, (*s).c.p)`) that can reach the sample's block.
+    pub fn instances(&self, f: usize) -> std::borrow::Cow<'_, [crate::instances::Instance]> {
+        match self.l.inst.get(f) {
+            Some(l) => std::borrow::Cow::Borrowed(&l[..]),
+            None => std::borrow::Cow::Owned(crate::instances::near(self.world, f, self.ctx.p, 0.0)),
+        }
+    }
+
     pub fn p(&self) -> DVec3 {
         self.ctx.p
     }

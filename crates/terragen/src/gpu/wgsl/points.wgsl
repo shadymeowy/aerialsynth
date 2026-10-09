@@ -60,6 +60,6 @@ fn eval_points(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workg
     let ctx = ctx_make(q.p.xyz, q.sl, q.cl, q.so, q.co, q.lat, q.gsd);
     let m = macro_at(ctx.p, ctx.gsd);
     let pre = pre_none();
-    let rl = relief(ctx, m, pre);
+    let rl = relief(ctx, m, pre, 0xffffffffu);
     pout[i] = terrain_rest(ctx, m, pre, rl, q.mode, q.dr);
 }
