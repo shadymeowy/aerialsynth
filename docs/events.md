@@ -10,22 +10,23 @@ tens of Mev/s.
 Datasets (M3ED, DSEC, ...) store events as parallel arrays `x, y (u16), t (µs, i64), p (0/1)`
 plus a per-millisecond index; this simulator uses the same data types.
 
-## Options considered
+## How events are simulated
 
-| approach | idea | pros | cons |
-|---|---|---|---|
-| **A. Adaptive re-rendering (ESIM)**, *implemented* | render log intensity at times chosen so image motion between renders ≤ `max_px_per_step`; interpolate per pixel between renders | exact geometry, occlusions and lighting; any camera model; the trajectory's vibration is handled naturally (dense sampling only where the image moves) | cost ∝ image motion (~0.2 s per internal render) |
-| B. Frame interpolation (v2e style), *tried and rejected* | render keyframes every few px of motion, reproject them with the exact per-pixel geometry for the steps in between | 5–7x faster | ~37% fewer events than A in textured terrain, also with 2x-resolution keyframes (see below) |
-| C. Linearized brightness constancy | `dL/dt = −∇L · flow` from one render + exact flow | very cheap | ignores occlusions and non-linear changes; poor for large motion |
-| D. A on the GPU, *implemented* | A with the keyframes rendered and the pixel model run on the GPU (`render.backend: gpu`, the default `auto` when there is a GPU; `docs/gpu.md`) | ~11–15x faster than A on the CPU; same events statistically | random numbers not bit-identical to the CPU |
+Events come from re-rendering the scene, ESIM-style: the camera's log intensity is rendered at
+times chosen so that the image moves at most `max_px_per_step` pixels between two renders, and
+each pixel's signal is interpolated in time between them. Geometry, occlusions and lighting are
+therefore exact for any camera model, and the trajectory's vibration costs nothing extra where
+the image does not move: renders are dense only where it does. The cost grows with image motion
+(about 0.2 s per internal render on the CPU).
 
-A is the implementation, on the CPU or (D) the GPU. B was implemented and measured: the reprojection
-itself is exact (image shifts match the geometric flow, identity warps are exact), but a
-pixel is a box integral of texture with detail near its Nyquist frequency, and under a
-sub-pixel shift that integral changes in ways no interpolation of the integrated image can
-predict (the best shift explains only 5–25% of the change between renders 0.15 px apart).
-Interpolated images are too smooth in time, so B systematically loses events (per-pixel event
-maps correlate at 0.92 with A, at 0.63x the count). C has the same problem in a stronger form.
+With a GPU (`render.backend: gpu`, or the default `auto` when one is present; `docs/gpu.md`)
+the renders and the pixel model run on the GPU, 11–15× faster than on the CPU. The events are
+statistically the same; the random numbers of the noise model differ from the CPU's.
+
+Rendering each step, rather than interpolating between keyframes (as v2e does), keeps the
+sub-pixel texture changes that make textured terrain fire: a pixel integrates detail near its
+Nyquist frequency, and under a sub-pixel shift that integral changes in ways an interpolated
+image cannot reproduce.
 
 ## Sensor model (`crates/render/src/events.rs`)
 
