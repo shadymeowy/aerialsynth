@@ -251,10 +251,15 @@ impl GpuEventSensor {
                         wgpu::BindGroupEntry { binding: 5, resource: self.ev.as_entire_binding() },
                     ],
                 });
-                let mut cp = enc.begin_compute_pass(&Default::default());
-                cp.set_pipeline(&self.pipe);
-                cp.set_bind_group(0, &bg, &[]);
-                cp.dispatch_workgroups(gx, gy, 1);
+                {
+                    let mut cp = enc.begin_compute_pass(&Default::default());
+                    cp.set_pipeline(&self.pipe);
+                    cp.set_bind_group(0, &bg, &[]);
+                    cp.dispatch_workgroups(gx, gy, 1);
+                }
+                if std::env::var_os("AS_DEBUG_EV_SPLIT").is_some() {
+                    q.submit([std::mem::replace(&mut enc, d.create_command_encoder(&Default::default())).finish()]);
+                }
             }
             enc.copy_buffer_to_buffer(&self.ev, 0, &self.count_read, 0, 4);
             q.submit([enc.finish()]);
@@ -422,6 +427,7 @@ mod tests {
             slot = 1 - slot;
             k0 = k1;
         }
+        eprintln!("FLICKER gpu {ng} cpu {nc} adapter {:?}", g.gpu.info);
         assert!(nc > 1000, "{nc}");
         assert!((ng as f64 - nc as f64).abs() <= 0.002 * nc as f64, "gpu {ng} cpu {nc}");
     }
