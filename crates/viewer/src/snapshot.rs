@@ -250,8 +250,7 @@ pub(crate) fn headless_device() -> Result<(wgpu::Device, wgpu::Queue)> {
         let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
         desc.backends = wgpu::Backends::PRIMARY;
         let instance = wgpu::Instance::new(desc);
-        let adapter =
-            instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() }).await?;
+        let adapter = terragen::gpu::device::select_adapter(&instance).await?;
         anyhow::Ok(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("viewer"), required_limits: adapter.limits(), ..Default::default() }).await?)
     })
 }

@@ -24,18 +24,82 @@ fn record(slot: &std::sync::Mutex<Option<String>>, e: String) {
 /// atomics for the drainage lattice's hash table.
 pub const GEN_FEATURES: wgpu::Features = wgpu::Features::SHADER_F64.union(wgpu::Features::SHADER_INT64).union(wgpu::Features::SHADER_INT64_ATOMIC_ALL_OPS);
 
+/// The environment variable choosing the GPU (see [`pick_adapter`]).
+pub const GPU_ENV: &str = "AERIALSYNTH_GPU";
+
+/// The adapter `AERIALSYNTH_GPU` asks for among `adapters`: an index into the list (as
+/// `adapter_list` prints it), a PCI bus id (`0000:83:00.0`), or a case-insensitive part of
+/// the adapter name (`6000`, `p4`); `Ok(None)` when the variable is unset or empty. A
+/// selection that matches nothing is an error, never a silent fallback to another GPU.
+pub fn pick_adapter(adapters: &[wgpu::Adapter]) -> Result<Option<wgpu::Adapter>> {
+    let Ok(sel) = std::env::var(GPU_ENV) else { return Ok(None) };
+    let sel = sel.trim().to_lowercase();
+    if sel.is_empty() {
+        return Ok(None);
+    }
+    let infos: Vec<wgpu::AdapterInfo> = adapters.iter().map(|a| a.get_info()).collect();
+    let bus = |i: &wgpu::AdapterInfo| i.device_pci_bus_id.to_lowercase();
+    let found = if let Ok(k) = sel.parse::<usize>() {
+        (k < adapters.len()).then_some(k)
+    } else {
+        // a PCI bus id, with or without the domain (`83:00.0`), else a part of the name
+        let pci = infos.iter().position(|i| {
+            !bus(i).is_empty() && (bus(i) == sel || bus(i).ends_with(&format!(":{sel}")) || bus(i).trim_start_matches('0') == sel.trim_start_matches('0'))
+        });
+        pci.or_else(|| {
+            let hits: Vec<usize> = (0..infos.len()).filter(|&k| infos[k].name.to_lowercase().contains(&sel)).collect();
+            (hits.len() == 1).then(|| hits[0])
+        })
+    };
+    match found {
+        Some(k) => Ok(Some(adapters[k].clone())),
+        None => bail!("{GPU_ENV}={sel} matches no single GPU; the adapters are:\n{}", adapter_list(adapters)),
+    }
+}
+
+/// One line per adapter: index, name, backend, type, PCI bus id.
+pub fn adapter_list(adapters: &[wgpu::Adapter]) -> String {
+    adapters
+        .iter()
+        .enumerate()
+        .map(|(k, a)| {
+            let i = a.get_info();
+            format!(
+                "  {k}: {} ({:?}, {:?}{})",
+                i.name,
+                i.backend,
+                i.device_type,
+                if i.device_pci_bus_id.is_empty() { String::new() } else { format!(", PCI {}", i.device_pci_bus_id) }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The headless adapter: the one `AERIALSYNTH_GPU` selects (see [`pick_adapter`]), else the
+/// first high-performance Vulkan / Metal / DX12 adapter.
+pub async fn select_adapter(instance: &wgpu::Instance) -> Result<wgpu::Adapter> {
+    if std::env::var(GPU_ENV).is_ok_and(|s| !s.trim().is_empty()) {
+        let adapters = instance.enumerate_adapters(wgpu::Backends::PRIMARY).await;
+        if let Some(a) = pick_adapter(&adapters)? {
+            return Ok(a);
+        }
+    }
+    instance
+        .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })
+        .await
+        .map_err(|e| anyhow!("no GPU adapter: {e}"))
+}
+
 impl Gpu {
-    /// The first high-performance adapter (Vulkan / Metal / DX12), headless, with the
-    /// generator's features where the adapter has them.
+    /// The adapter [`select_adapter`] picks (`AERIALSYNTH_GPU`, else the first high-performance
+    /// Vulkan / Metal / DX12 adapter), headless, with the generator's features where it has them.
     pub fn new() -> Result<Gpu> {
         pollster::block_on(async {
             let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
             desc.backends = wgpu::Backends::PRIMARY;
             let instance = wgpu::Instance::new(desc);
-            let adapter = instance
-                .request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })
-                .await
-                .map_err(|e| anyhow!("no GPU adapter: {e}"))?;
+            let adapter = select_adapter(&instance).await?;
             let info = adapter.get_info();
             let features = adapter.features() & (GEN_FEATURES | wgpu::Features::PIPELINE_CACHE);
             let (device, queue) = adapter
