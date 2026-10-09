@@ -13,6 +13,7 @@
 
 use std::f64::consts::{PI, TAU};
 use std::fmt;
+use std::ops::RangeInclusive;
 
 use glam::DVec2;
 use serde::{Deserialize, Serialize};
@@ -226,11 +227,40 @@ pub fn gsd_ns(lat: f64, z: u8, ts: u32, ell: &Ellipsoid) -> f64 {
 /// All tiles at zoom `z` intersecting `b` (radians). Latitudes are clamped to the Mercator
 /// range; `lon_min > lon_max` is treated as a box crossing the antimeridian. Boxes that
 /// merely touch a tile edge do not include that tile. Output is row-major (by `y`, then `x`
-/// going east from `lon_min`).
+/// going east from `lon_min`). [`count_tiles_in_bounds`] gives the length without building
+/// the list (a small box at a deep zoom can hold billions of tiles).
 ///
 /// # Panics
 /// If `z > MAX_ZOOM`.
 pub fn tiles_in_bounds(b: &LatLonBounds, z: u8) -> Vec<TileId> {
+    let Some((ys, x0, x1)) = bounds_ranges(b, z) else { return Vec::new() };
+    // the second range (east of the antimeridian) without the columns of the first
+    let xs: Vec<u64> = x0.clone().chain(x1.into_iter().flatten().filter(|x| !x0.contains(x))).collect();
+    ys.flat_map(|y| xs.iter().map(move |&x| TileId::new(z, x as u32, y as u32))).collect()
+}
+
+/// The number of tiles [`tiles_in_bounds`] returns, computed from the index ranges.
+///
+/// # Panics
+/// If `z > MAX_ZOOM`.
+pub fn count_tiles_in_bounds(b: &LatLonBounds, z: u8) -> u64 {
+    let Some((ys, x0, x1)) = bounds_ranges(b, z) else { return 0 };
+    let len = |r: &RangeInclusive<u64>| r.end() - r.start() + 1;
+    let nx = match x1 {
+        // (x0 runs to the last column, x1 from the first: they overlap when x1 reaches x0)
+        Some(x1) if x1.end() >= x0.start() => tiles_per_side(z),
+        Some(x1) => len(&x0) + len(&x1),
+        None => len(&x0),
+    };
+    len(&ys) * nx
+}
+
+/// Rows, columns and the columns east of the antimeridian (when crossed).
+type BoundsRanges = (RangeInclusive<u64>, RangeInclusive<u64>, Option<RangeInclusive<u64>>);
+
+/// The row range and the column range(s) of the tiles at zoom `z` intersecting `b`: a second
+/// column range when the box crosses the antimeridian; `None` when the box is empty.
+fn bounds_ranges(b: &LatLonBounds, z: u8) -> Option<BoundsRanges> {
     assert!(z <= MAX_ZOOM, "zoom {z} > MAX_ZOOM");
     let n = tiles_per_side(z);
     let nf = n as f64;
@@ -246,7 +276,7 @@ pub fn tiles_in_bounds(b: &LatLonBounds, z: u8) -> Vec<TileId> {
     let lat_max = b.lat_max.clamp(-MAX_MERCATOR_LAT_RAD, MAX_MERCATOR_LAT_RAD);
     let lat_min = b.lat_min.clamp(-MAX_MERCATOR_LAT_RAD, MAX_MERCATOR_LAT_RAD);
     if lat_min > lat_max {
-        return Vec::new();
+        return None;
     }
     let ys = range(latlon_to_uv(lat_max, 0.0).y, latlon_to_uv(lat_min, 0.0).y);
 
@@ -262,19 +292,11 @@ pub fn tiles_in_bounds(b: &LatLonBounds, z: u8) -> Vec<TileId> {
         let hi = wrap(b.lon_max);
         (wrap(b.lon_min), if hi == -PI { PI } else { hi })
     };
-    let mut xs: Vec<u64> = Vec::new();
     if lon_min <= lon_max {
-        xs.extend(range(u(lon_min), u(lon_max)));
+        Some((ys, range(u(lon_min), u(lon_max)), None))
     } else {
-        xs.extend(range(u(lon_min), 1.0));
-        for x in range(0.0, u(lon_max)) {
-            if !xs.contains(&x) {
-                xs.push(x);
-            }
-        }
+        Some((ys, range(u(lon_min), 1.0), Some(range(0.0, u(lon_max)))))
     }
-
-    ys.flat_map(|y| xs.iter().map(move |&x| TileId::new(z, x as u32, y as u32))).collect()
 }
 
 /// Fractional zoom at which [`gsd_ew`] at `lat` equals `gsd_m`:
@@ -543,5 +565,29 @@ mod tests {
         assert_eq!(xs(tiles_in_bounds(&b(-180.1, -179.9), 8)), vec![0, 255]);
         assert_eq!(xs(tiles_in_bounds(&b(-200.0, 200.0), 3)).len(), 8);
         assert_eq!(xs(tiles_in_bounds(&b(10.0, 20.0), 8)), xs(tiles_in_bounds(&b(370.0, 380.0), 8)));
+    }
+
+    #[test]
+    fn count_tiles_in_bounds_matches_the_list() {
+        let b = |a: f64, c: f64, d: f64, e: f64| LatLonBounds {
+            lat_min: a.to_radians(),
+            lon_min: c.to_radians(),
+            lat_max: d.to_radians(),
+            lon_max: e.to_radians(),
+        };
+        for bb in [
+            b(39.0, 32.0, 39.1, 32.1),
+            b(-10.0, 179.9, 10.0, 180.1),
+            b(-10.0, 170.0, 10.0, -170.0),
+            b(-90.0, -200.0, 90.0, 200.0),
+            b(10.0, 0.0, 5.0, 1.0),
+            b(-1.0, 120.0, 1.0, -170.0),
+        ] {
+            for z in 0..=9 {
+                assert_eq!(count_tiles_in_bounds(&bb, z), tiles_in_bounds(&bb, z).len() as u64, "{bb:?} z{z}");
+            }
+        }
+        // a small box at the deepest zoom: counted without being listed
+        assert!(count_tiles_in_bounds(&b(39.0, 32.0, 39.1, 32.1), MAX_ZOOM) > 1 << 30);
     }
 }

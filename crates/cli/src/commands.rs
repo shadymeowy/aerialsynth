@@ -1,7 +1,7 @@
 use crate::Common;
 use anyhow::{bail, Context, Result};
 use clap::Args;
-use geodesy::tiles::{tiles_in_bounds, LatLonBounds, TileId};
+use geodesy::tiles::{count_tiles_in_bounds, tiles_in_bounds, LatLonBounds, TileId, MAX_ZOOM};
 use indicatif::{ProgressBar, ProgressStyle};
 use render::dynamics;
 use render::pipeline;
@@ -94,6 +94,10 @@ fn plan_tiles(s: &Scenario, gen: &Generator) -> Result<BTreeSet<TileId>> {
     Ok(set)
 }
 
+/// The most tiles `terrain tiles --bbox` lists (a guard against a deep zoom over a large box:
+/// the list alone would exhaust memory).
+const MAX_LISTED_TILES: u64 = 4_000_000;
+
 fn parse_tile_list(p: &Path) -> Result<Vec<TileId>> {
     let mut v = Vec::new();
     for l in std::fs::read_to_string(p)?.lines() {
@@ -105,7 +109,11 @@ fn parse_tile_list(p: &Path) -> Result<Vec<TileId>> {
         if f.len() != 3 {
             bail!("bad tile line {l}");
         }
-        v.push(TileId::new(f[0] as u8, f[1], f[2]));
+        let t = TileId::new(u8::try_from(f[0]).unwrap_or(u8::MAX), f[1], f[2]);
+        if !t.is_valid() {
+            bail!("bad tile {l}: needs z <= {MAX_ZOOM} and x, y < 2^z");
+        }
+        v.push(t);
     }
     Ok(v)
 }
@@ -367,7 +375,14 @@ pub fn tiles(a: TilesArgs) -> Result<()> {
         let v = parse_floats(bb, 4, "--bbox lat_min,lon_min,lat_max,lon_max")?;
         let (z0, z1) = a.zooms.split_once('-').map(|(a, b)| (a.parse::<u8>(), b.parse::<u8>())).context("--zooms a-b")?;
         let (z0, z1) = (z0?, z1?);
+        if z0 > z1 || z1 > s.tiles.max_zoom {
+            bail!("--zooms {z0}-{z1}: needs {z0} <= {z1} <= tiles.max_zoom ({})", s.tiles.max_zoom);
+        }
         let b = LatLonBounds { lat_min: v[0].to_radians(), lon_min: v[1].to_radians(), lat_max: v[2].to_radians(), lon_max: v[3].to_radians() };
+        let n: u64 = (z0..=z1).map(|z| count_tiles_in_bounds(&b, z)).sum();
+        if n > MAX_LISTED_TILES {
+            bail!("--bbox at zooms {z0}-{z1} holds {n} tiles (at most {MAX_LISTED_TILES}): use a smaller box or fewer zooms");
+        }
         (z0..=z1).flat_map(|z| tiles_in_bounds(&b, z)).collect()
     } else {
         plan_tiles(&s, &gen)?.into_iter().collect()
