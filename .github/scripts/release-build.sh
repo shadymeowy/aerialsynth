@@ -8,7 +8,7 @@ version=$2
 export CARGO_PROFILE_RELEASE_DEBUG=0
 cargo build --release --locked -p terrain -p aerialsynth-capi
 # the system libraries a program linking the static library needs (rebuilds the static library)
-cargo rustc --release --locked -p aerialsynth-capi --lib --crate-type staticlib -- --print native-static-libs 2>&1 \
+cargo rustc --color never --release --locked -p aerialsynth-capi --lib --crate-type staticlib -- --print native-static-libs 2>&1 \
   | sed -n 's/.*native-static-libs: //p' | tail -n 1 | tr -d '\r' > target/release/native-static-libs.txt
 echo "native-static-libs: $(cat target/release/native-static-libs.txt)"
 test -s target/release/native-static-libs.txt

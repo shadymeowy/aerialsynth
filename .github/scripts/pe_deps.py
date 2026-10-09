@@ -1,5 +1,6 @@
 """List the DLLs the Windows binaries (or the extensions in wheels) import, and fail unless each
-is a system DLL (in System32) or python3.dll: no Visual C++ runtime (vcruntime / msvcp /
+is a system DLL (in System32, or a Windows API set api-ms-win-core-*) or python3.dll: no Visual
+C++ runtime (vcruntime / msvcp /
 api-ms-win-crt-*: the C runtime is linked statically), no HDF5 or zlib DLL.
 
     python pe_deps.py dist/aerialsynth-*.whl
@@ -37,7 +38,7 @@ def main(paths):
         dlls = sorted({e.dll.decode() for e in getattr(pe, "DIRECTORY_ENTRY_IMPORT", [])}, key=str.lower)
         print(f"{name} imports:")
         for dll in dlls:
-            system = os.path.exists(os.path.join(SYSTEM32, dll))
+            system = os.path.exists(os.path.join(SYSTEM32, dll)) or dll.lower().startswith("api-ms-win-core-")
             ok = (system or dll.lower().startswith("python3")) and not FORBIDDEN.match(dll)
             print(f"  {dll}{'' if ok else '   <-- not a system DLL'}")
             if not ok:

@@ -44,8 +44,8 @@ jobs:
           # `--auditwheel check`: fail (instead of bundling) if the extension needs a shared
           # library outside the manylinux policy
           args: --release --out dist --auditwheel check
-          # HDF5 is built from source and needs CMake >= 3.26
-          before-script-linux: python3 -m pip install "cmake>=3.26"
+          # HDF5 is built from source and needs CMake >= 3.26 (the manylinux images ship 4.x)
+          before-script-linux: cmake --version
       - uses: actions/setup-python@v6
         with:
           python-version: |
@@ -114,8 +114,9 @@ jobs:
           so=$(echo "$RUNNER_TEMP"/whl/aerialsynth/_native*.so)
           otool -L "$so"
           otool -l "$so" | grep -A4 LC_BUILD_VERSION
-          # only system libraries (/usr/lib, /System); Python's symbols resolve at load time
-          if otool -L "$so" | tail -n +2 | grep -vE '^[[:space:]]+(/usr/lib/|/System/Library/)'; then
+          # only system libraries (/usr/lib, /System; the first line is the module's own id);
+          # Python's symbols resolve at load time
+          if otool -L "$so" | tail -n +3 | grep -vE '^[[:space:]]+(/usr/lib/|/System/Library/)'; then
             echo "::error::the extension links a non-system library"; exit 1
           fi
       - name: Test on 3.10 and 3.13

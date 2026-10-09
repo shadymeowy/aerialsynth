@@ -100,7 +100,8 @@ jobs:
           for f in "$PKG/bin/terrain" "$PKG/lib/libaerialsynth.dylib"; do
             otool -L "$f"
             otool -l "$f" | grep -A4 LC_BUILD_VERSION | grep -E 'minos|sdk'
-            if otool -L "$f" | tail -n +2 | grep -vE '^[[:space:]]+(/usr/lib/|/System/Library/|@rpath/libaerialsynth)'; then
+            # (the library's own id, its first line, is @rpath/libaerialsynth.dylib)
+            if otool -L "$f" | tail -n +2 | grep -vE '^[[:space:]]+(/usr/lib/|/System/Library/|@rpath/libaerialsynth\.dylib )'; then
               echo "::error::$f links a non-system library"; exit 1
             fi
           done

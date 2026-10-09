@@ -118,7 +118,7 @@ jobs:
       - name: Build
         run: cargo build --release --workspace --all-targets
       - name: Test
-        run: cargo test --release --workspace
+        run: cargo test --release --workspace --no-fail-fast
       - name: cargo install
         shell: bash
         run: |
