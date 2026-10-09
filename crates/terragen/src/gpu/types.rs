@@ -51,7 +51,9 @@ pub(crate) struct GCfg {
     pub sun_u: f32,
     pub saturation: f32,
     pub brightness: f32,
-    pub _p: [f32; 3],
+    pub eco_cell: f32,
+    pub ecotone: f32,
+    pub _p: f32,
     pub lvl_a: [[f32; 4]; 4],
     pub lvl_b: [[f32; 4]; 4],
     pub _tail: [f32; 4],
@@ -89,10 +91,13 @@ pub struct GTerrain {
     pub road_minor: f32,
     pub region_edge: f32,
     pub town: u32,
-    pub _p: [u32; 2],
+    pub eco_edge: f32,
+    pub _p: u32,
     pub style: [f32; 4],
     pub region_id: u64,
     pub region_id2: u64,
+    pub eco_id: u64,
+    pub eco_id2: u64,
 }
 
 /// `Seg` of world.wgsl.
@@ -316,7 +321,7 @@ mod tests {
     #[test]
     fn sizes_match_wgsl() {
         assert_eq!(std::mem::size_of::<GCfg>(), 448);
-        assert_eq!(std::mem::size_of::<GTerrain>(), 128);
+        assert_eq!(std::mem::size_of::<GTerrain>(), 144);
         assert_eq!(std::mem::size_of::<GSeg>(), 96);
         assert_eq!(std::mem::size_of::<GSink>(), 64);
         assert_eq!(std::mem::size_of::<GPointIn>(), 128);

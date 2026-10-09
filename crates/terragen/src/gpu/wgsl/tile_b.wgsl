@@ -26,10 +26,14 @@ struct SiteReq {
 @group(2) @binding(16) var<storage, read_write> ranges: array<atomic<u32>>;
 @group(2) @binding(17) var<storage, read_write> region_req: array<SiteReq>;
 @group(2) @binding(18) var<storage, read_write> town_req: array<vec4<i32>>;
+@group(2) @binding(19) var<storage, read_write> eco_req: array<SiteReq>;
 
 const C_REGION_REQ: u32 = 3u;
 const C_TOWN_REQ: u32 = 4u;
 const C_MISSING: u32 = 5u;
+const C_ECO_REQ: u32 = 6u;
+
+var<workgroup> wg_eco_id: array<u64, 512>;
 
 var<workgroup> wg_site_id: array<u64, 256>;
 var<workgroup> wg_site_pt: array<vec4<f64>, 256>;
@@ -56,6 +60,14 @@ fn region_requests(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local
     let i = gid.x;
     let j = gid.y;
     wg_site_id[li] = 0lu;
+    wg_eco_id[2u * li] = 0lu;
+    wg_eco_id[2u * li + 1u] = 0lu;
+    if (i < NA && j < NA) {
+        // the ecoregions of the pixel (water too: its surface layers)
+        let te = terr[ti.pix0 + (j + 1u) * NA2 + (i + 1u)];
+        wg_eco_id[2u * li] = te.eco_id;
+        wg_eco_id[2u * li + 1u] = te.eco_id2;
+    }
     if (i < NA && j < NA && !all_water(ti, i, j)) {
         // the pass-A pixel at the pass-B pixel's centre
         let ia = i + 1u;
@@ -103,6 +115,33 @@ fn region_requests(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local
             if (slot < arrayLength(&region_req)) {
                 region_req[slot].id = id;
                 region_req[slot].pt = wg_site_pt[k];
+            }
+        }
+        // the ecoregions (a handful per workgroup): ids only, the host finds their sites
+        var eseen: array<u64, 16>;
+        var ne = 0u;
+        for (var k = 0u; k < 512u; k++) {
+            let id = wg_eco_id[k];
+            if (id == 0lu) {
+                continue;
+            }
+            var dup = false;
+            for (var e = 0u; e < ne; e++) {
+                if (eseen[e] == id) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) {
+                continue;
+            }
+            if (ne < 16u) {
+                eseen[ne] = id;
+                ne += 1u;
+            }
+            let slot = atomicAdd(&counters[C_ECO_REQ], 1u);
+            if (slot < arrayLength(&eco_req)) {
+                eco_req[slot].id = id;
             }
         }
     }
@@ -313,6 +352,10 @@ fn sample_b(ti: TileInfo, i: u32, j: u32, sx: u32, sy: u32, slope: f32, gsd: f32
     l.road_major = bilerp4(clamp(vec4<f32>(n00.road_major, n10.road_major, n01.road_major, n11.road_major), vec4<f32>(-1e6), vec4<f32>(1e6)), fx, fy);
     l.road_minor = bilerp4(clamp(vec4<f32>(n00.road_minor, n10.road_minor, n01.road_minor, n11.road_minor), vec4<f32>(-1e6), vec4<f32>(1e6)), fx, fy);
     t.region_edge = bilerp4(min(vec4<f32>(n00.region_edge, n10.region_edge, n01.region_edge, n11.region_edge), vec4<f32>(1e6)), fx, fy);
+    // the ecoregion border distance, signed by the side (`tile.rs`)
+    let ee = min(vec4<f32>(n00.eco_edge, n10.eco_edge, n01.eco_edge, n11.eco_edge), vec4<f32>(1e7));
+    let es = vec4<f32>(select(-1.0, 1.0, n00.eco_id == t.eco_id), select(-1.0, 1.0, n10.eco_id == t.eco_id), select(-1.0, 1.0, n01.eco_id == t.eco_id), select(-1.0, 1.0, n11.eco_id == t.eco_id));
+    l.eco_edge = bilerp4(ee * es, fx, fy);
     l.slope = slope;
     l.fw = gsd / f32(ss);
     let r = rows[ti.row_b + j * ss + sy];
@@ -351,7 +394,8 @@ fn pass_b(@builtin(global_invocation_id) gid: vec3<u32>) {
     var acc_h = 0.0;
     var acc_l = 0.0;
     var acc_g = 0.0;
-    var counts: array<u32, 32>;
+    // the classes of the samples (majority vote below)
+    var classes: array<u32, 16>;
     var taken = ss * ss;
     // One call site of `sample_b` (the driver inlines the whole surface model at every call:
     // five of them took minutes to compile). Adaptive (ss = 2): the diagonal pair first, the
@@ -372,7 +416,7 @@ fn pass_b(@builtin(global_invocation_id) gid: vec3<u32>) {
         acc_h += s.s.height;
         acc_l += s.s.lit;
         acc_g += s.ground;
-        counts[min(s.s.cls, 31u)] += 1u;
+        classes[min(k, 15u)] = min(s.s.cls, 127u);
         if (adaptive && k == 0u) {
             first_s = s.s;
         }
@@ -387,13 +431,18 @@ fn pass_b(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
     let inv = 1.0 / f32(taken);
-    // the most frequent cls (the last of equals, as `max_by_key`)
+    // the most frequent class (of equals the highest id, as `max_by_key` over the counts)
     var cls = 0u;
     var best = 0u;
-    for (var k = 0u; k < 32u; k++) {
-        if (counts[k] >= best && counts[k] > 0u) {
-            best = counts[k];
-            cls = k;
+    let nt = min(taken, 16u);
+    for (var a = 0u; a < nt; a++) {
+        var n = 0u;
+        for (var b = 0u; b < nt; b++) {
+            n += select(0u, 1u, classes[b] == classes[a]);
+        }
+        if (n > best || (n == best && classes[a] > cls)) {
+            best = n;
+            cls = classes[a];
         }
     }
     let b = (ti.pix0 + j * NA2 + i) * PB_F;

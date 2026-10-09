@@ -71,6 +71,7 @@ pub fn rivers(s: &mut Stack) {
     } else {
         lc::SAND
     };
-    s.m.river_cov = cov;
+    // (the snow cover leaves open water free, and frozen rivers a faint line)
+    s.m.river_cov = cov * if frozen { 0.4 } else if wet_r > 0.5 { 1.0 } else { 0.0 };
     s.composite(Layer { cov, albedo: rc, dh: l.river_level, hmode: hmode::ABS, cls, relit: 1.0, water: !frozen && wet_r > 0.5, ..Default::default() });
 }

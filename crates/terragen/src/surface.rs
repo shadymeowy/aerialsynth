@@ -494,26 +494,11 @@ impl SurfaceModel {
         let (sa, ca) = ang.sin_cos();
         let ex = east * ca + north * sa;
         let ey = north * ca - east * sa;
-        // climate at the region centre decides the field style
+        // climate at the region centre and its ecoregion's culture decide the field system
         let tc = world.terrain(&cctx);
-        let dry = 1.0 - smoothstep(0.2, 0.4, tc.moist);
-        let u = u01k(id, 2);
-        let style = if dry > 0.5 && u < 0.6 * dry {
-            2 // centre pivots
-        } else if u < 0.5 {
-            0 // rectangular grid
-        } else if u < 0.88 {
-            1 // irregular voronoi fields
-        } else {
-            3 // long strips
-        };
-        let scale = 0.6 + 1.1 * u01k(id, 3);
-        let (fw, fh) = match style {
-            0 => (220.0 * scale, 220.0 * scale * (1.0 + 2.0 * u01k(id, 4))),
-            1 => (300.0 * scale, 0.0),
-            2 => (if u01k(id, 4) < 0.5 { 805.0 } else { 402.0 }, 0.0),
-            _ => (60.0 + 90.0 * u01k(id, 4), 400.0 + 600.0 * u01k(id, 5)),
-        };
+        let eco = self.eco.params(world, &self.registry, cache, tc.eco.id, tc.eco.center);
+        let rs = crate::eco::region_style(id, tc.moist, tc.style[3], &eco.style);
+        let (style, fw, fh) = (rs.style, rs.fw, rs.fh);
         let info = RegionInfo {
             center: c,
             ex,
@@ -524,12 +509,12 @@ impl SurfaceModel {
             fw,
             fh,
             split: u01k(id, 6),
-            hedge: if u01k(id, 7) < 0.4 { u01k(id, 8) } else { 0.0 },
+            hedge: rs.hedge,
             track: 0.2 + 0.6 * u01k(id, 9),
             border_w: 1.5 + 3.0 * u01k(id, 10),
             palette: u01k(id, 11),
             agri: tc.agri,
-            season: (tc.style[3] * 0.7 + 0.3 * u01k(id, 12)).clamp(0.0, 1.0),
+            season: rs.season,
         };
         cache.regions.insert(id, info);
         self.shared_put(|sh| {
@@ -639,9 +624,13 @@ impl SurfaceModel {
         let near_surface = (center.length() - ctx.p.length()).abs() < 0.8 * world.cfg.landuse.town_cell_km * 1000.0;
         // the terrain under the site (expensive: drainage) only where a town can still exist
         // (p_exist <= 0.95)
+        // (the culture of the town's ecoregion: density, blocks, roofs, heights)
+        let mut culture = (1.0, 1.0, u01k(id, 8), u01k(id, 9));
         let exists = near_surface && u01k(id, 1) < 0.95 && {
             let tc = world.terrain(&ctx);
-            let p_exist = (tc.habit * 1.1 * world.cfg.landuse.towns).min(0.95);
+            let eco = self.eco.params(world, &self.registry, cache, tc.eco.id, tc.eco.center);
+            culture = crate::eco::town_style(id, &eco.style);
+            let p_exist = (tc.habit * 1.1 * world.cfg.landuse.towns * culture.0).min(0.95);
             u01k(id, 1) < p_exist && tc.water_kind == water::NONE && tc.ground > 2.0 && tc.ground < 4000.0
         };
         let ang = u01k(id, 2) * std::f64::consts::FRAC_PI_2;
@@ -657,11 +646,11 @@ impl SurfaceModel {
             ex: east * ca + north * sa,
             ey: north * ca - east * sa,
             radius: radius.min(world.cfg.landuse.town_cell_km * 1000.0 * 0.45),
-            block: 70.0 + 70.0 * u01k(id, 5),
+            block: (70.0 + 70.0 * u01k(id, 5)) * culture.1,
             street: 6.5 + 6.0 * u01k(id, 6),
             organic: u01k(id, 7),
-            roof_style: u01k(id, 8),
-            height: u01k(id, 9),
+            roof_style: culture.2,
+            height: culture.3,
             lot: 13.0 + 12.0 * u01k(id, 10),
             elong,
             seed: mix64(id ^ 0x70E5),
@@ -704,6 +693,7 @@ mod tests {
                 n += 1;
             }
         }
-        assert!(towns > n / 20, "too few town samples ({towns}/{n})");
+        // (enough towns that the comparison means something; their density varies by culture)
+        assert!(towns > n / 50, "too few town samples ({towns}/{n})");
     }
 }

@@ -1161,6 +1161,43 @@ pub mod gpu {
         [c.x as f32, c.y as f32, c.z as f32, 0.0]
     }
 
+    /// WGSL constants of the registry, kernels and stack (the same values as here).
+    pub fn wgsl_consts() -> String {
+        let mut o = String::from("// ---------------------------------------------------------------- registry constants (generated)\n");
+        let mut c = |n: &str, v: u32| o.push_str(&format!("const {n}: u32 = {v}u;\n"));
+        for (i, n) in field::NAMES.iter().enumerate() {
+            c(&format!("FIELD_{}", n.to_uppercase()), i as u32);
+        }
+        for (n, i, _) in pal::KEYS.iter().filter(|k| k.2 > 0) {
+            c(&format!("BP_{}", n.to_uppercase()), *i as u32);
+        }
+        for (i, n) in share::NAMES.iter().enumerate() {
+            c(&format!("SHARE_{}", n.to_uppercase()), i as u32);
+        }
+        for (i, n) in crate::kernels::shape::NAMES.iter().enumerate() {
+            c(&format!("SHAPE_{}", n.to_uppercase()), i as u32);
+        }
+        for k in crate::kernels::CORE {
+            c(&format!("KIND_{}", k.name.to_uppercase()), k.kind);
+        }
+        c("KIT_BASE", crate::kernels::KIT_BASE);
+        for (i, n) in crate::stack::slot::NAMES.iter().enumerate() {
+            c(&format!("SLOT_{}", n.to_uppercase()), i as u32);
+        }
+        use crate::stack::hmode;
+        c("HM_NONE", hmode::NONE as u32);
+        c("HM_BLEND", hmode::BLEND as u32);
+        c("HM_MAX", hmode::MAX as u32);
+        c("HM_ADD", hmode::ADD as u32);
+        c("HM_ABS", hmode::ABS as u32);
+        c("MAX_CROWNS", MAX_CROWNS as u32);
+        c("NBANDS", BANDS as u32);
+        for (n, id) in classes::TABLE.iter().filter(|e| e.1 > 17) {
+            c(&format!("LC_{}", n.to_uppercase()), *id as u32);
+        }
+        o
+    }
+
     pub struct Tables {
         pub biomes: Vec<GBiome>,
         pub crowns: Vec<GCrown>,

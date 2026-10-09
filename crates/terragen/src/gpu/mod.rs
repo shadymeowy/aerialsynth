@@ -30,6 +30,9 @@ const WORLD_WGSL: &str = include_str!("wgsl/world.wgsl");
 const POINTS_WGSL: &str = include_str!("wgsl/points.wgsl");
 const TILE_A_WGSL: &str = include_str!("wgsl/tile_a.wgsl");
 const SURFACE_WGSL: &str = include_str!("wgsl/surface.wgsl");
+const REGISTRY_WGSL: &str = include_str!("wgsl/registry.wgsl");
+const KERNELS_WGSL: &str = include_str!("wgsl/kernels.wgsl");
+const STACK_WGSL: &str = include_str!("wgsl/stack.wgsl");
 const TILE_B_WGSL: &str = include_str!("wgsl/tile_b.wgsl");
 const DRAIN_WGSL: &str = include_str!("wgsl/drain.wgsl");
 
@@ -41,8 +44,8 @@ const NA2: usize = N + 4;
 const PB_F: usize = 12;
 const OUT_U: usize = 6;
 const NBIN: usize = 17;
-const NODE_F: usize = 72;
-const NODE_IDS: usize = 8;
+const NODE_F: usize = 76;
+const NODE_IDS: usize = 10;
 const PIX_F: usize = 32;
 /// grid node spacing (pixels)
 const G: f64 = 16.0;
@@ -213,13 +216,16 @@ pub struct GpuGenerator {
 }
 
 /// The WGSL of the point kernels and of the tile kernels.
-fn sources() -> (String, String, String) {
+pub(crate) fn sources() -> (String, String, String) {
     let consts = tables::wgsl_consts();
     let w = World::new(Config::default());
     let (_, pal) = tables::palette(&SurfaceModel::new(&w).pal);
-    let points = format!("{consts}{NOISE_WGSL}{WORLD_WGSL}{POINTS_WGSL}");
-    let tile = format!("{consts}{pal}{NOISE_WGSL}{WORLD_WGSL}{TILE_A_WGSL}{SURFACE_WGSL}{TILE_B_WGSL}");
-    let drain = format!("{consts}{NOISE_WGSL}{WORLD_WGSL}{DRAIN_WGSL}");
+    let relief = crate::kits::wgsl_relief();
+    let reg = crate::registry::gpu::wgsl_consts();
+    let kits = crate::kits::wgsl();
+    let points = format!("{consts}{NOISE_WGSL}{WORLD_WGSL}{relief}{POINTS_WGSL}");
+    let tile = format!("{consts}{reg}{pal}{NOISE_WGSL}{WORLD_WGSL}{relief}{TILE_A_WGSL}{REGISTRY_WGSL}{KERNELS_WGSL}{SURFACE_WGSL}{STACK_WGSL}{kits}{TILE_B_WGSL}");
+    let drain = format!("{consts}{NOISE_WGSL}{WORLD_WGSL}{relief}{DRAIN_WGSL}");
     (points, tile, drain)
 }
 
@@ -245,13 +251,21 @@ impl GpuGenerator {
         use Bind::*;
         let (pal, _) = tables::palette(&surface.pal);
         let g_pal = storage(d, "palette", &pal);
-        let l_globals = layout(d, "globals", &[Uniform, Ro, Ro, Ro, Ro]);
+        // the biome registry (world-constant)
+        let rt = surface.registry.gpu();
+        let g_biomes = storage(d, "biomes", &rt.biomes);
+        let g_crowns = storage(d, "crowns", &rt.crowns);
+        let g_zones = storage(d, "zones", &rt.zones);
+        let g_layers = storage(d, "kernel layers", &rt.layers);
+        let g_band_ranges = storage(d, "band ranges", &rt.band_ranges);
+        let g_band_idx = storage(d, "band lists", &rt.band_idx);
+        let l_globals = layout(d, "globals", &[Uniform, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro]);
         let l_drain = layout(d, "drain", &[Ro, Ro, Ro, Ro, Ro]);
-        let l_tables = layout(d, "tables", &[Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro]);
+        let l_tables = layout(d, "tables", &[Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro]);
         let l_points = layout(d, "points", &[Ro, Rw, Rw, Rw]);
         let l_lat = layout(d, "drainage", &[Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw]);
-        let l_tile = layout(d, "tile", &[Ro, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw]);
-        let globals = bind(d, &l_globals, &[&g_cfg, &g_grads, &g_octs, &g_fbms, &g_pal]);
+        let l_tile = layout(d, "tile", &[Ro, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw]);
+        let globals = bind(d, &l_globals, &[&g_cfg, &g_grads, &g_octs, &g_fbms, &g_pal, &g_biomes, &g_crowns, &g_zones, &g_layers, &g_band_ranges, &g_band_idx]);
         let (src_points, src_tile, src_drain) = sources();
         let t_compile = std::time::Instant::now();
         let cache = PipelineCache::open(&gpu);
@@ -661,6 +675,33 @@ impl GpuGenerator {
         }
     }
 
+    /// The parameters of ecoregions by id (cached): their sites are found from the ids' lattice
+    /// cells around the tiles, so both backends compute them from the same exact site.
+    fn eco_params(&self, cache: &mut Cache, ids: &[u64], areas: &[(DVec3, f64)]) -> Result<Vec<crate::eco::EcoParams>> {
+        let w = &self.world;
+        let reg = &self.surface.registry;
+        let mut out = Vec::with_capacity(ids.len());
+        let missing: Vec<u64> = ids.iter().copied().filter(|id| !cache.eco.contains_key(id)).collect();
+        if !missing.is_empty() {
+            use rayon::prelude::*;
+            let sites = crate::eco::find_sites(w, &missing, areas);
+            let computed: Vec<(u64, Option<crate::eco::EcoParams>)> =
+                missing.par_iter().map(|&id| (id, sites.get(&id).map(|&site| crate::eco::compute(w, reg, id, site)))).collect();
+            for (id, e) in computed {
+                match e {
+                    Some(e) => {
+                        cache.eco.insert(id, e);
+                    }
+                    None => bail!("GPU generator: the site of ecoregion {id:#x} was not found"),
+                }
+            }
+        }
+        for id in ids {
+            out.push(cache.eco[id]);
+        }
+        Ok(out)
+    }
+
     /// The GPU's name.
     pub fn adapter(&self) -> &str {
         &self.gpu.info.name
@@ -915,6 +956,7 @@ impl GpuGenerator {
         let b_lake_req = output(d, "lake requests", (lake_cap * 64) as u64);
         let b_region_req = output(d, "region requests", (site_cap * 64) as u64);
         let b_town_req = output(d, "town requests", (site_cap * 16) as u64);
+        let b_eco_req = output(d, "ecoregion requests", (site_cap * 64) as u64);
         let b_counters = output(d, "counters", 32);
         let (b_pixb, b_scr_a, b_scr_b, b_out, b_ranges) = if full {
             (
@@ -952,6 +994,7 @@ impl GpuGenerator {
                     &b_ranges,
                     &b_region_req,
                     &b_town_req,
+                    &b_eco_req,
                 ],
             )
         };
@@ -980,7 +1023,7 @@ impl GpuGenerator {
             let b_keys = storage(d, "lake keys", &keys);
             let b_vals = storage(d, "lake levels", &vals);
             let b_list = output(d, "bin list", (bin_cap * 4) as u64);
-            let g1 = bind(d, &self.k.l_tables, &[b_segs, &empty, &b_sinks, &b_keys, &b_vals, &empty, &empty, &empty, &empty, &empty, &empty, &empty]);
+            let g1 = bind(d, &self.k.l_tables, &[b_segs, &empty, &b_sinks, &b_keys, &b_vals, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty]);
             let g2 = group2(&b_list);
             run_passes(
                 &g1,
@@ -1010,7 +1053,7 @@ impl GpuGenerator {
         };
         stamp("relief, lakes, bins");
         // ---- the rest of pass A (the bins' pieces as the piece list), the sites pass B needs
-        let g1 = bind(d, &self.k.l_tables, &[b_segs, &b_list, &b_sinks, &b_keys, &b_vals, &empty, &empty, &empty, &empty, &empty, &empty, &empty]);
+        let g1 = bind(d, &self.k.l_tables, &[b_segs, &b_list, &b_sinks, &b_keys, &b_vals, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty]);
         let g2 = group2(&unused);
         let mut passes = vec![(&self.k.a2, [wg(NA2), wg(NA2), nt as u32])];
         if full {
@@ -1024,9 +1067,9 @@ impl GpuGenerator {
         }
         let counters: Vec<u32> = read_back(&self.gpu, &b_counters, 8)?;
         stamp("pass a");
-        let (nreg, ntown) = (counters[3] as usize, counters[4] as usize);
-        if nreg > site_cap || ntown > site_cap {
-            return Err(Overflow(format!("{nreg} regions, {ntown} town cells")).into());
+        let (nreg, ntown, neco) = (counters[3] as usize, counters[4] as usize, counters[6] as usize);
+        if nreg > site_cap || ntown > site_cap || neco > site_cap {
+            return Err(Overflow(format!("{nreg} regions, {ntown} town cells, {neco} ecoregions")).into());
         }
         let reg_reqs: Vec<GSiteReq> = read_back(&self.gpu, &b_region_req, nreg)?;
         let town_reqs: Vec<[i32; 4]> = read_back(&self.gpu, &b_town_req, ntown)?;
@@ -1042,6 +1085,17 @@ impl GpuGenerator {
             (regions, towns)
         })?;
         stamp(&format!("{} regions, {} town cells", regions.len(), town_cells.len()));
+        // the ecoregions (host-shared parameters: the CPU's `eco::compute`, from the exact sites)
+        let eco_reqs: Vec<GSiteReq> = read_back(&self.gpu, &b_eco_req, neco)?;
+        let mut eco_ids: Vec<u64> = eco_reqs.iter().map(|r| r.id).collect();
+        eco_ids.sort_unstable();
+        eco_ids.dedup();
+        let areas: Vec<(DVec3, f64)> = tq.iter().map(|q| (q.center, q.radius)).collect();
+        let ecos = self.eco_params(&mut cache, &eco_ids, &areas)?;
+        let (ek, ev) = eco_table(&ecos);
+        let b_ek = storage(d, "ecoregion keys", &ek);
+        let b_ev = storage(d, "ecoregions", &ev);
+        stamp(&format!("{} ecoregions", ecos.len()));
         let (rk, ri, rv) = region_table(&regions);
         let (tk, tc, tl, tv) = town_table(&town_cells);
         let b_rk = storage(d, "region keys", &rk);
@@ -1052,7 +1106,7 @@ impl GpuGenerator {
         let b_tl = storage(d, "town list", &tl);
         let b_tv = storage(d, "towns", &tv);
         // ---- pass B, canopy opening, outputs
-        let g1 = bind(d, &self.k.l_tables, &[b_segs, &b_list, &b_sinks, &b_keys, &b_vals, &b_rk, &b_ri, &b_rv, &b_tk, &b_tc, &b_tl, &b_tv]);
+        let g1 = bind(d, &self.k.l_tables, &[b_segs, &b_list, &b_sinks, &b_keys, &b_vals, &b_rk, &b_ri, &b_rv, &b_tk, &b_tc, &b_tl, &b_tv, &b_ek, &b_ev]);
         let g2 = group2(&unused);
         let grid = [wg(NA), wg(NA), nt as u32];
         run_passes(
@@ -1129,6 +1183,22 @@ fn from_orderable(u: u32) -> f32 {
     } else {
         f32::from_bits(!u)
     }
+}
+
+/// Ecoregions as an open-addressing table: keys (the slot is the index of the value).
+fn eco_table(ecos: &[crate::eco::EcoParams]) -> (Vec<u64>, Vec<crate::eco::gpu::GEco>) {
+    let n = (ecos.len() * 2).next_power_of_two().max(16);
+    let mut keys = vec![0u64; n];
+    let mut vals = vec![crate::eco::gpu::GEco::default(); n];
+    for e in ecos {
+        let mut k = (crate::noise::mix64(e.id) % n as u64) as usize;
+        while keys[k] != 0 {
+            k = (k + 1) % n;
+        }
+        keys[k] = e.id;
+        vals[k] = crate::eco::gpu::GEco::of(e);
+    }
+    (keys, vals)
 }
 
 /// Land-use regions as an open-addressing table: keys, index into the region list, regions.
@@ -1349,6 +1419,8 @@ fn gpu_cfg(w: &World, s: &SurfaceModel) -> GCfg {
     g.sun_u = el.sin() as f32;
     g.saturation = c.albedo.saturation as f32;
     g.brightness = c.albedo.brightness as f32;
+    g.eco_cell = (c.ecoregions.cell_km * 1000.0) as f32;
+    g.ecotone = (c.ecoregions.ecotone_km * 1000.0) as f32;
     g
 }
 

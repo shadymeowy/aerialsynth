@@ -17,8 +17,11 @@
 //! ```
 //!
 //! Layers 1–5 are evaluated and composited in order. Layers 6 and 7 are evaluated before the
-//! canopy (they may clear it: towns have no forest) and composited after it, in order. A layer
-//! that sets [`Layer::clear`] removes that fraction of the natural vegetation where it covers.
+//! canopy (they may clear it: towns have no forest) and composited after it, in order: their
+//! composite is kept as a transform of what lies below ([`Deferred`]: colour, height and light
+//! are affine in it), applied after the canopy. There, height modes `max` act as `blend`, and
+//! `water` is ignored. A layer that sets [`Layer::clear`] removes that fraction of the natural
+//! vegetation where it covers.
 //!
 //! Kits add layers at any slot ([`crate::kits`]); the WGSL twin is `gpu/wgsl/stack.wgsl`.
 
@@ -195,7 +198,27 @@ pub struct Stack<'a> {
     pub done: bool,
     /// layers 6–7: evaluated before the canopy, composited after it
     deferring: bool,
-    deferred: Vec<Layer>,
+    deferred: Deferred,
+}
+
+/// The composite of the layers evaluated before the canopy and drawn over it, as a function of
+/// what lies below: colour `k·c + c0`, height `kh·h + ch`, light `min(la·l + lb, lmin)`, class.
+#[derive(Clone, Copy, Debug)]
+pub struct Deferred {
+    k: f64,
+    c: DVec3,
+    kh: f64,
+    ch: f64,
+    la: f64,
+    lb: f64,
+    lmin: f64,
+    cls: u8,
+}
+
+impl Default for Deferred {
+    fn default() -> Self {
+        Deferred { k: 1.0, c: DVec3::ZERO, kh: 1.0, ch: 0.0, la: 1.0, lb: 0.0, lmin: 1.0, cls: 0 }
+    }
 }
 
 impl<'a> Stack<'a> {
@@ -206,10 +229,53 @@ impl<'a> Stack<'a> {
             self.m.veg *= 1.0 - ly.clear * ly.cov.clamp(0.0, 1.0);
         }
         if self.deferring {
-            self.deferred.push(ly);
+            self.defer(&ly);
             return;
         }
         self.apply(&ly);
+    }
+
+    /// `ly` into the deferred composite (emission is added at once: it is order-independent).
+    fn defer(&mut self, ly: &Layer) {
+        self.emission += ly.emit;
+        let a = ly.cov.clamp(0.0, 1.0);
+        if a <= 0.0 {
+            return;
+        }
+        let d = &mut self.deferred;
+        d.k *= 1.0 - a;
+        d.c = d.c * (1.0 - a) + ly.albedo * a;
+        match ly.hmode {
+            hmode::BLEND | hmode::MAX | hmode::ABS => {
+                let target = if ly.hmode == hmode::ABS { ly.dh } else { self.l.ground + ly.dh };
+                d.kh *= 1.0 - a;
+                d.ch = d.ch * (1.0 - a) + target * a;
+            }
+            hmode::ADD => d.ch += ly.dh * a,
+            _ => {}
+        }
+        if ly.relit > 0.0 {
+            let w = ly.relit * a;
+            d.la *= 1.0 - w;
+            d.lb = d.lb * (1.0 - w) + w;
+            d.lmin = d.lmin * (1.0 - w) + w;
+        }
+        d.lmin = d.lmin.min(ly.lit);
+        if a > 0.5 && ly.cls != 0 {
+            d.cls = ly.cls;
+        }
+    }
+
+    /// Draw the deferred composite over the stack.
+    fn flush(&mut self) {
+        let d = self.deferred;
+        self.col = self.col * d.k + d.c;
+        self.height = self.height * d.kh + d.ch;
+        self.lit = (self.lit * d.la + d.lb).min(d.lmin);
+        if d.cls != 0 {
+            self.class = d.cls;
+        }
+        self.deferred = Deferred::default();
     }
 
     fn apply(&mut self, ly: &Layer) {
@@ -334,7 +400,7 @@ pub fn eval(sm: &SurfaceModel, world: &World, cache: &mut Caches, ctx: &Ctx, l: 
         is_water: false,
         done: false,
         deferring: false,
-        deferred: Vec::new(),
+        deferred: Deferred::default(),
     };
     use crate::layers as core;
     use crate::layers::biome_layers as biome;
@@ -378,9 +444,7 @@ pub fn eval(sm: &SurfaceModel, world: &World, cache: &mut Caches, ctx: &Ctx, l: 
     core::canopy::layer(&mut s);
     biome(&mut s, slot::CANOPY);
     kits::slot(slot::CANOPY, &mut s);
-    for ly in std::mem::take(&mut s.deferred) {
-        s.apply(&ly);
-    }
+    s.flush();
     // ---- 8, 9
     core::water::rivers(&mut s);
     if !s.done {

@@ -62,15 +62,17 @@ const TF_ROADS_GRID: u32 = 8u;
 const NA2: u32 = 260u;
 /// bins of 16 x 16 pass-A pixels
 const NBIN: u32 = 17u;
-/// floats per grid node: Macro (19), the interpolated `Pre` inputs (34), pixel fields (16)
-const NODE_F: u32 = 72u;
+/// floats per grid node: Macro (19), the interpolated `Pre` inputs (37), pixel fields (16),
+/// the `Pre` flags
+const NODE_F: u32 = 76u;
 const NODE_MAC: u32 = 0u;
 const NODE_PRE: u32 = 19u;
-const NODE_PF: u32 = 53u;
+const NODE_NPRE: u32 = 37u;
+const NODE_PF: u32 = 56u;
 /// floats per pass-A pixel: Macro (19), Relief (11)
 const PIX_F: u32 = 32u;
 /// the `Pre` fields a node holds (P_* flags, as f32 bits)
-const NODE_FLAGS: u32 = 70u;
+const NODE_FLAGS: u32 = 72u;
 
 @group(2) @binding(0) var<storage, read> tiles: array<TileInfo>;
 @group(2) @binding(1) var<storage, read> rows: array<Row>;
@@ -170,9 +172,12 @@ fn pre_put(base: u32, mtn_warp: vec2<f32>, p: Pre) {
     node_f[base + 31u] = p.floodplain.y;
     node_f[base + 32u] = p.floodplain.z;
     node_f[base + 33u] = p.floodplain.w;
+    node_f[base + 34u] = p.eco_warp.x;
+    node_f[base + 35u] = p.eco_warp.y;
+    node_f[base + 36u] = p.eco_warp.z;
 }
 
-fn pre_from(f: array<f32, 34>, flags: u32, cut: vec2<f32>) -> Pre {
+fn pre_from(f: array<f32, 37>, flags: u32, cut: vec2<f32>) -> Pre {
     var p = pre_none();
     p.flags = flags;
     p.gully = vec2<f32>(f[2], f[3]);
@@ -186,6 +191,7 @@ fn pre_from(f: array<f32, 34>, flags: u32, cut: vec2<f32>) -> Pre {
     p.region_warp = vec3<f32>(f[23], f[24], f[25]);
     p.gully_oct = vec4<f32>(f[26], f[27], f[28], f[29]);
     p.floodplain = vec4<f32>(f[30], f[31], f[32], f[33]);
+    p.eco_warp = vec3<f32>(f[34], f[35], f[36]);
     return p;
 }
 
@@ -205,8 +211,9 @@ fn sites_get(k: u32) -> Sites {
     return s;
 }
 
-/// Node ids per node: 3 sites x 2, the forest stand.
-const NODE_IDS: u32 = 8u;
+/// Node ids per node: the lake, region and town sites (2 each), the forest stand, -, the
+/// ecoregion sites (2).
+const NODE_IDS: u32 = 10u;
 
 /// Coarse grid nodes: macro fields and the smooth inputs (`tile.rs`, `nodes`).
 @compute @workgroup_size(64)
@@ -229,6 +236,7 @@ fn grid_nodes(@builtin(global_invocation_id) gid: vec3<u32>) {
     sites_put(ib + 0u, pre.site_lake);
     sites_put(ib + 2u, pre.site_region);
     sites_put(ib + 4u, pre.site_town);
+    sites_put(ib + 8u, pre.site_eco);
     grid_nodes_surface(ti, k, ctx, nb, ib);
 }
 
@@ -288,15 +296,15 @@ fn grid_macro(ti: TileInfo, g: GridPos, ctx: Ctx) -> Macro {
 }
 
 /// The Catmull-Rom interpolated `Pre` inputs (flat) at a pixel.
-fn grid_pre_flat(ti: TileInfo, g: GridPos) -> array<f32, 34> {
+fn grid_pre_flat(ti: TileInfo, g: GridPos) -> array<f32, 37> {
     let wx = catmull_rom_weights(g.fx);
     let wy = catmull_rom_weights(g.fy);
-    var f: array<f32, 34>;
+    var f: array<f32, 37>;
     for (var b = 0u; b < 4u; b++) {
         for (var a = 0u; a < 4u; a++) {
             let w = wx[a] * wy[b];
             let nb = node_index(ti, g.i0 + a - 1u, g.j0 + b - 1u) * NODE_F + NODE_PRE;
-            for (var k = 0u; k < 34u; k++) {
+            for (var k = 0u; k < NODE_NPRE; k++) {
                 f[k] += w * node_f[nb + k];
             }
         }
@@ -313,14 +321,16 @@ fn same_pair(a: Sites, b: Sites) -> bool {
 fn grid_pre(ti: TileInfo, g: GridPos) -> Pre {
     // the fields every node holds (those of node (i0, j0))
     let flags = bitcast<u32>(node_f[node_index(ti, g.i0, g.j0) * NODE_F + NODE_FLAGS]);
-    var pre = pre_from(grid_pre_flat(ti, g), flags & ~(P_SITE_LAKE | P_SITE_REGION | P_SITE_TOWN), vec2<f32>(ti.relief_cut_r, ti.relief_cut_h));
+    var pre = pre_from(grid_pre_flat(ti, g), flags & ~(P_SITE_LAKE | P_SITE_REGION | P_SITE_TOWN | P_SITE_ECO), vec2<f32>(ti.relief_cut_r, ti.relief_cut_h));
     let i00 = node_index(ti, g.i0, g.j0) * NODE_IDS;
     let i10 = node_index(ti, g.i0 + 1u, g.j0) * NODE_IDS;
     let i01 = node_index(ti, g.i0, g.j0 + 1u) * NODE_IDS;
     let i11 = node_index(ti, g.i0 + 1u, g.j0 + 1u) * NODE_IDS;
-    for (var k = 0u; k < 3u; k++) {
-        let s0 = sites_get(i00 + 2u * k);
-        if (same_pair(sites_get(i10 + 2u * k), s0) && same_pair(sites_get(i01 + 2u * k), s0) && same_pair(sites_get(i11 + 2u * k), s0)) {
+    for (var k = 0u; k < 4u; k++) {
+        // (slot 3: the ecoregion sites at ids 8, 9)
+        let o = select(2u * k, 8u, k == 3u);
+        let s0 = sites_get(i00 + o);
+        if (same_pair(sites_get(i10 + o), s0) && same_pair(sites_get(i01 + o), s0) && same_pair(sites_get(i11 + o), s0)) {
             switch k {
                 case 0u: {
                     pre.site_lake = s0;
@@ -330,9 +340,13 @@ fn grid_pre(ti: TileInfo, g: GridPos) -> Pre {
                     pre.site_region = s0;
                     pre.flags |= P_SITE_REGION;
                 }
-                default: {
+                case 2u: {
                     pre.site_town = s0;
                     pre.flags |= P_SITE_TOWN;
+                }
+                default: {
+                    pre.site_eco = s0;
+                    pre.flags |= P_SITE_ECO;
                 }
             }
         }

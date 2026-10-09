@@ -348,6 +348,107 @@ fn draw_style(id: u64, s: &atlas::AtlasSample, arch: usize, temp: f64) -> EcoSty
     }
 }
 
+/// The field system of a land-use region (`surface::RegionInfo`, the GPU's `Region`).
+#[derive(Clone, Copy, Debug)]
+pub struct RegionStyle {
+    /// 0 grid, 1 irregular (Voronoi), 2 centre pivots, 3 long strips
+    pub style: u8,
+    pub fw: f64,
+    pub fh: f64,
+    pub hedge: f64,
+    pub season: f64,
+}
+
+/// The field system of land-use region `id`: from the moisture and the style channel 3 at its
+/// centre and its ecoregion's culture (field-system weights, field size, hedges, season).
+/// Irrigated pivots wherever it is dry; elsewhere the culture's systems.
+pub fn region_style(id: u64, moist: f64, style3: f64, e: &EcoStyle) -> RegionStyle {
+    let dry = 1.0 - smoothstep(0.2, 0.4, moist);
+    let u = u01k(id, 2);
+    let style = if dry > 0.5 && u < 0.6 * dry {
+        2
+    } else {
+        let w = e.fields;
+        let total: f64 = w.iter().sum::<f64>().max(1e-9);
+        let v = u01k(id, 22) * total;
+        if v < w[0] {
+            0
+        } else if v < w[0] + w[1] {
+            1
+        } else if v < w[0] + w[1] + w[2] {
+            2
+        } else {
+            3
+        }
+    };
+    let scale = (0.6 + 1.1 * u01k(id, 3)) * e.field_scale;
+    let (fw, fh) = match style {
+        0 => (220.0 * scale, 220.0 * scale * (1.0 + 2.0 * u01k(id, 4))),
+        1 => (300.0 * scale, 0.0),
+        2 => (if u01k(id, 4) < 0.5 { 805.0 } else { 402.0 }, 0.0),
+        _ => ((60.0 + 90.0 * u01k(id, 4)) * scale.sqrt(), (400.0 + 600.0 * u01k(id, 5)) * scale.sqrt()),
+    };
+    RegionStyle {
+        style,
+        fw,
+        fh,
+        hedge: if u01k(id, 7) < e.hedges { u01k(id, 8) } else { 0.0 },
+        season: (0.5 * (style3 * 0.7 + 0.3 * u01k(id, 12)) + 0.5 * e.season).clamp(0.0, 1.0),
+    }
+}
+
+/// A town's culture: (existence multiplier, block size multiplier, roof palette offset 0..1,
+/// height 0..1).
+pub fn town_style(id: u64, e: &EcoStyle) -> (f64, f64, f64, f64) {
+    let roof = (e.roof + 0.25 * (u01k(id, 8) - 0.5)).rem_euclid(1.0);
+    let height = (0.5 * u01k(id, 9) + e.height).clamp(0.0, 1.0);
+    (e.towns, e.block, roof, height)
+}
+
+/// The parameters of ecoregion `id` near `p` (its site found from the lattice around `p`).
+pub fn params_near(w: &World, reg: &Registry, id: u64, p: DVec3) -> Option<EcoParams> {
+    let sites = find_sites(w, &[id], &[(p, 0.0)]);
+    sites.get(&id).map(|&site| compute(w, reg, id, site))
+}
+
+/// The lattice sites of ecoregion `ids` that can be among the two nearest of a point within
+/// the `areas` (centre, radius m): the lattice cells around them are enumerated (an id is the
+/// hash of its cell). The GPU generator reports ids only; this finds their exact sites, so its
+/// ecoregions are computed from the same sites as the CPU's.
+pub fn find_sites(w: &World, ids: &[u64], areas: &[(DVec3, f64)]) -> FxHashMap<u64, DVec3> {
+    let cell = w.cfg.ecoregions.cell_km * KM;
+    let seed = w.seed() ^ ECO_KEY;
+    // |warp| < √3 · 1.1 · (0.22 + 0.035) cell; the second-nearest site lies within ~1.7 cells
+    let reach = 0.5 * cell + 2.0 * cell;
+    let want: std::collections::HashSet<u64> = ids.iter().copied().collect();
+    let mut out: FxHashMap<u64, DVec3> = FxHashMap::default();
+    let (r_lo, r_hi) = (w.ell.b - 12_000.0 - reach - cell, w.ell.a + 9_000.0 + reach + cell);
+    for &(c, r) in areas {
+        if out.len() == want.len() {
+            break;
+        }
+        let rr = r + reach;
+        let lo = ((c - DVec3::splat(rr)) / cell).floor();
+        let hi = ((c + DVec3::splat(rr)) / cell).floor();
+        for z in lo.z as i64..=hi.z as i64 {
+            for y in lo.y as i64..=hi.y as i64 {
+                for x in lo.x as i64..=hi.x as i64 {
+                    let cc = (DVec3::new(x as f64, y as f64, z as f64) + 0.5) * cell;
+                    let d0 = cc.length();
+                    if d0 < r_lo || d0 > r_hi || (cc - c).length() > rr + 0.87 * cell {
+                        continue;
+                    }
+                    let (id, site) = worley3_site(seed, (x, y, z), cell, 0.9);
+                    if want.contains(&id) {
+                        out.insert(id, site);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 /// The ecoregion sites around `p` (the two nearest of the warped lattice).
 pub fn sites(w: &World, p: DVec3) -> [(u64, DVec3); 2] {
     worley3_sites(w.seed() ^ ECO_KEY, p + warp(w, p), w.cfg.ecoregions.cell_km * KM, 0.9)
@@ -368,6 +469,7 @@ pub mod gpu {
         pub arch: u32,
         pub litho: u32,
         pub culture: u32,
+        pub _p: [u32; 2],
         /// soil (rgb, weight), rock (rgb, weight), grass tint, crown tint
         pub soil: [f32; 4],
         pub rock: [f32; 4],
@@ -396,6 +498,7 @@ pub mod gpu {
                 arch: s.archetype as u32,
                 litho: s.litho as u32,
                 culture: e.culture,
+                _p: [0; 2],
                 soil: v(s.soil, s.soil_w),
                 rock: v(s.rock, s.rock_w),
                 grass: v(s.grass, 0.0),
@@ -413,7 +516,7 @@ pub mod gpu {
     #[cfg(test)]
     #[test]
     fn size() {
-        assert_eq!(std::mem::size_of::<GEco>(), 24 + 11 * 16 - 8);
+        assert_eq!(std::mem::size_of::<GEco>(), 32 + 10 * 16);
     }
 }
 

@@ -26,6 +26,8 @@ gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
 
 [dev-dependencies]
 image.workspace = true
+# WGSL validation and SPIR-V output in tests without a GPU (the version wgpu uses)
+naga = { version = "30", features = ["wgsl-in", "spv-out"] }
 
 [[example]]
 name = "gpu_vs_cpu"

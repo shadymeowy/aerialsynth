@@ -33,9 +33,10 @@ impl Stack<'_> {
     pub fn pal(&self, i: usize) -> DVec3 {
         let c = self.bio.pal(&self.sm.registry, i);
         let st = &self.bio.style;
+        // (the lithology's share varies within the ecoregion: no uniform polygons)
         match i {
-            pal::SOIL..=3 => c + (st.soil - c) * st.soil_w,
-            pal::ROCK..=11 => c + (st.rock - c) * st.rock_w,
+            pal::SOIL..=3 => c + (st.soil - c) * (st.soil_w * (0.25 + 1.3 * self.t.style[2]).clamp(0.0, 1.2)).min(1.0),
+            pal::ROCK..=11 => c + (st.rock - c) * (st.rock_w * (0.4 + 1.2 * self.t.style[1]).clamp(0.0, 1.2)).min(1.0),
             pal::GRASS_WET | pal::GRASS_DRY | pal::GRASS_COLD | pal::TUNDRA | pal::MARSH => c * st.grass,
             pal::CROWN_CONIFER..=pal::SHRUB => c * st.crown,
             _ => c,

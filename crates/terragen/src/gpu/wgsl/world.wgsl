@@ -48,8 +48,9 @@ struct Cfg {
     sun_u: f32,
     saturation: f32,
     brightness: f32,
-    _p0: f32,
-    _p1: f32,
+    /// ecoregion lattice cell and ecotone width (m)
+    eco_cell: f32,
+    ecotone: f32,
     _p2: f32,
     /// per drainage level: cell (m), width min, width max, valley half width (m)
     lvl_a: array<vec4<f32>, 4>,
@@ -149,9 +150,11 @@ struct Pre {
     region_warp: vec3<f32>,
     gully_oct: vec4<f32>,
     floodplain: vec4<f32>,
+    eco_warp: vec3<f32>,
     site_lake: Sites,
     site_region: Sites,
     site_town: Sites,
+    site_eco: Sites,
 }
 
 const P_GULLY: u32 = 1u;
@@ -164,6 +167,9 @@ const P_FLOODPLAIN0: u32 = 512u; // .. 512 << 3
 const P_SITE_LAKE: u32 = 8192u;
 const P_SITE_REGION: u32 = 16384u;
 const P_SITE_TOWN: u32 = 32768u;
+const P_ECO_WARP: u32 = 65536u;
+const P_SITE_ECO: u32 = 131072u;
+const ECO_KEY: u64 = 0xEC0Elu;
 
 fn pre_none() -> Pre {
     var p: Pre;
@@ -404,6 +410,23 @@ fn region_warp(p: vec3<f64>) -> vec3<f32> {
     return a + b;
 }
 
+/// Warp (m) of the lookup in the ecoregion lattice (`eco::warp`).
+fn eco_warp(p: vec3<f64>) -> vec3<f32> {
+    let c = f64(cfg.eco_cell);
+    let s = cfg.seed;
+    let i1 = 1.0lf / (0.8lf * c);
+    let i2 = 1.0lf / (0.17lf * c);
+    return vec3<f32>(perlin3(s ^ 0xEC1lu, p * i1), perlin3(s ^ 0xEC2lu, p * i1), perlin3(s ^ 0xEC3lu, p * i1)) * (0.22 * cfg.eco_cell)
+        + vec3<f32>(perlin3(s ^ 0xEC4lu, p * i2), perlin3(s ^ 0xEC5lu, p * i2), perlin3(s ^ 0xEC6lu, p * i2)) * (0.035 * cfg.eco_cell);
+}
+
+fn eco_warp_at(p: vec3<f64>, pre: Pre) -> vec3<f32> {
+    if ((pre.flags & P_ECO_WARP) != 0u) {
+        return pre.eco_warp;
+    }
+    return eco_warp(p);
+}
+
 fn base_elevation(s: f32) -> f32 {
     if (s > 0.0) {
         return 20.0 + 900.0 * pow(s, 1.3);
@@ -526,6 +549,10 @@ fn pre_at(c: Ctx, m: Macro, gully: bool, roads: bool, has_cut: bool, cut: vec2<f
             pre.region_warp = region_warp(c.p);
             pre.flags |= P_REGION_WARP;
         }
+        if (0.17 * cfg.eco_cell >= cut.y) {
+            pre.eco_warp = eco_warp(c.p);
+            pre.flags |= P_ECO_WARP;
+        }
     }
     if (gully) {
         let mm = mountain_mask(m);
@@ -545,7 +572,9 @@ fn pre_at(c: Ctx, m: Macro, gully: bool, roads: bool, has_cut: bool, cut: vec2<f
         let pw = c.p + vec3<f64>(region_warp(c.p));
         pre.site_region = worley3_sites(cfg.seed ^ 0x5E61lu, pw, 1.0lf / cfg.region_cell, 0.9);
         pre.site_town = worley3_sites(cfg.seed ^ 0x70E1lu, c.p, 1.0lf / cfg.town_cell, 0.8);
-        pre.flags |= P_SITE_LAKE | P_SITE_REGION | P_SITE_TOWN;
+        let pe = c.p + vec3<f64>(eco_warp(c.p));
+        pre.site_eco = worley3_sites(cfg.seed ^ ECO_KEY, pe, 1.0lf / f64(cfg.eco_cell), 0.9);
+        pre.flags |= P_SITE_LAKE | P_SITE_REGION | P_SITE_TOWN | P_SITE_ECO;
     }
     if (has_cut && (pre.flags & P_GULLY) != 0u) {
         let grad = c.east * pre.gully.x + c.north * pre.gully.y;
@@ -679,6 +708,16 @@ fn relief(c: Ctx, m: Macro, pre: Pre) -> Relief {
         h += cfg.dune_height * sand * dunes(c, m, gsd);
     }
 
+    // the kits' relief operators
+    var rin: ReliefIn;
+    rin.temp = temp0;
+    rin.moist = moist;
+    rin.mountain = mountain;
+    rin.sand = sand;
+    rin.mesa = mesa;
+    rin.smooth_h = smooth_h;
+    kits_relief(c, m, rin, &h);
+
     o.h = h;
     o.smooth_h = smooth_h;
     o.temp0 = temp0;
@@ -691,6 +730,16 @@ fn relief(c: Ctx, m: Macro, pre: Pre) -> Relief {
     o.sand = sand;
     o.gully_n = gully_n;
     return o;
+}
+
+/// Inputs of the kits' relief operators (`kits::ReliefIn`).
+struct ReliefIn {
+    temp: f32,
+    moist: f32,
+    mountain: f32,
+    sand: f32,
+    mesa: f32,
+    smooth_h: f32,
 }
 
 /// Pass-A result at a pixel centre (`Terrain`; the land-use sites as ids and edge distance).
@@ -717,9 +766,14 @@ struct Terrain {
     road_minor: f32,
     region_edge: f32,
     town: u32,
+    /// distance to the ecoregion border (m)
+    eco_edge: f32,
     style: vec4<f32>,
     region_id: u64,
     region_id2: u64,
+    /// the ecoregion and its neighbour across the nearest border
+    eco_id: u64,
+    eco_id2: u64,
 }
 
 // ---------------------------------------------------------------- drainage and lakes (batch data)
@@ -1107,6 +1161,23 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
         t.region_id = wc.id;
         t.region_id2 = wc.id2;
         t.region_edge = worley_edge_dist(wc, pw);
+    }
+    // the ecoregion (every zoom)
+    t.eco_id = 0lu;
+    t.eco_id2 = 0lu;
+    t.eco_edge = NONE_F;
+    if (mode != MODE_RELIEF) {
+        let pe = p + vec3<f64>(eco_warp_at(p, pre));
+        var wc: Cell3;
+        let cell = f64(cfg.eco_cell);
+        if ((pre.flags & P_SITE_ECO) != 0u) {
+            wc = worley3_from(pe, cell, 1.0lf / cell, pre.site_eco);
+        } else {
+            wc = worley3(cfg.seed ^ ECO_KEY, pe, cell, 0.9);
+        }
+        t.eco_id = wc.id;
+        t.eco_id2 = wc.id2;
+        t.eco_edge = worley_edge_dist(wc, pe);
     }
     t.town = 0u;
     let town_cell = f32(cfg.town_cell);

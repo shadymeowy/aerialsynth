@@ -340,3 +340,31 @@ fn polar_tile() {
         eprintln!("  {name:10} mean {mean:8.4} off {:7.3}% max {mx:8.2}", bad * 100.0);
     }
 }
+
+/// The generator's WGSL parses, validates and compiles to SPIR-V entry point by entry point
+/// (no GPU needed: kits can check their WGSL with `cargo test -p terragen wgsl_compiles`).
+#[test]
+fn wgsl_compiles() {
+    let (points, tile, drain) = super::sources();
+    for (name, src) in [("points", points), ("tile", tile), ("drain", drain)] {
+        let module = match naga::front::wgsl::parse_str(&src) {
+            Ok(m) => m,
+            Err(e) => panic!("{name}: {}", e.emit_to_string(&src)),
+        };
+        let mut v = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all());
+        let info = match v.validate(&module) {
+            Ok(i) => i,
+            Err(e) => panic!("{name}: {}", e.emit_to_string(&src)),
+        };
+        for ep in &module.entry_points {
+            let opts = naga::back::spv::Options::default();
+            let pipe = naga::back::spv::PipelineOptions { shader_stage: ep.stage, entry_point: ep.name.clone() };
+            let r = std::panic::catch_unwind(|| naga::back::spv::write_vec(&module, &info, &opts, Some(&pipe)));
+            match r {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => panic!("{name}::{}: SPIR-V: {e}", ep.name),
+                Err(_) => panic!("{name}::{}: the SPIR-V backend panicked", ep.name),
+            }
+        }
+    }
+}
