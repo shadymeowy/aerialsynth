@@ -55,7 +55,7 @@ It is developed on Linux; other platforms wgpu supports should work but are unte
 
 ```sh
 cargo build --release                       # the binary: target/release/terrain
-cargo install --path crates/cli             # optional: puts `terrain` on the PATH
+cargo install --locked --path crates/cli --target-dir target   # optional: `terrain` on the PATH (reuses that build)
 terrain view                                # the default world (seed 1, tiles in out/world.h5)
 terrain config > my.yaml                    # a commented scenario template; edit it
 terrain run -c my.yaml                      # trajectory → tiles → render (→ events)
@@ -68,7 +68,9 @@ different planet. A tile store holds exactly one world: a store made with anothe
 config is refused (the error names the settings that differ), so give each world its own
 `tiles.file`.
 
-`configs/quick.yaml` is a 10 s smoke test and `configs/dataset.yaml` a fuller dataset.
+`configs/quick.yaml` is a 3 s smoke test (16 frames of a 320 × 256 camera; ~50 s on 4 CPU
+cores without a GPU, most of it generating its ~75 tiles, and ~6 s with one) and
+`configs/dataset.yaml` a fuller dataset.
 `configs/examples/` has night flights, a full moon, an event camera rig, a star tracker, a
 fisheye, a 10 km cruise, a sunset and an IMU check.
 
@@ -106,6 +108,9 @@ Tiles and rendering from C and Python ([`bindings/`](bindings/README.md)): open 
 store and get a layer of tile z/x/y, or render a camera image (RGB, depth, land cover) from a
 pose with the renderer of `terrain run`; tiles that are not stored yet are generated (GPU if
 available, else CPU) and stored first. The world is given like `terrain -c FILE --seed N`.
+The first render at a new place generates a few hundred tiles: under half a minute on a GPU,
+minutes on a CPU (`World(..., verbose=True)` / `as_set_verbose` shows the progress, `World.prefetch` /
+`as_prefetch` makes an area's tiles ahead; [details](bindings/README.md#rendering)).
 
 ```python
 import aerialsynth                                       # bindings/python (maturin, abi3 ≥ 3.10)

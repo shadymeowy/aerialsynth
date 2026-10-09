@@ -34,7 +34,7 @@ output       the sequence file: body pose rate, time window, PNG export, compres
   on the CPU; `gpu` / `cpu` force one. Both build the same world (`docs/gpu.md`).
 - **Paths:** relative paths are relative to the working directory.
 
-Examples: `configs/quick.yaml` (10 s smoke test), `configs/dataset.yaml` (60 s with wind,
+Examples: `configs/quick.yaml` (3 s smoke test), `configs/dataset.yaml` (60 s with wind,
 vibration, a forward camera, clock sun, sensor model, IMU), `configs/view.yaml` (for
 `terrain view`), and `configs/examples/` (night, full moon, event camera rig, star tracker,
 fisheye, 10 km cruise, sunset, IMU check).

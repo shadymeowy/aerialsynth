@@ -103,7 +103,27 @@ Conventions (as in the datasets, [`docs/scenario.md`](../docs/scenario.md)):
 | backend | `auto` (the GPU when there is a usable one that takes the camera model, else the CPU), `cpu` or `gpu` (an error without a usable GPU); default: the scenario's `render.backend` (auto). CPU and GPU images agree closely, not bit for bit |
 
 Only the images asked for are made (no RGB: shading is skipped). A camera's tile cache holds up to
-`tiles.cache_tiles` tiles (default 2000, ~0.7 MB each) in memory.
+`tiles.cache_tiles` tiles (default 2000, ~0.9 MB each) in memory; tiles generated for a render
+are written to the store in batches as they are made.
+
+**The first render at a new place** generates the tiles it needs: the level-of-detail selection
+starts from zoom 2 and refines a tile while one of its texels covers more than an output pixel
+(`render.texel_px`, at the nearest point of the tile; supersampling does not refine further), so
+a 160 × 120 camera 1.5 km above the ground needs zoom 15 at most, a 640 × 480 one 300 m up zoom
+18 near the camera. Each level's tiles are generated before the next level is selected (the
+selection needs their elevation ranges), then the neighbours and ancestors of the selected tiles:
+a few hundred tiles in all for a new place. With a GPU that generates tiles that takes 20–30 s
+(one small batch per zoom level); **on the CPU it takes minutes** (4 cores: the C example
+`examples/render.c` 2.8 min, 220 tiles; the Python example of [the README](../README.md#bindings)
+4.6 min, 500 tiles), coarse tiles being the slowest. Later renders there read the tiles from
+the store (0.4 s and 0.9 s). To see
+the progress: `as_set_verbose(w, 1)` / `World(..., verbose=True)` (a line per batch of tiles on
+stderr). To make the tiles ahead, e.g. for many renders over an area: `as_prefetch` /
+`World.prefetch` over the area, or `terrain tiles --bbox`.
+
+The same call gives the same image: a render that generates its tiles selects the same tiles as
+one that reads them from the store (the selection is the one a store holding every tile gives,
+whatever it held before), and a generated tile is used exactly as it is stored.
 
 **Threads:** renders of one camera are serialized (it holds one renderer); different cameras,
 also of the same world, render concurrently (GPU work is serialized by the device). Python
@@ -147,6 +167,7 @@ as_close(w);
 | `int as_tiles(const as_world *w, const uint32_t *zxy, size_t n, as_layer layer, void *out, size_t out_len)` | a layer of `n` tiles (`zxy`: n × (z, x, y)), tile `i` at `out + i * as_layer_size(layer)` |
 | `int as_prefetch(const as_world *w, double lat_min, double lon_min, double lat_max, double lon_max, uint32_t z_min, uint32_t z_max, size_t *generated)` | generate and store the missing tiles of a box (at most `AS_MAX_PREFETCH_TILES`); the count into `*generated` (may be NULL) |
 | `int as_set_cache_mb(const as_world *w, size_t mb)` | size of the decoded-tile cache in MiB (default `AS_DEFAULT_CACHE_MB` = 256; 0 = off) |
+| `int as_set_verbose(const as_world *w, int on)` | report tile generation (by tile calls and renders) on stderr; off by default |
 | `void as_close(as_world *w)` | close (NULL is ignored) |
 | `size_t as_layer_size(as_layer layer)` | bytes of a tile of `layer` (0: unknown layer) |
 | `int as_layer_describe(as_layer layer, as_layer_info *info)` | name, dtype, channels, element size, size |
@@ -233,7 +254,7 @@ aerialsynth.LAYERS["elevation"]                  # LayerInfo(name, dtype, channe
 ```sh
 cd bindings/python
 maturin build --release -o dist          # dist/aerialsynth-0.1.0-cp310-abi3-<platform>.whl
-pip install dist/aerialsynth-*.whl pytest && pytest tests
+python3 -m venv .venv && .venv/bin/pip install dist/aerialsynth-*.whl pytest && .venv/bin/pytest tests
 ```
 
 Release wheels (`manylinux_2_28`, any Linux x86_64 with glibc 2.28 or newer) are built by
