@@ -251,15 +251,10 @@ impl GpuEventSensor {
                         wgpu::BindGroupEntry { binding: 5, resource: self.ev.as_entire_binding() },
                     ],
                 });
-                {
-                    let mut cp = enc.begin_compute_pass(&Default::default());
-                    cp.set_pipeline(&self.pipe);
-                    cp.set_bind_group(0, &bg, &[]);
-                    cp.dispatch_workgroups(gx, gy, 1);
-                }
-                if std::env::var_os("AS_DEBUG_EV_SPLIT").is_some() {
-                    q.submit([std::mem::replace(&mut enc, d.create_command_encoder(&Default::default())).finish()]);
-                }
+                let mut cp = enc.begin_compute_pass(&Default::default());
+                cp.set_pipeline(&self.pipe);
+                cp.set_bind_group(0, &bg, &[]);
+                cp.dispatch_workgroups(gx, gy, 1);
             }
             enc.copy_buffer_to_buffer(&self.ev, 0, &self.count_read, 0, 4);
             q.submit([enc.finish()]);
@@ -427,79 +422,8 @@ mod tests {
             slot = 1 - slot;
             k0 = k1;
         }
-        eprintln!("FLICKER gpu {ng} cpu {nc} adapter {:?}", g.gpu.info);
         assert!(nc > 1000, "{nc}");
         assert!((ng as f64 - nc as f64).abs() <= 0.002 * nc as f64, "gpu {ng} cpu {nc}");
-    }
-
-    /// DEBUG (temporary): the flicker test in variants.
-    #[test]
-    fn debug_flicker_variants() {
-        for (split, interp, each) in [(true, true, false), (false, true, false), (true, false, false), (true, true, true), (false, false, false)] {
-            let (w, h) = (64, 16);
-            let n = w * h;
-            let cfg = quiet();
-            let Some(mut g) = sensor(cfg.clone(), w, h) else { return };
-            let mut c = EventSensor::new(cfg, w, h);
-            let omega = std::f64::consts::TAU * 100.0;
-            let key = |k: usize| -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-                let k = if interp { k } else { 0 };
-                let r = (0..n * 3).map(|i| 0.05 + 0.3 * (((i / 3) * 7 + k * 13) % 17) as f32 / 17.0).collect();
-                if !split {
-                    return (r, vec![], vec![]);
-                }
-                let fc = (0..n * 3).map(|i| if (i / 3) % 5 == 0 { 0.02 * (1 + k) as f32 } else { 0.0 }).collect();
-                let fs = (0..n * 3).map(|i| if (i / 3) % 7 == 0 { 0.03 } else { 0.0 }).collect();
-                (r, fc, fs)
-            };
-            let at = |k: &(Vec<f32>, Vec<f32>, Vec<f32>), t: f64| -> Vec<f32> {
-                if k.1.is_empty() {
-                    return k.0.clone();
-                }
-                let (co, si) = ((omega * t).cos() as f32, (omega * t).sin() as f32);
-                k.0.iter().zip(&k.1).zip(&k.2).map(|((r, a), b)| r + a * co + b * si).collect()
-            };
-            let (mut ng, mut nc) = (0, 0);
-            let mut per = vec![];
-            let mut k0 = key(0);
-            g.set_key_raw(0, &k0.0, &k0.1, &k0.2);
-            g.push(0.0, 0, 0.0, omega);
-            g.flush().unwrap();
-            c.step(0.0, &c.log_image(&at(&k0, 0.0)));
-            let mut slot = 0;
-            for j in 1..=6 {
-                let (t0, t1) = ((j - 1) as f64 * 0.01, j as f64 * 0.01);
-                let k1 = key(j);
-                g.set_key_raw(1 - slot, &k1.0, &k1.1, &k1.2);
-                let (mut bg, mut bc) = (0, 0);
-                for i in 1..=12 {
-                    let t = t0 + (t1 - t0) * i as f64 / 12.0;
-                    let a = ((t - t0) / (t1 - t0)) as f32;
-                    let rad = if i == 12 {
-                        g.push(t, 1 - slot, 0.0, omega);
-                        at(&k1, t)
-                    } else {
-                        g.push(t, slot, a, omega);
-                        at(&k0, t).iter().zip(&at(&k1, t)).map(|(u, v)| u + a * (v - u)).collect()
-                    };
-                    let e = c.step(t, &c.log_image(&rad)).len();
-                    nc += e;
-                    bc += e;
-                    if each {
-                        let e = g.flush().unwrap().len();
-                        ng += e;
-                        bg += e;
-                    }
-                }
-                let e = g.flush().unwrap().len();
-                ng += e;
-                bg += e;
-                per.push((bg, bc));
-                slot = 1 - slot;
-                k0 = k1;
-            }
-            eprintln!("VARIANT split {split} interp {interp} each {each}: gpu {ng} cpu {nc} per batch {per:?}");
-        }
     }
 
     /// Noise statistics (shot noise, leak) agree with the CPU sensor.
