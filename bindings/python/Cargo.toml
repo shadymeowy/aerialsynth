@@ -1,0 +1,23 @@
+[package]
+name = "aerialsynth-python"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Python bindings of aerialsynth (the aerialsynth._native extension; built with maturin)"
+publish = false
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+# An extension module does not link libpython (`extension-module`): a test harness of it would not
+# link, so the crate has no Rust tests (the logic is tested in aerialsynth-core; the module by
+# tests/test_tiles.py). `cargo build / clippy / test --workspace` thus never need libpython.
+test = false
+doctest = false
+
+[dependencies]
+aerialsynth-core.workspace = true
+# abi3-py310: one wheel for CPython >= 3.10 (stable ABI)
+pyo3 = { version = "0.29", features = ["abi3-py310", "extension-module"] }

@@ -96,6 +96,26 @@ options.
 
 Both are plain HDF5; layouts in [`docs/formats.md`](docs/formats.md).
 
+## Bindings
+
+Tile access from C and Python ([`bindings/`](bindings/README.md)): open a world's tile store and
+get a layer of tile z/x/y; a tile that is not stored yet is generated (GPU if available, else
+CPU) and stored first. The world is given like `terrain -c FILE --seed N`.
+
+```python
+import aerialsynth                                       # bindings/python (maturin, abi3 ≥ 3.10)
+w = aerialsynth.World("out/world.h5")                    # the default world; created if missing
+rgb = w.tile(12, 2200, 1500, "rgb")                      # np.uint8 (256, 256, 3)
+h = w.tile(12, 2200, 1500, "elevation")                  # np.float32 (256, 256), m above WGS84
+```
+
+```c
+as_world *w = as_open("out/world.h5", NULL, -1);        /* bindings/c: libaerialsynth */
+static float h[256 * 256];                               /* 256 KiB: not on the stack */
+as_tile(w, 12, 2200, 1500, AS_LAYER_ELEVATION, h, sizeof h);
+as_close(w);
+```
+
 ## Documentation
 
 | | |
@@ -107,6 +127,7 @@ Both are plain HDF5; layouts in [`docs/formats.md`](docs/formats.md).
 | [`docs/events.md`](docs/events.md) | event cameras |
 | [`docs/stars.md`](docs/stars.md) | stars, planets, Moon: catalogue, astrometry, star ground truth |
 | [`docs/gpu.md`](docs/gpu.md) | the GPU backend: tile generation and rendering |
+| [`bindings/README.md`](bindings/README.md) | the C and Python bindings: tile access, building, examples |
 
 ## Repository layout
 
@@ -118,6 +139,7 @@ crates/terragen   the world generator (CPU / GPU)
 crates/render     cameras, flights, level of detail, renderer (CPU / GPU), lighting, sensor, events, IMU, writers
 crates/viewer     terrain view: map and camera views
 crates/cli        the terrain command
+bindings/         C API (libaerialsynth) and Python package (aerialsynth): tile access
 configs/          example scenarios
 docs/             documentation
 scripts/          Python tools: ground-truth validation, data builders

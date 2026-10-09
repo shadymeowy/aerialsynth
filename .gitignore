@@ -2,3 +2,13 @@
 /out
 *.h5
 __pycache__/
+
+# bindings tooling (wheels, virtualenvs, built libraries, test caches)
+*.so
+*.dylib
+*.whl
+dist/
+.venv/
+*.egg-info/
+.pytest_cache/
+bindings/python/target/

@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
-      - run: python3 -m compileall -q scripts showcase
+      - run: python3 -m compileall -q scripts showcase bindings/python
 
   # Clippy and the tests in one job: HDF5 is built from source (hdf5-metno-sys, features static +
   # zlib: CMake and a C compiler, both on the runner image) and its build-script output is shared
@@ -87,3 +87,41 @@ jobs:
             echo "::error::GPU tests were skipped: lavapipe gave no usable adapter"
             exit 1
           fi
+
+  # The Python package: one abi3 wheel (cp310-abi3), built once and tested on the oldest and the
+  # newest supported CPython. The C API (header, example) is tested by `cargo test` above.
+  python-wheel:
+    name: Python wheel (abi3, 3.10 + 3.13)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: |
+            3.13
+            3.10
+
+      - name: Build the wheel
+        working-directory: bindings/python
+        run: |
+          python3.10 -m pip install "maturin>=1.9,<2"
+          python3.10 -m maturin build --release -o dist
+          ls dist
+
+      # no GPU on the runner: tiles are generated on the CPU
+      - name: Test on 3.10 and 3.13
+        working-directory: bindings/python
+        env:
+          VK_DRIVER_FILES: /nonexistent.json
+          VK_ICD_FILENAMES: /nonexistent.json
+        run: |
+          for v in 3.10 3.13; do
+            python$v -m venv /tmp/venv$v
+            /tmp/venv$v/bin/pip install dist/*.whl pytest
+            /tmp/venv$v/bin/python -m pytest -q tests
+          done

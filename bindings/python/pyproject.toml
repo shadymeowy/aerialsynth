@@ -1,0 +1,35 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "aerialsynth"
+description = "Tiles of a procedural planet (aerialsynth) as numpy arrays, generated on demand into an HDF5 tile store"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = ["numpy>=1.22"]
+dynamic = ["version"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.urls]
+Repository = "https://github.com/shadymeowy/aerialsynth"
+
+[tool.maturin]
+# the Rust extension is the private aerialsynth._native; python/aerialsynth wraps it
+module-name = "aerialsynth._native"
+python-source = "python"
+# the release profile keeps line tables (debug = 1): stripped, the wheel is ~4x smaller
+strip = true
+# (pyo3 is built with abi3-py310 and extension-module: one cp310-abi3 wheel for CPython >= 3.10)
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

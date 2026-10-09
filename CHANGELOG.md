@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Bindings** (`bindings/`): tile access from C and Python. Open a world's tile store (the
+  world given like `terrain -c FILE --seed N`) and get a layer of tile z/x/y; missing tiles are
+  generated (GPU if available, else CPU) and stored first.
+  - C: `libaerialsynth` (shared and static) with the header `bindings/c/include/aerialsynth.h`
+    (`as_open`, `as_tile`, `as_close`, layer descriptions, per-thread error messages).
+  - Python: the `aerialsynth` package (maturin, one `cp310-abi3` wheel for CPython ≥ 3.10)
+    returning numpy arrays; `World(tiles_file, config, seed).tile(z, x, y, layer)`.
+
 ## 0.1.0 — 2026-10-09
 
 First public release.
