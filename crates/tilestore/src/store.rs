@@ -65,7 +65,9 @@ fn layer_shape(l: Layer, n: usize) -> Vec<usize> {
 }
 
 impl TileStore {
-    /// Create (truncate) a store.
+    /// Create (replace) a store. The file is built as `<path>.tmp` and renamed into place once
+    /// its metadata is on disk, so a process killed during creation never leaves a store that
+    /// later runs cannot open.
     pub fn create(path: impl AsRef<Path>, meta: StoreMeta) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         if let Some(p) = path.parent() {
@@ -73,23 +75,38 @@ impl TileStore {
                 std::fs::create_dir_all(p)?;
             }
         }
-        let file = h5::File::create(&path).with_context(|| format!("creating {}", path.display()))?;
-        file.set_attr_str("format", FORMAT)?;
-        file.set_attr("format_version", FORMAT_VERSION)?;
-        file.set_attr("tile_size", TILE_SIZE as i32)?;
-        file.set_attr_str("scheme", "xyz")?;
-        file.set_attr_str("projection", "EPSG:3857")?;
-        file.set_attr_str("pixel_registration", "center")?;
-        file.set_attr_str("vertical_datum", "ellipsoid")?;
-        file.set_attr("ellipsoid_a", meta.ellipsoid_a)?;
-        file.set_attr("ellipsoid_b", meta.ellipsoid_b)?;
-        file.set_attr_str("generator_config", &meta.generator_config)?;
-        file.set_attr("seed", meta.seed)?;
-        file.set_attr("generator_version", meta.generator_version)?;
-        let names: Vec<&str> = meta.layers.iter().map(|l| l.name()).collect();
-        file.set_attr_str("layers", &names.join(","))?;
-        file.ensure_group("levels")?;
-        Ok(TileStore { file, path, writable: true, meta, levels: RwLock::new(BTreeMap::new()) })
+        let tmp = {
+            let mut s = path.clone().into_os_string();
+            s.push(".tmp");
+            PathBuf::from(s)
+        };
+        let file = h5::File::create(&tmp).map_err(|e| open_error(&tmp, e, "creating"))?;
+        let res = (move || -> Result<()> {
+            file.set_attr_str("format", FORMAT)?;
+            file.set_attr("format_version", FORMAT_VERSION)?;
+            file.set_attr("tile_size", TILE_SIZE as i32)?;
+            file.set_attr_str("scheme", "xyz")?;
+            file.set_attr_str("projection", "EPSG:3857")?;
+            file.set_attr_str("pixel_registration", "center")?;
+            file.set_attr_str("vertical_datum", "ellipsoid")?;
+            file.set_attr("ellipsoid_a", meta.ellipsoid_a)?;
+            file.set_attr("ellipsoid_b", meta.ellipsoid_b)?;
+            file.set_attr_str("generator_config", &meta.generator_config)?;
+            file.set_attr("seed", meta.seed)?;
+            file.set_attr("generator_version", meta.generator_version)?;
+            let names: Vec<&str> = meta.layers.iter().map(|l| l.name()).collect();
+            file.set_attr_str("layers", &names.join(","))?;
+            file.ensure_group("levels")?;
+            file.flush()?;
+            Ok(())
+            // (the file closes here: every handle into it is dropped)
+        })();
+        if let Err(e) = res {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.context(format!("creating {}", path.display())));
+        }
+        std::fs::rename(&tmp, &path).with_context(|| format!("renaming {} to {}", tmp.display(), path.display()))?;
+        Self::open_impl(&path, true)
     }
 
     /// Open read-only.
@@ -112,7 +129,7 @@ impl TileStore {
     }
 
     fn open_impl(path: &Path, writable: bool) -> Result<Self> {
-        let file = if writable { h5::File::open_rw(path) } else { h5::File::open(path) }.with_context(|| format!("opening {}", path.display()))?;
+        let file = if writable { h5::File::open_rw(path) } else { h5::File::open(path) }.map_err(|e| open_error(path, e, "opening"))?;
         let format = file.attr_str("format").unwrap_or_default();
         if format != FORMAT {
             bail!("{} is not a terrain tile store (format attr = {format:?})", path.display());
@@ -131,9 +148,11 @@ impl TileStore {
         for name in lg.member_names()? {
             let Ok(z) = name.parse::<u8>() else { continue };
             let g = lg.group(&name)?;
-            if !g.exists("index") || !g.exists("elev_range") {
-                // a level whose creation was interrupted holds no tiles
-                eprintln!("tile store {}: skipping incomplete level {z}", path.display());
+            let missing: Vec<&str> = ["index", "elev_range"].into_iter().chain(meta.layers.iter().map(|l| l.name())).filter(|n| !g.exists(n)).collect();
+            if !missing.is_empty() {
+                // a level whose creation was interrupted (it holds no tiles; a write to this zoom
+                // completes it)
+                eprintln!("warning: tile store {}: skipping incomplete level {z} (no {})", path.display(), missing.join(", "));
                 continue;
             }
             let idx_ds = g.dataset("index")?;
@@ -157,18 +176,23 @@ impl TileStore {
         Ok(TileStore { file, path: path.to_path_buf(), writable, meta, levels: RwLock::new(levels) })
     }
 
-    /// Record the world (config YAML, seed, generator version) of a writable store, e.g. of an
-    /// empty store about to be filled with another world.
-    pub fn set_generator(&mut self, config: &str, seed: u64, version: u32) -> Result<()> {
+    /// Record the world (ellipsoid, config YAML, seed, generator version) of a writable store,
+    /// e.g. of an empty store about to be filled with another world. The store's layers are kept.
+    pub fn set_generator(&mut self, meta: &StoreMeta) -> Result<()> {
         if !self.writable {
             bail!("{} is open read-only", self.path.display());
         }
-        self.file.set_attr_str("generator_config", config)?;
-        self.file.set_attr("seed", seed)?;
-        self.file.set_attr("generator_version", version)?;
-        self.meta.generator_config = config.to_string();
-        self.meta.seed = seed;
-        self.meta.generator_version = version;
+        self.file.set_attr("ellipsoid_a", meta.ellipsoid_a)?;
+        self.file.set_attr("ellipsoid_b", meta.ellipsoid_b)?;
+        self.file.set_attr_str("generator_config", &meta.generator_config)?;
+        self.file.set_attr("seed", meta.seed)?;
+        self.file.set_attr("generator_version", meta.generator_version)?;
+        self.file.flush()?;
+        self.meta.ellipsoid_a = meta.ellipsoid_a;
+        self.meta.ellipsoid_b = meta.ellipsoid_b;
+        self.meta.generator_config = meta.generator_config.clone();
+        self.meta.seed = meta.seed;
+        self.meta.generator_version = meta.generator_version;
         Ok(())
     }
 
@@ -216,20 +240,23 @@ impl TileStore {
     pub fn elev_range(&self, id: TileId) -> Option<(f32, f32)> {
         let lv = self.levels.read();
         let l = lv.get(&id.z)?;
-        l.index.get(&(id.x, id.y)).map(|&r| l.ranges[r])
+        l.index.get(&(id.x, id.y)).and_then(|&r| l.ranges.get(r).copied())
     }
 
+    /// Create the datasets of level `z`. The layers come first and the index last, so a level
+    /// with all of them is complete. The datasets of a level whose creation was interrupted
+    /// (empty; skipped on open) are replaced.
     fn create_level(&self, z: u8) -> Result<Level> {
         let g = self.file.ensure_group(&format!("levels/{z}"))?;
-        let idx_ds = g
-            .new_dataset::<i32>()
-            .shape(&[0, 2])
-            .max_shape(&[None, Some(2)])
-            .chunk(&[1024, 2])
-            .deflate(4)
-            .fill_value(-1) // rows never written (interrupted write) are recognisable
-            .create("index")?;
-        let range_ds = g.new_dataset::<f32>().shape(&[0, 2]).max_shape(&[None, Some(2)]).chunk(&[1024, 2]).deflate(4).create("elev_range")?;
+        let names = self.meta.layers.iter().map(|l| l.name()).chain(["elev_range", "index"]);
+        for name in names {
+            if g.exists(name) {
+                if g.dataset(name)?.shape()?.first().copied().unwrap_or(0) != 0 {
+                    bail!("{}: level {z} is damaged ({name} has rows, but the level is incomplete); use a new tiles file", self.path.display());
+                }
+                g.delete(name)?;
+            }
+        }
         let mut layers = HashMap::new();
         for &l in &self.meta.layers {
             let shape = layer_shape(l, 0);
@@ -254,11 +281,20 @@ impl TileStore {
                     Layer::Elevation => "DSM height above the ellipsoid (m) at pixel centres",
                     Layer::Normal => "unit surface normal (east, north, up) * 127, i8",
                     Layer::Landcover => "land-cover class id (terragen::landcover)",
-                    Layer::Emission => "night-time artificial light, linear radiance = 4 * (v/255)^2.2",
+                    Layer::Emission => "night-time artificial light, linear radiance = 16 * (v/255)^3",
                 },
             )?;
             layers.insert(l, ds);
         }
+        let range_ds = g.new_dataset::<f32>().shape(&[0, 2]).max_shape(&[None, Some(2)]).chunk(&[1024, 2]).deflate(4).create("elev_range")?;
+        let idx_ds = g
+            .new_dataset::<i32>()
+            .shape(&[0, 2])
+            .max_shape(&[None, Some(2)])
+            .chunk(&[1024, 2])
+            .deflate(4)
+            .fill_value(-1) // rows never written (interrupted write) are recognisable
+            .create("index")?;
         Ok(Level { rows: vec![], index: HashMap::new(), ranges: vec![], idx_ds, range_ds, layers })
     }
 
@@ -330,7 +366,7 @@ impl TileStore {
                 for (k, &i) in idxs.iter().enumerate() {
                     let row = rows[k];
                     for (l, bytes) in &encoded[i] {
-                        let ds = &level.layers[l];
+                        let ds = level.layers.get(l).with_context(|| format!("{}: level {z} has no {} dataset", self.path.display(), l.name()))?;
                         let off = if l.channels() > 1 { vec![row, 0, 0, 0] } else { vec![row, 0, 0] };
                         ds.write_chunk_raw(&off, 0, bytes)?;
                     }
@@ -420,4 +456,25 @@ impl TileStore {
         self.file.flush()?;
         Ok(())
     }
+}
+
+/// A short error for the common ways of failing to open (or create) a store: the file is locked
+/// by another process, or it is truncated (its creation was interrupted).
+fn open_error(path: &Path, e: h5::Error, doing: &str) -> anyhow::Error {
+    let stack = match &e {
+        h5::Error::Hdf5 { stack, .. } => stack.as_str(),
+        _ => "",
+    };
+    let name = path.display();
+    if stack.contains("unable to lock file") && (stack.contains("errno = 11") || stack.contains("temporarily unavailable")) {
+        return anyhow::anyhow!("{name} is open in another process (e.g. terrain view or terrain tiles); close it or use another tiles.file");
+    }
+    if stack.contains("truncated file") {
+        let len = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        if len < 4096 {
+            return anyhow::anyhow!("{name} looks incomplete ({len} bytes: the process creating it was killed?); it holds no tiles and can be deleted");
+        }
+        return anyhow::Error::new(e).context(format!("{name} is truncated (a write was interrupted?); delete it to start over"));
+    }
+    anyhow::Error::new(e).context(format!("{doing} {name}"))
 }
