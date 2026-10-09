@@ -47,6 +47,14 @@
     static, header, example) for the same platforms.
 
   All are self-contained: HDF5 and zlib are linked statically, only system libraries are needed.
+- **GPU self-check:** with `render.backend: auto` the renderer first draws a 32 × 24 test frame
+  on the GPU and on the CPU (once per process); a GPU that renders it clearly wrong is not used
+  (a warning, then the CPU renders). Catches the virtual GPU of macOS VMs on Intel hosts, which
+  renders nothing.
+- `AERIALSYNTH_GPU=none`: no GPU (generation, rendering and the event sensor on the CPU).
+- **Event sensor:** the luminance is clamped at 0 before its log (CPU and GPU): interpolated or
+  flickering radiance below 0 gave NaN, which GPUs handle differently (on WARP and the macOS
+  paravirtual GPU the GPU sensor gave half again as many events as the CPU).
 
 ## 0.1.0 — 2026-10-09
 

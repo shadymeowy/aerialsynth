@@ -151,6 +151,16 @@ Low-zoom tiles are the most work per tile on both backends, for two reasons:
   Python bindings: an index, a PCI bus id (`0000:83:00.0`) or part of the adapter name
   (`AERIALSYNTH_GPU=6000`). Without it the first high-performance adapter is used. A value
   that matches no single GPU is an error that lists the adapters (`AERIALSYNTH_GPU=list`).
+- **No GPU at all:** `AERIALSYNTH_GPU=none` hides every GPU: tile generation, rendering and the
+  event sensor run on the CPU (`backend: gpu` and the viewer then fail). For a GPU whose driver
+  misbehaves, or to compare against the CPU reference.
+- **A GPU that renders wrongly:** with `render.backend: auto` the renderer first draws a 32 × 24
+  test frame of a synthetic tile on the GPU and on the CPU (once per process: ~15 ms after the
+  GPU renderer's start-up). A GPU whose frame clearly differs (no terrain, wrong depth, land cover or
+  brightness) is not used: a one-line warning (`render.backend auto: the GPU (…) renders a test
+  frame wrongly (…); rendering on the CPU`) and the CPU renders. Seen on the virtual GPU of
+  macOS VMs on Intel hosts ("Apple Paravirtual device"), which renders nothing. `backend: gpu`
+  skips the check.
 
 - **No suitable GPU:** with `backend: auto` (the default) generation and rendering fall back to
   the CPU; `backend: gpu` makes a missing GPU an error instead. Tile generation

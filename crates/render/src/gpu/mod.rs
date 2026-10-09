@@ -9,6 +9,7 @@
 
 pub mod device;
 pub mod events;
+pub mod selfcheck;
 pub mod tiles;
 
 use crate::lighting::SunState;
@@ -160,6 +161,25 @@ fn ctx() -> anyhow::Result<&'static Mutex<Ctx>> {
     match CTX.get_or_init(|| Ctx::new().map(Mutex::new).map_err(|e| format!("{e:#}"))) {
         Ok(c) => Ok(c),
         Err(e) => anyhow::bail!("render.backend gpu: no usable GPU ({e})"),
+    }
+}
+
+/// Drop the GPU's copies (pool slots, meshes) of tiles `ids`, so that they are uploaded again
+/// (the self-check renders synthetic tiles under real tile ids).
+pub(crate) fn forget_tiles(ids: &[TileId]) {
+    let Some(Ok(c)) = CTX.get() else { return };
+    let mut c = c.lock();
+    let c = &mut *c;
+    let bytes = &mut c.mesh_bytes;
+    c.meshes.retain(|k, m| {
+        let keep = !ids.contains(&k.id) && !ids.contains(&k.data);
+        if !keep {
+            *bytes -= m.bytes;
+        }
+        keep
+    });
+    for p in c.pools.values_mut() {
+        p.forget(ids);
     }
 }
 

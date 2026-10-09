@@ -72,13 +72,18 @@ pub enum Backend {
 }
 
 impl Backend {
-    /// `Auto` resolved: the GPU backend when it is compiled in and a GPU is available.
+    /// `Auto` resolved: the GPU backend when it is compiled in, a GPU is available and it passes
+    /// the self-check (renders a small test frame like the CPU, `gpu::selfcheck`; once per
+    /// process).
     pub fn resolve(self) -> Backend {
         match self {
             Backend::Auto => {
                 #[cfg(feature = "gpu")]
                 if crate::gpu::device::shared().is_ok() {
-                    return Backend::Gpu;
+                    if crate::gpu::selfcheck::passed() {
+                        return Backend::Gpu;
+                    }
+                    return Backend::Cpu; // (the self-check warned)
                 }
                 static NOTE: std::sync::Once = std::sync::Once::new();
                 NOTE.call_once(|| eprintln!("render.backend auto: no usable GPU, rendering on the CPU"));
