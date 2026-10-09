@@ -122,8 +122,7 @@ jobs:
         shell: bash
         run: |
           cargo run --release -p render --example gpu_probe || true
-          cargo test --release -p render --lib gpu::events -- --nocapture --test-threads=1 2>&1 | grep -E "FLICKER|test |result" || true
-          AS_DEBUG_EV_SPLIT=1 cargo test --release -p render --lib gpu::events -- --nocapture --test-threads=1 2>&1 | grep -E "FLICKER|test |result" || true
+          cargo test --release -p render --lib gpu::events -- --nocapture --test-threads=1 2>&1 | grep -E "FLICKER|VARIANT|test |result" || true
       - name: Test
         run: cargo test --release --workspace --no-fail-fast
       - name: cargo install
