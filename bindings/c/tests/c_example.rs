@@ -65,7 +65,7 @@ fn c_example_runs() {
     };
     let first = run(); // generates the tile
     assert!(first.contains("tile 3/5/3 elevation: min") && first.contains("rgb: 3 channels, 196608 bytes"), "{first}");
-    assert!(first.contains("zoom 7: refused"), "{first}");
+    assert!(first.contains("zoom 7: refused") && first.contains("as_tiles: 4 tiles, the first equal to as_tile"), "{first}");
     assert_eq!(run(), first, "the stored tile differs from the generated one");
     let _ = std::fs::remove_dir_all(&dir);
 }
