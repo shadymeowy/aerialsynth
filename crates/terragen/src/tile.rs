@@ -81,8 +81,8 @@ struct Node {
 }
 
 /// Grid-interpolated inputs of pass A, flattened: mountain warp, gully gradient, roads, relief
-/// octaves, meander warps, region warp, gully octaves, floodplain-edge noise.
-const NPRE: usize = 34;
+/// octaves, meander warps, region warp, gully octaves, floodplain-edge noise, ecoregion warp.
+const NPRE: usize = 37;
 
 fn pack_pre(m: &Macro, p: &Pre) -> [f64; NPRE] {
     let mut f = [0.0; NPRE];
@@ -99,6 +99,7 @@ fn pack_pre(m: &Macro, p: &Pre) -> [f64; NPRE] {
     for li in 0..4 {
         f[30 + li] = p.floodplain[li].unwrap_or_default();
     }
+    f[34..37].copy_from_slice(&p.eco_warp.unwrap_or_default());
     f
 }
 
@@ -118,6 +119,7 @@ fn unpack_pre(f: &[f64; NPRE], like: &Pre) -> ([f64; 2], Pre) {
     for li in 0..4 {
         p.floodplain[li] = like.floodplain[li].map(|_| f[30 + li]);
     }
+    p.eco_warp = like.eco_warp.map(|_| arr(34));
     ([f[0], f[1]], p)
 }
 
@@ -155,6 +157,9 @@ impl Generator {
 
     /// A generator on `backend` (the GPU generator is compiled on first use).
     pub fn with_backend(cfg: Config, backend: Backend) -> Self {
+        let mut cfg = cfg;
+        // the resolved biome registry is part of the world (stores record it)
+        cfg.biomes.resolved = crate::registry::Registry::for_config(&cfg).ok().map(|r| r.resolved.clone());
         let world = World::new(cfg);
         let surface = SurfaceModel::new(&world);
         Generator {
@@ -343,6 +348,7 @@ impl Generator {
             river_d: t.river_d.min(1e7),
             river_hw: t.river_hw,
             river_level: t.river_level,
+            eco_edge: t.eco.edge,
             road_major: t.road_major.min(1e7),
             road_minor: t.road_minor.min(1e7),
             slope: 0.0,
@@ -440,7 +446,7 @@ impl Generator {
             let (mtn_warp, mut pre) = unpack_pre(&f, &g(i0, j0).pre);
             // lattice sites: when the four nodes around the pixel have the same two nearest
             // sites, so has the pixel (the region of points with a given pair is convex)
-            for k in 0..3 {
+            for k in 0..4 {
                 let s0 = g(i0, j0).pre.sites[k];
                 let same = |n: &Node| match (n.pre.sites[k], s0) {
                     (Some([a, b]), Some([c, d])) => (a.0 == c.0 && b.0 == d.0) || (a.0 == d.0 && b.0 == c.0),
@@ -657,6 +663,9 @@ impl Generator {
                             let road_minor = bilerp(nb.map(|t| t.road_minor.clamp(-1e6, 1e6)), fx, fy);
                             let mut tt = *t;
                             tt.region.edge = bilerp(nb.map(|t| t.region.edge.min(1e6)), fx, fy);
+                            // the ecoregion border distance (signed by which pair the neighbours
+                            // hold: the same pair on both sides of the border)
+                            let eco_edge = bilerp(nb.map(|n| if n.eco.id == t.eco.id { n.eco.edge.min(1e7) } else { -n.eco.edge.min(1e7) }), fx, fy);
                             let local = Local {
                                 t: &tt,
                                 ground,
@@ -665,6 +674,7 @@ impl Generator {
                                 river_d: rd,
                                 river_hw: rhw,
                                 river_level: rl,
+                                eco_edge,
                                 road_major,
                                 road_minor,
                                 slope: slope[j * na + i],
@@ -681,14 +691,14 @@ impl Generator {
                         let mut acc_h = 0.0;
                         let mut acc_l = 0.0;
                         let mut acc_g = 0.0;
-                        let mut counts = [0u16; 32];
+                        let mut counts = [0u16; 128];
                         let mut add = |(s, ground): (Surface, f64)| {
                             acc_a += s.albedo;
                             acc_e += s.emission;
                             acc_h += s.height;
                             acc_l += s.lit;
                             acc_g += ground;
-                            counts[(s.class as usize).min(31)] += 1;
+                            counts[(s.class as usize).min(127)] += 1;
                         };
                         let mut taken = ss * ss;
                         if adaptive {

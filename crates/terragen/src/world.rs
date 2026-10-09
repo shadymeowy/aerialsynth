@@ -109,6 +109,9 @@ pub struct Terrain {
     pub region: Site,
     /// Nearest potential town site.
     pub town: Site,
+    /// Ecoregion (`crate::eco`): the two nearest sites of the warped lattice, the distance to
+    /// their border.
+    pub eco: Site,
 }
 
 /// A Worley site: id hash, centre (ECEF, on the surface), distance to its Voronoi border (m).
@@ -118,6 +121,8 @@ pub struct Site {
     /// id of the neighbouring site across the nearest border
     pub id2: u64,
     pub center: DVec3,
+    /// the neighbouring site's point
+    pub center2: DVec3,
     pub dist: f64,
     pub edge: f64,
 }
@@ -160,19 +165,22 @@ pub struct Pre {
     /// meander warps of the drainage levels, the warp of the region lattice
     pub river_warp: [Option<[f64; 2]>; 4],
     pub region_warp: Option<[f64; 3]>,
+    /// the warp of the ecoregion lattice
+    pub eco_warp: Option<[f64; 3]>,
     /// the long gully octaves (state of `gullies_part`, split at `relief_cut[1]`)
     pub gully_oct: Option<[f64; 4]>,
     /// floodplain-edge noise per drainage level
     pub floodplain: [Option<f64>; 4],
-    /// the two nearest sites of the lake, region and town lattices where known (the same for a
-    /// whole block of the tile's coarse grid)
-    pub sites: [Option<[(u64, DVec3); 2]>; 3],
+    /// the two nearest sites of the lake, region, town and ecoregion lattices where known (the
+    /// same for a whole block of the tile's coarse grid)
+    pub sites: [Option<[(u64, DVec3); 2]>; 4],
 }
 
 /// Indices of [`Pre::sites`].
 pub const SITE_LAKE: usize = 0;
 pub const SITE_REGION: usize = 1;
 pub const SITE_TOWN: usize = 2;
+pub const SITE_ECO: usize = 3;
 
 impl Macro {
     /// Bilinear interpolation of four corner values (a b / c d).
@@ -602,6 +610,9 @@ impl World {
             if 1500.0f64.min(0.9 * region_cell) >= cut[1] {
                 pre.region_warp = Some(self.region_warp(ctx.p).to_array());
             }
+            if crate::eco::warp_min_wavelength(self) >= cut[1] {
+                pre.eco_warp = Some(crate::eco::warp(self, ctx.p).to_array());
+            }
         }
         if gully {
             let lam_e = self.cfg.relief.gully_wavelength_m;
@@ -629,6 +640,7 @@ impl World {
             let pw = ctx.p + self.region_warp(ctx.p);
             pre.sites[SITE_REGION] = Some(worley3_sites(self.seed ^ 0x5E61, pw, region_cell, 0.9));
             pre.sites[SITE_TOWN] = Some(worley3_sites(self.seed ^ 0x70E1, ctx.p, self.cfg.landuse.town_cell_km * KM, 0.8));
+            pre.sites[SITE_ECO] = Some(crate::eco::sites(self, ctx.p));
         }
         // the long gully octaves (they follow the low-passed relief gradient above)
         if let (Some(cut), Some([ge, gn])) = (relief_cut, pre.gully) {
@@ -976,6 +988,12 @@ impl World {
             h += r.dune_height_m * sand * self.dunes(ctx, m, gsd);
         }
 
+        // ---- the kits' relief operators (volcanoes, karst, dunes …)
+        if !crate::kits::KITS.is_empty() {
+            let rin = crate::kits::ReliefIn { ctx, m, temp: temp0, moist, mountain, sand, mesa, smooth };
+            crate::kits::relief(self, &rin, &mut h);
+        }
+
         // ---- rivers: major + minor networks carve valleys, set water level
         let mut t = Terrain { river_d: f64::MAX, river_hw: 0.0, water: f64::NEG_INFINITY, ..Default::default() };
         let mut floodplain: f64 = 0.0;
@@ -1189,12 +1207,22 @@ impl World {
             };
             let pw = p + wq;
             let wc = self.site_cell(m, SITE_REGION, 0x5E61, pw, region_cell, 0.9);
-            t.region = Site { id: wc.id, id2: wc.id2, center: wc.point, dist: wc.f1, edge: worley_edge_dist(&wc, pw) };
+            t.region = Site { id: wc.id, id2: wc.id2, center: wc.point, center2: wc.point2, dist: wc.f1, edge: worley_edge_dist(&wc, pw) };
+        }
+        // the ecoregion (every zoom: the biomes' look)
+        if mode != Mode::Relief {
+            let wq = match m.pre.and_then(|p| p.eco_warp) {
+                Some(w) => DVec3::from_array(w),
+                None => crate::eco::warp(self, p),
+            };
+            let pw = p + wq;
+            let wc = self.site_cell(m, SITE_ECO, crate::eco::ECO_KEY, pw, self.cfg.ecoregions.cell_km * KM, 0.9);
+            t.eco = Site { id: wc.id, id2: wc.id2, center: wc.point, center2: wc.point2, dist: wc.f1, edge: worley_edge_dist(&wc, pw) };
         }
         let town_cell = self.cfg.landuse.town_cell_km * KM;
         if mode != Mode::Relief && gsd < town_cell * 0.25 && self.cfg.landuse.towns > 0.0 {
             let wc = self.site_cell(m, SITE_TOWN, 0x70E1, p, town_cell, 0.8);
-            t.town = Site { id: wc.id, id2: wc.id2, center: wc.point, dist: wc.f1, edge: worley_edge_dist(&wc, p) };
+            t.town = Site { id: wc.id, id2: wc.id2, center: wc.point, center2: wc.point2, dist: wc.f1, edge: worley_edge_dist(&wc, p) };
         }
 
         // ---- road networks (iso-lines of warped noise), only where people live

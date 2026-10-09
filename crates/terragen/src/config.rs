@@ -16,6 +16,11 @@ pub struct Config {
     pub climate: Climate,
     pub vegetation: Vegetation,
     pub landuse: Landuse,
+    /// Ecoregions: the lattice of regions with one biome and style each.
+    pub ecoregions: Ecoregions,
+    /// The biome registry: weight overrides; the resolved registry (written by the generator,
+    /// stored with the tiles).
+    pub biomes: Biomes,
     /// Colour of the surface (the `albedo` layer, and so every rendering of it).
     pub albedo: AlbedoLook,
     /// Lighting of the baked `rgb` layer of the tiles (a satellite-style image). Camera images
@@ -40,12 +45,45 @@ impl Default for Config {
             climate: Climate::default(),
             vegetation: Vegetation::default(),
             landuse: Landuse::default(),
+            ecoregions: Ecoregions::default(),
+            biomes: Biomes::default(),
             albedo: AlbedoLook::default(),
             satellite: SatelliteLook::default(),
             tile_supersample: 2,
             tile_supersample_adaptive: true,
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Ecoregions {
+    /// Lattice cell size (km): ecoregions are ~this wide.
+    pub cell_km: f64,
+    /// Width (km) of the mosaic of both sides along their borders.
+    pub ecotone_km: f64,
+}
+impl Default for Ecoregions {
+    fn default() -> Self {
+        Ecoregions { cell_km: 100.0, ecotone_km: 5.0 }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Biomes {
+    /// Per biome id: a pick weight replacing the registry's (0: never picked).
+    pub overrides: std::collections::BTreeMap<String, BiomeOverride>,
+    /// The resolved registry this world was generated with (set by the generator; a store's
+    /// world records it, so a changed registry is a different world).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved: Option<serde_yaml::Value>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct BiomeOverride {
+    pub weight: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -305,6 +343,7 @@ impl Config {
         pos("hydro.lake_cell_km", self.hydro.lake_cell_km);
         pos("landuse.region_km", self.landuse.region_km);
         pos("landuse.town_cell_km", self.landuse.town_cell_km);
+        pos("ecoregions.cell_km", self.ecoregions.cell_km);
         if let Some(h) = &self.home {
             pos("home.radius_km", h.radius_km);
         }
@@ -330,6 +369,12 @@ impl Config {
         nonneg("landuse.agriculture", self.landuse.agriculture);
         nonneg("landuse.towns", self.landuse.towns);
         nonneg("landuse.roads", self.landuse.roads);
+        nonneg("ecoregions.ecotone_km", self.ecoregions.ecotone_km);
+        for (id, o) in &self.biomes.overrides {
+            if let Some(w) = o.weight {
+                nonneg(&format!("biomes.overrides.{id}.weight"), w);
+            }
+        }
         nonneg("albedo.saturation", self.albedo.saturation);
         nonneg("albedo.brightness", self.albedo.brightness);
         let s = &self.satellite;
@@ -369,6 +414,11 @@ impl Config {
         }
         if !(1..=MAX_TILE_SUPERSAMPLE).contains(&self.tile_supersample) {
             errs.push(format!("world.tile_supersample must be 1..={MAX_TILE_SUPERSAMPLE} (is {})", self.tile_supersample));
+        }
+        if errs.is_empty() {
+            if let Err(e) = crate::registry::Registry::for_config(self) {
+                errs.push(format!("world.biomes: {e:#}"));
+            }
         }
         match errs.len() {
             0 => Ok(()),
