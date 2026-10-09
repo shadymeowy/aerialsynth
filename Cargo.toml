@@ -16,6 +16,7 @@ tilestore = { path = "crates/tilestore" }
 terragen = { path = "crates/terragen" }
 render = { path = "crates/render" }
 viewer = { path = "crates/viewer" }
+seqview = { path = "crates/seqview" }
 aerialsynth-core = { path = "bindings/core" }
 hdf5-sys = { package = "hdf5-metno-sys", version = "0.12.4", features = ["static", "zlib"] }
 glam = { version = "0.30", features = ["serde"] }
