@@ -63,6 +63,13 @@ def test_bad_arguments(tmp_path, config):
             w.tile(z, x, y, "rgb")
     with pytest.raises(ValueError, match="unknown layer"):
         w.tile(3, 0, 0, "height")
+    # no silent truncation: integers only (numpy integers too)
+    for z, x, y in [(3.5, 0, 0), (3, 0.0, 0), (3, 0, "1"), (True, 0, 0), (3, np.float32(1), 0)]:
+        with pytest.raises(TypeError, match="must be an integer"):
+            w.tile(z, x, y, "landcover")
+    np.testing.assert_array_equal(w.tile(np.int64(3), np.uint8(1), np.int32(2), "landcover"), w.tile(3, 1, 2, "landcover"))
+    with pytest.raises(TypeError):
+        w.prefetch((44.0, 9.0, 46.0, 11.0), (0, 2.5))
     w.close()
     w.close()
     with pytest.raises(ValueError, match="closed"):
@@ -71,10 +78,30 @@ def test_bad_arguments(tmp_path, config):
         aerialsynth.World(tmp_path / "x.h5", config=tmp_path / "missing.yaml")
     with pytest.raises(ValueError):
         aerialsynth.World(tmp_path / "x.h5", seed=-1)
+    with pytest.raises(TypeError):
+        aerialsynth.World(tmp_path / "x.h5", seed=1.5)
+    # not a tile store: the reason first, no HDF5 error stack
+    (tmp_path / "notes.txt").write_text("hello")
+    for p, why in [(tmp_path, "is a directory"), (tmp_path / "notes.txt", "is not an HDF5 file")]:
+        with pytest.raises(RuntimeError, match=why) as e:
+            aerialsynth.World(p)
+        assert str(e.value).startswith(str(p)) and "\n" not in str(e.value)
     bad = tmp_path / "bad.yaml"
     bad.write_text("world: { no_such_setting: 1 }\n")
     with pytest.raises(RuntimeError, match="no_such_setting"):
         aerialsynth.World(tmp_path / "x.h5", config=bad)
+
+
+def test_verbose(tmp_path, config, capfd):
+    with aerialsynth.World(tmp_path / "w.h5", config=config, verbose=True) as w:
+        assert w.verbose
+        w.tile(2, 1, 1, "rgb")
+        assert "generated tile 2/1/1" in capfd.readouterr().err
+        w.verbose = False
+        w.tile(2, 2, 1, "rgb")
+        assert capfd.readouterr().err == ""
+    with aerialsynth.World(tmp_path / "w.h5", config=config) as w:
+        assert not w.verbose
 
 
 def test_threads(tmp_path, config):

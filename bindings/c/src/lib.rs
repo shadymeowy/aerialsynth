@@ -369,6 +369,23 @@ pub unsafe extern "C" fn as_set_cache_mb(w: *const as_world, mb: usize) -> c_int
     })
 }
 
+/// Report tile generation on stderr (`on` != 0) or not (0, the default): a line per batch of
+/// tiles generated (count, zooms, CPU or GPU, time) by `as_tile`, `as_tiles`, `as_prefetch` and
+/// the renders of the world's cameras (`as_render`). The first render at a new place generates
+/// the tiles in view, which on the CPU can take minutes. Returns `AS_OK` or
+/// `AS_ERR_INVALID_ARGUMENT` (`w` is NULL).
+///
+/// # Safety
+/// `w` is NULL or a handle from `as_open`.
+#[no_mangle]
+pub unsafe extern "C" fn as_set_verbose(w: *const as_world, on: c_int) -> c_int {
+    guard(|| {
+        let Some(w) = (unsafe { w.as_ref() }) else { return Err(invalid("world handle is NULL")) };
+        w.world.set_verbose(on != 0);
+        Ok(())
+    })
+}
+
 /// The highest zoom the world serves (`tiles.max_zoom` of its config, default 18), or -1 if `w`
 /// is NULL.
 ///
@@ -714,6 +731,9 @@ mod tests {
             assert!(again[..] == many[..4 * n]);
             assert_eq!(as_set_cache_mb(w, AS_DEFAULT_CACHE_MB), AS_OK);
             assert_eq!(as_set_cache_mb(std::ptr::null(), 1), AS_ERR_INVALID_ARGUMENT);
+            assert_eq!(as_set_verbose(w, 1), AS_OK);
+            assert_eq!(as_set_verbose(w, 0), AS_OK);
+            assert_eq!(as_set_verbose(std::ptr::null(), 1), AS_ERR_INVALID_ARGUMENT);
             // prefetch: z0..=2 of a box: 0/0/0, 1/1/0, 2/2/1
             let mut g = 99usize;
             assert_eq!(as_prefetch(w, 44.0, 9.0, 46.0, 11.0, 0, 2, &mut g), AS_OK, "{}", last_error());
