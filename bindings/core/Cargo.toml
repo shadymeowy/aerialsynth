@@ -5,13 +5,14 @@ edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 license.workspace = true
-description = "Tile access shared by the aerialsynth C and Python bindings: a world's tiles, generated into its tile store on demand"
+description = "Shared by the aerialsynth C and Python bindings: a world's tiles, generated into its tile store on demand, and camera rendering"
 publish = false
 
 [dependencies]
 geodesy.workspace = true
 tilestore.workspace = true
 terragen.workspace = true
+render.workspace = true
 serde_yaml.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true

@@ -10,13 +10,16 @@ style = "both"
 header = """\
 /*
  * aerialsynth C API: tiles of a procedural world (Web-Mercator XYZ, 256 x 256 pixels), read from
- * its HDF5 tile store and generated (GPU if available, else CPU) and stored when missing.
+ * its HDF5 tile store and generated (GPU if available, else CPU) and stored when missing; camera
+ * images of the world rendered from a pose (the renderer of `terrain run`).
  *
  * Link with -laerialsynth (libaerialsynth.so / .dylib / aerialsynth.dll, or the static
- * libaerialsynth.a with its system libraries). See bindings/README.md and examples/tile.c.
+ * libaerialsynth.a with its system libraries). See bindings/README.md, examples/tile.c and
+ * examples/render.c.
  *
- * Thread safety: a handle may be used by several threads at once (as_tile); as_close must not
- * run concurrently with other calls on the same handle. as_last_error is per thread.
+ * Thread safety: a world or camera handle may be used by several threads at once (as_tile,
+ * as_render; renders of one camera are serialized); as_close / as_camera_close must not run
+ * concurrently with other calls on the same handle. as_last_error is per thread.
  *
  * SPDX-License-Identifier: Apache-2.0
  */"""

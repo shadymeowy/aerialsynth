@@ -99,15 +99,19 @@ Both are plain HDF5; layouts in [`docs/formats.md`](docs/formats.md).
 
 ## Bindings
 
-Tile access from C and Python ([`bindings/`](bindings/README.md)): open a world's tile store and
-get a layer of tile z/x/y; a tile that is not stored yet is generated (GPU if available, else
-CPU) and stored first. The world is given like `terrain -c FILE --seed N`.
+Tiles and rendering from C and Python ([`bindings/`](bindings/README.md)): open a world's tile
+store and get a layer of tile z/x/y, or render a camera image (RGB, depth, land cover) from a
+pose with the renderer of `terrain run`; tiles that are not stored yet are generated (GPU if
+available, else CPU) and stored first. The world is given like `terrain -c FILE --seed N`.
 
 ```python
 import aerialsynth                                       # bindings/python (maturin, abi3 ≥ 3.10)
 w = aerialsynth.World("out/world.h5")                    # the default world; created if missing
 rgb = w.tile(12, 2200, 1500, "rgb")                      # np.uint8 (256, 256, 3)
 h = w.tile(12, 2200, 1500, "elevation")                  # np.float32 (256, 256), m above WGS84
+cam = w.camera(width=640, height=480, hfov=90)           # or a scenario camera: config=, camera=
+f = cam.render(45.0, 10.0, w.surface_height(45.0, 10.0) + 300, pitch=-30, yaw=90,
+               time="2026-06-21T07:30:00Z", depth=True)  # f.rgb (480, 640, 3), f.depth (480, 640)
 ```
 
 ```c
@@ -128,7 +132,7 @@ as_close(w);
 | [`docs/events.md`](docs/events.md) | event cameras |
 | [`docs/stars.md`](docs/stars.md) | stars, planets, Moon: catalogue, astrometry, star ground truth |
 | [`docs/gpu.md`](docs/gpu.md) | the GPU backend: tile generation and rendering |
-| [`bindings/README.md`](bindings/README.md) | the C and Python bindings: tile access, building, examples |
+| [`bindings/README.md`](bindings/README.md) | the C and Python bindings: tile access, rendering, building, examples |
 
 ## Repository layout
 
@@ -140,7 +144,7 @@ crates/terragen   the world generator (CPU / GPU)
 crates/render     cameras, flights, level of detail, renderer (CPU / GPU), lighting, sensor, events, IMU, writers
 crates/viewer     terrain view: map and camera views
 crates/cli        the terrain command
-bindings/         C API (libaerialsynth) and Python package (aerialsynth): tile access
+bindings/         C API (libaerialsynth) and Python package (aerialsynth): tiles, rendering
 configs/          example scenarios
 docs/             documentation
 scripts/          builders of the bundled star catalogue and ephemeris

@@ -267,13 +267,25 @@ impl LightingConfig {
 
     /// Sun state at trajectory time `t` (s) and location (rad).
     pub fn sun_at(&self, t: f64, lat: f64, lon: f64) -> SunState {
+        let unix = parse_utc(&self.date, &self.time_utc).unwrap_or(0.0) + self.clock(t);
         let (az, el) = match self.mode {
             SunMode::Fixed => (self.sun_azimuth_deg.to_radians(), self.sun_elevation_deg.to_radians()),
-            SunMode::Clock => {
-                let t0 = parse_utc(&self.date, &self.time_utc).unwrap_or(0.0);
-                solar_position(t0 + self.clock(t), lat, lon)
-            }
+            SunMode::Clock => solar_position(unix, lat, lon),
         };
+        self.state(az, el, unix, t, lat, lon)
+    }
+
+    /// Sun state at the UTC `unix` (Unix seconds) and location (rad), as in `clock` mode
+    /// whatever `mode` says: the sun and moon of that instant (the other settings apply).
+    /// `t` (trajectory time) is the fractional second of `unix`: lamp flicker (100 / 120 Hz)
+    /// keeps its phase.
+    pub fn sun_at_utc(&self, unix: f64, lat: f64, lon: f64) -> SunState {
+        let (az, el) = solar_position(unix, lat, lon);
+        self.state(az, el, unix, unix.rem_euclid(1.0), lat, lon)
+    }
+
+    /// The lighting state for a sun at (`az`, `el`) (rad) at UTC `unix` and trajectory time `t`.
+    fn state(&self, az: f64, el: f64, unix: f64, t: f64, lat: f64, lon: f64) -> SunState {
         let eld = el.to_degrees();
         // relative air mass (Kasten–Young) → direct transmittance
         let am = if eld > -1.0 { 1.0 / ((eld.max(0.0) * std::f64::consts::PI / 180.0).sin() + 0.50572 * (eld.max(0.0) + 6.07995).powf(-1.6364)) } else { 40.0 };
@@ -286,12 +298,7 @@ impl LightingConfig {
             LightsMode::Off => 0.0,
             LightsMode::Auto => smooth(self.lights_on_below_deg, self.lights_on_below_deg - 4.0, eld),
         } * self.lights_intensity;
-        let (moon_azimuth, moon_elevation, moon_phase) = if self.moon {
-            let t0 = parse_utc(&self.date, &self.time_utc).unwrap_or(0.0);
-            moon_position(t0 + self.clock(t), lat, lon)
-        } else {
-            (0.0, -1.0, 0.0)
-        };
+        let (moon_azimuth, moon_elevation, moon_phase) = if self.moon { moon_position(unix, lat, lon) } else { (0.0, -1.0, 0.0) };
         let mel = moon_elevation.to_degrees();
         let moon_direct = if self.moon { 2.5e-6 * moon_phase.powf(1.5) * smooth(-0.5, 8.0, mel) * self.moon_intensity } else { 0.0 };
         SunState {
@@ -308,7 +315,7 @@ impl LightingConfig {
             light_pollution: self.light_pollution,
             time: t,
             exposure: 0.0,
-            unix: parse_utc(&self.date, &self.time_utc).unwrap_or(0.0) + self.clock(t),
+            unix,
             flicker: self.flicker,
         }
     }
@@ -382,6 +389,22 @@ mod tests {
         assert_eq!(l.clock(-1.0), -1.0);
         l.mode = SunMode::Fixed;
         assert_eq!(l.clock(15.0), 0.0);
+    }
+
+    #[test]
+    fn utc_is_clock_mode() {
+        // the sun and moon at a UTC instant are those of `clock` mode at that instant, whatever
+        // the mode
+        let clock = LightingConfig { mode: SunMode::Clock, date: "2026-06-21".into(), time_utc: "05:00:00".into(), ..Default::default() };
+        let (lat, lon) = (0.7, 0.57);
+        let a = clock.sun_at(30.25, lat, lon);
+        assert_eq!(a.unix, parse_utc("2026-06-21", "05:00:30").unwrap() + 0.25);
+        let b = LightingConfig::default().sun_at_utc(a.unix, lat, lon);
+        assert_eq!(
+            (a.azimuth, a.elevation, a.moon_azimuth, a.moon_elevation, a.direct, a.unix),
+            (b.azimuth, b.elevation, b.moon_azimuth, b.moon_elevation, b.direct, b.unix)
+        );
+        assert_eq!(b.time, 0.25);
     }
 
     #[test]

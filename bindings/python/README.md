@@ -1,9 +1,11 @@
 # aerialsynth (Python)
 
-Tiles of the [aerialsynth](https://github.com/shadymeowy/aerialsynth) procedural planet as numpy
-arrays. A `World` is an HDF5 tile store of one world (seed + world config); `World.tile` reads a
-layer of a Web-Mercator XYZ tile (256 × 256 pixels) from the store, and a tile that is not stored
-yet is generated (on the GPU when there is a suitable one, else on the CPU), stored and returned.
+Tiles and camera images of the [aerialsynth](https://github.com/shadymeowy/aerialsynth) procedural
+planet as numpy arrays. A `World` is an HDF5 tile store of one world (seed + world config);
+`World.tile` reads a layer of a Web-Mercator XYZ tile (256 × 256 pixels) from the store, and a
+tile that is not stored yet is generated (on the GPU when there is a suitable one, else on the
+CPU), stored and returned. A `Camera` renders images of the world from a pose
+([rendering](#rendering)).
 
 ```python
 import aerialsynth
@@ -39,6 +41,60 @@ aerialsynth.LAYERS["normal"]   # LayerInfo(name='normal', dtype=dtype('int8'), c
 | `landcover` | uint8 | 256 × 256 | class id: 0 unknown, 1 ocean, 2 lake, 3 river, 4 beach, 5 sand, 6 rock, 7 snow, 8 grass, 9 shrub, 10 forest, 11 crop, 12 building, 13 road, 14 wetland, 15 tundra, 16 bare, 17 urban |
 | `emission` | uint8 | 256 × 256 × 3 | night lights, linear radiance = 16 (v/255)³ |
 
+## Rendering
+
+```python
+import aerialsynth
+
+with aerialsynth.World("out/world.h5") as w:
+    cam = w.camera(width=640, height=480, hfov=90)          # a pinhole camera, forward mount
+    ground = w.surface_height(45.0, 10.0)                   # DSM height below, m above WGS84
+    f = cam.render(lat=45.0, lon=10.0, height=ground + 300,
+                   roll=0, pitch=-30, yaw=90,               # looking east, 30° down
+                   time="2026-06-21T07:30:00Z", depth=True, landcover=True)
+    f.rgb        # uint8 (480, 640, 3), sRGB after the sensor model
+    f.depth      # float32 (480, 640), z-depth in m, inf = sky
+    f.landcover  # uint8 (480, 640), 255 = sky
+    f.exposure, f.time, f.sun_elevation, f.position_ecef, f.r_ecef_cam
+    cam.K        # 3 × 3 camera matrix (pinhole models)
+
+    # a camera of a scenario (its render settings, intrinsics, mount, sensor), on the CPU
+    cam0 = w.camera(config="configs/dataset.yaml", camera="/cam0", backend="cpu")
+```
+
+`Camera.render` uses the renderer of `terrain run`, so the images match the CLI's datasets; the
+tiles in view are generated into the store when missing (like `terrain run` with lazy tiles).
+
+- **Cameras:** `w.camera(width, height, hfov, cx=None, cy=None, mount="forward")` is a
+  distortion-free pinhole camera (principal point default the image centre); `mount="forward"`
+  makes the pose's angles the camera's own, `"nadir"` looks straight down when level.
+  `w.camera(config=SCENARIO, camera="/cam0" | 0 | None)` is one of a scenario's `cameras` (default
+  the first) with its `intrinsics` (any camera model), `extrinsics`, `rgb.sensor` and
+  `depth.kind`; `config` with `width/height/hfov` is a pinhole camera with the scenario's render
+  settings. The scenario's `render` section (supersample, shading, lighting, atmosphere,
+  backend) and `tiles` zoom range apply; its `world` section is ignored (the world is `w`).
+- **Pose:** `lat`, `lon` (degrees) and `height` (m above the WGS84 ellipsoid; see
+  `World.surface_height`); `roll`, `pitch`, `yaw` (degrees) of the body in the local
+  north-east-down frame (aerospace Z-Y-X: yaw = heading clockwise from north, pitch nose-up,
+  roll right wing down). The camera sits on the body by its mount. Camera frame: OpenCV (x right,
+  y down, z forward); `f.r_ecef_cam` maps camera vectors to ECEF.
+- **Time:** UTC as Unix seconds, a `datetime` (naive = UTC) or an ISO 8601 string; it places the
+  sun, moon and stars. `None` uses the scenario's lighting (by default a fixed sun at 52°).
+- **Images:** only those asked for (`rgb=True`, `depth=False`, `landcover=False`) are made.
+  The RGB image is a sequence's first frame (auto exposure converged on it, no motion blur); its
+  noise is deterministic (the same call gives the same image). Depth is the z-depth (or the range
+  with a scenario camera's `depth: { kind: range }`), `inf` for sky.
+- **Backend:** `backend="auto"` (the GPU when there is a usable one, else the CPU), `"cpu"` or
+  `"gpu"` (`RuntimeError` without a usable GPU); `None` (default) takes the scenario's
+  `render.backend` (auto). `cam.backend` tells which one renders.
+- **Threads:** rendering releases the GIL. One camera renders one frame at a time (calls from
+  several threads wait for each other); several cameras render concurrently. A camera keeps the
+  store open until it is closed (`cam.close()`, `with`, or closing the world, which closes its
+  cameras).
+- **Errors:** `ValueError` for a pose out of range or not finite, bad camera settings, an unknown
+  scenario camera, a bad time or a closed camera; `RuntimeError` for an invalid scenario or a
+  failed render.
+
 ## Install
 
 Linux x86_64 (glibc 2.28 or newer, CPython 3.10 or newer): the wheel attached to each
@@ -48,7 +104,7 @@ Linux x86_64 (glibc 2.28 or newer, CPython 3.10 or newer): the wheel attached to
 pip install aerialsynth-0.1.0-cp310-abi3-manylinux_2_28_x86_64.whl
 ```
 
-A GPU is optional: without a suitable one, tiles are generated on the CPU.
+A GPU is optional: without a suitable one, tiles are generated and images rendered on the CPU.
 
 ## Build
 
