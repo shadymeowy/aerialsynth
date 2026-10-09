@@ -114,7 +114,7 @@ a 160 × 120 camera 1.5 km above the ground needs zoom 15 at most, a 640 × 480 
 selection needs their elevation ranges), then the neighbours and ancestors of the selected tiles:
 a few hundred tiles in all for a new place. With a GPU that generates tiles that takes 20–30 s
 (one small batch per zoom level); **on the CPU it takes minutes** (4 cores: the C example
-`examples/render.c` 2.8 min, 220 tiles; the Python example of [the README](../README.md#bindings)
+`examples/render.c` ~3 min, 220 tiles; the Python example of [the README](../README.md#bindings)
 4.6 min, 500 tiles), coarse tiles being the slowest. Later renders there read the tiles from
 the store (0.4 s and 0.9 s). To see
 the progress: `as_set_verbose(w, 1)` / `World(..., verbose=True)` (a line per batch of tiles on

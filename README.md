@@ -91,8 +91,8 @@ different planet. A tile store holds exactly one world: a store made with anothe
 config is refused (the error names the settings that differ), so give each world its own
 `tiles.file`.
 
-`configs/quick.yaml` is a 3 s smoke test (16 frames of a 320 × 256 camera; ~50 s on 4 CPU
-cores without a GPU, most of it generating its ~75 tiles, and ~6 s with one) and
+`configs/quick.yaml` is a 3 s smoke test (16 frames of a 320 × 256 camera; under a minute on
+4 CPU cores without a GPU, most of it generating its ~75 tiles, and ~6 s with one) and
 `configs/dataset.yaml` a fuller dataset.
 `configs/examples/` has night flights, a full moon, an event camera rig, a star tracker, a
 fisheye, a 10 km cruise, a sunset and an IMU check.

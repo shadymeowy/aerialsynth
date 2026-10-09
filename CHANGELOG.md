@@ -9,7 +9,7 @@
     tiles to z18 for a 160 × 120 image whose pixels are ~14 m on the ground; > 6 GB, 13 min on
     4 CPU cores). The selection now generates the tiles whose range it needs, one zoom level
     per pass, and selects again until it knows them all (`lod::Selection::unknown`): 220 tiles
-    to z15, 1 GB, 2.8 min (the Python example: 1,900 tiles, 3.4 GB, 8.5 min before; 500
+    to z15, 1 GB, ~3 min (the Python example: 1,900 tiles, 3.4 GB, 8.5 min before; 500
     tiles, 1.3 GB, 4.6 min now).
   - The same call gives the same image: the selection is the one a store holding every tile
     gives, so a render that generates its tiles and one that reads them select the same tiles
