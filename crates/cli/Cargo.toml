@@ -17,7 +17,7 @@ terragen.workspace = true
 anyhow.workspace = true
 rayon.workspace = true
 clap.workspace = true
-image.workspace = true
+image = { workspace = true, features = ["jpeg"] }
 indicatif.workspace = true
 serde_yaml.workspace = true
 render.workspace = true

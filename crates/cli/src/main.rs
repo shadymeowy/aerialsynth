@@ -1,10 +1,11 @@
 //! `terrain` — a procedural planet for aerial vision: terrain tiles, flights and camera datasets.
 //!
-//! `run`, `tiles`, `view` and `config` read one scenario YAML (`-c` / `--config`; `terrain
-//! config` prints a template); `info` takes a tile store or sequence file.
+//! `run`, `tiles`, `view`, `survey` and `config` read one scenario YAML (`-c` / `--config`;
+//! `terrain config` prints a template); `info` takes a tile store or sequence file.
 
 mod commands;
 mod preview;
+mod survey;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -46,6 +47,8 @@ enum Cmd {
     Info(commands::InfoArgs),
     /// Print a scenario template (--all: every setting; -c: a scenario with its defaults filled in).
     Config(commands::ConfigArgs),
+    /// Find diverse places of the world and render stills of them (contact sheet, places.csv).
+    Survey(survey::SurveyArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -62,5 +65,6 @@ fn main() -> anyhow::Result<()> {
         Cmd::View(a) => commands::view(a),
         Cmd::Info(a) => commands::info(a),
         Cmd::Config(a) => commands::config(a),
+        Cmd::Survey(a) => survey::survey(a),
     }
 }

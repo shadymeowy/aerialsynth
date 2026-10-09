@@ -16,6 +16,18 @@
     `landcover` datasets hold; new attributes `class_groups`, `class_legacy`, `class_mapping`
     next to `class_names`.
   - The viewer's and `terrain tiles --png`'s land-cover palettes come from the table.
+- **`terrain survey`:** finds diverse places of a world quickly and renders stills of them.
+  Random points on land and coasts (`--seed-places`) are classified with cheap point queries
+  (class mix, elevation, relief, coast, river, town, climate); `--count` places are chosen by
+  theme (coast, mountains, town, river, snow and ice, desert, forest, farmland, wetland,
+  plateau, lake, tundra) and farthest-point sampling. Each place is rendered with the dataset
+  renderer (GPU when available) in the `--views` (oblique from 1.5 km, nadir from 800 m,
+  optionally high from 10 km, or custom), the sun at a fixed local time; tiles are generated
+  into one store (`--tiles`). Outputs: stills, a labelled contact sheet `sheet.jpg` and
+  `places.csv`; `--places FILE.csv` renders a fixed list again (regression stills).
+  `docs/design/survey_places.csv` and `survey_places_seed2.csv` hold 24 places of worlds 1
+  and 2 (the redesign's "before" baselines). ~20 s per place with two views on an RTX 6000 Ada.
+
 - **Bindings** (`bindings/`): tile access from C and Python. Open a world's tile store (the
   world given like `terrain -c FILE --seed N`) and get a layer of tile z/x/y; missing tiles are
   generated (GPU if available, else CPU) and stored first.

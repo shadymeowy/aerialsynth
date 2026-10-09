@@ -78,6 +78,7 @@ fisheye, a 10 km cruise, a sunset and an IMU check.
 | `terrain run` | make a dataset: trajectory → tiles → render → events. `--step traj,tiles,render,events` runs single steps (an existing trajectory file is kept unless `traj` is asked for); `--lazy` generates missing tiles while rendering |
 | `terrain tiles` | plan and generate the flight's tiles; or a region's (`--bbox … --zooms 6-14`), a list's (`--list`); `--dry-run [-o FILE]` only lists them; `--png PREFIX --zoom Z` previews a mosaic without a store |
 | `terrain view` | the viewer: map and camera, flown live; generates as you go (`docs/viewer.md`) |
+| `terrain survey` | find diverse places (coasts, mountains, towns, rivers, deserts, …) and render stills of each: `OUT/NN_<lat>_<lon>_<view>.png`, a labelled `OUT/sheet.jpg`, `OUT/places.csv`; `--count 24 --seed-places N`, `--views oblique,nadir,high`, `--places FILE.csv` re-renders a list (regression stills) |
 | `terrain info FILE` | summarize a tile store or a sequence file |
 | `terrain config` | the scenario template; `--all` every setting; `-c my.yaml` a scenario with its defaults filled in |
 
