@@ -97,3 +97,78 @@ def test_threads(tmp_path, config):
     assert not errors
     for i in ids:
         np.testing.assert_array_equal(out[i], serial[i])
+
+
+def test_tiles_batch(tmp_path, config):
+    """World.tiles: the tiles of World.tile in one array; duplicates, stored and missing ones."""
+    ids = [(3, 4, 2), (3, 5, 2), (3, 4, 2), (4, 9, 6), (2, 1, 1)]
+    with aerialsynth.World(tmp_path / "one.h5", config=config) as w:
+        w.tile(3, 4, 2, "rgb")  # stored before the batch
+        one = {i: w.tile(*i, "elevation") for i in ids}
+    with aerialsynth.World(tmp_path / "many.h5", config=config) as w:
+        w.tile(3, 4, 2, "landcover")  # stored (and cached) before the batch
+        a = w.tiles(ids, "elevation")
+        assert a.dtype == np.float32 and a.shape == (5, 256, 256) and a.flags.writeable
+        for k, i in enumerate(ids):
+            np.testing.assert_array_equal(a[k], one[i])
+        # an array of coordinates, default layer rgb
+        rgb = w.tiles(np.array(ids, dtype=np.uint32))
+        assert rgb.dtype == np.uint8 and rgb.shape == (5, 256, 256, 3)
+        np.testing.assert_array_equal(rgb[1], w.tile(3, 5, 2, "rgb"))
+        assert w.tiles([], "normal").shape == (0, 256, 256, 3)
+        # a bad coordinate is refused before anything is made
+        for bad in [[(3, 6, 2), (3, 8, 0)], [(9, 0, 0)], [(3, -1, 0)], [(3, 0, 2**32)]]:
+            with pytest.raises(ValueError):
+                w.tiles(bad, "rgb")
+        with pytest.raises(ValueError, match="shape"):
+            w.tiles([3, 6, 2])
+        with pytest.raises(TypeError):
+            w.tiles([(3.5, 6, 2)])
+        with pytest.raises(ValueError, match="unknown layer"):
+            w.tiles(ids, "height")
+    with aerialsynth.World(tmp_path / "many.h5", config=config, cache_mb=0) as w:
+        np.testing.assert_array_equal(w.tiles([(3, 6, 2)], "landcover")[0], w.tile(3, 6, 2, "landcover"))
+        assert w.cache_info().entries == 0
+
+
+def test_cache(tmp_path, config):
+    with aerialsynth.World(tmp_path / "w.h5", config=config, cache_mb=1) as w:
+        assert w.cache_mb == 1
+        a = w.tile(3, 4, 2, "rgb")  # generated: its layers go to the cache (as far as they fit)
+        info = w.cache_info()
+        assert info.size_mb == 1 and 0 < info.bytes <= 2**20
+        b = w.tile(3, 4, 2, "rgb")
+        np.testing.assert_array_equal(a, b)
+        assert w.cache_info().hits == info.hits + 1
+        b[0, 0] = 0  # arrays are copies: the cache is not changed through them
+        np.testing.assert_array_equal(w.tile(3, 4, 2, "rgb"), a)
+        w.cache_mb = 0
+        assert w.cache_info() == (0, 0, 0, w.cache_info().hits, w.cache_info().misses)
+        np.testing.assert_array_equal(w.tile(3, 4, 2, "rgb"), a)  # from the store
+        assert w.cache_info().entries == 0
+        w.cache_mb = 64
+        w.tiles([(3, x, 2) for x in range(4)], "rgb")
+        assert w.cache_info().entries >= 4
+        with pytest.raises(ValueError):
+            w.cache_mb = -1
+    with pytest.raises(ValueError, match="closed"):
+        w.cache_info()
+
+
+def test_prefetch(tmp_path, config):
+    with aerialsynth.World(tmp_path / "w.h5", config=config) as w:
+        n = w.prefetch((44.0, 9.0, 46.0, 11.0), (0, 4))
+        assert n == 5  # one tile per zoom
+        assert w.prefetch((44.0, 9.0, 46.0, 11.0), 4) == 0  # stored now
+        assert w.cache_info().entries == 0  # not cached
+        with pytest.raises(ValueError):
+            w.prefetch((44.0, 9.0, 46.0, 11.0), (0, 9))  # above max_zoom
+        with pytest.raises(ValueError):
+            w.prefetch((46.0, 9.0, 44.0, 11.0), 3)  # lat_min > lat_max
+        with pytest.raises(ValueError):
+            w.prefetch((44.0, 9.0, 95.0, 11.0), 3)
+    big = tmp_path / "big.yaml"
+    big.write_text("world:\n  tile_supersample: 1\n")
+    with aerialsynth.World(tmp_path / "big.h5", config=big) as w:
+        with pytest.raises(ValueError, match="at most"):
+            w.prefetch((-80, -180, 80, 180), (0, 12))  # millions of tiles: refused

@@ -7,6 +7,7 @@
  *
  * CONFIG.yaml is a scenario (its `world:` section) or a world config; "-" or nothing = the default
  * world. The tile store is created if missing; the tile is generated and stored on first use.
+ * Then the 2 x 2 tiles from Z/X/Y (to the east and south) are read in one call (as_tiles).
  */
 #include "aerialsynth.h"
 
@@ -34,8 +35,11 @@ int main(int argc, char **argv) {
         return 1;
     }
     int status = 1;
-    float *elev = NULL;
+    float *elev = NULL, *block = NULL;
     uint8_t *rgb = NULL;
+
+    /* the in-memory cache of decoded tiles (default AS_DEFAULT_CACHE_MB; 0 = off) */
+    if (as_set_cache_mb(w, 64) != AS_OK) goto done;
 
     /* elevation: f32 metres above the WGS84 ellipsoid (little-endian, as on this host) */
     size_t n = as_layer_size(AS_LAYER_ELEVATION);
@@ -72,12 +76,31 @@ int main(int argc, char **argv) {
     printf("tile %u/%u/%u %s: %u channels, %zu bytes, mean colour (%.0f, %.0f, %.0f)\n", z, x, y, info.name, info.channels, info.size,
            mean[0] / (double)npx, mean[1] / (double)npx, mean[2] / (double)npx);
 
+    /* many tiles in one call: 2 x 2 tiles (x, x + 1) x (y, y + 1) of elevation (wrapping at the
+       edge), generated together where missing; tile i at offset i * n */
+    uint32_t side = 1u << z, zxy[4 * 3];
+    for (uint32_t i = 0; i < 4; i++) {
+        zxy[3 * i] = z;
+        zxy[3 * i + 1] = (x + i % 2) % side;
+        zxy[3 * i + 2] = (y + i / 2) % side;
+    }
+    block = malloc(4 * n);
+    if (!block) goto done;
+    rc = as_tiles(w, zxy, 4, AS_LAYER_ELEVATION, block, 4 * n);
+    if (rc != AS_OK) {
+        fprintf(stderr, "as_tiles: %d %s\n", rc, as_last_error());
+        goto done;
+    }
+    printf("as_tiles: 4 tiles, the first %s as_tile\n", memcmp(block, elev, n) == 0 ? "equal to" : "DIFFERENT from");
+    if (memcmp(block, elev, n) != 0) goto done;
+
     /* errors: a zoom above the world's max zoom is refused */
     rc = as_tile(w, (uint32_t)as_max_zoom(w) + 1, 0, 0, AS_LAYER_RGB, rgb, info.size);
     printf("zoom %d: %s (%d: %s)\n", as_max_zoom(w) + 1, rc == AS_ERR_INVALID_ARGUMENT ? "refused" : "unexpected", rc, as_last_error());
     status = rc == AS_ERR_INVALID_ARGUMENT ? 0 : 1;
 
 done:
+    free(block);
     free(rgb);
     free(elev);
     as_close(w);
