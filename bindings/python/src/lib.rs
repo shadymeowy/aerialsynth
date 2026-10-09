@@ -63,9 +63,10 @@ impl World {
 #[pymethods]
 impl World {
     #[new]
-    #[pyo3(signature = (tiles_file, config=None, seed=None))]
-    fn new(py: Python<'_>, tiles_file: PathBuf, config: Option<PathBuf>, seed: Option<u64>) -> PyResult<Self> {
+    #[pyo3(signature = (tiles_file, config=None, seed=None, cache_mb=core::DEFAULT_CACHE_MB))]
+    fn new(py: Python<'_>, tiles_file: PathBuf, config: Option<PathBuf>, seed: Option<u64>, cache_mb: usize) -> PyResult<Self> {
         let w = py.detach(|| core::World::open(&tiles_file, config.as_deref(), seed)).map_err(to_py)?;
+        w.set_cache_mb(cache_mb);
         Ok(World {
             path: w.path().to_path_buf(),
             seed: w.seed(),
@@ -145,8 +146,42 @@ impl World {
         let l = core::layer_by_name(layer).map_err(to_py)?;
         let (z, x, y) = (coord(z, "z")?, coord(x, "x")?, coord(y, "y")?);
         let w = self.get()?;
-        let v = py.detach(move || w.tile(z, x, y, l)).map_err(to_py)?;
-        Ok(PyByteArray::new(py, &v))
+        filled(py, l.tile_bytes(), |buf| w.tile_into(z, x, y, l, buf))
+    }
+
+    /// Raw pixels of a layer of n tiles, one after the other: `zxy` is n × 3 little-endian
+    /// uint32 (z, x, y of each tile).
+    fn tiles<'py>(&self, py: Python<'py>, zxy: &[u8], layer: &str) -> PyResult<Bound<'py, PyByteArray>> {
+        let l = core::layer_by_name(layer).map_err(to_py)?;
+        if !zxy.len().is_multiple_of(12) {
+            return Err(PyValueError::new_err("zxy: n × 3 uint32 expected"));
+        }
+        let coords: Vec<[u32; 3]> =
+            zxy.as_chunks::<12>().0.iter().map(|c| [0, 4, 8].map(|o| u32::from_le_bytes([c[o], c[o + 1], c[o + 2], c[o + 3]]))).collect();
+        let size = coords.len().checked_mul(l.tile_bytes()).ok_or_else(|| PyValueError::new_err("too many tiles"))?;
+        let w = self.get()?;
+        filled(py, size, |buf| w.tiles_into(&coords, l, buf))
+    }
+
+    /// Generate and store the missing tiles of a latitude / longitude box (degrees) at zooms
+    /// z_min..=z_max; the number generated.
+    #[allow(clippy::too_many_arguments)]
+    fn prefetch(&self, py: Python<'_>, lat_min: f64, lon_min: f64, lat_max: f64, lon_max: f64, z_min: i64, z_max: i64) -> PyResult<usize> {
+        let (z0, z1) = (coord(z_min, "z_min")?, coord(z_max, "z_max")?);
+        let w = self.get()?;
+        py.detach(move || w.prefetch([lat_min, lon_min, lat_max, lon_max], z0, z1)).map_err(to_py)
+    }
+
+    /// Set the size of the decoded-tile cache in MiB (0: off).
+    fn set_cache_mb(&self, mb: usize) -> PyResult<()> {
+        self.get()?.set_cache_mb(mb);
+        Ok(())
+    }
+
+    /// `(size in MiB, bytes held, layers of tiles held, hits, misses)` of the tile cache.
+    fn cache_info(&self) -> PyResult<(usize, usize, usize, u64, u64)> {
+        let s = self.get()?.cache_stats();
+        Ok((s.capacity >> 20, s.bytes, s.entries, s.hits, s.misses))
     }
 
     /// Close the store and the world's cameras (idempotent). A tile or frame being made in
@@ -320,6 +355,17 @@ impl Camera {
     }
 }
 
+/// A new `bytearray` of `len` bytes filled by `fill` without the GIL.
+fn filled<'py>(py: Python<'py>, len: usize, fill: impl FnOnce(&mut [u8]) -> core::Result<()> + Send) -> PyResult<Bound<'py, PyByteArray>> {
+    let b = PyByteArray::new_with(py, len, |_| Ok(()))?;
+    // SAFETY: the bytearray was just made and no Python code holds a reference to it (it is
+    // returned only afterwards), so nothing else accesses its buffer while it is filled without
+    // the GIL, and it is not resized.
+    let buf = unsafe { b.as_bytes_mut() };
+    py.detach(move || fill(buf)).map_err(to_py)?;
+    Ok(b)
+}
+
 /// `[(name, numpy dtype str, channels, bytes per tile, description)]` of every layer.
 #[pyfunction]
 fn layers() -> Vec<(&'static str, &'static str, usize, usize, &'static str)> {
@@ -336,6 +382,8 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("MAX_ZOOM", core::MAX_ZOOM)?;
     m.add("MAX_IMAGE_SIZE", core::MAX_IMAGE_SIZE)?;
     m.add("DEFAULT_MAX_ZOOM", core::DEFAULT_MAX_ZOOM)?;
+    m.add("DEFAULT_CACHE_MB", core::DEFAULT_CACHE_MB)?;
+    m.add("MAX_PREFETCH_TILES", core::MAX_PREFETCH_TILES)?;
     m.add("GENERATOR_VERSION", core::GENERATOR_VERSION)?;
     Ok(())
 }

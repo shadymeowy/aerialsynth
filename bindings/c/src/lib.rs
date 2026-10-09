@@ -58,6 +58,12 @@ pub const AS_ERR_PANIC: c_int = -4;
 /// Width and height of a tile in pixels.
 pub const AS_TILE_SIZE: u32 = 256;
 
+/// Default size of a world's tile cache in MiB (`as_set_cache_mb`).
+pub const AS_DEFAULT_CACHE_MB: usize = 256;
+
+/// Most tiles `as_prefetch` takes (its box over its zooms).
+pub const AS_MAX_PREFETCH_TILES: u64 = 1000000;
+
 /// A tile store opened for one world. Opaque; made by `as_open`, freed by `as_close`.
 pub struct as_world {
     world: Arc<World>,
@@ -239,9 +245,10 @@ pub unsafe extern "C" fn as_close(w: *mut as_world) {
 }
 
 /// Write the pixels of `layer` of tile `z/x/y` to `out`: `as_layer_size(layer)` bytes, row-major,
-/// 256 rows (row 0 = north) x 256 columns x channels, little-endian. A tile that is not stored
-/// yet is generated (all layers; on the GPU when there is a suitable one, else on the CPU) and
-/// stored first.
+/// 256 rows (row 0 = north) x 256 columns x channels, little-endian. A tile in the world's cache
+/// (`as_set_cache_mb`) is copied from it; else it is read from the store, or, when it is not
+/// stored yet, generated (all layers; on the GPU when there is a suitable one, else on the CPU)
+/// and stored first. Many tiles at once: `as_tiles`.
 ///
 /// `z` must be at most the world's max zoom, `x` and `y` less than 2^z (XYZ / Web-Mercator
 /// scheme, y = 0 at the north edge). A handle can be used from several threads at once.
@@ -262,6 +269,103 @@ pub unsafe extern "C" fn as_tile(w: *const as_world, z: u32, x: u32, y: u32, lay
         }
         let buf = unsafe { std::slice::from_raw_parts_mut(out as *mut u8, l.tile_bytes()) };
         w.world.tile_into(z, x, y, l, buf).map_err(status)
+    })
+}
+
+/// Write the pixels of `layer` of `n` tiles to `out`: tile `i` (zoom, x, y = `zxy[3i]`,
+/// `zxy[3i + 1]`, `zxy[3i + 2]`) at byte offset `i * as_layer_size(layer)`, as `as_tile` writes
+/// it. `out_len` must be at least `n * as_layer_size(layer)`.
+///
+/// Faster than `n` calls of `as_tile`: every coordinate is checked before any work (one out of
+/// range: `AS_ERR_INVALID_ARGUMENT`, nothing is read or written), cached tiles are copied, the
+/// stored ones are read and decompressed in parallel, and the missing ones are generated
+/// together (in batches of up to 64 tiles: on the GPU, many tiles per dispatch) and stored with
+/// one write per batch. A tile listed several times is read or generated once. `n` = 0 does
+/// nothing (`zxy` and `out` may then be NULL).
+///
+/// Returns `AS_OK` or a negative `AS_ERR_*` code (see `as_last_error`); on an error after the
+/// checks (`AS_ERR_FAILED`) the contents of `out` are unspecified, but the tiles generated before
+/// the failure are stored.
+///
+/// # Safety
+/// `w` is a handle from `as_open`; `zxy` points to `3 * n` readable `uint32_t`s; `out` points to
+/// `out_len` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn as_tiles(w: *const as_world, zxy: *const u32, n: usize, layer: as_layer, out: *mut c_void, out_len: usize) -> c_int {
+    guard(|| {
+        let l = self::layer(layer)?;
+        let Some(w) = (unsafe { w.as_ref() }) else { return Err(invalid("world handle is NULL")) };
+        if n == 0 {
+            return Ok(());
+        }
+        if zxy.is_null() {
+            return Err(invalid("zxy is NULL"));
+        }
+        if out.is_null() {
+            return Err(invalid("output buffer is NULL"));
+        }
+        let need = match (n.checked_mul(3).and_then(|v| v.checked_mul(4)), n.checked_mul(l.tile_bytes())) {
+            (Some(c), Some(need)) if c <= isize::MAX as usize && need <= isize::MAX as usize => need,
+            _ => return Err(invalid(format!("n = {n} tiles is too many"))),
+        };
+        if out_len < need {
+            return Err((AS_ERR_BUFFER_TOO_SMALL, format!("buffer of {out_len} bytes is too small for {n} tiles of layer {} ({need} bytes)", l.name())));
+        }
+        let coords = unsafe { std::slice::from_raw_parts(zxy as *const [u32; 3], n) };
+        let buf = unsafe { std::slice::from_raw_parts_mut(out as *mut u8, need) };
+        w.world.tiles_into(coords, l, buf).map_err(status)
+    })
+}
+
+/// Generate and store the missing tiles of a latitude / longitude box (degrees) at zooms `z_min`
+/// to `z_max`, without returning them: the tiles intersecting the box (`lon_min > lon_max` is a
+/// box across the antimeridian), in batches of up to 64 tiles. The number of tiles generated is
+/// written to `*generated` (may be NULL).
+///
+/// The box must hold at most `AS_MAX_PREFETCH_TILES` tiles over those zooms (stored ones
+/// included), and `z_min <= z_max <= ` the world's max zoom; else `AS_ERR_INVALID_ARGUMENT`
+/// before any work. Returns `AS_OK` or a negative `AS_ERR_*` code; after a failure the batches
+/// done are stored.
+///
+/// # Safety
+/// `w` is a handle from `as_open`; `generated` is NULL or points to a writable `size_t`.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn as_prefetch(
+    w: *const as_world,
+    lat_min: f64,
+    lon_min: f64,
+    lat_max: f64,
+    lon_max: f64,
+    z_min: u32,
+    z_max: u32,
+    generated: *mut usize,
+) -> c_int {
+    guard(|| {
+        let Some(w) = (unsafe { w.as_ref() }) else { return Err(invalid("world handle is NULL")) };
+        let n = w.world.prefetch([lat_min, lon_min, lat_max, lon_max], z_min, z_max).map_err(status)?;
+        if !generated.is_null() {
+            unsafe { generated.write(n) };
+        }
+        Ok(())
+    })
+}
+
+/// Set the size of world `w`'s in-memory cache of decoded tiles to `mb` MiB (default
+/// `AS_DEFAULT_CACHE_MB`, 256; about 1.1 MiB per generated tile with all its layers, 192 KiB per
+/// rgb layer of a tile). `as_tile` and `as_tiles` copy cached tiles instead of reading and
+/// decompressing them from the store; tiles read or generated are cached, the least recently used
+/// dropped beyond the size. 0 turns the cache off (and frees it). Returns `AS_OK` or
+/// `AS_ERR_INVALID_ARGUMENT` (`w` is NULL).
+///
+/// # Safety
+/// `w` is NULL or a handle from `as_open`.
+#[no_mangle]
+pub unsafe extern "C" fn as_set_cache_mb(w: *const as_world, mb: usize) -> c_int {
+    guard(|| {
+        let Some(w) = (unsafe { w.as_ref() }) else { return Err(invalid("world handle is NULL")) };
+        w.world.set_cache_mb(mb);
+        Ok(())
     })
 }
 
@@ -530,6 +634,8 @@ mod tests {
         }
         assert_eq!(as_layer_size(AS_LAYER_COUNT), 0);
         assert_eq!(as_layer_size(AS_LAYER_ELEVATION), 256 * 256 * 4);
+        assert_eq!(AS_DEFAULT_CACHE_MB, aerialsynth_core::DEFAULT_CACHE_MB);
+        assert_eq!(AS_MAX_PREFETCH_TILES, aerialsynth_core::MAX_PREFETCH_TILES);
         assert_eq!(unsafe { as_layer_describe(AS_LAYER_COUNT, std::ptr::null_mut()) }, AS_ERR_INVALID_ARGUMENT);
         assert_eq!(unsafe { as_layer_describe(AS_LAYER_RGB, std::ptr::null_mut()) }, AS_ERR_INVALID_ARGUMENT);
         assert_eq!(unsafe { CStr::from_ptr(as_version()) }.to_str().unwrap(), env!("CARGO_PKG_VERSION"));
@@ -576,6 +682,50 @@ mod tests {
             assert_eq!(as_tile(w, 3, 8, 3, AS_LAYER_ELEVATION, a.as_mut_ptr() as *mut c_void, n), AS_ERR_INVALID_ARGUMENT);
             assert_eq!(as_tile(w, 6, 0, 0, AS_LAYER_ELEVATION, a.as_mut_ptr() as *mut c_void, n), AS_ERR_INVALID_ARGUMENT);
             assert!(last_error().contains("max_zoom"), "{}", last_error());
+            // many tiles at once: stored (3/5/3), missing, repeated; the bytes of as_tile
+            let ids: [u32; 12] = [3, 5, 3, 3, 6, 3, 3, 5, 3, 2, 1, 1];
+            let mut many = vec![0u8; 4 * n + 3];
+            let rc = as_tiles(w, ids.as_ptr(), 4, AS_LAYER_ELEVATION, many.as_mut_ptr() as *mut c_void, many.len());
+            assert_eq!(rc, AS_OK, "{}", last_error());
+            for (i, t) in ids.chunks(3).enumerate() {
+                assert_eq!(as_tile(w, t[0], t[1], t[2], AS_LAYER_ELEVATION, b.as_mut_ptr() as *mut c_void, n), AS_OK);
+                assert!(many[i * n..(i + 1) * n] == b[..n], "tile {i}");
+            }
+            assert_eq!(many[..n], a[..]);
+            let rgb = as_layer_size(AS_LAYER_RGB);
+            let mut out = vec![0u8; 2 * rgb];
+            let o = out.as_mut_ptr() as *mut c_void;
+            assert_eq!(as_tiles(w, ids.as_ptr(), 2, AS_LAYER_RGB, o, 2 * rgb - 1), AS_ERR_BUFFER_TOO_SMALL);
+            assert!(last_error().contains("too small"), "{}", last_error());
+            let bad: [u32; 6] = [1, 0, 0, 3, 8, 0]; // 1/0/0 valid and missing, 3/8/0 out of range
+            assert_eq!(as_tiles(w, bad.as_ptr(), 2, AS_LAYER_RGB, o, 2 * rgb), AS_ERR_INVALID_ARGUMENT);
+            assert!(last_error().contains("3/8/0"), "{}", last_error());
+            assert_eq!(as_tiles(w, ids.as_ptr(), 2, 99, o, 2 * rgb), AS_ERR_INVALID_ARGUMENT);
+            assert_eq!(as_tiles(w, std::ptr::null(), 2, AS_LAYER_RGB, o, 2 * rgb), AS_ERR_INVALID_ARGUMENT);
+            assert_eq!(as_tiles(w, ids.as_ptr(), 2, AS_LAYER_RGB, std::ptr::null_mut(), 2 * rgb), AS_ERR_INVALID_ARGUMENT);
+            assert_eq!(as_tiles(w, ids.as_ptr(), usize::MAX / 2, AS_LAYER_RGB, o, 2 * rgb), AS_ERR_INVALID_ARGUMENT);
+            assert_eq!(as_tiles(std::ptr::null(), ids.as_ptr(), 2, AS_LAYER_RGB, o, 2 * rgb), AS_ERR_INVALID_ARGUMENT);
+            assert_eq!(as_tiles(w, std::ptr::null(), 0, AS_LAYER_RGB, std::ptr::null_mut(), 0), AS_OK);
+            // the cache: off, then on again; the same bytes
+            assert_eq!(as_set_cache_mb(w, 0), AS_OK);
+            assert_eq!(as_tiles(w, ids.as_ptr(), 4, AS_LAYER_ELEVATION, b.as_mut_ptr() as *mut c_void, n), AS_ERR_BUFFER_TOO_SMALL);
+            let mut again = vec![0u8; 4 * n];
+            assert_eq!(as_tiles(w, ids.as_ptr(), 4, AS_LAYER_ELEVATION, again.as_mut_ptr() as *mut c_void, 4 * n), AS_OK);
+            assert!(again[..] == many[..4 * n]);
+            assert_eq!(as_set_cache_mb(w, AS_DEFAULT_CACHE_MB), AS_OK);
+            assert_eq!(as_set_cache_mb(std::ptr::null(), 1), AS_ERR_INVALID_ARGUMENT);
+            // prefetch: z0..=2 of a box: 0/0/0, 1/1/0, 2/2/1
+            let mut g = 99usize;
+            assert_eq!(as_prefetch(w, 44.0, 9.0, 46.0, 11.0, 0, 2, &mut g), AS_OK, "{}", last_error());
+            assert_eq!(g, 3);
+            // across the antimeridian (from 9 W east to 11 W): 1/0/0 and 1/1/0, which is stored;
+            // 1/0/0 is missing (the refused batch did not make it)
+            assert_eq!(as_prefetch(w, 44.0, -9.0, 46.0, -11.0, 1, 1, &mut g), AS_OK);
+            assert_eq!(g, 1);
+            assert_eq!(as_prefetch(w, 44.0, 9.0, 46.0, 11.0, 0, 2, std::ptr::null_mut()), AS_OK);
+            assert_eq!(as_prefetch(w, 44.0, 9.0, 46.0, 11.0, 0, 6, &mut g), AS_ERR_INVALID_ARGUMENT);
+            assert_eq!(as_prefetch(w, 44.0, 9.0, 95.0, 11.0, 0, 1, &mut g), AS_ERR_INVALID_ARGUMENT);
+            assert_eq!(as_prefetch(std::ptr::null(), 44.0, 9.0, 46.0, 11.0, 0, 1, &mut g), AS_ERR_INVALID_ARGUMENT);
             as_close(w);
             // another seed: refused
             assert!(as_open(tiles.as_ptr(), cfgc.as_ptr(), 3).is_null());

@@ -59,6 +59,16 @@
 #define AS_TILE_SIZE 256
 
 /**
+ * Default size of a world's tile cache in MiB (`as_set_cache_mb`).
+ */
+#define AS_DEFAULT_CACHE_MB 256
+
+/**
+ * Most tiles `as_prefetch` takes (its box over its zooms).
+ */
+#define AS_MAX_PREFETCH_TILES 1000000
+
+/**
  * A camera over a world, rendering images from poses. Opaque; made by `as_camera_open` or
  * `as_camera_pinhole`, freed by `as_camera_close`.
  */
@@ -257,9 +267,10 @@ void as_close(struct as_world *w);
 
 /**
  * Write the pixels of `layer` of tile `z/x/y` to `out`: `as_layer_size(layer)` bytes, row-major,
- * 256 rows (row 0 = north) x 256 columns x channels, little-endian. A tile that is not stored
- * yet is generated (all layers; on the GPU when there is a suitable one, else on the CPU) and
- * stored first.
+ * 256 rows (row 0 = north) x 256 columns x channels, little-endian. A tile in the world's cache
+ * (`as_set_cache_mb`) is copied from it; else it is read from the store, or, when it is not
+ * stored yet, generated (all layers; on the GPU when there is a suitable one, else on the CPU)
+ * and stored first. Many tiles at once: `as_tiles`.
  *
  * `z` must be at most the world's max zoom, `x` and `y` less than 2^z (XYZ / Web-Mercator
  * scheme, y = 0 at the north edge). A handle can be used from several threads at once.
@@ -275,6 +286,69 @@ int as_tile(const struct as_world *w,
             as_layer layer,
             void *out,
             size_t out_len);
+
+/**
+ * Write the pixels of `layer` of `n` tiles to `out`: tile `i` (zoom, x, y = `zxy[3i]`,
+ * `zxy[3i + 1]`, `zxy[3i + 2]`) at byte offset `i * as_layer_size(layer)`, as `as_tile` writes
+ * it. `out_len` must be at least `n * as_layer_size(layer)`.
+ *
+ * Faster than `n` calls of `as_tile`: every coordinate is checked before any work (one out of
+ * range: `AS_ERR_INVALID_ARGUMENT`, nothing is read or written), cached tiles are copied, the
+ * stored ones are read and decompressed in parallel, and the missing ones are generated
+ * together (in batches of up to 64 tiles: on the GPU, many tiles per dispatch) and stored with
+ * one write per batch. A tile listed several times is read or generated once. `n` = 0 does
+ * nothing (`zxy` and `out` may then be NULL).
+ *
+ * Returns `AS_OK` or a negative `AS_ERR_*` code (see `as_last_error`); on an error after the
+ * checks (`AS_ERR_FAILED`) the contents of `out` are unspecified, but the tiles generated before
+ * the failure are stored.
+ *
+ * # Safety
+ * `w` is a handle from `as_open`; `zxy` points to `3 * n` readable `uint32_t`s; `out` points to
+ * `out_len` writable bytes.
+ */
+int as_tiles(const struct as_world *w,
+             const uint32_t *zxy,
+             size_t n,
+             as_layer layer,
+             void *out,
+             size_t out_len);
+
+/**
+ * Generate and store the missing tiles of a latitude / longitude box (degrees) at zooms `z_min`
+ * to `z_max`, without returning them: the tiles intersecting the box (`lon_min > lon_max` is a
+ * box across the antimeridian), in batches of up to 64 tiles. The number of tiles generated is
+ * written to `*generated` (may be NULL).
+ *
+ * The box must hold at most `AS_MAX_PREFETCH_TILES` tiles over those zooms (stored ones
+ * included), and `z_min <= z_max <= ` the world's max zoom; else `AS_ERR_INVALID_ARGUMENT`
+ * before any work. Returns `AS_OK` or a negative `AS_ERR_*` code; after a failure the batches
+ * done are stored.
+ *
+ * # Safety
+ * `w` is a handle from `as_open`; `generated` is NULL or points to a writable `size_t`.
+ */
+int as_prefetch(const struct as_world *w,
+                double lat_min,
+                double lon_min,
+                double lat_max,
+                double lon_max,
+                uint32_t z_min,
+                uint32_t z_max,
+                size_t *generated);
+
+/**
+ * Set the size of world `w`'s in-memory cache of decoded tiles to `mb` MiB (default
+ * `AS_DEFAULT_CACHE_MB`, 256; about 1.1 MiB per generated tile with all its layers, 192 KiB per
+ * rgb layer of a tile). `as_tile` and `as_tiles` copy cached tiles instead of reading and
+ * decompressing them from the store; tiles read or generated are cached, the least recently used
+ * dropped beyond the size. 0 turns the cache off (and frees it). Returns `AS_OK` or
+ * `AS_ERR_INVALID_ARGUMENT` (`w` is NULL).
+ *
+ * # Safety
+ * `w` is NULL or a handle from `as_open`.
+ */
+int as_set_cache_mb(const struct as_world *w, size_t mb);
 
 /**
  * The highest zoom the world serves (`tiles.max_zoom` of its config, default 18), or -1 if `w`

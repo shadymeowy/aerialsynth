@@ -15,4 +15,5 @@ terragen.workspace = true
 render.workspace = true
 serde_yaml.workspace = true
 anyhow.workspace = true
+rayon.workspace = true
 thiserror.workspace = true
