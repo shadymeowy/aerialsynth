@@ -4,7 +4,7 @@ invariants (coordinates inside the sensor, binary polarity, sorted timestamps in
 sequence, ms_index consistent with t) and print rate / polarity / hot-pixel statistics. Exits
 non-zero if an invariant fails or the file has no event stream to check.
 
-    python scripts/check_events.py SEQ.h5 [--camera /events]
+    python scripts/check_events.py SEQ.h5 [--camera /dvs]
 """
 import argparse, os, sys
 import numpy as np, h5py

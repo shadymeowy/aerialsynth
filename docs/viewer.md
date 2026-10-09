@@ -172,9 +172,10 @@ On the author's machine (RTX 2080 Ti, Xeon W-2125):
 | camera, 640×360 | ~42 frames/s (render ~24 ms, frame ~35 ms) |
 | camera, 960×540 (default) | ~21 frames/s |
 | camera, 1280×720 | ~14 frames/s (render ~55 ms: GPU 20 + read-back 20–40) |
-| generation | ~6.5 tiles/s in low flight (z13–z17); z5–z12 are slower |
+| generation | ~6.5 tiles/s in low flight with the CPU generator (z13–z17); z5–z12 are slower |
 
 - **Camera limits:** the GPU → CPU read-back and the CPU sensor (bloom, chromatic aberration,
   noise, tone). A GPU sensor writing straight into the displayed texture would make 720p run
   at ≥ 30 frames/s.
-- **Unexplored ground:** the distance stays coarse for the first minute or so of low flight.
+- **Unexplored ground:** distant terrain stays coarse for the first minute or so of low flight,
+  until its tiles are generated.

@@ -5,7 +5,7 @@ rendered from generated tiles: there is no imagery or elevation data anywhere, a
 synthesised by the scripts here. Both are also attached to the
 [v0.1.0 release](https://github.com/shadymeowy/aerialsynth/releases/tag/v0.1.0).
 
-- **The feature showcase** ([YouTube](https://youtu.be/SkTq4ph64l4); `out/showcase/showcase_music.mp4`, 4:35): 46 short
+- **The feature showcase** ([YouTube](https://youtu.be/SkTq4ph64l4); `out/showcase/showcase_music.mp4`, 4:35): 43 short
   shots of the planet of seed 1, one feature each (landscapes, light, night sky, sensor
   modalities, camera models, tiles on demand), with an original electronic score.
   Made by `make_showcase.py` (video) and `showcase_score.py` (music).
@@ -50,7 +50,7 @@ at 39.2°N 33.8°E, the coast near 40.3°N 36.9°E, …) are where seed 1 put th
 |--------|-------|
 | globe | the opening: the planet turning through its map layers (surface, elevation, land cover), then a dive through the tile pyramid (borders coloured by zoom) down to the first shot; a keyframed map flight (`globe/dive.yaml`) recorded by `terrain view --record` into its own tile store |
 | follows | the globe's recorded camera path flown on by the dataset renderer (`descent`): the hand-off from the map to the camera |
-| single | rainforest peak, full moon, boreal forest, 10 km cruise, 120 m low flight, golden hour, day → night time-lapse, night towns, real stars and planets, a star tracker with ground-truth rings, rivers, vibration motion blur, mountains, lakes, tropics, 200° fisheye, dunes, steep turns, irrigated desert, town, coasts, taiga, glacial valley, forest, farmland |
+| single | rainforest peak, full moon, boreal forest, 10 km cruise, 120 m low flight, golden hour, day → night time-lapse, night towns, real stars and planets, a star tracker with ground-truth rings, rivers, vibration motion blur, mountains, lakes, tropics, 200° fisheye, dunes, steep turns, glaciated massif, irrigated desert, red rock canyon, town, coasts, taiga, glacial valley, forest, farmland |
 | map | a sped-up flight next to a 2D mosaic of its XYZ tiles: whole trajectory, current position, camera footprint (from depth), the planned LOD tiles coloured by zoom, altitude profile |
 | modalities | RGB, depth (normalised to the frame's 98th percentile), optical flow (Middlebury colour wheel, camera rotation removed), events (10 ms, ON red / OFF blue) of one camera |
 | events | the event camera of another shot full screen (`source`: that shot; `offset`: seconds into its flight, i.e. the continuation after the source's own segment, which renders `extend` seconds more for it; `window_ms`, `camera`) |

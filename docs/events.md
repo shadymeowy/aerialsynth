@@ -8,7 +8,7 @@ brighter and OFF for darker. Timestamps have µs resolution, and data rates run 
 tens of Mev/s.
 
 Datasets (M3ED, DSEC, ...) store events as parallel arrays `x, y (u16), t (µs, i64), p (0/1)`
-plus a per-millisecond index; we use the same data types.
+plus a per-millisecond index; this simulator uses the same data types.
 
 ## Options considered
 
@@ -52,7 +52,7 @@ Per pixel, the processing chain is the following. Prophesee bias names are in br
    polarity bias.
 9. **Timestamp jitter:** Gaussian with σ `timestamp_jitter_us`.
 10. **Event rate controller:** at most `max_rate_mev_s` events per second. The excess within
-    each 1 ms window is dropped at random, like Prophesee's ERC under bus saturation.
+    each 1 ms window is dropped at random, like Prophesee's event rate controller (ERC) under bus saturation.
 
 Unit tests (`cargo test -p render events`):
 
@@ -99,7 +99,7 @@ hot pixels, background activity) is seeded from `seed` mixed with the camera pat
 cameras with the same settings get independent noise.
 
 Performance of the CPU backend on the author's machine (Xeon W-2125, 8 threads; VGA, supersample 2, `max_px_per_step` 0.5,
-~1000 m AGL flight with engine vibration): about 100 s of compute per simulated second, for
+~1000 m above-ground flight with engine vibration): about 100 s of compute per simulated second, for
 ~520 renders per simulated second; the sensor model runs in parallel (~3 ms per step) and is
 not the bottleneck. The GPU backend renders the keyframes ~15x and runs the sensor steps ~11x
 faster (`docs/gpu.md`). The events step prints renders, sensor steps and their times. Two
