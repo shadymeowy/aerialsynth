@@ -53,13 +53,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           # PRs read master's cache but do not write their own.
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          save-if: ${{ github.event_name != 'pull_request' }}
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --release -- -D warnings
 
       - name: Build
         run: cargo build --release --workspace --all-targets
+
+      # `cargo install --path` reuses the workspace's release build
+      - name: cargo install
+        run: |
+          cargo install --locked --path crates/cli --root "$RUNNER_TEMP/terrain"
+          "$RUNNER_TEMP/terrain/bin/terrain" --version
 
       # No Vulkan driver here (the runner has no GPU, and the variables hide any ICD the image
       # might ship): the GPU tests skip themselves and the generator falls back to the CPU.
@@ -88,6 +94,38 @@ jobs:
             exit 1
           fi
 
+  # macOS (Apple silicon and Intel) and Windows (MSVC): build, test and `cargo install`. The
+  # runners have no GPU for the generator (macOS: Metal has no f64 shaders; Windows: no adapter or
+  # WARP without 64-bit shaders), so tiles are generated on the CPU there, as for most users
+  # without a discrete GPU; the GPU tests skip themselves when no adapter can run them.
+  test-os:
+    name: test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS arm64, os: macos-latest }
+          - { name: macOS x86_64, os: macos-15-intel }
+          - { name: Windows x86_64, os: windows-latest }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - name: Build
+        run: cargo build --release --workspace --all-targets
+      - name: Test
+        run: cargo test --release --workspace
+      - name: cargo install
+        shell: bash
+        run: |
+          cargo install --locked --path crates/cli --root "$RUNNER_TEMP/terrain"
+          "$RUNNER_TEMP/terrain/bin/terrain" --version
+          "$RUNNER_TEMP/terrain/bin/terrain" config > "$RUNNER_TEMP/scenario.yaml"
+
   # The Python package: one abi3 wheel (cp310-abi3), built once and tested on the oldest and the
   # newest supported CPython. The C API (header, example) is tested by `cargo test` above.
   python-wheel:
@@ -99,7 +137,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          save-if: ${{ github.event_name != 'pull_request' }}
       - uses: actions/setup-python@v6
         with:
           python-version: |
