@@ -875,7 +875,13 @@ impl Globe {
 
     /// True when nothing the view wants is loading, generating or waiting for upload.
     pub fn settled(&self, svc: &Service) -> bool {
-        self.pending.is_empty() && svc.in_flight() == 0 && self.stats.want_load == 0 && (self.stats.want_gen == 0) && svc.base_pending() == 0
+        self.view_complete() && svc.in_flight() == 0 && svc.base_pending() == 0
+    }
+
+    /// True when every tile the view wants is resident (base levels elsewhere may still be
+    /// generating).
+    pub fn view_complete(&self) -> bool {
+        self.pending.is_empty() && self.stats.want_load == 0 && self.stats.want_gen == 0
     }
 
     /// Ray from the eye through normalized device coordinates hit with the ellipsoid (lat, lon).

@@ -2,8 +2,10 @@
 //! and turns them into GPU-ready payloads (colour + land cover, elevation, slope).
 //!
 //! The view sends the tiles it wants every frame (most important first); workers take the first
-//! ones that are not in flight. The base levels (z0..=base) are generated unconditionally;
-//! deeper tiles only while dynamic generation is on. A read-only store generates nothing.
+//! ones that are not in flight. The base levels (z0..=base) are generated unconditionally:
+//! z0..=[`FIRST_LEVELS`] first, the deeper ones whenever the view wants nothing generated (they
+//! are the slowest tiles). Deeper tiles only while dynamic generation is on. A read-only store
+//! generates nothing.
 
 use geodesy::tiles::{gsd_ew, gsd_ns, pixel_to_latlon, TileId};
 use glam::DVec2;
@@ -175,22 +177,23 @@ fn generator(sh: Arc<Shared>, store: Arc<TileStore>, gen: Arc<Generator>, batch:
                 if sh.stop.load(Ordering::Relaxed) {
                     return;
                 }
-                let mut ids = Vec::new();
-                // the base levels first (coarse to fine), then what the view asks for
-                while ids.len() < batch {
-                    let Some(t) = s.base.pop_front() else { break };
-                    if !store.contains(t) && !s.in_flight.contains(&t) {
-                        ids.push(t);
-                    } else {
-                        sh.stats.base_done.fetch_add(1, Ordering::Relaxed);
+                // the base levels down to FIRST_LEVELS (a few cheap tiles: something to draw),
+                // then what the view asks for, then the rest of the base levels; a batch of base
+                // tiles holds one level (the first frame waits for z0 only)
+                let mut ids = take_base(&mut s, &sh.stats, &store, batch, FIRST_LEVELS);
+                let first = ids.len();
+                if ids.is_empty() {
+                    while ids.len() < batch && !s.want_gen.is_empty() {
+                        let t = s.want_gen.remove(0);
+                        if !s.in_flight.contains(&t) && !store.contains(t) {
+                            ids.push(t);
+                        }
                     }
                 }
-                let n_base = ids.len();
-                while ids.len() < batch && !s.want_gen.is_empty() {
-                    let t = s.want_gen.remove(0);
-                    if !s.in_flight.contains(&t) && !store.contains(t) {
-                        ids.push(t);
-                    }
+                let mut n_base = first;
+                if ids.is_empty() {
+                    ids = take_base(&mut s, &sh.stats, &store, batch, u8::MAX);
+                    n_base = ids.len();
                 }
                 if !ids.is_empty() {
                     for t in &ids {
@@ -212,12 +215,25 @@ fn generator(sh: Arc<Shared>, store: Arc<TileStore>, gen: Arc<Generator>, batch:
             }
         };
         sh.stats.gen_us.fetch_add((t0.elapsed().as_secs_f64() * 1e6) as u64, Ordering::Relaxed);
+        let t_gen = t0.elapsed().as_secs_f64();
         if let Err(e) = store.write_tiles(&tiles) {
             eprintln!("writing tiles: {e:#}");
             sh.stats.errors.fetch_add(1, Ordering::Relaxed);
         }
+        let t_write = t0.elapsed().as_secs_f64();
         let payloads: Vec<Payload> = tiles.par_iter().map(|t| payload(t, &store)).collect();
         sh.results.lock().extend(payloads);
+        if std::env::var_os("TERRAGEN_PROFILE").is_some() {
+            eprintln!(
+                "viewer: {} tiles z{}..{}: generated in {:.3} s, stored in {:.3} s, payloads {:.3} s",
+                ids.len(),
+                ids.iter().map(|i| i.z).min().unwrap_or(0),
+                ids.iter().map(|i| i.z).max().unwrap_or(0),
+                t_gen,
+                t_write - t_gen,
+                t0.elapsed().as_secs_f64() - t_write
+            );
+        }
         sh.stats.generated.fetch_add(ids.len() as u64, Ordering::Relaxed);
         sh.stats.base_done.fetch_add(n_base, Ordering::Relaxed);
         sh.stats.gen_busy.store(0, Ordering::Relaxed);
@@ -228,6 +244,29 @@ fn generator(sh: Arc<Shared>, store: Arc<TileStore>, gen: Arc<Generator>, batch:
         drop(s);
         (sh.repaint)();
     }
+}
+
+/// The base levels down to this one come before the tiles the view asks for (21 tiles: the
+/// whole planet at ~40 km per pixel; the deeper base levels are the slowest tiles to generate).
+const FIRST_LEVELS: u8 = 2;
+
+/// Up to `batch` base tiles of one level (the next in the queue, at most `max_z`) that are
+/// neither stored nor in flight; the ones that are count as done.
+fn take_base(s: &mut State, stats: &Stats, store: &TileStore, batch: usize, max_z: u8) -> Vec<TileId> {
+    let mut ids: Vec<TileId> = Vec::new();
+    while ids.len() < batch {
+        let Some(&t) = s.base.front() else { break };
+        if t.z > max_z || ids.first().is_some_and(|f| f.z != t.z) {
+            break;
+        }
+        s.base.pop_front();
+        if !store.contains(t) && !s.in_flight.contains(&t) {
+            ids.push(t);
+        } else {
+            stats.base_done.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    ids
 }
 
 /// GPU payload of a tile: colour + class, elevation, and its slope by central differences

@@ -26,6 +26,7 @@ pub(crate) fn snapshot(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Gener
         bail!("{VIEW}: five numbers (a distance > 0), got {:?}", args.view);
     }
     let (w, h) = parse_size(&args.size)?;
+    let t0 = Instant::now();
     let (device, queue) = headless_device()?;
     let ell = gen.world.ell;
     let svc = Service::start(store, gen, base_tiles(args.base_zoom()), (rayon::current_num_threads() / 2).max(1), || {});
@@ -40,8 +41,9 @@ pub(crate) fn snapshot(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Gener
         fov_y: 40f64.to_radians(),
         target_h: 0.0,
     };
-    let t0 = Instant::now();
     let mut calm = 0;
+    // progress: the first tiles on screen, then the view's tiles all in
+    let (mut first, mut view_done) = (false, false);
     loop {
         cam.target_h = globe.height_at(cam.lat, cam.lon, 22).unwrap_or(0.0).max(0.0) * s.exaggeration as f64;
         let cf = if fly_view {
@@ -54,6 +56,14 @@ pub(crate) fn snapshot(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Gener
             cam.frame(&ell, w as f64 / h as f64)
         };
         globe.render(&cf, &s, &svc, w, h, None);
+        if !first && globe.stats.drawn > 0 {
+            first = true;
+            eprintln!("first tiles drawn after {:.1}s", t0.elapsed().as_secs_f64());
+        }
+        if first && !view_done && globe.view_complete() {
+            view_done = true;
+            eprintln!("the view's tiles in after {:.1}s (finest z{})", t0.elapsed().as_secs_f64(), globe.stats.max_zoom_drawn);
+        }
         calm = if globe.settled(&svc) { calm + 1 } else { 0 };
         if calm >= 5 || t0.elapsed().as_secs_f64() > args.wait {
             break;

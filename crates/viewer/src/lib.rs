@@ -119,6 +119,11 @@ pub fn run(scn: Scenario, store: Arc<TileStore>, gen: Arc<Generator>, mut opts: 
     opts.max_zoom.get_or_insert(scn.tiles.max_zoom);
     opts.base_zoom.get_or_insert(DEFAULT_BASE_ZOOM.min(scn.tiles.max_zoom));
     check_options(&opts, scn.tiles.max_zoom)?;
+    if store.writable() {
+        // (compiling the GPU generator's pipelines the first time takes a while: the CPU
+        // generates the first tiles meanwhile)
+        gen.prepare_gpu_in_background();
+    }
     if let Some(out) = opts.snapshot.clone() {
         return snapshot::snapshot(&opts, store, gen, &out);
     }
