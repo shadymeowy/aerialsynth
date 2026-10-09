@@ -248,7 +248,8 @@ impl World {
         if tiles_file.as_os_str().is_empty() {
             return Err(Error::InvalidArgument("empty tiles file path".into()));
         }
-        let gen = Generator::new(spec.config);
+        // (validated: a bad config value is an error, not a broken world)
+        let gen = Generator::try_new(spec.config).map_err(Error::Failed)?;
         // (the registry stays locked until the store is open: two threads opening the same new
         // file must not both create it)
         let mut open = open_files();
@@ -430,6 +431,12 @@ mod tests {
         assert_eq!(layer_by_name("normal").unwrap(), Layer::Normal);
         assert!(matches!(World::open(&d.0.join("x.h5"), Some(&d.0.join("missing.yaml")), None), Err(Error::Io { .. })));
         assert!(matches!(World::open(Path::new(""), None, None), Err(Error::InvalidArgument(_))));
+        // invalid world values are refused before a store is made
+        let bad = d.0.join("bad.yaml");
+        std::fs::write(&bad, "world: { planet: { a: 0 } }\n").unwrap();
+        let e = World::open(&d.0.join("bad.h5"), Some(&bad), None).err().expect("planet.a = 0");
+        assert!(e.to_string().contains("planet.a"), "{e}");
+        assert!(!d.0.join("bad.h5").exists());
     }
 
     #[test]
