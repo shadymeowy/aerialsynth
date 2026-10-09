@@ -1,12 +1,15 @@
 /*
  * aerialsynth C API: tiles of a procedural world (Web-Mercator XYZ, 256 x 256 pixels), read from
- * its HDF5 tile store and generated (GPU if available, else CPU) and stored when missing.
+ * its HDF5 tile store and generated (GPU if available, else CPU) and stored when missing; camera
+ * images of the world rendered from a pose (the renderer of `terrain run`).
  *
  * Link with -laerialsynth (libaerialsynth.so / .dylib / aerialsynth.dll, or the static
- * libaerialsynth.a with its system libraries). See bindings/README.md and examples/tile.c.
+ * libaerialsynth.a with its system libraries). See bindings/README.md, examples/tile.c and
+ * examples/render.c.
  *
- * Thread safety: a handle may be used by several threads at once (as_tile); as_close must not
- * run concurrently with other calls on the same handle. as_last_error is per thread.
+ * Thread safety: a world or camera handle may be used by several threads at once (as_tile,
+ * as_render; renders of one camera are serialized); as_close / as_camera_close must not run
+ * concurrently with other calls on the same handle. as_last_error is per thread.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -56,6 +59,12 @@
 #define AS_TILE_SIZE 256
 
 /**
+ * A camera over a world, rendering images from poses. Opaque; made by `as_camera_open` or
+ * `as_camera_pinhole`, freed by `as_camera_close`.
+ */
+typedef struct as_camera as_camera;
+
+/**
  * A tile store opened for one world. Opaque; made by `as_open`, freed by `as_close`.
  */
 typedef struct as_world as_world;
@@ -64,6 +73,34 @@ typedef struct as_world as_world;
  * A layer of a tile: one of the `AS_LAYER_*` values.
  */
 typedef uint32_t as_layer;
+
+/**
+ * Where a camera renders: one of the `AS_BACKEND_*` values.
+ */
+typedef uint32_t as_backend;
+
+/**
+ * How a pinhole camera sits on the body: one of the `AS_MOUNT_*` values.
+ */
+typedef uint32_t as_mount;
+
+/**
+ * Position and body attitude of a render.
+ *
+ * Position: geodetic latitude and longitude (degrees) and height above the WGS84 ellipsoid
+ * (metres). Attitude: aerospace Z-Y-X Euler angles (degrees) of the body (x forward, y right,
+ * z down) in the local north-east-down frame: yaw = heading clockwise from north, pitch nose-up
+ * positive, roll right-wing-down positive. The camera sits on the body by its mount (the
+ * scenario camera's `extrinsics`, or `as_mount` for a pinhole camera).
+ */
+typedef struct as_pose {
+  double lat_deg;
+  double lon_deg;
+  double height_m;
+  double roll_deg;
+  double pitch_deg;
+  double yaw_deg;
+} as_pose;
 
 /**
  * Element type of a layer's pixels: one of the `AS_DTYPE_*` values.
@@ -144,6 +181,38 @@ typedef struct as_layer_info {
  */
 #define AS_DTYPE_F32 2
 
+/**
+ * The scenario's `render.backend` (`AS_BACKEND_AUTO` without a scenario).
+ */
+#define AS_BACKEND_DEFAULT 0
+
+/**
+ * The GPU when there is a usable one (that can take the camera model), else the CPU.
+ */
+#define AS_BACKEND_AUTO 1
+
+/**
+ * The CPU reference renderer.
+ */
+#define AS_BACKEND_CPU 2
+
+/**
+ * The GPU: opening the camera fails without a usable GPU.
+ */
+#define AS_BACKEND_GPU 3
+
+/**
+ * Optical axis = body forward, image top = body up: the pose's angles are the camera's own (yaw
+ * = heading of the optical axis, pitch = its elevation, negative looks down).
+ */
+#define AS_MOUNT_FORWARD 0
+
+/**
+ * Optical axis = body down, image top = body forward (the scenario default mount): a level
+ * pose looks straight down.
+ */
+#define AS_MOUNT_NADIR 1
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
@@ -178,7 +247,8 @@ struct as_world *as_open(const char *tiles_file, const char *config_yaml, int64_
 
 /**
  * Close a world (flushing its store). NULL is ignored. The handle must not be in use by another
- * thread, and is invalid afterwards.
+ * thread, and is invalid afterwards. Cameras of the world stay usable: the store is closed when
+ * the world and all its cameras are closed.
  *
  * # Safety
  * `w` is NULL or a handle from `as_open` not closed yet.
@@ -214,6 +284,118 @@ int as_tile(const struct as_world *w,
  * `w` is NULL or a handle from `as_open`.
  */
 int as_max_zoom(const struct as_world *w);
+
+/**
+ * The DSM height (ground, canopy, buildings, water surface; metres above the WGS84 ellipsoid) at
+ * latitude / longitude `lat_deg`, `lon_deg` into `*height_m`: about what the tiles of the max
+ * zoom hold there (evaluated by the generator; no tile is made). For heights above ground.
+ * Returns `AS_OK` or a negative `AS_ERR_*` code.
+ *
+ * # Safety
+ * `w` is a handle from `as_open`; `height_m` points to a writable double.
+ */
+int as_surface_height(const struct as_world *w, double lat_deg, double lon_deg, double *height_m);
+
+/**
+ * A camera of a scenario over world `w`.
+ *
+ * `scenario_yaml` is the path of a scenario YAML (as for `terrain run`) or NULL for the default
+ * settings: its `render` section (backend, supersample, shading, lighting, atmosphere, ...),
+ * `tiles` zoom range and cache size and `cameras` are used; its `world` section is ignored (the
+ * world is `w`'s). `camera` picks one of its `cameras` by HDF5 path ("/cam0") or index ("0");
+ * NULL is the first one (the default camera, 640 x 512 with a 70 degree field of view on a nadir
+ * mount, when there is none). `backend` overrides `render.backend` (`AS_BACKEND_DEFAULT` keeps
+ * it).
+ *
+ * The camera keeps the world's store open (`as_close` of the world may come first). Returns NULL
+ * on error (see `as_last_error`). Close the camera with `as_camera_close`.
+ *
+ * # Safety
+ * `w` is a handle from `as_open`; `scenario_yaml` and `camera` are NULL or NUL-terminated.
+ */
+struct as_camera *as_camera_open(const struct as_world *w,
+                                 const char *scenario_yaml,
+                                 const char *camera,
+                                 as_backend backend);
+
+/**
+ * A distortion-free pinhole camera over world `w`: `width` x `height` pixels, horizontal field
+ * of view `hfov_deg` (0 < hfov < 180), principal point at the image centre, mounted by `mount`
+ * (`AS_MOUNT_FORWARD` or `AS_MOUNT_NADIR`), with the default render settings; `backend`
+ * (`AS_BACKEND_DEFAULT` = `AS_BACKEND_AUTO`).
+ *
+ * The camera keeps the world's store open. Returns NULL on error (see `as_last_error`). Close
+ * the camera with `as_camera_close`.
+ *
+ * # Safety
+ * `w` is a handle from `as_open`.
+ */
+struct as_camera *as_camera_pinhole(const struct as_world *w,
+                                    uint32_t width,
+                                    uint32_t height,
+                                    double hfov_deg,
+                                    as_mount mount,
+                                    as_backend backend);
+
+/**
+ * The image size of camera `c` into `*width` and `*height` (either may be NULL). Returns `AS_OK`
+ * or `AS_ERR_INVALID_ARGUMENT` (`c` is NULL).
+ *
+ * # Safety
+ * `c` is NULL or a camera handle; `width` and `height` are NULL or point to writable `uint32_t`s.
+ */
+int as_camera_size(const struct as_camera *c, uint32_t *width, uint32_t *height);
+
+/**
+ * The backend camera `c` renders on: `AS_BACKEND_CPU` or `AS_BACKEND_GPU` (auto resolved), or
+ * `AS_ERR_INVALID_ARGUMENT` if `c` is NULL.
+ *
+ * # Safety
+ * `c` is NULL or a camera handle.
+ */
+int as_camera_backend(const struct as_camera *c);
+
+/**
+ * Render a frame of camera `c` from `pose` at `unix_time` (UTC, Unix seconds; NAN: the
+ * scenario's lighting time). Tiles the view needs are read from the store, or generated and
+ * stored when missing. Only the images whose buffer is not NULL are made; each `*_len` is the
+ * buffer's length in elements and must be at least:
+ *
+ * - `rgb`: width * height * 3 bytes, row-major (row 0 = image top), sRGB after the camera
+ *   sensor model (auto exposure converged on the frame, optics, noise, tone curve; no motion
+ *   blur). The noise is deterministic: the same camera, pose and time give the same image.
+ * - `depth`: width * height floats, metres: the z-depth along the optical axis (OpenCV camera
+ *   frame: x right, y down, z forward), or the range along the pixel ray when the scenario
+ *   camera's `depth.kind` is `range`; +infinity where there is no terrain (sky).
+ * - `landcover`: width * height class ids (as `AS_LAYER_LANDCOVER`), 255 = sky.
+ *
+ * The time places the sun, moon and stars (as the lighting `clock` mode at that instant).
+ * Renders of one camera are serialized; different cameras render concurrently. Returns `AS_OK`
+ * or a negative `AS_ERR_*` code (`AS_ERR_INVALID_ARGUMENT`: a NULL camera or pose, a pose out
+ * of range (|lat| > 90, non-finite values), a non-finite time; `AS_ERR_BUFFER_TOO_SMALL`).
+ *
+ * # Safety
+ * `c` is a camera handle; `pose` points to an `as_pose`; each buffer is NULL or points to
+ * `*_len` writable elements.
+ */
+int as_render(const struct as_camera *c,
+              const struct as_pose *pose,
+              double unix_time,
+              uint8_t *rgb,
+              size_t rgb_len,
+              float *depth,
+              size_t depth_len,
+              uint8_t *landcover,
+              size_t landcover_len);
+
+/**
+ * Close a camera. NULL is ignored. The handle must not be in use by another thread, and is
+ * invalid afterwards.
+ *
+ * # Safety
+ * `c` is NULL or a camera handle not closed yet.
+ */
+void as_camera_close(struct as_camera *c);
 
 /**
  * Bytes of one tile of `layer` (256 * 256 * channels * element size), or 0 for an unknown layer.

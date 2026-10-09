@@ -1,16 +1,17 @@
 //! `aerialsynth._native`: the extension module behind the `aerialsynth` Python package
 //! (`python/aerialsynth/__init__.py` wraps it and returns numpy arrays).
 //!
-//! Tiles are returned as `bytearray`s (raw little-endian pixels) so that the module needs only
-//! the stable ABI and no numpy C API: the Python layer views them with `np.frombuffer` (writable,
-//! no copy). The implementation is `aerialsynth-core`, shared with the C API.
+//! Tiles and images are returned as `bytearray`s (raw little-endian pixels) so that the module
+//! needs only the stable ABI and no numpy C API: the Python layer views them with
+//! `np.frombuffer` (writable, no copy). The implementation is `aerialsynth-core`, shared with the
+//! C API.
 
 use aerialsynth_core as core;
 use pyo3::exceptions::{PyFileNotFoundError, PyOSError, PyPermissionError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyByteArray;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 fn to_py(e: core::Error) -> PyErr {
     let msg = e.to_string();
@@ -29,12 +30,25 @@ fn coord(v: i64, what: &str) -> PyResult<u32> {
     u32::try_from(v).map_err(|_| PyValueError::new_err(format!("{what} = {v} is out of range")))
 }
 
+/// A slot that is emptied on close. The value is an `Arc`, so that work in progress (without
+/// the GIL) keeps it alive while another thread closes it.
+type Slot<T> = Mutex<Option<Arc<T>>>;
+
+fn get<T>(slot: &Slot<T>, what: &str) -> PyResult<Arc<T>> {
+    slot.lock().unwrap_or_else(|e| e.into_inner()).clone().ok_or_else(|| PyValueError::new_err(format!("the {what} is closed")))
+}
+
+fn take<T>(slot: &Slot<T>) -> Option<Arc<T>> {
+    slot.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
+
 /// A tile store opened for one world (see `aerialsynth.World`).
 #[pyclass(frozen, module = "aerialsynth._native")]
 struct World {
-    /// `None` once closed. An `Arc`, so that a tile being made (without the GIL) keeps the store
-    /// open while another thread closes the world.
-    inner: Mutex<Option<Arc<core::World>>>,
+    /// `None` once closed.
+    inner: Slot<core::World>,
+    /// The cameras made from this world: closed with it (a camera keeps the store open).
+    cameras: Mutex<Vec<Weak<Slot<core::Camera>>>>,
     path: PathBuf,
     seed: u64,
     max_zoom: u32,
@@ -42,7 +56,7 @@ struct World {
 
 impl World {
     fn get(&self) -> PyResult<Arc<core::World>> {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner()).clone().ok_or_else(|| PyValueError::new_err("the world is closed"))
+        get(&self.inner, "world")
     }
 }
 
@@ -52,7 +66,78 @@ impl World {
     #[pyo3(signature = (tiles_file, config=None, seed=None))]
     fn new(py: Python<'_>, tiles_file: PathBuf, config: Option<PathBuf>, seed: Option<u64>) -> PyResult<Self> {
         let w = py.detach(|| core::World::open(&tiles_file, config.as_deref(), seed)).map_err(to_py)?;
-        Ok(World { path: w.path().to_path_buf(), seed: w.seed(), max_zoom: w.max_zoom(), inner: Mutex::new(Some(Arc::new(w))) })
+        Ok(World {
+            path: w.path().to_path_buf(),
+            seed: w.seed(),
+            max_zoom: w.max_zoom(),
+            inner: Mutex::new(Some(Arc::new(w))),
+            cameras: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// A camera over this world: a pinhole camera (`width`, `height`, `hfov`; optional principal
+    /// point `cx`, `cy`, `mount` "forward" | "nadir") with the render settings of `config`, or a
+    /// camera of the scenario `config` (`camera`: HDF5 path or index, None = the first).
+    #[pyo3(signature = (width=None, height=None, hfov=None, cx=None, cy=None, mount="forward", config=None, camera=None, backend=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn camera(
+        &self,
+        py: Python<'_>,
+        width: Option<u32>,
+        height: Option<u32>,
+        hfov: Option<f64>,
+        cx: Option<f64>,
+        cy: Option<f64>,
+        mount: &str,
+        config: Option<PathBuf>,
+        camera: Option<String>,
+        backend: Option<&str>,
+    ) -> PyResult<Camera> {
+        let w = self.get()?;
+        let backend = backend.map(core::Backend::from_name).transpose().map_err(to_py)?;
+        let mount = core::Mount::from_name(mount).map_err(to_py)?;
+        let def = match (width, height, hfov) {
+            (Some(width), Some(height), Some(hfov_deg)) => {
+                if camera.is_some() {
+                    return Err(PyValueError::new_err("camera selects a camera of the scenario: not with width, height and hfov"));
+                }
+                let principal_point = match (cx, cy) {
+                    (Some(x), Some(y)) => Some((x, y)),
+                    (None, None) => None,
+                    _ => return Err(PyValueError::new_err("give both cx and cy (or neither)")),
+                };
+                core::CameraDef::Pinhole(core::Pinhole { width, height, hfov_deg, principal_point, mount })
+            }
+            (None, None, None) => {
+                if cx.is_some() || cy.is_some() || mount != core::Mount::Forward {
+                    return Err(PyValueError::new_err("cx, cy and mount are settings of a pinhole camera (width, height, hfov)"));
+                }
+                core::CameraDef::Scenario(camera)
+            }
+            _ => return Err(PyValueError::new_err("a pinhole camera needs width, height and hfov")),
+        };
+        let cam = py.detach(|| core::Camera::new(w, config.as_deref(), def, backend)).map_err(to_py)?;
+        let info = CameraInfo::of(&cam);
+        let slot = Arc::new(Mutex::new(Some(Arc::new(cam))));
+        {
+            let mut cams = self.cameras.lock().unwrap_or_else(|e| e.into_inner());
+            cams.retain(|c| c.strong_count() > 0);
+            cams.push(Arc::downgrade(&slot));
+        }
+        // (`close` empties `inner` before it closes the listed cameras: a world closed while this
+        // camera was made is seen here, else the camera is in the list it closes)
+        if self.inner.lock().unwrap_or_else(|e| e.into_inner()).is_none() {
+            let c = take(&slot);
+            py.detach(move || drop(c));
+            return Err(PyValueError::new_err("the world is closed"));
+        }
+        Ok(Camera { inner: slot, info })
+    }
+
+    /// DSM height (m above the WGS84 ellipsoid) at a point (degrees).
+    fn surface_height(&self, py: Python<'_>, lat: f64, lon: f64) -> PyResult<f64> {
+        let w = self.get()?;
+        py.detach(move || w.surface_height(lat, lon)).map_err(to_py)
     }
 
     /// Raw little-endian pixels of a layer of tile z/x/y (generated and stored if missing).
@@ -64,10 +149,16 @@ impl World {
         Ok(PyByteArray::new(py, &v))
     }
 
-    /// Close the store (idempotent). A tile being made in another thread finishes first.
+    /// Close the store and the world's cameras (idempotent). A tile or frame being made in
+    /// another thread finishes first.
     fn close(&self, py: Python<'_>) {
-        let w = self.inner.lock().unwrap_or_else(|e| e.into_inner()).take();
-        py.detach(move || drop(w));
+        let w = take(&self.inner);
+        let cams: Vec<_> = std::mem::take(&mut *self.cameras.lock().unwrap_or_else(|e| e.into_inner()));
+        let cams: Vec<_> = cams.iter().filter_map(Weak::upgrade).filter_map(|s| take(&s)).collect();
+        py.detach(move || {
+            drop(cams);
+            drop(w)
+        });
     }
 
     #[getter]
@@ -88,6 +179,147 @@ impl World {
     }
 }
 
+/// What does not change about a camera (readable after it is closed).
+#[derive(Clone)]
+struct CameraInfo {
+    width: u32,
+    height: u32,
+    backend: &'static str,
+    supersample: u32,
+    path: String,
+    model: String,
+    intrinsics: Vec<f64>,
+    distortion: Vec<f64>,
+    depth_range: bool,
+}
+
+impl CameraInfo {
+    fn of(c: &core::Camera) -> Self {
+        let (model, intrinsics, distortion) = c.model();
+        CameraInfo {
+            width: c.width(),
+            height: c.height(),
+            backend: c.backend().name(),
+            supersample: c.supersample(),
+            path: c.path().to_string(),
+            model: model.to_string(),
+            intrinsics: intrinsics.to_vec(),
+            distortion: distortion.to_vec(),
+            depth_range: c.depth_kind_range(),
+        }
+    }
+}
+
+/// `(rgb, depth, landcover, exposure (time, gain, ev) | None, position_ecef, r_ecef_cam (row-major
+/// 9), unix_time, sun_azimuth_deg, sun_elevation_deg)` of a frame; images as raw bytes.
+type FrameTuple<'py> = (
+    Option<Bound<'py, PyByteArray>>,
+    Option<Bound<'py, PyByteArray>>,
+    Option<Bound<'py, PyByteArray>>,
+    Option<(f64, f64, f64)>,
+    [f64; 3],
+    [f64; 9],
+    f64,
+    f64,
+    f64,
+);
+
+/// A camera over a world (see `aerialsynth.Camera`).
+#[pyclass(frozen, module = "aerialsynth._native")]
+struct Camera {
+    /// `None` once closed (by itself or by its world).
+    inner: Arc<Slot<core::Camera>>,
+    info: CameraInfo,
+}
+
+#[pymethods]
+impl Camera {
+    /// Render a frame: images as raw bytes (see `FrameTuple`).
+    #[pyo3(signature = (lat, lon, height, roll, pitch, yaw, time, rgb, depth, landcover))]
+    #[allow(clippy::too_many_arguments)]
+    fn render<'py>(
+        &self,
+        py: Python<'py>,
+        lat: f64,
+        lon: f64,
+        height: f64,
+        roll: f64,
+        pitch: f64,
+        yaw: f64,
+        time: Option<f64>,
+        rgb: bool,
+        depth: bool,
+        landcover: bool,
+    ) -> PyResult<FrameTuple<'py>> {
+        let cam = get(&self.inner, "camera")?;
+        let pose = core::Pose { lat_deg: lat, lon_deg: lon, height_m: height, roll_deg: roll, pitch_deg: pitch, yaw_deg: yaw };
+        let f = py.detach(move || cam.render(&pose, time, core::Outputs { rgb, depth, landcover })).map_err(to_py)?;
+        let depth = f.depth.map(|d| {
+            let b: Vec<u8> = d.iter().flat_map(|v| v.to_le_bytes()).collect();
+            PyByteArray::new(py, &b)
+        });
+        let r = f.r_ecef_cam;
+        Ok((
+            f.rgb.map(|v| PyByteArray::new(py, &v)),
+            depth,
+            f.landcover.map(|v| PyByteArray::new(py, &v)),
+            f.exposure.map(|e| (e.time, e.gain, e.ev)),
+            f.position_ecef,
+            [r[0][0], r[0][1], r[0][2], r[1][0], r[1][1], r[1][2], r[2][0], r[2][1], r[2][2]],
+            f.unix_time,
+            f.sun_azimuth_deg,
+            f.sun_elevation_deg,
+        ))
+    }
+
+    /// Close the camera (idempotent). A frame being rendered in another thread finishes first.
+    fn close(&self, py: Python<'_>) {
+        let c = take(&self.inner);
+        py.detach(move || drop(c));
+    }
+
+    #[getter]
+    fn closed(&self) -> bool {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).is_none()
+    }
+    #[getter]
+    fn width(&self) -> u32 {
+        self.info.width
+    }
+    #[getter]
+    fn height(&self) -> u32 {
+        self.info.height
+    }
+    #[getter]
+    fn backend(&self) -> &'static str {
+        self.info.backend
+    }
+    #[getter]
+    fn supersample(&self) -> u32 {
+        self.info.supersample
+    }
+    #[getter]
+    fn path(&self) -> String {
+        self.info.path.clone()
+    }
+    #[getter]
+    fn model(&self) -> String {
+        self.info.model.clone()
+    }
+    #[getter]
+    fn intrinsics(&self) -> Vec<f64> {
+        self.info.intrinsics.clone()
+    }
+    #[getter]
+    fn distortion(&self) -> Vec<f64> {
+        self.info.distortion.clone()
+    }
+    #[getter]
+    fn depth_is_range(&self) -> bool {
+        self.info.depth_range
+    }
+}
+
 /// `[(name, numpy dtype str, channels, bytes per tile, description)]` of every layer.
 #[pyfunction]
 fn layers() -> Vec<(&'static str, &'static str, usize, usize, &'static str)> {
@@ -97,10 +329,12 @@ fn layers() -> Vec<(&'static str, &'static str, usize, usize, &'static str)> {
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<World>()?;
+    m.add_class::<Camera>()?;
     m.add_function(wrap_pyfunction!(layers, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add("TILE_SIZE", core::TILE_PX)?;
     m.add("MAX_ZOOM", core::MAX_ZOOM)?;
+    m.add("MAX_IMAGE_SIZE", core::MAX_IMAGE_SIZE)?;
     m.add("DEFAULT_MAX_ZOOM", core::DEFAULT_MAX_ZOOM)?;
     m.add("GENERATOR_VERSION", core::GENERATOR_VERSION)?;
     Ok(())

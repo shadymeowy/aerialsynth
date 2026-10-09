@@ -128,10 +128,15 @@ cargo test --release
 - **Events:** moving edge, background activity, low-light bandwidth.
 - **IMU:** noise statistics, level-flight truth, lever arm and sample timing against the
   1 kHz simulator truth.
-- **Solar position.**
+- **Solar position** (and the lighting at a UTC instant).
 - **Generator invariants:** determinism, seamless east-west and north-south tile borders, parent ≈
   mean of its children (on the default backend: the GPU).
 - **GPU generator:** noise, pass A (the macro-scale world model: relief, drainage, sites) and
   whole tiles (z7–z16) against the CPU generator.
 - **Flight camera:** level flight holds height and heading, banked turns at g·tan(bank)/V, the
   ground stops the camera.
+- **Bindings** (`bindings/`): tiles generated once then read, stores of other worlds refused,
+  bad arguments; rendering on the CPU (image shapes, depth and land cover, sky, time of day,
+  determinism, mounts, scenario cameras, the store kept open by cameras) and GPU against CPU;
+  the C API, its header and its examples (`tile.c`, `render.c`); the Python package by
+  `bindings/python/tests` against a built wheel.

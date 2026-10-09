@@ -1,9 +1,11 @@
-//! Tile access shared by the C (`bindings/c`) and Python (`bindings/python`) bindings, so both
-//! behave identically.
+//! Tile access and camera rendering shared by the C (`bindings/c`) and Python
+//! (`bindings/python`) bindings, so both behave identically.
 //!
 //! A [`World`] is a tile store opened for one world (seed + world config). [`World::tile`] reads
 //! a layer of a tile from the store; a tile that is not stored yet is generated (on the GPU when
-//! there is a suitable one, else on the CPU), written to the store, and returned.
+//! there is a suitable one, else on the CPU), written to the store, and returned. A [`Camera`]
+//! renders images of the world (the renderer of `terrain run`), generating the tiles it needs
+//! into the store the same way.
 //!
 //! The world is given like the CLI's `terrain -c FILE --seed N`: an optional scenario YAML
 //! (only its `world:` section is used) or a bare world config, and an optional seed override.
@@ -12,9 +14,13 @@
 
 use anyhow::Context;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use terragen::{Config, Generator};
 use tilestore::{TileStore, TILE_SIZE};
 
+mod camera;
+
+pub use camera::{Backend, Camera, CameraDef, Exposure, Frame, Mount, Outputs, Pinhole, Pose, MAX_IMAGE_SIZE};
 pub use terragen::GENERATOR_VERSION;
 pub use tilestore::{Layer, TileId};
 
@@ -201,8 +207,9 @@ pub fn tile_id(z: u32, x: u32, y: u32, max_zoom: u32) -> Result<TileId> {
 /// A tiles file is open by at most one `World` per process: a second open fails while the
 /// first is alive (share the handle instead).
 pub struct World {
-    gen: Generator,
-    store: TileStore,
+    /// (shared with the tile caches of cameras)
+    gen: Arc<Generator>,
+    store: Arc<TileStore>,
     path: PathBuf,
     max_zoom: u32,
     /// The store's entry in [`OPEN`]; after `store`, so it is dropped after the store is closed.
@@ -264,7 +271,7 @@ impl World {
         let store = gen.open_store_rw(tiles_file).with_context(|| format!("opening the tile store {}", tiles_file.display()))?;
         let key = tiles_file.canonicalize().with_context(|| format!("resolving {}", tiles_file.display()))?;
         open.push(key.clone());
-        Ok(World { gen, store, path: tiles_file.to_path_buf(), max_zoom: spec.max_zoom, _open: OpenFile(key) })
+        Ok(World { gen: Arc::new(gen), store: Arc::new(store), path: tiles_file.to_path_buf(), max_zoom: spec.max_zoom, _open: OpenFile(key) })
     }
 
     /// The tiles file.
@@ -285,6 +292,19 @@ impl World {
     /// The world config (as stored in the tile store).
     pub fn config(&self) -> &Config {
         self.gen.config()
+    }
+
+    /// The DSM height (ground, canopy, buildings, water surface; metres above the WGS84
+    /// ellipsoid) at a point (degrees), evaluated by the generator at the ground resolution of
+    /// the max zoom: about what the tiles hold there. For heights above ground.
+    pub fn surface_height(&self, lat_deg: f64, lon_deg: f64) -> Result<f64> {
+        if !(lat_deg.is_finite() && lon_deg.is_finite() && lat_deg.abs() <= 90.0) {
+            return Err(Error::InvalidArgument(format!("latitude {lat_deg}° / longitude {lon_deg}°: finite values with |latitude| <= 90 expected")));
+        }
+        let lat = lat_deg.to_radians();
+        let ell = self.store.meta().ellipsoid();
+        let gsd = geodesy::tiles::gsd_ew(lat, self.max_zoom as u8, TILE_SIZE as u32, &ell).max(0.1);
+        Ok(self.gen.probe(lat, lon_deg.to_radians(), gsd).1)
     }
 
     /// Is the tile stored (i.e. would [`World::tile`] read it rather than generate it)?
@@ -342,13 +362,13 @@ fn copy_layer(t: &tilestore::TileData, layer: Layer, out: &mut [u8]) -> Result<(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// A fresh temporary directory (removed on drop).
-    struct TempDir(PathBuf);
+    pub(crate) struct TempDir(pub PathBuf);
     impl TempDir {
-        fn new(name: &str) -> Self {
+        pub(crate) fn new(name: &str) -> Self {
             let d = std::env::temp_dir().join(format!("aerialsynth-core-{name}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&d);
             std::fs::create_dir_all(&d).unwrap();

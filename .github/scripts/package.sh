@@ -9,7 +9,7 @@
 #         libaerialsynth.dylib + libaerialsynth.a       macOS
 #         aerialsynth.dll + aerialsynth.dll.lib (import library) + aerialsynth.lib (static)  Windows
 #         native-static-libs.txt (the system libraries to link with the static library)
-#     include/aerialsynth.h, examples/tile.c, configs/, README.md, LICENSE, NOTICE, CHANGELOG.md
+#     include/aerialsynth.h, examples/{tile,render}.c, configs/, README.md, LICENSE, NOTICE, CHANGELOG.md
 set -euo pipefail
 target=$1
 version=$2
@@ -31,7 +31,7 @@ case "$target" in
 esac
 if [ -f "$rel/native-static-libs.txt" ]; then cp "$rel/native-static-libs.txt" "$stage/lib/"; fi
 cp bindings/c/include/aerialsynth.h "$stage/include/"
-cp bindings/c/examples/tile.c "$stage/examples/"
+cp bindings/c/examples/*.c "$stage/examples/"
 cp -r configs "$stage/"
 cp README.md LICENSE NOTICE CHANGELOG.md "$stage/"
 cd dist
