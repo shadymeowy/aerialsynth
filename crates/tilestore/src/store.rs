@@ -129,6 +129,7 @@ impl TileStore {
     }
 
     fn open_impl(path: &Path, writable: bool) -> Result<Self> {
+        check_hdf5_file(path)?;
         let file = if writable { h5::File::open_rw(path) } else { h5::File::open(path) }.map_err(|e| open_error(path, e, "opening"))?;
         let format = file.attr_str("format").unwrap_or_default();
         if format != FORMAT {
@@ -460,6 +461,37 @@ impl TileStore {
 
 /// A short error for the common ways of failing to open (or create) a store: the file is locked
 /// by another process, or it is truncated (its creation was interrupted).
+/// The signature at the start of an HDF5 superblock (at offset 0, 512, 1024, 2048, ...).
+const HDF5_SIGNATURE: [u8; 8] = *b"\x89HDF\r\n\x1a\n";
+
+/// A short error for paths that cannot be a tile store (a directory, a file without an HDF5
+/// signature) instead of HDF5's error stack. Other failures are left to HDF5.
+fn check_hdf5_file(path: &Path) -> Result<()> {
+    use std::io::{Read, Seek, SeekFrom};
+    let name = path.display();
+    let Ok(meta) = std::fs::metadata(path) else { return Ok(()) };
+    if meta.is_dir() {
+        bail!("{name} is a directory, not a tile store (an HDF5 file such as out/world.h5)");
+    }
+    let Ok(mut f) = std::fs::File::open(path) else { return Ok(()) };
+    let len = meta.len();
+    let mut at = 0u64;
+    while at + 8 <= len {
+        let mut sig = [0u8; 8];
+        if f.seek(SeekFrom::Start(at)).is_err() || f.read_exact(&mut sig).is_err() {
+            return Ok(());
+        }
+        if sig == HDF5_SIGNATURE {
+            return Ok(());
+        }
+        at = if at == 0 { 512 } else { at * 2 };
+    }
+    if len == 0 {
+        bail!("{name} is empty, not a tile store (an HDF5 file); delete it to start over");
+    }
+    bail!("{name} is not an HDF5 file, so not a tile store (tiles.file names the HDF5 tile store, e.g. out/world.h5)");
+}
+
 fn open_error(path: &Path, e: h5::Error, doing: &str) -> anyhow::Error {
     let stack = match &e {
         h5::Error::Hdf5 { stack, .. } => stack.as_str(),

@@ -292,7 +292,8 @@ impl World {
                 )));
             }
         }
-        let store = gen.open_store_rw(tiles_file).with_context(|| format!("opening the tile store {}", tiles_file.display()))?;
+        // (the store's errors name the file and lead with the reason: "… is a directory")
+        let store = gen.open_store_rw(tiles_file)?;
         let key = tiles_file.canonicalize().with_context(|| format!("resolving {}", tiles_file.display()))?;
         open.push(key.clone());
         Ok(World {
@@ -758,6 +759,18 @@ pub(crate) mod tests {
         let e = World::open(&d.0.join("bad.h5"), Some(&bad), None).err().expect("planet.a = 0");
         assert!(e.to_string().contains("planet.a"), "{e}");
         assert!(!d.0.join("bad.h5").exists());
+    }
+
+    #[test]
+    fn a_directory_or_another_file_is_not_a_store() {
+        let d = TempDir::new("notastore");
+        let text = d.0.join("notes.txt");
+        std::fs::write(&text, "hello").unwrap();
+        for (p, want) in [(&d.0, "is a directory"), (&text, "is not an HDF5 file")] {
+            let e = World::open(p, None, None).err().expect("not a store, opened").to_string();
+            assert!(e.starts_with(&format!("{} {want}", p.display())), "{e}");
+            assert_eq!(e.lines().count(), 1, "{e}");
+        }
     }
 
     #[test]
