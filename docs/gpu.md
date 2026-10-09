@@ -155,12 +155,12 @@ Low-zoom tiles are the most work per tile on both backends, for two reasons:
   event sensor run on the CPU (`backend: gpu` and the viewer then fail). For a GPU whose driver
   misbehaves, or to compare against the CPU reference.
 - **A GPU that renders wrongly:** with `render.backend: auto` the renderer first draws a 32 × 24
-  test frame of a synthetic tile on the GPU and on the CPU (once per process: ~15 ms after the
-  GPU renderer's start-up). A GPU whose frame clearly differs (no terrain, wrong depth, land cover or
-  brightness) is not used: a one-line warning (`render.backend auto: the GPU (…) renders a test
-  frame wrongly (…); rendering on the CPU`) and the CPU renders. Seen on the virtual GPU of
-  macOS VMs on Intel hosts ("Apple Paravirtual device"), which renders nothing. `backend: gpu`
-  skips the check.
+  test frame of a synthetic tile on the GPU and on the CPU (once per process: 15–30 ms after
+  the GPU renderer's start-up, ~0.3 s on Windows' software WARP device). A GPU whose frame
+  clearly differs (no terrain, wrong depth, land cover or brightness) is not used: a one-line
+  warning (`render.backend auto: the GPU (…) renders a test frame wrongly (…); rendering on the
+  CPU`) and the CPU renders. Seen on the virtual GPU of macOS VMs on Intel hosts ("Apple
+  Paravirtual device"), which renders nothing. `backend: gpu` skips the check.
 
 - **No suitable GPU:** with `backend: auto` (the default) generation and rendering fall back to
   the CPU; `backend: gpu` makes a missing GPU an error instead. Tile generation
