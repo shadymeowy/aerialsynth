@@ -19,7 +19,12 @@ Both files are HDF5 and open in h5py or any HDF5 reader. `terrain info FILE` sum
 
 - **Chunks:** one tile per chunk, compressed with shuffle + deflate. Compression runs in parallel
   and is written with HDF5 direct chunk I/O. The bundled HDF5 is 2.2.0 (via `hdf5-metno-sys`).
-- **Growth:** rows can be appended in any order, so a store grows lazily.
+- **Growth:** rows can be appended in any order, so a store grows lazily. A new store is
+  written as `<file>.tmp` and renamed once its metadata is on disk, and every write ends with
+  a flush, so a killed process loses at most its last batch.
+- **Locking:** HDF5 locks the file: a store open for writing in one process (`terrain view`,
+  `terrain tiles`) cannot be opened by another, and one open for reading cannot be written;
+  such an open fails with an error saying so.
 - **One world per store:** a store records the world config and generator version of its
   tiles. Every command refuses a store of another world, naming the settings that differ.
   It also refuses to add tiles to a store of another generator version; reading such a store

@@ -258,8 +258,7 @@ impl GpuEventSensor {
             }
             enc.copy_buffer_to_buffer(&self.ev, 0, &self.count_read, 0, 4);
             q.submit([enc.finish()]);
-            self.count_read.slice(..).map_async(wgpu::MapMode::Read, |r| r.expect("GPU read-back"));
-            d.poll(wgpu::PollType::wait_indefinitely())?;
+            self.gpu.map_read(&[self.count_read.slice(..)])?;
             let count = bytemuck::cast_slice::<u8, u32>(&self.count_read.slice(..).get_mapped_range()?)[0] as u64;
             self.count_read.unmap();
             first = false;
@@ -278,8 +277,7 @@ impl GpuEventSensor {
             let mut enc = d.create_command_encoder(&Default::default());
             enc.copy_buffer_to_buffer(&self.ev, 0, &self.ev_read, 0, bytes);
             q.submit([enc.finish()]);
-            self.ev_read.slice(..bytes).map_async(wgpu::MapMode::Read, |r| r.expect("GPU read-back"));
-            d.poll(wgpu::PollType::wait_indefinitely())?;
+            self.gpu.map_read(&[self.ev_read.slice(..bytes)])?;
             {
                 let map = self.ev_read.slice(..bytes).get_mapped_range()?;
                 let rec: &[u32] = bytemuck::cast_slice(&map[4..]);

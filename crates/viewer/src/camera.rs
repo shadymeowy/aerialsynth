@@ -217,7 +217,14 @@ fn render_thread(
         // (the exposure matters to the render for lamp flicker: the latest one)
         sun.exposure = f64::from_bits(exposure_time.load(Ordering::Relaxed));
         let t1 = Instant::now();
-        let frame = renderer.render(&cam, &sun);
+        let frame = match renderer.try_render(&cam, &sun) {
+            Ok(f) => f,
+            Err(e) => {
+                drop(tx);
+                let _ = developer.join();
+                return Err(e);
+            }
+        };
         let render_ms = t1.elapsed().as_secs_f64() * 1000.0;
         let d = Developing { radiance: frame.radiance, t: req.wall, render_ms, started: t0, sun_elevation: sun.elevation.to_degrees(), lights: sun.lights };
         if tx.send(d).is_err() {

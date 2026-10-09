@@ -240,9 +240,8 @@ impl Dataset {
         Ok(())
     }
 
-    /// Validate a hyperslab and build (file space with selection, mem space).
-    /// Returns `None` for an empty selection.
-    fn select(&self, offset: &[usize], count: &[usize], buf_len: usize) -> Result<Option<(Handle, Handle)>> {
+    /// Validate a hyperslab against the dataset's rank and extent; returns its element count.
+    fn selection_len(&self, offset: &[usize], count: &[usize]) -> Result<usize> {
         let _g = lock();
         let (dims, _) = self.dims()?;
         let rank = dims.len();
@@ -250,14 +249,24 @@ impl Dataset {
         if offset.len() != rank || count.len() != rank {
             return Err(bad(format!("offset/count rank {}/{} != dataset rank {rank}", offset.len(), count.len())));
         }
-        if buf_len != prod(count) {
-            return Err(bad(format!("buffer length {buf_len} != prod(count {count:?})")));
-        }
         for i in 0..rank {
-            if (offset[i] + count[i]) as hsize_t > dims[i] {
+            let end = offset[i].checked_add(count[i]).ok_or_else(|| bad(format!("selection offset {offset:?} + count {count:?} overflows")))?;
+            if end as hsize_t > dims[i] {
                 return Err(bad(format!("selection offset {offset:?} count {count:?} exceeds shape {dims:?}")));
             }
         }
+        count.iter().try_fold(1usize, |a, &c| a.checked_mul(c)).ok_or_else(|| bad(format!("selection count {count:?} overflows")))
+    }
+
+    /// Validate a hyperslab and build (file space with selection, mem space).
+    /// Returns `None` for an empty selection.
+    fn select(&self, offset: &[usize], count: &[usize], buf_len: usize) -> Result<Option<(Handle, Handle)>> {
+        let _g = lock();
+        let n = self.selection_len(offset, count)?;
+        if buf_len != n {
+            return Err(Error::InvalidArgument(format!("{}: buffer length {buf_len} != prod(count {count:?})", self.ctx())));
+        }
+        let rank = count.len();
         if buf_len == 0 {
             return Ok(None);
         }
@@ -298,7 +307,7 @@ impl Dataset {
 
     /// Read a C-order block at `offset` of extent `count`.
     pub fn read_slice<T: H5Type>(&self, offset: &[usize], count: &[usize]) -> Result<Vec<T>> {
-        let mut v = vec![T::default(); prod(count)];
+        let mut v = vec![T::default(); self.selection_len(offset, count)?];
         self.read_slice_into(offset, count, &mut v)?;
         Ok(v)
     }

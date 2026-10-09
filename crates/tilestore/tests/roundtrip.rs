@@ -67,3 +67,73 @@ fn rejects_invalid_tiles() {
     s.write_tiles(&[tile(TileId::new(3, 1, 1), 1)]).unwrap();
     assert!(s.read_tile(TileId::new(3, 1, 1), &Layer::ALL).unwrap().is_some());
 }
+
+fn test_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("tilestore-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn a_new_store_opens_before_any_write() {
+    let dir = test_dir("fresh");
+    let path = dir.join("t.h5");
+    drop(TileStore::create(&path, StoreMeta::default()).unwrap());
+    // (built as t.h5.tmp and renamed: no temporary file is left)
+    assert!(!dir.join("t.h5.tmp").exists());
+    let s = TileStore::open(&path).unwrap();
+    assert!(s.is_empty());
+    assert_eq!(s.meta().layers, Layer::ALL.to_vec());
+    drop(s);
+    let s = TileStore::open_rw(&path).unwrap();
+    s.write_tile(&tile(TileId::new(2, 1, 1), 1)).unwrap();
+    assert_eq!(s.len(), 1);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_truncated_store_is_reported_as_incomplete() {
+    let dir = test_dir("truncated");
+    let path = dir.join("t.h5");
+    drop(TileStore::create(&path, StoreMeta::default()).unwrap());
+    // what a process killed during creation left behind (HDF5 superblock only)
+    let head = std::fs::read(&path).unwrap()[..48].to_vec();
+    let cut = dir.join("cut.h5");
+    std::fs::write(&cut, head).unwrap();
+    for e in [TileStore::open(&cut).err(), TileStore::open_rw(&cut).err()] {
+        let e = format!("{:#}", e.expect("a truncated store opened"));
+        assert!(e.contains("looks incomplete") && e.contains("can be deleted"), "{e}");
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_partial_level_is_skipped_and_completed() {
+    let dir = test_dir("partial");
+    let path = dir.join("t.h5");
+    {
+        let s = TileStore::create(&path, StoreMeta::default()).unwrap();
+        s.write_tile(&tile(TileId::new(3, 1, 2), 1)).unwrap();
+        // a level whose creation was interrupted: an index and one layer, no other layers
+        let g = s.file().ensure_group("levels/5").unwrap();
+        g.new_dataset::<i32>().shape(&[0, 2]).max_shape(&[None, Some(2)]).chunk(&[1024, 2]).create("index").unwrap();
+        g.new_dataset::<f32>().shape(&[0, 2]).max_shape(&[None, Some(2)]).chunk(&[1024, 2]).create("elev_range").unwrap();
+        g.new_dataset::<u8>().shape(&[0, 256, 256, 3]).max_shape(&[None, Some(256), Some(256), Some(3)]).chunk(&[1, 256, 256, 3]).create("rgb").unwrap();
+        s.flush().unwrap();
+    }
+    let s = TileStore::open(&path).unwrap();
+    assert_eq!(s.zooms(), vec![3]);
+    assert!(s.read_tile(TileId::new(5, 1, 1), &Layer::ALL).unwrap().is_none());
+    drop(s);
+    // writing to that zoom completes the level (no panic on its missing layers)
+    let s = TileStore::open_rw(&path).unwrap();
+    s.write_tile(&tile(TileId::new(5, 1, 1), 5)).unwrap();
+    drop(s);
+    let s = TileStore::open(&path).unwrap();
+    assert_eq!(s.zooms(), vec![3, 5]);
+    let t = s.read_tile(TileId::new(5, 1, 1), &Layer::ALL).unwrap().unwrap();
+    assert_eq!(t.elevation, tile(TileId::new(5, 1, 1), 5).elevation);
+    assert_eq!(t.emission, tile(TileId::new(5, 1, 1), 5).emission);
+    std::fs::remove_dir_all(&dir).ok();
+}

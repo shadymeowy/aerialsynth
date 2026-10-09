@@ -324,6 +324,18 @@ impl Default for Compression {
     }
 }
 
+/// The most samples of one uniform time series (poses, frames, IMU samples, flight recorder
+/// steps): a guard against rates or durations that would exhaust memory.
+pub const MAX_SAMPLES: usize = 10_000_000;
+
+/// `key` must be finite and > 0.
+fn positive(key: &str, v: f64) -> Result<()> {
+    if !(v.is_finite() && v > 0.0) {
+        bail!("{key} must be finite and > 0 (is {v})");
+    }
+    Ok(())
+}
+
 impl Scenario {
     pub fn load(path: &Path) -> Result<Self> {
         let s = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
@@ -350,8 +362,23 @@ impl Scenario {
         if let Some(imu) = &self.imu {
             groups.push(("imu", imu.path.clone()));
         }
-        if self.output.pose.rate_hz <= 0.0 {
-            bail!("output.pose.rate_hz must be > 0");
+        self.world.validate()?;
+        positive("output.pose.rate_hz", self.output.pose.rate_hz)?;
+        let o = &self.output;
+        if !o.start.is_finite() || o.end.is_some_and(|e| !e.is_finite()) {
+            bail!("output.start and output.end must be finite (are {}, {:?})", o.start, o.end);
+        }
+        let syn = &self.trajectory.synth;
+        positive("trajectory.synth.duration_s", syn.duration)?;
+        positive("trajectory.synth.rate_hz", syn.rate)?;
+        positive("trajectory.synth.dt_s", syn.dt)?;
+        if !syn.speed.is_finite() || !syn.altitude.is_finite() || !syn.climb_rate.is_finite() || !syn.radius.is_finite() || !syn.leg.is_finite() {
+            bail!("trajectory.synth: speed_mps, altitude_m, climb_rate_mps, radius_m and leg_m must be finite");
+        }
+        // the flight recorder keeps every integration step (dt_s is clamped to 0.1..10 ms)
+        let steps = syn.duration / syn.dt.clamp(1e-4, 0.01);
+        if steps > MAX_SAMPLES as f64 {
+            bail!("trajectory.synth: duration_s / dt_s = {steps:.3e} integration steps (at most {MAX_SAMPLES}): shorten the flight or raise dt_s");
         }
         let (z0, z1) = (self.tiles.min_zoom, self.tiles.max_zoom);
         if z0 > z1 || z1 > geodesy::MAX_ZOOM {
@@ -365,17 +392,15 @@ impl Scenario {
             bail!("render.lighting.time_map: [trajectory time, clock] pairs with finite values and increasing times");
         }
         if let Some(imu) = &self.imu {
-            if imu.rate_hz <= 0.0 {
-                bail!("imu.rate_hz must be > 0");
-            }
+            positive("imu.rate_hz", imu.rate_hz)?;
         }
         for c in &self.cameras {
             groups.push(("camera", c.path.clone()));
-            if c.has_frames() && c.frame_rate <= 0.0 {
-                bail!("camera {}: frame_rate must be > 0", c.path);
+            if c.has_frames() || c.events.is_some() {
+                positive(&format!("camera {}: frame_rate", c.path), c.frame_rate)?;
             }
-            if c.time_offset < 0.0 {
-                bail!("camera {}: time_offset must be >= 0 (frames before the sequence start)", c.path);
+            if !(c.time_offset.is_finite() && c.time_offset >= 0.0) {
+                bail!("camera {}: time_offset must be finite and >= 0 (frames before the sequence start)", c.path);
             }
             // geometry GT is taken at the central sub-sample, which is the pixel centre only for
             // odd supersampling
@@ -395,7 +420,8 @@ impl Scenario {
                 bail!("camera {}: motion_blur.max_samples must be >= 1", c.path);
             }
             if let Some(e) = &c.events {
-                if e.max_px_per_step <= 0.0 || e.min_rate_hz <= 0.0 || e.max_rate_hz < e.min_rate_hz {
+                let pos = |v: f64| v.is_finite() && v > 0.0;
+                if !pos(e.max_px_per_step) || !pos(e.min_rate_hz) || !pos(e.max_rate_hz) || e.max_rate_hz < e.min_rate_hz {
                     bail!("camera {}: events need max_px_per_step > 0 and 0 < min_rate_hz <= max_rate_hz", c.path);
                 }
             }
@@ -449,6 +475,33 @@ mod tests {
         let mut s = Scenario::default();
         s.cameras.push(CameraSpec { path: "/cam0/sub".into(), ..CameraSpec::example() });
         assert!(s.validate().is_err());
+    }
+
+    #[test]
+    fn rates_must_be_finite_and_positive() {
+        let check = |f: &dyn Fn(&mut Scenario)| {
+            let mut s = Scenario::default();
+            f(&mut s);
+            s.validate()
+        };
+        assert!(check(&|_| {}).is_ok());
+        for bad in [0.0, -1.0, f64::INFINITY, f64::NAN] {
+            assert!(check(&|s| s.cameras[0].frame_rate = bad).is_err(), "frame_rate {bad}");
+            assert!(check(&|s| s.output.pose.rate_hz = bad).is_err(), "pose rate {bad}");
+            assert!(check(&|s| s.imu.as_mut().unwrap().rate_hz = bad).is_err(), "imu rate {bad}");
+            assert!(check(&|s| s.trajectory.synth.duration = bad).is_err(), "duration {bad}");
+        }
+        assert!(check(&|s| s.cameras[0].time_offset = f64::NAN).is_err());
+        assert!(check(&|s| s.output.start = f64::INFINITY).is_err());
+        assert!(check(&|s| s.trajectory.synth.duration = 1e9).is_err());
+        let e = check(&|s| s.world.planet.a = 0.0).unwrap_err().to_string();
+        assert!(e.contains("world.planet.a"), "{e}");
+        // through the YAML too (`.inf`)
+        let s: Scenario = serde_yaml::from_str(
+            "cameras:\n  - path: /c\n    intrinsics: { model: pinhole, width: 64, height: 48, intrinsics: [50, 50, 32, 24] }\n    rgb: {}\n    frame_rate: .inf\n",
+        )
+        .unwrap();
+        assert!(s.validate().unwrap_err().to_string().contains("frame_rate must be finite"));
     }
 
     #[test]

@@ -6,7 +6,7 @@ use crate::camera::CameraModel;
 use crate::lod::{LodParams, PlanOracle, Selector, TileOracle};
 use crate::output::{self, BodySample, CameraWriter, Frame, PngWriter};
 use crate::raster::Renderer;
-use crate::scenario::{CameraSpec, DepthKind, Scenario};
+use crate::scenario::{CameraSpec, DepthKind, Scenario, MAX_SAMPLES};
 use crate::sensor::Sensor;
 use crate::trajectory::{self, CamPose, Pose};
 use anyhow::{bail, Context, Result};
@@ -45,24 +45,34 @@ impl Window {
     }
 }
 
-/// `t0 + offset + k / rate` within the window, at most `max` samples.
-fn uniform_times(win: Window, offset: f64, rate: f64, max: Option<usize>) -> Vec<f64> {
-    let dt = 1.0 / rate.max(1e-6);
-    let mut v = Vec::new();
+/// `t0 + offset + k / rate` within the window, at most `max` samples (and at most
+/// [`MAX_SAMPLES`]: more is an error).
+fn uniform_times(win: Window, offset: f64, rate: f64, max: Option<usize>) -> Result<Vec<f64>> {
+    if !(rate.is_finite() && rate > 0.0) || !offset.is_finite() || !win.t0.is_finite() || !win.t1.is_finite() {
+        bail!("sample times: rate {rate} Hz, offset {offset} s, window [{}, {}] s: finite values and a rate > 0 expected", win.t0, win.t1);
+    }
+    let dt = 1.0 / rate;
+    let n = ((win.t1 + 1e-9 - win.t0 - offset) / dt).floor() + 1.0;
+    let n = if n > 0.0 { n } else { 0.0 };
+    let n = max.map_or(n, |m| n.min(m as f64));
+    if n > MAX_SAMPLES as f64 {
+        bail!("{n:.3e} samples at {rate} Hz over {:.1} s (at most {MAX_SAMPLES}): lower the rate or shorten the output window", win.duration());
+    }
+    let mut v = Vec::with_capacity(n as usize + 1);
     loop {
         let t = win.t0 + offset + v.len() as f64 * dt;
-        if t > win.t1 + 1e-9 || max.is_some_and(|m| v.len() >= m) {
+        if t > win.t1 + 1e-9 || max.is_some_and(|m| v.len() >= m) || v.len() > MAX_SAMPLES {
             break;
         }
         v.push(t);
     }
-    v
+    Ok(v)
 }
 
 /// Frame times of a camera (empty without frame modalities).
-pub fn frame_times(scn: &Scenario, spec: &CameraSpec, win: Window) -> Vec<f64> {
+pub fn frame_times(scn: &Scenario, spec: &CameraSpec, win: Window) -> Result<Vec<f64>> {
     if !spec.has_frames() {
-        return vec![];
+        return Ok(vec![]);
     }
     uniform_times(win, spec.time_offset, spec.frame_rate, scn.output.max_frames)
 }
@@ -127,9 +137,9 @@ pub fn plan(scn: &Scenario, poses: &[Pose], gen: Option<&Generator>) -> Result<B
     let mut set: BTreeSet<TileId> = BTreeSet::new();
     for spec in &scn.cameras {
         let model = spec.intrinsics.build()?;
-        let mut times = frame_times(scn, spec, win);
+        let mut times = frame_times(scn, spec, win)?;
         if spec.events.is_some() {
-            times.extend(uniform_times(win, 0.0, spec.frame_rate, None));
+            times.extend(uniform_times(win, 0.0, spec.frame_rate, None)?);
             times.sort_by(f64::total_cmp);
             times.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
         }
@@ -204,9 +214,9 @@ pub fn plan_missing(scn: &Scenario, poses: &[Pose], store: &TileStore) -> Result
     let mut want: BTreeSet<TileId> = BTreeSet::new();
     for spec in &scn.cameras {
         let model = spec.intrinsics.build()?;
-        let mut times = frame_times(scn, spec, win);
+        let mut times = frame_times(scn, spec, win)?;
         if spec.events.is_some() {
-            times.extend(uniform_times(win, 0.0, 4.0 * spec.frame_rate, None));
+            times.extend(uniform_times(win, 0.0, 4.0 * spec.frame_rate, None)?);
         }
         let sel: Vec<Vec<TileId>> = times
             .par_iter()
@@ -401,7 +411,7 @@ fn render_camera(
 ) -> Result<usize> {
     let model = spec.intrinsics.build()?;
     let (w, h) = (model.width() as usize, model.height() as usize);
-    let times = frame_times(scn, spec, win);
+    let times = frame_times(scn, spec, win)?;
     let n = times.len();
     let mut renderer = renderer(scn, model.clone(), spec.supersample(&scn.render), ell, cache);
     renderer.geometry_only = spec.rgb.is_none();
@@ -462,7 +472,7 @@ fn render_camera(
         if let Some(r) = &spec.rgb {
             sun.exposure = ex_pre.map(|e| e.time).unwrap_or(r.sensor.exposure.base_time);
         }
-        let frame = renderer.render(&cam, &sun);
+        let frame = renderer.try_render(&cam, &sun)?;
         let mut stars_gt = vec![];
         // camera poses across the open shutter, for star trails
         let star_track = |span: f64| -> Vec<CamPose> {
@@ -565,6 +575,7 @@ pub fn render_sequence(
 
     let tr0 = poses[0].t;
     let body: Vec<BodySample> = uniform_times(win, 0.0, scn.output.pose.rate_hz, None)
+        .context("output.pose")?
         .into_iter()
         .map(|t| {
             let pose = trajectory::interpolate(poses, t);

@@ -15,7 +15,7 @@ pub use device::{shared, Gpu};
 use crate::surface::SurfaceModel;
 use crate::world::{Ctx, World};
 use crate::Config;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use geodesy::tiles::{gsd_ew, gsd_ns, pixel_to_latlon, TileId};
 use glam::{DVec2, DVec3};
 use host::{gsink, point_in, Cache, PointKey, PointReq, Prep};
@@ -86,8 +86,7 @@ pub(crate) fn read_back<T: bytemuck::Pod>(g: &Gpu, buf: &wgpu::Buffer, n: usize)
     let mut enc = g.device.create_command_encoder(&Default::default());
     enc.copy_buffer_to_buffer(buf, 0, &rb, 0, bytes);
     g.queue.submit([enc.finish()]);
-    rb.slice(..).map_async(wgpu::MapMode::Read, |r| r.expect("GPU read-back"));
-    g.device.poll(wgpu::PollType::wait_indefinitely())?;
+    g.map_read(&[rb.slice(..)])?;
     let out = bytemuck::cast_slice::<u8, T>(&rb.slice(..).get_mapped_range()?).to_vec();
     rb.unmap();
     Ok(out)
@@ -706,24 +705,28 @@ impl GpuGenerator {
         let ctxs: Vec<Ctx> = pts.iter().map(|&(lat, lon, gsd)| Ctx::new(lat, lon, gsd, &ell)).collect();
         let mut cache = self.cache.lock().unwrap();
         cache.trim();
-        let out = self.settle(&mut cache, |p| ctxs.iter().map(|c| p.point(MODE_FULL, c)).collect::<Vec<_>>())?;
-        Ok(out.into_iter().map(|t| t.expect("settled")).collect())
+        let out = self.gpu.scoped(|| self.settle(&mut cache, |p| ctxs.iter().map(|c| p.point(MODE_FULL, c)).collect::<Vec<_>>()))?;
+        out.into_iter().map(|t| t.context("GPU generator: a point did not settle")).collect()
     }
 
     /// Pass A of tiles: the terrain per pass-A pixel centre (tile + 2-pixel apron, 260 x 260).
     pub fn pass_a(&self, ids: &[TileId]) -> Result<Vec<Vec<GTerrain>>> {
-        Ok(self.run(ids, false)?.0)
+        Ok(self.gpu.scoped(|| self.run(ids, false))?.0)
     }
 
     /// Generate tiles (one batch on the GPU; halved while its land-use sites overflow the
     /// request buffers).
     pub fn tiles(&self, ids: &[TileId]) -> Result<Vec<TileData>> {
+        self.gpu.scoped(|| self.tiles_split(ids))
+    }
+
+    fn tiles_split(&self, ids: &[TileId]) -> Result<Vec<TileData>> {
         match self.run(ids, true) {
             Ok(r) => Ok(r.1),
             Err(e) if e.is::<Overflow>() && ids.len() > 1 => {
                 let (a, b) = ids.split_at(ids.len() / 2);
-                let mut out = self.tiles(a)?;
-                out.extend(self.tiles(b)?);
+                let mut out = self.tiles_split(a)?;
+                out.extend(self.tiles_split(b)?);
                 Ok(out)
             }
             Err(e) => Err(e),

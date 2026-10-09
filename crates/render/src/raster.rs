@@ -778,13 +778,20 @@ impl Renderer {
             .collect()
     }
 
-    /// Render one frame for camera pose `cam` under the given sun / light state.
+    /// Render one frame for camera pose `cam` under the given sun / light state (panics if the
+    /// GPU backend fails: see [`Renderer::try_render`]).
     pub fn render(&self, cam: &CamPose, sun_state: &SunState) -> FrameOut {
-        let mut frame = self.render_terrain(cam, sun_state);
+        self.try_render(cam, sun_state).unwrap_or_else(|e| panic!("{e:#}"))
+    }
+
+    /// Render one frame for camera pose `cam` under the given sun / light state; fails when the
+    /// GPU backend does (device lost, out of memory).
+    pub fn try_render(&self, cam: &CamPose, sun_state: &SunState) -> anyhow::Result<FrameOut> {
+        let mut frame = self.render_terrain(cam, sun_state)?;
         if sun_state.stars && !self.geometry_only && self.stars_in_render {
             self.stars().render(&mut frame, self.model.as_ref(), cam, sun_state.unix, &self.ell, &self.settings.atmosphere);
         }
-        frame
+        Ok(frame)
     }
 
     /// The star field of this renderer's settings (catalogue loaded on first use).
@@ -793,14 +800,14 @@ impl Renderer {
     }
 
     /// Terrain, sky and lights (everything but the stars).
-    fn render_terrain(&self, cam: &CamPose, sun_state: &SunState) -> FrameOut {
+    fn render_terrain(&self, cam: &CamPose, sun_state: &SunState) -> anyhow::Result<FrameOut> {
         #[cfg(feature = "gpu")]
         if self.settings.backend == Backend::Gpu {
             return crate::gpu::render(self, cam, sun_state);
         }
         #[cfg(not(feature = "gpu"))]
         if self.settings.backend == Backend::Gpu {
-            panic!("render.backend: gpu needs the `gpu` feature of the render crate");
+            anyhow::bail!("render.backend: gpu needs the `gpu` feature of the render crate");
         }
         let ss = self.settings.supersample.max(1) as usize;
         let ms = &self.model_ss;
@@ -1010,7 +1017,7 @@ impl Renderer {
             out.flicker_cos.extend(r.fc);
             out.flicker_sin.extend(r.fs);
         }
-        out
+        Ok(out)
     }
 
     /// Fraction of direct sunlight reaching a surface point (1 = lit): march the DSM towards the

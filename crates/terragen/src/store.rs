@@ -35,8 +35,7 @@ impl Generator {
         }
         let mut st = TileStore::open_rw(path)?;
         if st.is_empty() {
-            let m = self.store_meta();
-            st.set_generator(&m.generator_config, m.seed, m.generator_version)?;
+            st.set_generator(&self.store_meta())?;
         } else {
             self.check_store(&st, true)?;
         }
@@ -77,6 +76,15 @@ impl Generator {
                 if diffs.len() == 1 { "s" } else { "" },
                 shown.join(", "),
                 if diffs.len() > shown.len() { ", …" } else { "" }
+            );
+        }
+        let (ea, eb) = (self.world.ell.a, self.world.ell.b);
+        let close = |x: f64, y: f64| (x - y).abs() <= 1e-9 * y.abs().max(1.0);
+        if !close(m.ellipsoid_a, ea) || !close(m.ellipsoid_b, eb) {
+            bail!(
+                "{name} holds tiles on another ellipsoid (a = {} m, b = {} m; the world's: a = {ea} m, b = {eb} m): use another tiles file",
+                m.ellipsoid_a,
+                m.ellipsoid_b
             );
         }
         if m.generator_version != GENERATOR_VERSION {
@@ -159,6 +167,32 @@ mod tests {
         };
         assert!(e.contains("world.seed (1 → 7)"), "{e}");
         assert!(g7.open_store_ro(&path).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_empty_store_takes_the_new_worlds_ellipsoid() {
+        let dir = std::env::temp_dir().join(format!("terragen-store-ell-{}", std::process::id()));
+        let path = dir.join("w.h5");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut sphere = Config { tile_supersample: 1, ..Config::default() };
+        sphere.planet = crate::config::Planet { a: 6371000.0, inv_f: 0.0 };
+        let gs = Generator::new(sphere);
+        drop(gs.open_store_rw(&path).unwrap());
+        assert_eq!(TileStore::open(&path).unwrap().meta().ellipsoid_b, 6371000.0);
+        // re-used (empty) for the default world: re-stamped with its ellipsoid too
+        let g = Generator::new(Config { tile_supersample: 1, ..Config::default() });
+        drop(g.open_store_rw(&path).unwrap());
+        let st = TileStore::open(&path).unwrap();
+        let e = g.world.ell;
+        assert_eq!((st.meta().ellipsoid_a, st.meta().ellipsoid_b), (e.a, e.b));
+        g.check_store(&st, true).unwrap();
+        drop(st);
+        // a store whose ellipsoid disagrees with its config (as such re-use left them) is refused
+        let bad = dir.join("bad.h5");
+        drop(TileStore::create(&bad, StoreMeta { ellipsoid_a: 6371000.0, ellipsoid_b: 6371000.0, ..g.store_meta() }).unwrap());
+        let e = g.check_store(&TileStore::open(&bad).unwrap(), false).unwrap_err().to_string();
+        assert!(e.contains("another ellipsoid"), "{e}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

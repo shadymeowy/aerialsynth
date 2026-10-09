@@ -339,16 +339,16 @@ pub struct TilesArgs {
     #[arg(long, value_name = "PREFIX", help_heading = "Preview")]
     #[allow(rustdoc::invalid_html_tags)] // the doc comment is the CLI help text
     pub png: Option<PathBuf>,
-    /// Preview: zoom level.
+    /// Preview: zoom level (at most tiles.max_zoom).
     #[arg(long, default_value_t = 14, help_heading = "Preview")]
     pub zoom: u8,
-    /// Preview: mosaic size in tiles per side.
+    /// Preview: mosaic size in tiles per side (at most 32).
     #[arg(long, default_value_t = 4, help_heading = "Preview")]
     pub size: u32,
     /// Preview: centre lat,lon (deg; default: the world's home).
     #[arg(long, allow_hyphen_values = true, help_heading = "Preview")]
     pub at: Option<String>,
-    /// Preview: layers (rgb, albedo, elevation, normal, landcover, hillshade).
+    /// Preview: layers (rgb, albedo, elevation, normal, landcover, hillshade, emission).
     #[arg(long, default_value = "rgb", help_heading = "Preview")]
     pub layers: String,
 }
@@ -365,7 +365,8 @@ pub fn tiles(a: TilesArgs) -> Result<()> {
     let s = setup(&a.common)?;
     if let Some(prefix) = &a.png {
         let at = a.at.as_deref().map(|v| parse_floats(v, 2, "--at lat,lon")).transpose()?.map(|v| (v[0], v[1]));
-        return crate::preview::mosaic(s.world.clone(), at, a.zoom, a.size, &a.layers, prefix);
+        let layers = crate::preview::check_args(a.zoom, s.tiles.max_zoom, a.size, &a.layers, at)?;
+        return crate::preview::mosaic(s.world.clone(), at, a.zoom, a.size, &layers, prefix);
     }
     let gen = pipeline::generator(&s)?;
     let flight = a.list.is_none() && a.bbox.is_none();
@@ -422,6 +423,7 @@ pub struct ViewArgs {
 /// The world on a globe (map) and through a camera (the dataset renderer), flown live.
 pub fn view(a: ViewArgs) -> Result<()> {
     let s = setup(&a.common)?;
+    viewer::check_options(&a.view, s.tiles.max_zoom)?;
     let gen = pipeline::generator(&s)?;
     // (read-only without generation: a store of another generator version can be viewed)
     let store = if a.view.no_generate {
@@ -463,34 +465,21 @@ pub struct InfoArgs {
 }
 
 pub fn info(a: InfoArgs) -> Result<()> {
-    if let Ok(st) = TileStore::open(&a.file) {
-        let m = st.meta();
-        println!(
-            "tile store {} (seed {}, generator version {}{}, ellipsoid a={} b={:.6})",
-            a.file.display(),
-            m.seed,
-            m.generator_version,
-            if m.generator_version == terragen::GENERATOR_VERSION { "" } else { " — not this binary's" },
-            m.ellipsoid_a,
-            m.ellipsoid_b
-        );
-        println!("layers: {:?}", m.layers.iter().map(|l| l.name()).collect::<Vec<_>>());
-        for z in st.zooms() {
-            let t = st.tiles_at(z);
-            let (mut lo, mut hi) = (f32::MAX, f32::MIN);
-            for id in &t {
-                if let Some((a, b)) = st.elev_range(*id) {
-                    lo = lo.min(a);
-                    hi = hi.max(b);
-                }
-            }
-            println!("  z{z:2}: {:6} tiles  elevation {lo:.0} .. {hi:.0} m", t.len());
-        }
-        return Ok(());
-    }
-    let f = h5::File::open(&a.file)?;
+    let store_err = match TileStore::open(&a.file) {
+        Ok(st) => return store_info(&a.file, &st),
+        Err(e) => e,
+    };
+    // not a tile store (a sequence file), or a tile store that does not open: list its contents
+    let Ok(f) = h5::File::open(&a.file) else {
+        // (locked, truncated, not HDF5: the store's error says which)
+        return Err(store_err);
+    };
     use h5::Attrs;
-    println!("{} (format {:?})", a.file.display(), f.attr_str("format").unwrap_or_default());
+    let format = f.attr_str("format").unwrap_or_default();
+    if format == tilestore::FORMAT {
+        eprintln!("warning: {store_err:#}\nlisting the file's contents instead");
+    }
+    println!("{} (format {format:?})", a.file.display());
     fn walk(g: &h5::Group, prefix: &str, depth: usize) -> Result<()> {
         for name in g.member_names()? {
             let path = format!("{prefix}/{name}");
@@ -504,6 +493,32 @@ pub fn info(a: InfoArgs) -> Result<()> {
         Ok(())
     }
     walk(&f, "", 1)
+}
+
+fn store_info(path: &Path, st: &TileStore) -> Result<()> {
+    let m = st.meta();
+    println!(
+        "tile store {} (seed {}, generator version {}{}, ellipsoid a={} b={:.6})",
+        path.display(),
+        m.seed,
+        m.generator_version,
+        if m.generator_version == terragen::GENERATOR_VERSION { "" } else { " — not this binary's" },
+        m.ellipsoid_a,
+        m.ellipsoid_b
+    );
+    println!("layers: {:?}", m.layers.iter().map(|l| l.name()).collect::<Vec<_>>());
+    for z in st.zooms() {
+        let t = st.tiles_at(z);
+        let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+        for id in &t {
+            if let Some((a, b)) = st.elev_range(*id) {
+                lo = lo.min(a);
+                hi = hi.max(b);
+            }
+        }
+        println!("  z{z:2}: {:6} tiles  elevation {lo:.0} .. {hi:.0} m", t.len());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
