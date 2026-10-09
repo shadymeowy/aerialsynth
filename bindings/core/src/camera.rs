@@ -677,34 +677,6 @@ mod tests {
         let pose = pose(&w);
         let (a, b) = (cpu.render(&pose, Some(T), ALL).unwrap(), gpu.render(&pose, Some(T), ALL).unwrap());
         let (ra, rb) = (a.rgb.unwrap(), b.rgb.unwrap());
-        // DEBUG (temporary)
-        if let Some(dir) = std::env::var_os("AS_DEBUG_DUMP") {
-            let dir = std::path::PathBuf::from(dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            for (name, img) in [("cpu", &ra), ("gpu", &rb)] {
-                let mut f = format!("P6\n{} {}\n255\n", a.width, a.height).into_bytes();
-                f.extend_from_slice(img);
-                std::fs::write(dir.join(format!("{name}.ppm")), f).unwrap();
-            }
-            let mean = |v: &[u8]| v.iter().map(|x| *x as f64).sum::<f64>() / v.len() as f64;
-            let (da, db) = (a.depth.as_ref().unwrap(), b.depth.as_ref().unwrap());
-            let fin = |v: &[f32]| v.iter().filter(|x| x.is_finite()).count();
-            let dm = |v: &[f32]| v.iter().filter(|x| x.is_finite()).map(|x| *x as f64).sum::<f64>() / fin(v).max(1) as f64;
-            let (la, lb) = (a.landcover.as_ref().unwrap(), b.landcover.as_ref().unwrap());
-            let same = la.iter().zip(lb).filter(|(x, y)| x == y).count();
-            eprintln!(
-                "DEBUG rgb mean cpu {:.1} gpu {:.1}; depth finite cpu {} gpu {}, mean cpu {:.1} gpu {:.1}; landcover same {} of {}; gpu {:?}",
-                mean(&ra),
-                mean(&rb),
-                fin(da),
-                fin(db),
-                dm(da),
-                dm(db),
-                same,
-                la.len(),
-                gpu.backend()
-            );
-        }
         let mad = ra.iter().zip(&rb).map(|(x, y)| (*x as f64 - *y as f64).abs()).sum::<f64>() / ra.len() as f64;
         assert!(mad < 6.0, "mean |rgb difference| {mad}");
         let (da, db) = (a.depth.unwrap(), b.depth.unwrap());

@@ -107,7 +107,11 @@ jobs:
       matrix:
         include:
           - { name: macOS arm64, os: macos-latest }
-          - { name: macOS x86_64, os: macos-15-intel }
+          # The Intel runner's Metal device ("Apple Paravirtual device") renders nothing (depth
+          # all non-finite, black images) where the arm64 one matches the CPU renderer: the GPU
+          # is hidden there (an AERIALSYNTH_GPU that matches no adapter), as on Linux without a
+          # Vulkan driver, so the GPU tests skip and everything runs on the CPU.
+          - { name: macOS x86_64, os: macos-15-intel, gpu: none }
           - { name: Windows x86_64, os: windows-latest }
     steps:
       - uses: actions/checkout@v5
@@ -117,20 +121,9 @@ jobs:
           save-if: ${{ github.event_name != 'pull_request' }}
       - name: Build
         run: cargo build --release --workspace --all-targets
-      - name: DEBUG render
-        if: matrix.os == 'macos-15-intel'
-        continue-on-error: true
-        env:
-          AS_DEBUG_DUMP: ${{ runner.temp }}/dump
-        run: |
-          cargo run --release -p render --example gpu_probe || true
-          cargo test --release -p aerialsynth-core --lib gpu_matches_cpu -- --nocapture 2>&1 | grep -E "DEBUG|test |result|panicked|mean" || true
-      - uses: actions/upload-artifact@v4
-        if: matrix.os == 'macos-15-intel'
-        with:
-          name: debug-render
-          path: ${{ runner.temp }}/dump
       - name: Test
+        env:
+          AERIALSYNTH_GPU: ${{ matrix.gpu }}
         run: cargo test --release --workspace --no-fail-fast
       - name: cargo install
         shell: bash
