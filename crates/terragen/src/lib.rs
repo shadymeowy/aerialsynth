@@ -5,6 +5,8 @@
 //! Point queries ([`Generator::terrain_points`], [`Generator::probe`]) evaluate the same world at
 //! single locations.
 //!
+//! * [`atlas`]: the planetary atlas: world-scale fields (climate with rain shadows and
+//!   seasons, plates, lithology, glaciation, cultures) precomputed once per world on a cube map;
 //! * [`world`]: the macro-scale world model ("pass A"): continents, relief, hydrology, climate;
 //! * [`surface`]: the fine-scale surface ("pass B"): albedo, DSM height, land cover;
 //! * [`noise`], [`landcover`], [`config`]: noise primitives, land-cover classes, the world config;
@@ -14,6 +16,7 @@
 //!   device with 64-bit float / integer shader support is available;
 //! * [`store`]: the generator's [`tilestore`] binding (config and version stored with the tiles).
 
+pub mod atlas;
 pub mod config;
 #[cfg(feature = "gpu")]
 pub mod gpu;

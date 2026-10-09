@@ -524,8 +524,9 @@ impl World {
         [self.mtn_warp[0].eval(p, gsd), self.mtn_warp[1].eval(p, gsd)]
     }
 
-    /// Evaluate all large-scale fields at a point.
-    pub fn macro_at(&self, p: DVec3, gsd: f64) -> Macro {
+    /// The large-scale fields of the relief (continent, plateau, belts, hill amplitude,
+    /// roughness; the others zero): what [`World::smooth_relief`] needs.
+    fn macro_relief(&self, p: DVec3, gsd: f64) -> Macro {
         Macro {
             cont: self.continent(p, gsd),
             plateau: self.plateau.eval(p, gsd) * self.plateau.norm() * 1.8,
@@ -534,6 +535,13 @@ impl World {
             belt_var: self.belt_var.eval(p, gsd) * self.belt_var.norm() * 1.6,
             hill_amp: self.hill_amp.eval(p, gsd) * self.hill_amp.norm() * 1.6,
             rough: self.rough.eval(p, gsd) * self.rough.norm() * 1.6,
+            ..Default::default()
+        }
+    }
+
+    /// Evaluate all large-scale fields at a point.
+    pub fn macro_at(&self, p: DVec3, gsd: f64) -> Macro {
+        Macro {
             temp: 5.0 * self.temp_n.eval(p, 50.0 * KM),
             moist: self.moist_n.eval(p, 20.0 * KM) * self.moist_n.norm() * 1.6,
             mesa: self.mesa_n.eval(p, gsd) * self.mesa_n.norm() * 1.8,
@@ -543,6 +551,7 @@ impl World {
             river_width: self.river_width_n.eval(p, gsd),
             mtn_warp: self.mtn_warp_at(p, gsd),
             pre: None,
+            ..self.macro_relief(p, gsd)
         }
     }
 
@@ -724,13 +733,19 @@ impl World {
 
     /// Smooth (≥ ~5 km) elevation at a point; used for water levels.
     pub fn smooth_elevation(&self, p: DVec3) -> f64 {
-        let gsd = 1500.0;
-        let m = self.macro_at(p, gsd);
+        self.smooth_relief(p, 1500.0).0
+    }
+
+    /// [`World::smooth_elevation`] band-limited at `gsd` (the planetary atlas samples it at its
+    /// texel size), and the mountain amplitude there (m: the height of the ridged mountains
+    /// above the smooth elevation's uplift, 0 outside the mountain belts).
+    pub fn smooth_relief(&self, p: DVec3, gsd: f64) -> (f64, f64) {
+        let m = self.macro_relief(p, gsd);
         let s = m.cont;
         let plateau = smoothstep(0.15, 0.55, m.plateau) * 900.0 * smoothstep(0.02, 0.15, s);
         let (_, amp_m) = self.mountain_mask(&m);
         let (_, hl_low) = self.hills(p, gsd, 0.47 + 0.08 * m.rough);
-        Self::base_elevation(s) + plateau + 0.22 * amp_m + amp_m * 0.12 + self.hill_amplitude(&m) * hl_low
+        (Self::base_elevation(s) + plateau + 0.22 * amp_m + amp_m * 0.12 + self.hill_amplitude(&m) * hl_low, amp_m)
     }
 
     /// Lake surface level: the spill height of the basin (lowest rim sample), or None when the
