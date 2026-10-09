@@ -12,6 +12,9 @@ name: Release binaries
 on:
   push:
     tags: ["v*"]
+  # a change of the release pipeline is tried on its pull request (nothing is attached there)
+  pull_request:
+    paths: [".github/workflows/release.yml", ".github/scripts/**"]
   workflow_dispatch:
 
 concurrency:
