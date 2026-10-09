@@ -130,7 +130,7 @@ zlib are linked statically; nothing else to install besides numpy):
 | Windows x86_64 | `aerialsynth-<version>-cp310-abi3-win_amd64.whl` |
 
 ```sh
-pip install https://github.com/shadymeowy/aerialsynth/releases/download/v0.1.0/aerialsynth-0.1.0-cp310-abi3-manylinux_2_28_x86_64.whl
+pip install https://github.com/shadymeowy/aerialsynth/releases/download/v0.2.0/aerialsynth-0.2.0-cp310-abi3-manylinux_2_28_x86_64.whl
 ```
 
 A GPU is optional: without a suitable one, images are rendered on the CPU, and tiles are

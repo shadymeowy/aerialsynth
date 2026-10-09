@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-10-10
 
 - **`terrain show SEQ.h5`**: a viewer for sequence files (new crate `seqview`, `docs/show.md`).
   A timeline (play, pause, frame steps, speed, Space / arrow / Home / End keys) over the
@@ -81,6 +81,19 @@
 - **Event sensor:** the luminance is clamped at 0 before its log (CPU and GPU): interpolated or
   flickering radiance below 0 gave NaN, which GPUs handle differently (on WARP and the macOS
   paravirtual GPU the GPU sensor gave half again as many events as the CPU).
+
+- **GPU choice:** `AERIALSYNTH_GPU` selects the GPU (index, PCI bus id or part of the name;
+  `none` for the CPU) for generation, rendering, the viewer and the bindings.
+- **Robustness:**
+  - Tile stores are created atomically, so a run killed at start no longer leaves a broken
+    file; a store open in another process, an incomplete store or a half-written zoom level
+    gives a one-line error instead of an HDF5 stack or a panic.
+  - World configs, scenario rates and CLI arguments are validated, with the offending key
+    named.
+  - `terrain tiles --bbox` limits `--zooms` to `tiles.max_zoom` and refuses more than 4 million
+    tiles; a deep zoom over a small box used to exhaust memory.
+  - GPU device loss or out-of-memory is an error, not a panic; with `auto` a failed generator
+    batch is redone on the CPU.
 
 ## 0.1.0 — 2026-10-09
 

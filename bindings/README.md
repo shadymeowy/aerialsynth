@@ -268,7 +268,7 @@ aerialsynth.LAYERS["elevation"]                  # LayerInfo(name, dtype, channe
 
 ```sh
 cd bindings/python
-maturin build --release -o dist          # dist/aerialsynth-0.1.0-cp310-abi3-<platform>.whl
+maturin build --release -o dist          # dist/aerialsynth-0.2.0-cp310-abi3-<platform>.whl
 pip install dist/aerialsynth-*.whl pytest && pytest tests
 ```
 
