@@ -1,5 +1,7 @@
 # aerialsynth
 
+<p align="center"><img src="showcase/media/globe.jpg" width="440" alt="The generated planet (seed 1) seen from 15,000 km: continents, deserts, forests and oceans"></p>
+
 A procedural planet for aerial vision research. `terrain` generates a deterministic world as
 Web-Mercator XYZ tiles, flies cameras and an IMU over it, and writes datasets with exact
 ground truth. A viewer flies over the world in realtime. There is no imagery or elevation data
@@ -58,7 +60,6 @@ terrain view                                # the default world (seed 1, tiles i
 terrain config > my.yaml                    # a commented scenario template; edit it
 terrain run -c my.yaml                      # trajectory → tiles → render (→ events)
 terrain view -c my.yaml                     # look around: map, camera (M), flying (F)
-python scripts/check_gt.py out/seq.h5       # check the ground truth of every camera
 ```
 
 Without `-c` every command uses the default scenario. `--seed N` overrides `world.seed`: a
@@ -120,22 +121,20 @@ crates/viewer     terrain view: map and camera views
 crates/cli        the terrain command
 configs/          example scenarios
 docs/             documentation
-scripts/          Python tools: ground-truth validation, data builders
+scripts/          builders of the bundled star catalogue and ephemeris
 showcase/         the showcase videos
 ```
 
 `cargo test --release` runs the tests ([`docs/simulation.md`](docs/simulation.md#tests) lists
 them).
 
-## Python tools
+## Data builders
 
 ```sh
 pip install -r scripts/requirements.txt
 ```
 
-- `check_gt.py`, `check_imu.py`, `check_events.py`: validation of a sequence file; PASS / FAIL
-  per check ([`docs/formats.md`](docs/formats.md)).
-- `build_stars.py`, `build_planets.py`: rebuild the bundled star catalogue and ephemeris.
+`build_stars.py` and `build_planets.py` rebuild the bundled star catalogue and ephemeris.
 
 [`showcase/`](showcase/README.md) renders the showcase video and the long-haul airliner flight,
 fully from this repository; it has its own README and requirements. Its fonts (Noto Sans,

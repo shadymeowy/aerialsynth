@@ -21,5 +21,5 @@ First public release.
   star positions); an event camera simulator and a synthetic IMU; all in one HDF5 sequence file.
 - **Viewer** (`terrain view`): a map of the planet and the dataset camera flown live, with
   headless snapshots and keyframed recordings.
-- **Tools**: validation scripts for the ground truth, IMU and events (`scripts/`), and the
+- **Tools**: builders of the bundled star catalogue and ephemeris (`scripts/`), and the
   showcase and long-haul flight videos (`showcase/`).

@@ -1,7 +1,5 @@
-# Python packages for the general tools in scripts/:
+# Python packages for the data builders in scripts/:
 #   pip install -r scripts/requirements.txt
 numpy
-h5py          # sequence files (check_*.py)
-PyYAML        # scenario / camera / IMU YAML stored in the sequence files
 # build_planets.py only (rebuilding crates/render/data/planets.bin from JPL DE440):
 jplephem

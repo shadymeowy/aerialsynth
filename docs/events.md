@@ -81,7 +81,6 @@ cameras:
 ```
 terrain run -c configs/examples/events.yaml           # render (poses, IMU, frames), then events
 terrain run -c configs/examples/events.yaml --step events   # (re)simulate only the events into the existing file
-python scripts/check_events.py out/events/seq.h5    # format invariants and event rates
 ```
 
 Output, in the sequence file:
