@@ -21,6 +21,9 @@ pub struct Config {
     /// Lighting of the baked `rgb` layer of the tiles (a satellite-style image). Camera images
     /// are lit by the scenario's `render.lighting` instead.
     pub satellite: SatelliteLook,
+    /// The planetary atlas: the coarse world-scale fields (climate, tectonics, cultures) computed
+    /// once per world (`atlas.rs`).
+    pub atlas: AtlasConfig,
     /// Supersampling per axis of the tile pixels (1 = one sample per pixel).
     pub tile_supersample: u32,
     /// With tile_supersample 2: evaluate the two diagonal samples first and the other two only
@@ -42,6 +45,7 @@ impl Default for Config {
             landuse: Landuse::default(),
             albedo: AlbedoLook::default(),
             satellite: SatelliteLook::default(),
+            atlas: AtlasConfig::default(),
             tile_supersample: 2,
             tile_supersample_adaptive: true,
         }
@@ -262,6 +266,47 @@ impl Default for AlbedoLook {
     }
 }
 
+/// The planetary atlas (`atlas.rs`): a cube map of world-scale fields computed once per world.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AtlasConfig {
+    /// Texels per cube-face edge: 6 × resolution² texels (512: ~20 km, ~58 MB). Even, 32..=1024.
+    pub resolution: u32,
+    /// Number of tectonic plates (2..=64).
+    pub plates: u32,
+    /// Number of mantle hotspots (volcanic chains on the plates moving over them), 0..=32.
+    pub hotspots: u32,
+    /// Size of the culture areas (km), 500..=20000.
+    pub culture_cell_km: f64,
+    /// Strength of the orographic rain-out (rain shadows behind mountain ranges); 0 turns it off.
+    pub rain_shadow: f64,
+    /// Ocean currents: cold currents on subtropical west coasts (coastal deserts), warm ones on
+    /// subtropical east coasts and high-latitude west coasts.
+    pub currents: bool,
+    /// Strength of the monsoon (seasonal onshore winds and summer rains); 0 turns it off.
+    pub monsoon: f64,
+    /// Multiplier on the precipitation.
+    pub precipitation: f64,
+    /// Steps of the moisture advection (each moves the air by 3 climate texels, ~120 km, at
+    /// 10 m/s; 100 steps simulate ~2 weeks).
+    pub advection_steps: u32,
+}
+impl Default for AtlasConfig {
+    fn default() -> Self {
+        AtlasConfig {
+            resolution: 512,
+            plates: 16,
+            hotspots: 6,
+            culture_cell_km: 1000.0,
+            rain_shadow: 1.0,
+            currents: true,
+            monsoon: 1.0,
+            precipitation: 1.0,
+            advection_steps: 100,
+        }
+    }
+}
+
 impl Config {
     pub fn from_yaml_str(s: &str) -> anyhow::Result<Self> {
         if s.trim().is_empty() {
@@ -336,6 +381,10 @@ impl Config {
         nonneg("satellite.ambient", s.ambient);
         nonneg("satellite.direct", s.direct);
         nonneg("satellite.exposure", s.exposure);
+        let a = &self.atlas;
+        nonneg("atlas.rain_shadow", a.rain_shadow);
+        nonneg("atlas.monsoon", a.monsoon);
+        nonneg("atlas.precipitation", a.precipitation);
         // ranges and plain finite values
         let mut within = |key: &str, v: f64, lo: f64, hi: f64| check(key, v, (lo..=hi).contains(&v), &format!("in [{lo}, {hi}]"));
         if let Some(h) = &self.home {
@@ -344,6 +393,7 @@ impl Config {
         }
         within("satellite.sun_elevation_deg", s.sun_elevation_deg, -90.0, 90.0);
         within("satellite.haze", s.haze, 0.0, 1.0);
+        within("atlas.culture_cell_km", a.culture_cell_km, 500.0, 20000.0);
         let mut finite = |key: &str, v: f64| check(key, v, true, "finite");
         finite("continents.threshold", self.continents.threshold);
         if let Some(h) = &self.home {
@@ -366,6 +416,18 @@ impl Config {
             if l.width_m[1] < l.width_m[0] {
                 errs.push(format!("world.hydro.levels[{i}].width_m must be [min, max] with min <= max (is {:?})", l.width_m));
             }
+        }
+        if !(32..=1024).contains(&a.resolution) || !a.resolution.is_multiple_of(2) {
+            errs.push(format!("world.atlas.resolution must be even and in 32..=1024 (is {})", a.resolution));
+        }
+        if !(2..=64).contains(&a.plates) {
+            errs.push(format!("world.atlas.plates must be in 2..=64 (is {})", a.plates));
+        }
+        if a.hotspots > 32 {
+            errs.push(format!("world.atlas.hotspots must be in 0..=32 (is {})", a.hotspots));
+        }
+        if !(1..=4000).contains(&a.advection_steps) {
+            errs.push(format!("world.atlas.advection_steps must be in 1..=4000 (is {})", a.advection_steps));
         }
         if !(1..=MAX_TILE_SUPERSAMPLE).contains(&self.tile_supersample) {
             errs.push(format!("world.tile_supersample must be 1..={MAX_TILE_SUPERSAMPLE} (is {})", self.tile_supersample));
@@ -417,6 +479,14 @@ mod tests {
         assert!(err(|c| c.hydro.lake_cell_km = 0.0).starts_with("world.hydro.lake_cell_km"));
         assert!(err(|c| c.relief.mountain_height_m = -1.0).starts_with("world.relief.mountain_height_m must be finite and >= 0"));
         assert!(err(|c| c.satellite.haze = 2.0).starts_with("world.satellite.haze"));
+        assert!(err(|c| c.atlas.resolution = 31).starts_with("world.atlas.resolution must be even"));
+        assert!(err(|c| c.atlas.resolution = 2048).starts_with("world.atlas.resolution"));
+        assert!(err(|c| c.atlas.plates = 1).starts_with("world.atlas.plates"));
+        assert!(err(|c| c.atlas.hotspots = 99).starts_with("world.atlas.hotspots"));
+        assert!(err(|c| c.atlas.culture_cell_km = 100.0).starts_with("world.atlas.culture_cell_km must be in [500, 20000]"));
+        assert!(err(|c| c.atlas.rain_shadow = -1.0).starts_with("world.atlas.rain_shadow must be finite and >= 0"));
+        assert!(err(|c| c.atlas.precipitation = f64::NAN).starts_with("world.atlas.precipitation"));
+        assert!(err(|c| c.atlas.advection_steps = 0).starts_with("world.atlas.advection_steps"));
         let two = err(|c| {
             c.planet.a = 0.0;
             c.landuse.region_km = -1.0;
