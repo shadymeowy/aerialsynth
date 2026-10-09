@@ -1,7 +1,8 @@
 //! `terrain` — a procedural planet for aerial vision: terrain tiles, flights and camera datasets.
 //!
 //! `run`, `tiles`, `view` and `config` read one scenario YAML (`-c` / `--config`; `terrain
-//! config` prints a template); `info` takes a tile store or sequence file.
+//! config` prints a template); `info` takes a tile store or sequence file; `show` and `export`
+//! a sequence file.
 
 mod commands;
 mod preview;
@@ -14,7 +15,7 @@ use std::path::PathBuf;
     name = "terrain",
     version,
     about = "A procedural planet for aerial vision: terrain tiles, flights and camera datasets",
-    after_help = "Start: `terrain config > my.yaml`, edit, `terrain run -c my.yaml`, `terrain view -c my.yaml`."
+    after_help = "Start: `terrain config > my.yaml`, edit, `terrain run -c my.yaml`, `terrain show out/…/seq.h5`, `terrain view -c my.yaml`."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -42,6 +43,10 @@ enum Cmd {
     Tiles(commands::TilesArgs),
     /// Open the world: a map of the tile store and the camera through the dataset renderer, flown live.
     View(commands::ViewArgs),
+    /// Look at a sequence file: frames, depth, flow, land cover, events, poses and IMU on a timeline.
+    Show(seqview::ShowOptions),
+    /// Export a camera's modalities of a sequence file as PNGs or a video (ffmpeg).
+    Export(seqview::ExportOptions),
     /// Summarize a tile store or a sequence file.
     Info(commands::InfoArgs),
     /// Print a scenario template (--all: every setting; -c: a scenario with its defaults filled in).
@@ -60,7 +65,27 @@ fn main() -> anyhow::Result<()> {
         Cmd::Run(a) => commands::run(a),
         Cmd::Tiles(a) => commands::tiles(a),
         Cmd::View(a) => commands::view(a),
+        Cmd::Show(a) => seqview::show(a),
+        Cmd::Export(a) => seqview::export(a),
         Cmd::Info(a) => commands::info(a),
         Cmd::Config(a) => commands::config(a),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn show_and_export_arguments() {
+        let ok = |a: &[&str]| Cli::try_parse_from(a).is_ok();
+        assert!(ok(&["terrain", "show", "seq.h5"]));
+        assert!(ok(&["terrain", "show", "seq.h5", "--snapshot", "a.png", "--frame", "3", "--modalities", "rgb,events", "--events", "gray"]));
+        assert!(!ok(&["terrain", "show"]));
+        assert!(!ok(&["terrain", "show", "seq.h5", "--frame", "1", "--time", "0.5"]));
+        assert!(!ok(&["terrain", "show", "seq.h5", "--depth-scale", "cubic"]));
+        assert!(ok(&["terrain", "export", "seq.h5", "-o", "out", "-m", "rgb,depth", "--side-by-side", "--start", "0", "--end", "1", "--fps", "30"]));
+        assert!(!ok(&["terrain", "export", "seq.h5"])); // --out is required
+        assert!(!ok(&["terrain", "export", "seq.h5", "-o", "x", "--every", "-1"]));
     }
 }

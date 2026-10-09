@@ -1,0 +1,23 @@
+[package]
+name = "seqview"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "`terrain show` and `terrain export`: look at a sequence file (frames, depth, flow, land cover, events, stars, poses, IMU)"
+
+[dependencies]
+h5.workspace = true
+geodesy.workspace = true
+terragen.workspace = true
+glam.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+image.workspace = true
+parking_lot.workspace = true
+rayon.workspace = true
+eframe = { version = "0.36", default-features = false, features = ["wgpu", "default_fonts", "x11", "wayland"] }
+
+[dev-dependencies]
+render.workspace = true

@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- **`terrain show SEQ.h5`**: a viewer for sequence files (new crate `seqview`, `docs/show.md`).
+  A timeline (play, pause, frame steps, speed, Space / arrow / Home / End keys) over the
+  modalities of a camera in a grid: RGB, depth (turbo, auto or fixed range, log scale), optical
+  flow (Middlebury wheel), land cover (class palette and legend), events (a window of ON / OFF on
+  black or on the gray frame, or a time surface) and catalogue stars on the image. A side panel
+  with the pose, IMU plots, the trajectory, display settings, the camera calibration and the
+  scenario; the value of every panel under the pointer. Frames, event windows and IMU samples
+  are read on demand in the background, so large files open at once; files with events-only
+  cameras or without cameras work. `--snapshot out.png` renders the viewer without a window, on
+  the CPU (no GPU or display).
+- **`terrain export SEQ.h5`**: PNG sequences or videos (ffmpeg: `.mp4`, `.mkv`, `.mov`,
+  `.webm`) of a camera's modalities, one per modality or `--side-by-side` with titles and
+  legends, in the viewer's colours with ranges fixed over the export; `--start`, `--end`,
+  `--every`, `--fps`, `--rate` (cameras without frames), `--window-ms`.
+- **Viewer cold start:** on an empty store the first tiles are drawn after ~1 s instead of
+  2 s (warm pipeline cache) or 137–157 s (cold), and the view's own tiles no longer wait for
+  all 341 base tiles (a flight view's tiles: 51 s → 29 s on an RTX 2080 Ti).
+  - GPU generator: pass B's pipeline compiles in ~25–30 s instead of ~150 s (the driver
+    inlined the surface model at five call sites; now one, likewise the pixel-field fBm and
+    the town shadow march). Tiles agree with before to 1 DN; no generator version change.
+  - `Generator::prepare_gpu_in_background`: the viewer compiles the GPU generator on a
+    background thread and generates on the CPU meanwhile.
+  - Base levels: z0–z2 first (one level per batch), then the view's tiles, then z3..=base.
+  - Snapshots report the first drawn tiles and the view's tiles in; `TERRAGEN_PROFILE=1` prints
+    pipeline compile times and the viewer's batch times; `examples/base_levels` times z0..=Z.
+
 - **Bindings** (`bindings/`): tile access from C and Python. Open a world's tile store (the
   world given like `terrain -c FILE --seed N`) and get a layer of tile z/x/y; missing tiles are
   generated (GPU if available, else CPU) and stored first.

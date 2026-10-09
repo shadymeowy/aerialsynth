@@ -2480,6 +2480,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
+name = "seqview"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "eframe",
+ "geodesy",
+ "glam",
+ "h5",
+ "image",
+ "parking_lot",
+ "rayon",
+ "render",
+ "terragen",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2776,6 +2793,7 @@ dependencies = [
  "libc",
  "rayon",
  "render",
+ "seqview",
  "serde_yaml",
  "terragen",
  "tilestore",

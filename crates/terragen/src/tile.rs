@@ -24,6 +24,10 @@ pub struct Generator {
     /// `Backend::Auto` after a failed GPU batch: the CPU generates from then on
     #[cfg(feature = "gpu")]
     gpu_failed: std::sync::atomic::AtomicBool,
+    /// the GPU generator is being set up on a background thread
+    /// ([`Generator::prepare_gpu_in_background`]): the CPU generates meanwhile
+    #[cfg(feature = "gpu")]
+    gpu_preparing: std::sync::atomic::AtomicBool,
 }
 
 /// Where tiles are generated. The GPU generator (`terragen::gpu`) builds the same world as the
@@ -161,6 +165,8 @@ impl Generator {
             gpu: std::sync::OnceLock::new(),
             #[cfg(feature = "gpu")]
             gpu_failed: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(feature = "gpu")]
+            gpu_preparing: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -182,9 +188,49 @@ impl Generator {
         Ok(Self::with_backend(cfg, backend))
     }
 
-    /// The GPU generator, if tiles are generated on the GPU.
+    /// With `Backend::Auto`, set the GPU generator up on a background thread: the device and
+    /// its pipelines, which take up to a minute or so to compile the first time (afterwards they
+    /// come from the pipeline cache in ~0.1 s). Until it is ready, tiles and points are
+    /// generated on the CPU instead of waiting for it (both build the same world). Nothing with
+    /// another backend, or once the GPU generator is set up.
+    pub fn prepare_gpu_in_background(self: &std::sync::Arc<Self>) {
+        #[cfg(feature = "gpu")]
+        {
+            use std::sync::atomic::Ordering;
+            if self.backend != Backend::Auto || self.gpu.get().is_some() || self.gpu_preparing.swap(true, Ordering::AcqRel) {
+                return;
+            }
+            let g = self.clone();
+            let spawned = std::thread::Builder::new().name("gpu-generator-setup".into()).spawn(move || {
+                let t0 = std::time::Instant::now();
+                if g.gpu_blocking().is_some() && std::env::var_os("TERRAGEN_PROFILE").is_some() {
+                    eprintln!("GPU generator ready after {:.1} s (in the background)", t0.elapsed().as_secs_f64());
+                }
+                g.gpu_preparing.store(false, Ordering::Release);
+            });
+            if spawned.is_err() {
+                self.gpu_preparing.store(false, Ordering::Release);
+            }
+        }
+    }
+
+    /// The GPU generator, if tiles are generated on the GPU (`None` while it is being set up in
+    /// the background, [`Generator::prepare_gpu_in_background`]).
     #[cfg(feature = "gpu")]
     pub fn gpu(&self) -> Option<&crate::gpu::GpuGenerator> {
+        use std::sync::atomic::Ordering;
+        if self.backend == Backend::Auto && self.gpu_preparing.load(Ordering::Acquire) {
+            return match self.gpu.get() {
+                Some(Ok(g)) if !self.gpu_failed.load(Ordering::Relaxed) => Some(g),
+                _ => None,
+            };
+        }
+        self.gpu_blocking()
+    }
+
+    /// The GPU generator, set up on first use (blocking).
+    #[cfg(feature = "gpu")]
+    fn gpu_blocking(&self) -> Option<&crate::gpu::GpuGenerator> {
         if self.backend == Backend::Cpu {
             return None;
         }
