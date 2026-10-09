@@ -127,7 +127,7 @@ pub fn layer_info(layer: Layer) -> LayerInfo {
         Layer::Albedo => "unlit surface colour, sRGB encoded",
         Layer::Elevation => "DSM (ground, canopy, buildings, water surface): metres above the WGS84 ellipsoid at pixel centres",
         Layer::Normal => "unit surface normal (east, north, up) * 127",
-        Layer::Landcover => "land-cover class id (terragen::landcover::NAMES: 0 unknown, 1 ocean, 2 lake, 3 river, ...)",
+        Layer::Landcover => "land-cover class id (terragen::landcover classes v2, docs/formats.md: 0 unknown, 1 ocean, 2 lake, 3 river, ...)",
         Layer::Emission => "night-time artificial light: linear radiance = 16 * (v/255)^3",
     };
     LayerInfo { layer, name: layer.name(), dtype, channels: layer.channels(), size: layer.tile_bytes(), description }

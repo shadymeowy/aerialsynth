@@ -104,6 +104,7 @@ fisheye, a 10 km cruise, a sunset and an IMU check.
 | `terrain view` | the viewer: map and camera, flown live; generates as you go (`docs/viewer.md`) |
 | `terrain show SEQ.h5` | look at a dataset: every modality of a camera on a timeline (depth, flow, land cover, events, stars), the pose, IMU and trajectory, pixel values; `--snapshot` renders it without a window (`docs/show.md`) |
 | `terrain export SEQ.h5 --out DIR\|FILE.mp4` | PNG sequences or videos (ffmpeg) of a camera's modalities, one per modality or `--side-by-side` with legends |
+| `terrain survey` | find diverse places (coasts, mountains, towns, rivers, deserts, …) and render stills of each: `OUT/NN_<lat>_<lon>_<view>.png`, a labelled `OUT/sheet.jpg`, `OUT/places.csv`; `--count 24 --seed-places N`, `--views oblique,nadir,high`, `--places FILE.csv` re-renders a list (regression stills) |
 | `terrain info FILE` | summarize a tile store or a sequence file |
 | `terrain config` | the scenario template; `--all` every setting; `-c my.yaml` a scenario with its defaults filled in |
 

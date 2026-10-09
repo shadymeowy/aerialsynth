@@ -39,7 +39,7 @@ fn main() -> anyhow::Result<()> {
     for (i, t) in out.iter().enumerate() {
         write!(w, "{:.2} {:.2} {}", t.surface(), t.ground, t.water_kind)?;
         if let Some((c, above)) = covers.get(i) {
-            write!(w, " {} {:.2}", terragen::landcover::NAMES[*c as usize], above)?;
+            write!(w, " {} {:.2}", terragen::landcover::name(*c), above)?;
         }
         writeln!(w)?;
     }

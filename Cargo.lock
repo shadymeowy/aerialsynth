@@ -1248,6 +1248,8 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -2372,6 +2374,7 @@ dependencies = [
  "glam",
  "h5",
  "image",
+ "naga",
  "parking_lot",
  "rayon",
  "serde",
@@ -2772,6 +2775,7 @@ dependencies = [
  "geodesy",
  "glam",
  "image",
+ "naga",
  "pollster",
  "rayon",
  "serde",
@@ -3054,6 +3058,7 @@ dependencies = [
  "glam",
  "half",
  "image",
+ "naga",
  "parking_lot",
  "pollster",
  "rayon",

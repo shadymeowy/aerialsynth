@@ -28,6 +28,32 @@
   - Snapshots report the first drawn tiles and the view's tiles in; `TERRAGEN_PROFILE=1` prints
     pipeline compile times and the viewer's batch times; `examples/base_levels` times z0..=Z.
 
+- **Land-cover classes v2** (`terragen::landcover`, `docs/formats.md`): one table of 82 classes
+  as data (id, name, group, legacy class, display colour, material). Ids 0–17 keep their
+  meaning; the new classes (20–110: reservoirs, sea ice, glaciers, lava, forest types, savanna,
+  rice paddies, vineyards, greenhouses, residential / industrial, motorways, runways, …) are
+  reserved for the coming terrain kits (the generator still emits 0–17). 11 stable groups.
+  - The shaders get the table as WGSL generated from it (`gpu/wgsl/classes.wgsl`, checked by a
+    test): `LC_*` / `LG_*` constants, `lc_group`, `lc_material`, `lc_palette`.
+  - Materials replace the water test in both renderers: glint weight, specular F0, roughness
+    and self-emission per class (water renders as before).
+  - The tile generator's majority vote of a pixel's class counts 128 classes (CPU and GPU).
+  - Sequence files: `output.landcover: v2 | legacy | group` (default `v2`) chooses the values
+    `landcover` datasets hold; new attributes `class_groups`, `class_legacy`, `class_mapping`
+    next to `class_names`.
+  - The viewer's and `terrain tiles --png`'s land-cover palettes come from the table.
+- **`terrain survey`:** finds diverse places of a world quickly and renders stills of them.
+  Random points on land and coasts (`--seed-places`) are classified with cheap point queries
+  (class mix, elevation, relief, coast, river, town, climate); `--count` places are chosen by
+  theme (coast, mountains, town, river, snow and ice, desert, forest, farmland, wetland,
+  plateau, lake, tundra) and farthest-point sampling. Each place is rendered with the dataset
+  renderer (GPU when available) in the `--views` (oblique from 1.5 km, nadir from 800 m,
+  optionally high from 10 km, or custom), the sun at a fixed local time; tiles are generated
+  into one store (`--tiles`). Outputs: stills, a labelled contact sheet `sheet.jpg` and
+  `places.csv`; `--places FILE.csv` renders a fixed list again (regression stills).
+  `docs/design/survey_places.csv` and `survey_places_seed2.csv` hold 24 places of worlds 1
+  and 2 (the redesign's "before" baselines). ~20 s per place with two views on an RTX 6000 Ada.
+
 - **Bindings** (`bindings/`): tile access from C and Python. Open a world's tile store (the
   world given like `terrain -c FILE --seed N`) and get a layer of tile z/x/y; missing tiles are
   generated (GPU if available, else CPU) and stored first.

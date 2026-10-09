@@ -218,7 +218,8 @@ fn sources() -> (String, String, String) {
     let w = World::new(Config::default());
     let (_, pal) = tables::palette(&SurfaceModel::new(&w).pal);
     let points = format!("{consts}{NOISE_WGSL}{WORLD_WGSL}{POINTS_WGSL}");
-    let tile = format!("{consts}{pal}{NOISE_WGSL}{WORLD_WGSL}{TILE_A_WGSL}{SURFACE_WGSL}{TILE_B_WGSL}");
+    let classes = crate::landcover::WGSL;
+    let tile = format!("{consts}{pal}{classes}{NOISE_WGSL}{WORLD_WGSL}{TILE_A_WGSL}{SURFACE_WGSL}{TILE_B_WGSL}");
     let drain = format!("{consts}{NOISE_WGSL}{WORLD_WGSL}{DRAIN_WGSL}");
     (points, tile, drain)
 }

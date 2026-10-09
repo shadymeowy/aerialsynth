@@ -40,7 +40,7 @@ pixel-centre registered, channels last, little-endian:
 | albedo | u8 | 3 | unlit surface colour, sRGB encoded |
 | elevation | f32 | 1 | DSM (ground, canopy, buildings, water surface), metres above the WGS84 ellipsoid, at pixel centres |
 | normal | i8 | 3 | unit surface normal (east, north, up) × 127 |
-| landcover | u8 | 1 | class id: 0 unknown, 1 ocean, 2 lake, 3 river, 4 beach, 5 sand, 6 rock, 7 snow, 8 grass, 9 shrub, 10 forest, 11 crop, 12 building, 13 road, 14 wetland, 15 tundra, 16 bare, 17 urban |
+| landcover | u8 | 1 | class id: 0 unknown, 1 ocean, 2 lake, 3 river, 4 beach, 5 sand, 6 rock, 7 snow, 8 grass, 9 shrub, 10 forest, 11 crop, 12 building, 13 road, 14 wetland, 15 tundra, 16 bare, 17 urban; classes v2 add 20–110 (`docs/formats.md`) |
 | emission | u8 | 3 | night-time artificial light, linear radiance = 16 (v/255)³ |
 
 A generated tile is stored with all its layers, so the other layers of it are read, not

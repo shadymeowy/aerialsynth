@@ -220,8 +220,7 @@ impl Ctx {
             multiview_mask: None,
             cache: None,
         });
-        let smod =
-            d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("shade"), source: wgpu::ShaderSource::Wgsl(include_str!("shade.wgsl").into()) });
+        let smod = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("shade"), source: wgpu::ShaderSource::Wgsl(shade_source().into()) });
         let shade_pipe = d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("shade"),
             layout: None,
@@ -710,4 +709,23 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
         );
     }
     Ok(out)
+}
+
+/// The shading shader: the land-cover class table (generated WGSL) and `shade.wgsl`.
+fn shade_source() -> String {
+    format!("{}{}", terragen::landcover::WGSL, include_str!("shade.wgsl"))
+}
+
+#[cfg(test)]
+mod wgsl_tests {
+    /// The shaders parse and validate (naga), without a GPU.
+    #[test]
+    fn shaders_validate() {
+        for (name, src) in [("shade", super::shade_source()), ("mesh", include_str!("mesh.wgsl").to_string())] {
+            let m = naga::front::wgsl::parse_str(&src).unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&src)));
+            naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+                .validate(&m)
+                .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&src)));
+        }
+    }
 }
