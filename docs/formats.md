@@ -81,22 +81,15 @@ trajectory; the root attribute `t0` holds it in trajectory seconds). Every datas
 - **Reading:** everything is plain HDF5 with fixed dataset names under configurable group
   paths. The data types follow common event / VIO datasets such as M3ED (i64 µs timestamps,
   u16 / i64 / i8 events, f64 calibration), but the layout is this project's own: a reader
-  written for another layout needs the group and dataset names above. The scripts in
-  `scripts/` read sequences with h5py.
+  written for another layout needs the group and dataset names above (h5py reads it as is).
 - **Compression:** `output.compression` sets the deflate level (shuffle + gzip, as in h5py) and
   `float_keep_bits`, an optional lossy rounding of depth/flow mantissas. 16 bits gives a max
   relative error of 7.6e-6 and shrinks depth/flow by ~35–40%. Flow is exactly recomputable from
-  depth + poses (`scripts/check_gt.py`), so omitting `flow` roughly halves the file.
-- **Validation:** the scripts print PASS / FAIL per check and exit non-zero when a check fails
-  or nothing could be checked; their tolerances are in their docstrings.
-  - `scripts/check_gt.py` checks every camera: flow against depth reprojected with the poses
-    (agrees to ~5e-6 px median, ~3e-5 px max), photometric warping (~2 DN: sensor noise plus
-    motion blur), and camera poses against `/pose` ∘ `T_body_cam` (interpolated for frames
-    between `/pose` samples).
-  - `scripts/check_imu.py` rebuilds the IMU truth from `/pose` independently (needs `/pose`
-    finer than the IMU, e.g. `configs/examples/imu_check.yaml`) and checks white noise and bias
-    walk against the configured densities. The gyro truth agrees to 3e-10 rad/s, the accel
-    truth to 1e-4 m/s² without a lever arm. The example's lever arm (12 cm) under the default
-    engine vibration (38 Hz and its 76 Hz harmonic) adds ~5.8 m/s² RMS, which the simulation
-    step discretizes: 0.27 m/s² (~5%) off at the 1 ms step, ~0.2% at 0.2 ms.
-  - `scripts/check_events.py` checks the event format invariants and prints rate statistics.
+  depth + poses, so omitting `flow` roughly halves the file.
+- **Accuracy** (measured against independent reconstructions from the stored data): flow
+  agrees with depth reprojected with the poses to ~5e-6 px median, ~3e-5 px max; photometric
+  warping to ~2 DN (sensor noise plus motion blur); camera poses with `/pose` ∘ `T_body_cam`.
+  The IMU truth rebuilt from a `/pose` finer than the IMU (e.g. `configs/examples/imu_check.yaml`)
+  agrees to 3e-10 rad/s (gyro) and 1e-4 m/s² (accel, without a lever arm). The example's
+  lever arm (12 cm) under the default engine vibration (38 Hz and its 76 Hz harmonic) adds
+  ~5.8 m/s² RMS, which the simulation step discretizes: 0.27 m/s² (~5%) off at the 1 ms step, ~0.2% at 0.2 ms.

@@ -113,7 +113,7 @@ flight's tiles would take tens of GB). `make_airliner.py` builds the `terragen` 
 | `globe/dive.yaml` | the showcase opening's map flight (keyframes and map layers) for `terrain view --record` |
 | `globe/route.yaml` | the airliner opening's map flight |
 | `fonts/` | Noto Sans Light / Medium, used for every caption (SIL Open Font License, `fonts/OFL.txt`) |
-| `media/` | stills used by the repository README (`mosaic.jpg`: a 3×3 grid of showcase stills; `ground_truth.jpg`: an RGB / depth / flow / events panel frame) |
+| `media/` | stills used by the repository README (`globe.jpg`: the planet from the globe shot; `mosaic.jpg`: a 3×3 grid of showcase stills; `ground_truth.jpg`: an RGB / depth / flow / events panel frame) |
 
 ## Outputs
 
