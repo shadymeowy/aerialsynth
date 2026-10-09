@@ -32,7 +32,7 @@ and events.</sub>
   - ground truth: depth, optical flow, land cover, star positions;
   - event cameras and an IMU.
 - **Viewer:** a map of the tile store and the camera through the dataset renderer, flown
-  live.
+  live; and a dataset viewer and exporter (`terrain show`, `terrain export`).
 
 ## Requirements
 
@@ -59,6 +59,7 @@ cargo install --path crates/cli             # optional: puts `terrain` on the PA
 terrain view                                # the default world (seed 1, tiles in out/world.h5)
 terrain config > my.yaml                    # a commented scenario template; edit it
 terrain run -c my.yaml                      # trajectory → tiles → render (→ events)
+terrain show out/quick/seq.h5               # look at a dataset (after `terrain run -c configs/quick.yaml`)
 terrain view -c my.yaml                     # look around: map, camera (M), flying (F)
 ```
 
@@ -78,12 +79,14 @@ fisheye, a 10 km cruise, a sunset and an IMU check.
 | `terrain run` | make a dataset: trajectory → tiles → render → events. `--step traj,tiles,render,events` runs single steps (an existing trajectory file is kept unless `traj` is asked for); `--lazy` generates missing tiles while rendering |
 | `terrain tiles` | plan and generate the flight's tiles; or a region's (`--bbox … --zooms 6-14`), a list's (`--list`); `--dry-run [-o FILE]` only lists them; `--png PREFIX --zoom Z` previews a mosaic without a store |
 | `terrain view` | the viewer: map and camera, flown live; generates as you go (`docs/viewer.md`) |
+| `terrain show SEQ.h5` | look at a dataset: every modality of a camera on a timeline (depth, flow, land cover, events, stars), the pose, IMU and trajectory, pixel values; `--snapshot` renders it without a window (`docs/show.md`) |
+| `terrain export SEQ.h5 --out DIR\|FILE.mp4` | PNG sequences or videos (ffmpeg) of a camera's modalities, one per modality or `--side-by-side` with legends |
 | `terrain info FILE` | summarize a tile store or a sequence file |
 | `terrain config` | the scenario template; `--all` every setting; `-c my.yaml` a scenario with its defaults filled in |
 
 `run`, `tiles`, `view` and `config` read one scenario (`-c`) and take `--seed` (a different
-world) and `-j` (threads); `info` takes just the file. `terrain <command> --help` lists the
-options.
+world) and `-j` (threads); `show`, `export` and `info` take just the file.
+`terrain <command> --help` lists the options.
 
 ## Outputs
 
@@ -129,6 +132,7 @@ as_close(w);
 | [`docs/formats.md`](docs/formats.md) | the tile store and sequence file layouts, validation scripts |
 | [`docs/simulation.md`](docs/simulation.md) | what is simulated: terrain, rendering, lighting, sensor, IMU, flights; performance, tests |
 | [`docs/viewer.md`](docs/viewer.md) | the viewer: map and camera views, controls, snapshots and recordings |
+| [`docs/show.md`](docs/show.md) | looking at a dataset: `terrain show` (viewer, snapshots) and `terrain export` (PNGs, videos) |
 | [`docs/events.md`](docs/events.md) | event cameras |
 | [`docs/stars.md`](docs/stars.md) | stars, planets, Moon: catalogue, astrometry, star ground truth |
 | [`docs/gpu.md`](docs/gpu.md) | the GPU backend: tile generation and rendering |
@@ -143,6 +147,7 @@ crates/tilestore  the HDF5 tile store
 crates/terragen   the world generator (CPU / GPU)
 crates/render     cameras, flights, level of detail, renderer (CPU / GPU), lighting, sensor, events, IMU, writers
 crates/viewer     terrain view: map and camera views
+crates/seqview    terrain show / export: the dataset viewer and exporter
 crates/cli        the terrain command
 bindings/         C API (libaerialsynth) and Python package (aerialsynth): tiles, rendering
 configs/          example scenarios

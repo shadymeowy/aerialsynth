@@ -9,6 +9,8 @@ One window, two views of the scenario's world, flown in realtime:
   stars), the atmosphere and shadows, auto exposure, noise and the tone curve: what a dataset
   frame from that pose and time looks like.
 
+To look at a dataset `terrain run` wrote, see `terrain show` ([`show.md`](show.md)).
+
 ```sh
 terrain view -c configs/view.yaml                  # the map: orbit the planet (M: camera)
 terrain view -c configs/view.yaml --fly free       # fly over home on the map

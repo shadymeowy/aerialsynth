@@ -1,6 +1,7 @@
 # File formats
 
-Both files are HDF5 and open in h5py or any HDF5 reader. `terrain info FILE` summarizes either.
+Both files are HDF5 and open in h5py or any HDF5 reader. `terrain info FILE` summarizes either;
+`terrain show` and `terrain export` look at a sequence file ([`show.md`](show.md)).
 
 ## Tile store (`tiles.file`)
 

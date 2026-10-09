@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **`terrain show SEQ.h5`**: a viewer for sequence files (new crate `seqview`, `docs/show.md`).
+  A timeline (play, pause, frame steps, speed, Space / arrow / Home / End keys) over the
+  modalities of a camera in a grid: RGB, depth (turbo, auto or fixed range, log scale), optical
+  flow (Middlebury wheel), land cover (class palette and legend), events (a window of ON / OFF on
+  black or on the gray frame, or a time surface) and catalogue stars on the image. A side panel
+  with the pose, IMU plots, the trajectory, display settings, the camera calibration and the
+  scenario; the value of every panel under the pointer. Frames, event windows and IMU samples
+  are read on demand in the background, so large files open at once; files with events-only
+  cameras or without cameras work. `--snapshot out.png` renders the viewer without a window, on
+  the CPU (no GPU or display).
+- **`terrain export SEQ.h5`**: PNG sequences or videos (ffmpeg: `.mp4`, `.mkv`, `.mov`,
+  `.webm`) of a camera's modalities, one per modality or `--side-by-side` with titles and
+  legends, in the viewer's colours with ranges fixed over the export; `--start`, `--end`,
+  `--every`, `--fps`, `--rate` (cameras without frames), `--window-ms`.
 - **Bindings** (`bindings/`): tile access from C and Python. Open a world's tile store (the
   world given like `terrain -c FILE --seed N`) and get a layer of tile z/x/y; missing tiles are
   generated (GPU if available, else CPU) and stored first.

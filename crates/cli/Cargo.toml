@@ -24,4 +24,5 @@ render.workspace = true
 tilestore.workspace = true
 h5.workspace = true
 viewer.workspace = true
+seqview.workspace = true
 libc = "0.2"
