@@ -431,7 +431,7 @@ impl GpuGenerator {
         let t_drain = std::time::Instant::now();
         let mut lat = self.lat.lock().unwrap();
         let mut seg_cap = (1usize << 18).max(queries.len() * 64);
-        let sink_cap = 1usize << 16;
+        let mut sink_cap = 1usize << 16;
         let b_boxes_e = storage(d, "boxes", &boxes_e);
         let b_chunks_e = storage(d, "chunks", &chunks_e);
         let b_boxes_t = storage(d, "boxes", &boxes_t);
@@ -442,15 +442,14 @@ impl GpuGenerator {
         let b_count = output(d, "drainage counters", 32);
         let b_chunk_n = output(d, "chunk counts", (chunks_g.len().max(1) * 4) as u64);
         let b_range = output(d, "query ranges", (queries.len().max(1) * 8) as u64);
-        let b_sinks = output(d, "sink pieces", (sink_cap * std::mem::size_of::<GSinkPiece>()) as u64);
         let wg2 = |n: usize| {
             let g = n.max(1) as u32;
             let gx = g.min(65535);
             [gx, g.div_ceil(gx), 1]
         };
-        let run = |lat: &Lattice, keys_ro: &wgpu::Buffer, enc: &mut wgpu::CommandEncoder, new_list: &wgpu::Buffer, segs: &wgpu::Buffer, boxes: &wgpu::Buffer, chunks: &wgpu::Buffer, passes: &[(&wgpu::ComputePipeline, [u32; 3])]| {
+        let run = |lat: &Lattice, keys_ro: &wgpu::Buffer, enc: &mut wgpu::CommandEncoder, new_list: &wgpu::Buffer, segs: &wgpu::Buffer, b_sinks: &wgpu::Buffer, boxes: &wgpu::Buffer, chunks: &wgpu::Buffer, passes: &[(&wgpu::ComputePipeline, [u32; 3])]| {
             let g1 = bind(d, &self.k.l_drain, &[&b_dummy(d), &b_dummy(d), &b_dummy(d), &b_dummy(d), &b_dummy(d)]);
-            let g2 = bind(d, &self.k.l_lat, &[&lat.keys, &lat.s, &lat.h, &lat.flags, &lat.tgt, boxes, chunks, new_list, &b_count, segs, &b_chunk_n, &b_range, &b_sinks, &b_qboxes, keys_ro, &lat.mark, &lat.work_t, &lat.work_s]);
+            let g2 = bind(d, &self.k.l_lat, &[&lat.keys, &lat.s, &lat.h, &lat.flags, &lat.tgt, boxes, chunks, new_list, &b_count, segs, &b_chunk_n, &b_range, b_sinks, &b_qboxes, keys_ro, &lat.mark, &lat.work_t, &lat.work_s]);
             let mut cp = enc.begin_compute_pass(&Default::default());
             cp.set_bind_group(0, &self.globals, &[]);
             cp.set_bind_group(1, &g1, &[]);
@@ -466,6 +465,7 @@ impl GpuGenerator {
         let b_new = output(d, "new lattice points", (new_cap * 4) as u64);
         let dummy_segs = output(d, "-", 256);
         let dummy_ro = output(d, "-", 256);
+        let dummy_sinks = output(d, "-", 256);
         let mut n_new = 0usize;
         for attempt in 0..2 {
             if lat.used > lat.cap * 3 / 5 || attempt == 1 {
@@ -478,7 +478,7 @@ impl GpuGenerator {
             let mut enc = d.create_command_encoder(&Default::default());
             enc.clear_buffer(&b_count, 0, None);
             if !chunks_e.is_empty() {
-                run(&lat, &dummy_ro, &mut enc, &b_new, &dummy_segs, &b_boxes_e, &b_chunks_e, &[(&self.k.dk.enumerate, wg2(chunks_e.len()))]);
+                run(&lat, &dummy_ro, &mut enc, &b_new, &dummy_segs, &dummy_sinks, &b_boxes_e, &b_chunks_e, &[(&self.k.dk.enumerate, wg2(chunks_e.len()))]);
             }
             enc.copy_buffer_to_buffer(&lat.keys, 0, &lat.keys_ro, 0, (lat.cap * 8) as u64);
             self.gpu.queue.submit([enc.finish()]);
@@ -497,6 +497,7 @@ impl GpuGenerator {
         // ---- heights, targets, sources, the queries' pieces
         loop {
             let b_segs = output(d, "drainage pieces", (seg_cap * std::mem::size_of::<GSeg>()) as u64);
+            let b_sinks = output(d, "sink pieces", (sink_cap * std::mem::size_of::<GSinkPiece>()) as u64);
             let mut enc = d.create_command_encoder(&Default::default());
             enc.clear_buffer(&b_count, 12, None);
             enc.clear_buffer(&lat.mark, 0, None);
@@ -514,7 +515,7 @@ impl GpuGenerator {
             let mut times = String::new();
             for (name, p, n, bx, ch) in &passes {
                 let t = std::time::Instant::now();
-                run(&lat, &lat.keys_ro, &mut enc, &b_new, &b_segs, bx, ch, &[(p, *n)]);
+                run(&lat, &lat.keys_ro, &mut enc, &b_new, &b_segs, &b_sinks, bx, ch, &[(p, *n)]);
                 if prof {
                     // each pass on its own (timing)
                     self.gpu.queue.submit([std::mem::replace(&mut enc, d.create_command_encoder(&Default::default())).finish()]);
@@ -531,14 +532,12 @@ impl GpuGenerator {
             if c[2] != 0 {
                 bail!("GPU generator: drainage data missing for {} lattice points", c[2]);
             }
-            let total = c[3] as usize;
-            if total > seg_cap {
-                seg_cap = total + 1024;
+            let (total, nsink) = (c[3] as usize, c[4] as usize);
+            if total > seg_cap || nsink > sink_cap {
+                // too small for this batch: larger buffers, the same passes again
+                seg_cap = seg_cap.max(total + 1024);
+                sink_cap = sink_cap.max(nsink + 1024);
                 continue;
-            }
-            let nsink = c[4] as usize;
-            if nsink > sink_cap {
-                bail!("GPU generator: {nsink} sink pieces in one drainage batch (at most {sink_cap})");
             }
             if prof {
                 eprintln!(

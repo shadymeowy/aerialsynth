@@ -354,6 +354,10 @@ impl Scenario {
         if z0 > MAX_MIN_ZOOM {
             bail!("tiles.min_zoom {z0} > {MAX_MIN_ZOOM}: the tile selection tests every tile of min_zoom (4^{z0}) for every frame");
         }
+        let m = &self.render.lighting.time_map;
+        if m.iter().any(|p| !p[0].is_finite() || !p[1].is_finite()) || m.windows(2).any(|w| w[1][0] <= w[0][0]) {
+            bail!("render.lighting.time_map: [trajectory time, clock] pairs with finite values and increasing times");
+        }
         if let Some(imu) = &self.imu {
             if imu.rate_hz <= 0.0 {
                 bail!("imu.rate_hz must be > 0");

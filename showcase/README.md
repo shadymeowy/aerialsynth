@@ -5,6 +5,7 @@ A promotional video of aerialsynth, fully reproducible from this folder:
 ```
 cargo build --release
 python showcase/make_showcase.py          # renders every shot, writes out/showcase/showcase.mp4
+~/.venv/bin/python showcase/soundtrack.py --music-only out/showcase/showcase.mp4   # + music → showcase_music.mp4
 ```
 
 | file | what |
@@ -29,6 +30,26 @@ All shots share one planet: the places (farmland at 39.9°N 32.8°E, the snow-ca
 | globe | the opening: the planet turning through its map layers (surface, elevation, land cover), then a dive through the tile pyramid (borders coloured by zoom) down to the first shot; a keyframed map flight (`globe/dive.yaml`) recorded by `terrain view --record` into its own tile store |
 | follows | the globe's recorded camera path flown on by the dataset renderer (`descent`): the hand-off from the map to the camera, 6 km above the ground |
 | map | a sped-up flight next to a 2D mosaic of its XYZ tiles: whole trajectory, current position, camera footprint (from depth), the planned LOD tiles coloured by zoom, altitude profile |
+
+## The long-haul flight
+
+A second video, `out/airliner/airliner.mp4` (about 4 min): one airliner flight from a tropical
+lake district on the equator to a tundra basin inside an arctic ice sheet, 8,100 km in 9 h 47 min,
+shown as one continuous time-lapse.
+
+```
+python showcase/make_airliner.py            # route, render, compose → out/airliner/airliner.mp4
+python showcase/make_airliner.py --stills   # framing check per camera stretch → out/airliner/stills.png
+~/.venv/bin/python showcase/soundtrack.py   # sound (needs scipy) → out/airliner/airliner_sound.mp4
+```
+
+| file | what |
+|------|------|
+| `airliner.yaml` | the route (airports, waypoints, speeds, climb and descent), the take-off time, the globe opening, the flight timeline (playback speed along the route, camera switches, captions) and the outro |
+| `route.py` | flies the route: great circles with fly-by turns, an airliner's climb / cruise / 3° descent and flare, attitude from the flight path; the airports' ground from the world (`terragen` example `ground`) → `out/airliner/route.csv` (`t,lat,lon,h,roll,pitch,yaw`, 10 Hz) |
+| `make_airliner.py` | the video: video time ↔ flight time from the playback speed (real time at take-off and landing, ×20 over each place, up to ×3000 in between), one `terrain run` per camera stretch over the time-warped trajectory (`render.lighting.time_map` keeps the sun on the flight's clock), the globe with the route drawn over it, captions, the speed, a readout and a route inset |
+| `globe/route.yaml` | the globe opening's keyframes |
+| `soundtrack.py` | the sound, all synthesised here: an original ambient score (D dorian, 76 bpm: pads, a plucked arpeggio, sub bass, bells, reverb) whose sections follow the video, and the aircraft from the flight itself (turbofan roar, buzz-saw and whine from the thrust schedule, airflow from the indicated airspeed, gear, touchdown, reversers); the faster the playback, the more the aircraft recedes to a cabin hum; near real time the music ducks under the engines |
 
 ## Options
 

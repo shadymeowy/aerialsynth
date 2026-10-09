@@ -1,0 +1,144 @@
+# A long-haul flight across the planet of seed 1, from a tropical lake district on the equator
+# (1.3°N 103.9°W) to a tundra plateau inside an ice sheet (65.22°N 150.82°W): 8,100 km in
+# ten hours over savanna, desert, the ocean, farmland, boreal forest and ice.
+# `route.py` flies it (trajectory CSV), `make_airliner.py` renders the shots (windows of that
+# one flight) and composes the video.
+
+route:
+  out: out/airliner
+  departure: {lat: 1.30, lon: -103.90, heading_deg: 20, straight_m: 7000}
+  waypoints:
+  - [12.0, -109.2]          # (the turn well before the dune fields, while the video runs fast)
+  - [64.92, -150.40, 150]   # south of the field, then round to the west (turn speed m/s)
+  - [65.08, -151.70, 128]
+  arrival: {lat: 65.218, lon: -150.82, course_deg: 91, final_m: 25000}
+  start_agl_m: 100          # the flight starts just after lift-off
+  touchdown_agl_m: 3.0      # (body reference above the ground at touchdown)
+  liftoff_mps: 85
+  low_mps: 128              # 250 kt below 3,000 m
+  approach_mps: 72          # 140 kt on final
+  cruise_m: 11000
+  cruise_mps: 236           # Mach 0.80
+  climb_rates: [[0, 14], [1500, 12], [3000, 11], [6000, 8], [9000, 5], [10600, 2.5], [11000, 0.4]]
+  glide_deg: 3.0
+  rate_hz: 10
+  takeoff_utc: "2026-06-21T14:26:00"   # 07:30 local at the departure, touchdown 14:10 local
+
+base:                       # over showcase/base.yaml
+  tiles: {file: out/airliner/world.h5}
+
+map: {zoom: 5, size: 12, at: [35, -130]}   # the region map (inset, outro)
+inset_px: 150               # route inset (at 1280 px width)
+drop_tiles: true            # delete the tile store after each camera stretch (disk space)
+
+video:
+  width: 1920
+  height: 1080
+  fps: 25
+  crossfade: 0.6
+  title: "aerialsynth"
+  subtitle: "A long-haul flight across a procedural planet"
+  tagline: "From lift-off to touchdown, 8,100 km and ten hours — every frame rendered from generated tiles"
+
+# The opening: the map flight showcase/globe/route.yaml recorded by `terrain view --record`, the
+# route drawn over it (growing over `draw` shot seconds) with `labels` at route times.
+globe:
+  id: globe
+  path: globe/route.yaml
+  seconds: 17
+  fov: 40
+  draw: [4.5, 9.5]          # the route grows over these shot seconds
+  label: The route
+  text: 8,100 km from the equator to the arctic, great circles at 11,000 m
+  notes:
+  - {t: 0.5, until: 4.2, text: "one procedural planet, seed 1"}
+  labels:                   # along the route (route time, s)
+  - {t: 0, text: lake district, dx: 14}
+  - {t: 7500, text: desert}
+  - {t: 21500, text: ocean}
+  - {t: 26700, text: farmland}
+  - {t: 32500, text: ice sheet}
+  - {t: 35200, text: tundra, dx: -14}
+  - {t: 28500, text: boreal forest, dx: -14}
+
+# The flight as one continuous time-lapse (make_airliner.py): `speed` sets the playback speed
+# along the route ([route time s, ×], or {slow: route time, speed, width, up, ramp}: a slow pass
+# of `width` route seconds at ×`speed`, eased over `ramp` route seconds from / to ×`up`),
+# log-linear in between; `cameras` switch the view from a route time on (a `dissolve` of
+# video seconds; front | nadir | wide, `pitch` relative to the body, `scenario` overrides);
+# `captions` appear at route times for `seconds` of video. Negative times: seconds before touchdown.
+flight:
+  dissolve: 0.6
+  speed:
+  - [0, 1]
+  - [10, 1]
+  - [30, 8]
+  - [90, 25]
+  - [400, 100]
+  - [1800, 400]
+  - {slow: 2950, speed: 20, up: 1000, ramp: 180}     # savanna
+  - {slow: 7500, speed: 20, up: 2000, ramp: 200}     # dunes
+  - [10000, 3000]
+  - [17000, 3000]
+  - {slow: 18250, speed: 20, up: 2000, ramp: 200}    # the coast
+  - [20000, 3000]
+  - [23500, 3000]
+  - [24600, 300]                                     # landfall
+  - [26200, 300]
+  - {slow: 27550, speed: 20, up: 300, ramp: 110}     # farmland
+  - [28300, 500]                                     # curvature
+  - [31500, 500]
+  - {slow: 32550, speed: 20, up: 300, ramp: 110}     # ice sheet
+  - [33300, 300]
+  - [33800, 100]                                     # descent
+  # (from here on: seconds before touchdown)
+  - [-800, 60]
+  - [-560, 15]                                       # the turns onto final
+  - [-280, 15]
+  - [-200, 30]
+  - [-80, 10]
+  - [-45, 5]
+  - [-14, 1.5]
+  - [-8, 1]                                          # flare and touchdown
+  cameras:
+  - {from: 0, camera: front, pitch: -18}
+  - {from: 2450, camera: nadir}
+  - {from: 8300, camera: wide, scenario: {render: {atmosphere: {visibility_km: 150}}, tiles: {max_zoom: 13}}}
+  - {from: 27150, camera: nadir, scenario: {tiles: {max_zoom: 14}}}
+  - {from: 28050, camera: wide, scenario: {render: {atmosphere: {visibility_km: 150}}, tiles: {max_zoom: 13}}}
+  - {from: 32150, camera: nadir, scenario: {tiles: {max_zoom: 14}}}
+  - {from: 33000, camera: front}
+  captions:
+  - {at: 0.3, seconds: 8, label: "Take-off · 1.30°N 103.90°W", text: "100 m over a tropical lake district, 07:30 in the morning"}
+  - {at: 45, seconds: 6, label: Climb-out, text: "Gear up, flaps up, turning north-west"}
+  - {at: 700, seconds: 6, label: Climb, text: "Through 6,000 m the view opens up"}
+  - {at: 2870, seconds: 6, label: "Savanna · 6°N", text: "Grassland and open woods, straight down from 11 km"}
+  - {at: 7420, seconds: 6, label: "Desert · 15°N", text: "Dune fields"}
+  - {at: 8400, seconds: 3.0, label: "Cruise · 11,000 m · Mach 0.80", text: "Hours of desert at ×3,000"}
+  - {at: 18060, seconds: 6, label: "Coast · 36°N", text: "Leaving the continent, ahead the ocean"}
+  - {at: 19300, seconds: 3.4, label: Over the ocean, text: "2 h 10 min of open water"}
+  - {at: 25000, seconds: 6, label: "Landfall · 51°N", text: "A northern coast rises over the horizon"}
+  - {at: 27470, seconds: 6, label: "Farmland · 53°N", text: "Fields and towns along the coast"}
+  - {at: 28700, seconds: 6, label: "Cruise · 11,000 m", text: "Ice fields ahead; the horizon 375 km away bends with the Earth"}
+  - {at: 32470, seconds: 6, label: "Ice sheet · 62°N", text: "Ice to the horizon, straight down from 11 km"}
+  - {at: 33700, seconds: 6, label: Descent, text: "Down from cruise on a 3° path over the tundra"}
+  - {at: -560, seconds: 7, label: Turning onto final, text: "Round to the west of the field and back east, at 3,000 m"}
+  - {at: -150, seconds: 7, label: Final approach, text: "Over the tundra, ice on the hills"}
+  - {at: -12, seconds: 9, label: "Landing · 65.22°N 150.82°W", text: "Flare and touchdown, 9 h 46 min after take-off"}
+
+outro:
+  seconds: 8
+  title: "8,095 km · 9 h 46 min"
+  lines:
+  - "Lakes, savanna, desert"
+  - "Ocean, farmland, boreal forest, ice fields"
+  - "Cruise 11,000 m at Mach 0.80"
+  - "One procedural planet, rendered on the GPU"
+  footer: "aerialsynth · showcase/airliner.yaml"
+  labels:
+  - {t: 0, text: "Lake district · 1.3°N"}
+  - {t: 7500, text: desert}
+  - {t: 21500, text: ocean}
+  - {t: 26700, text: farmland}
+  - {t: 32500, text: ice sheet}
+  - {t: 35200, text: "Tundra · 65.2°N", dx: -14}

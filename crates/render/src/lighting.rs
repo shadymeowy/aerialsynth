@@ -10,7 +10,8 @@ pub enum SunMode {
     /// camera position.
     Fixed,
     /// Solar position from `date` + `time_utc` at the camera location; the clock advances with
-    /// the time since the trajectory start multiplied by `time_scale` (0 = static clock).
+    /// the time since the trajectory start multiplied by `time_scale` (0 = static clock), or
+    /// as `time_map` says.
     Clock,
 }
 
@@ -34,6 +35,10 @@ pub struct LightingConfig {
     /// HH:MM[:SS] UTC at trajectory time 0.
     pub time_utc: String,
     pub time_scale: f64,
+    /// Clock of a time-warped trajectory (varying time-lapse): [trajectory time (s since its
+    /// start), clock (s after `date` / `time_utc`)] pairs with increasing times, linearly
+    /// interpolated and extended with the end slopes. Replaces `time_scale` when given.
+    pub time_map: Vec<[f64; 2]>,
     /// Direct sun irradiance scale (sunlit white Lambertian at normal incidence ≈ this).
     pub sun_intensity: f64,
     /// Sky (ambient) light scale.
@@ -121,6 +126,7 @@ impl Default for LightingConfig {
             date: "2026-06-21".into(),
             time_utc: "08:30:00".into(),
             time_scale: 1.0,
+            time_map: Vec::new(),
             sun_intensity: 1.0,
             sky_intensity: 1.0,
             shadows: true,
@@ -242,13 +248,28 @@ pub struct SunState {
 }
 
 impl LightingConfig {
+    /// Clock (s after `date` / `time_utc`) at trajectory time `t` (s since its start): 0 in
+    /// `fixed` mode.
+    pub fn clock(&self, t: f64) -> f64 {
+        if self.mode != SunMode::Clock {
+            return 0.0;
+        }
+        let m = &self.time_map;
+        if m.len() < 2 {
+            return t * self.time_scale;
+        }
+        let i = m.partition_point(|p| p[0] <= t).clamp(1, m.len() - 1);
+        let (a, b) = (m[i - 1], m[i]);
+        a[1] + (b[1] - a[1]) * (t - a[0]) / (b[0] - a[0]).max(1e-12)
+    }
+
     /// Sun state at trajectory time `t` (s) and location (rad).
     pub fn sun_at(&self, t: f64, lat: f64, lon: f64) -> SunState {
         let (az, el) = match self.mode {
             SunMode::Fixed => (self.sun_azimuth_deg.to_radians(), self.sun_elevation_deg.to_radians()),
             SunMode::Clock => {
                 let t0 = parse_utc(&self.date, &self.time_utc).unwrap_or(0.0);
-                solar_position(t0 + t * self.time_scale, lat, lon)
+                solar_position(t0 + self.clock(t), lat, lon)
             }
         };
         let eld = el.to_degrees();
@@ -265,8 +286,7 @@ impl LightingConfig {
         } * self.lights_intensity;
         let (moon_azimuth, moon_elevation, moon_phase) = if self.moon {
             let t0 = parse_utc(&self.date, &self.time_utc).unwrap_or(0.0);
-            let ts = if self.mode == SunMode::Clock { self.time_scale } else { 0.0 };
-            moon_position(t0 + t * ts, lat, lon)
+            moon_position(t0 + self.clock(t), lat, lon)
         } else {
             (0.0, -1.0, 0.0)
         };
@@ -290,7 +310,7 @@ impl LightingConfig {
             light_pollution: self.light_pollution,
             time: t,
             exposure: 0.0,
-            unix: parse_utc(&self.date, &self.time_utc).unwrap_or(0.0) + t * if self.mode == SunMode::Clock { self.time_scale } else { 0.0 },
+            unix: parse_utc(&self.date, &self.time_utc).unwrap_or(0.0) + self.clock(t),
             flicker: self.flicker,
         }
     }
@@ -350,6 +370,20 @@ mod tests {
         let (az, el) = solar_position(t, lat, lon);
         assert!(el.to_degrees().abs() < 1.5, "{}", el.to_degrees());
         assert!(az.to_degrees() > 50.0 && az.to_degrees() < 70.0, "{}", az.to_degrees());
+    }
+
+    #[test]
+    fn clock_follows_time_map() {
+        let mut l = LightingConfig { mode: SunMode::Clock, time_scale: 2.0, ..Default::default() };
+        assert_eq!(l.clock(10.0), 20.0);
+        // ×1 for 10 s, then ×100: the map replaces time_scale, extended with the end slopes
+        l.time_map = vec![[0.0, 0.0], [10.0, 10.0], [20.0, 1010.0]];
+        assert_eq!(l.clock(5.0), 5.0);
+        assert_eq!(l.clock(15.0), 510.0);
+        assert_eq!(l.clock(21.0), 1110.0);
+        assert_eq!(l.clock(-1.0), -1.0);
+        l.mode = SunMode::Fixed;
+        assert_eq!(l.clock(15.0), 0.0);
     }
 
     #[test]

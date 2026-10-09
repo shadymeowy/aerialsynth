@@ -103,7 +103,7 @@ output: { file: out/seq.h5, pose: { path: /pose, rate_hz: 200 } }
 |------|--------|
 | `world.albedo.saturation`, `brightness` | the generated surface colours (every layer) |
 | `world.satellite.*` | sun, ambient, haze of the baked `rgb` tile layer only (camera images use `render.lighting`) |
-| `render.lighting` | `mode: clock` (sun / moon from `date`, `time_utc`), `lights_intensity`, `moon_intensity`, `night_sky`, `light_pollution` |
+| `render.lighting` | `mode: clock` (sun / moon from `date`, `time_utc`; the clock runs at `time_scale`, or follows `time_map`: [trajectory time, clock] pairs for a time-warped trajectory, i.e. a time-lapse of varying speed), `lights_intensity`, `moon_intensity`, `night_sky`, `light_pollution` |
 | `render.atmosphere.visibility_km`, `inscatter` | haze |
 | `cameras[].rgb.sensor.exposure.target` | overall brightness |
 | `cameras[].rgb.sensor.tone` | `saturation`, `white_balance`, `curve` (`srgb`/`filmic`/`gamma`) |
