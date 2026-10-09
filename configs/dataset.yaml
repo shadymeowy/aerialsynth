@@ -1,5 +1,5 @@
 # Example dataset scenario: 60 s of low-level flight (600 m AGL) with a forward-oblique camera,
-# wind / turbulence / vibration from the flight recorder, late-afternoon sun, full sensor model,
+# wind / turbulence / vibration from the flight simulator, late-afternoon sun, full sensor model,
 # IMU.   terrain run -c configs/dataset.yaml
 world:
   seed: 7

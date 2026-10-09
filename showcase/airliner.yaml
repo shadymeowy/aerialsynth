@@ -1,5 +1,5 @@
 # A long-haul flight across the planet of seed 1, from a tropical lake district on the equator
-# (1.3°N 103.9°W) to a tundra plateau inside an ice sheet (65.22°N 150.82°W): 8,100 km in
+# (1.3°N 103.9°W) to a tundra basin inside an arctic ice sheet (65.22°N 150.82°W): 8,100 km in
 # ten hours over savanna, desert, the ocean, farmland, boreal forest and ice.
 # `route.py` flies it (trajectory CSV), `make_airliner.py` renders the shots (windows of that
 # one flight) and composes the video.

@@ -7,7 +7,7 @@ template of the main settings; `terrain config --all` lists every setting with i
 ```
 world        the planet: seed, continents, relief, rivers, climate, vegetation, land use
 tiles        the tile store: file, zoom range, generation while rendering
-trajectory   the flight: a CSV, synthesized from `synth` (path, speed, wind, vibration, gimbal)
+trajectory   the flight: a CSV, synthesised from `synth` (path, speed, wind, vibration, gimbal)
 render       backend, supersampling, level of detail, lighting, atmosphere, stars
 cameras      any number of cameras: intrinsics, mounting, modalities
 imu          an IMU (omit for none)
@@ -91,7 +91,7 @@ output: { file: out/seq.h5, pose: { path: /pose, rate_hz: 200 } }
 
 ## Conventions
 
-- **Earth model:** WGS84 ellipsoid (configurable: `world.planet`). Heights are **meters above
+- **Earth model:** WGS84 ellipsoid (configurable: `world.planet`). Heights are **metres above
   the ellipsoid**; the vertical datum is the ellipsoid, i.e. the geoid undulation is 0. Real
   SRTM data is referenced to EGM96 instead.
 - **Tiles:** Google/OSM XYZ on Web Mercator (EPSG:3857), 256×256 px, y grows southwards, and

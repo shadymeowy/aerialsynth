@@ -7,7 +7,7 @@ build the same world, see `docs/gpu.md`).
 
 - **Determinism:** a pure function of (seed, config, position), using f64 3D noise on the
   ellipsoid surface. There are no seams or pole problems.
-- **Band limiting:** fields are band-limited by the pixel GSD, so coarse zooms approximate the
+- **Band limiting:** fields are band-limited by the pixel's ground sample distance (GSD), so coarse zooms approximate the
   average of fine ones. Large-scale fields are sampled on a 16-px grid aligned to tile corners.
   Whether a field comes from the grid or per pixel depends on the zoom only, so neighbouring
   tiles always take the same path.
@@ -20,7 +20,7 @@ build the same world, see `docs/gpu.md`).
     `world.hydro.levels`): dendritic, always draining downhill, meandering
   - valleys, floodplains and riparian woods; wet or dry beds
   - lakes filled to their spill level, oceans with shallows and surf, beaches
-- **Climate:** latitude, lapse rate, Hadley dryness, coast and noise. It drives biomes: snow, rock,
+- **Climate:** latitude, lapse rate, subtropical (Hadley-cell) dryness, coast and noise. It drives biomes: snow, rock,
   tundra, boreal, temperate and tropical forests, steppe, savanna, desert, wetlands.
 - **Vegetation:** individual tree crowns in 3 layers plus shrubs, with explicit crowns and canopy
   heights in the DSM. They are prefiltered when unresolved and cast shadows in the baked
@@ -104,7 +104,7 @@ On the author's machine (Xeon W-2125, 8 threads; RTX 2080 Ti):
 | task | speed |
 |------|-------|
 | generation | GPU (default, `docs/gpu.md`): ~60 tiles/s at z13–z15; CPU: ~7 tiles/s at z17, ~6 at z16, ~5 at z15, ~1.5 at z6–10 (8 threads, `world.tile_supersample` 2) |
-| rendering 640×512, 3×3 supersampled, shadows | ~0.5 s per frame on the CPU, ~40× faster on the GPU |
+| rendering 640×360, 2×2 supersampled, shadows | ~1.3 s per frame on the CPU, ~40× faster on the GPU ([`gpu.md`](gpu.md)) |
 
 `terrain run --lazy` generates exactly the tiles each view needs while rendering. The live
 camera view (`terrain view`) renders 640×360 at ~40 frames/s, 1280×720 at ~14 (`docs/viewer.md`).
@@ -120,7 +120,7 @@ cargo test --release
 
 - **Geodesy:** checked against pymap3d.
 - **h5:** round trips, raw chunks, concurrency, error stacks.
-- **Tile store:** round trip, rejection of invalid tiles.
+- **Tile store:** round trip, rejection of invalid tiles and of tiles of another world.
 - **Camera models and trajectories:** includes NED/ECEF CSV formats.
 - **LOD and dynamics.**
 - **Sensor:** auto-exposure ODE.
@@ -131,7 +131,7 @@ cargo test --release
 - **Solar position.**
 - **Generator invariants:** determinism, seamless east-west and north-south tile borders, parent ≈
   mean of its children (on the default backend: the GPU).
-- **GPU generator:** noise, pass A and whole tiles (z7–z16) against the CPU generator.
-- **Tile stores:** a store refuses tiles of another world.
+- **GPU generator:** noise, pass A (the macro-scale world model: relief, drainage, sites) and
+  whole tiles (z7–z16) against the CPU generator.
 - **Flight camera:** level flight holds height and heading, banked turns at g·tan(bank)/V, the
   ground stops the camera.

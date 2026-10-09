@@ -29,7 +29,7 @@ cameras:
 ## Catalogue
 
 The built-in catalogue, `crates/render/data/stars_v9.bin`, holds 130,442 stars and takes
-3.7 MB. It is complete to V = 9, about 1.5–2 magnitudes fainter than typical star trackers
+3.7 MB. It is complete to V = 9, about 1.5–2.5 magnitudes fainter than typical star trackers
 detect (V ≈ 6.5–7.5).
 
 * **Hipparcos** (ESA 1997; new reduction, van Leeuwen 2007): 83,337 stars. Positions come
@@ -50,11 +50,11 @@ record is 28 bytes. All stars are real, so the ground truth covers every star in
 | 10 | 355,045 (Tycho-2 file) |
 | 12 | 2,078,257 (Tycho-2 file) |
 
-A deeper catalogue (all of Tycho-2, about 58 MB) can be built from the CDS files and set as
+A deeper catalogue (Tycho-2 to V = 12, about 58 MB) can be built from the CDS files and set as
 `render.stars.catalog`:
 
 ```sh
-python scripts/build_stars.py CATDIR --vmax 12.5 -o tycho2.stars   # see the script for the download
+python scripts/build_stars.py CATDIR --vmax 12 -o tycho2.stars   # see the script for the download
 ```
 
 The catalogue contains stars only; the planets come from the ephemeris (below). It has no
@@ -150,7 +150,7 @@ Below the limb (hidden) the refraction fades out.
     limited by 8-bit quantisation of the dim trail pixels.
 
 **Error budget of the inputs:**
-* `dut1_s`: leaving it at 0 rotates the sky by up to 15″/s × |UT1 − UTC| (≤ 13″). Set it from
+* `dut1_s`: leaving it at 0 rotates the sky by up to 15″/s × |UT1 − UTC| (≤ 13.5″). Set it from
   IERS Bulletin A for arcsecond work.
 * Polar motion: ≤ 0.5″ if left at zero.
 * Vehicle velocity is not included in the aberration: about 0.17″ at 250 m/s, 5″ at orbital
@@ -195,7 +195,7 @@ modality's `mag_limit`. Each star records:
 The renderer must know that no terrain can rise into the view. While tile elevations are
 unknown it assumes up to 6 km, so the pre-render dry run learns the real heights one zoom level
 per pass instead of refining that conservative volume to the finest zoom. Tiles lying entirely
-below the view cone are also culled. The example's first run generates about 140 tiles instead
+below the view cone are also culled. The first run of `configs/examples/star_tracker.yaml` generates about 140 tiles instead
 of over 5,000.
 
 ## Limitations (known, not modelled)
@@ -209,7 +209,7 @@ of over 5,000.
 * V and B−V of Tycho-only stars come from the BT/VT conversion (≈ 0.05 mag).
 
 **Astrometry**
-* UT1 − UTC (`dut1_s`) and polar motion are constants given per scenario (default 0: up to 13″
+* UT1 − UTC (`dut1_s`) and polar motion are constants given per scenario (default 0: up to 13.5″
   and 0.5″), not interpolated from IERS tables.
 * Aberration uses the Earth's orbital velocity and the observer's diurnal velocity, but not the
   vehicle's: ≈ 0.17″ at 250 m/s, 5″ at orbital speed.

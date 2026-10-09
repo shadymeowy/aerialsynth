@@ -1,4 +1,4 @@
-//! `terrain` — procedural aerial-odometry dataset toolchain.
+//! `terrain` — a procedural planet for aerial vision: terrain tiles, flights and camera datasets.
 //!
 //! `run`, `tiles`, `view` and `config` read one scenario YAML (`-c` / `--config`; `terrain
 //! config` prints a template); `info` takes a tile store or sequence file.

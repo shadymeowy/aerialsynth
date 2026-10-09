@@ -458,6 +458,7 @@ pub fn config(a: ConfigArgs) -> Result<()> {
 
 #[derive(Args)]
 pub struct InfoArgs {
+    /// Tile store or sequence file (HDF5).
     pub file: PathBuf,
 }
 
