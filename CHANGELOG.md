@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Viewer cold start:** on an empty store the first tiles are drawn after ~1 s instead of
+  2 s (warm pipeline cache) or 137–157 s (cold), and the view's own tiles no longer wait for
+  all 341 base tiles (a flight view's tiles: 51 s → 29 s on an RTX 2080 Ti).
+  - GPU generator: pass B's pipeline compiles in ~25–30 s instead of ~150 s (the driver
+    inlined the surface model at five call sites; now one, likewise the pixel-field fBm and
+    the town shadow march). Tiles agree with before to 1 DN; no generator version change.
+  - `Generator::prepare_gpu_in_background`: the viewer compiles the GPU generator on a
+    background thread and generates on the CPU meanwhile.
+  - Base levels: z0–z2 first (one level per batch), then the view's tiles, then z3..=base.
+  - Snapshots report the first drawn tiles and the view's tiles in; `TERRAGEN_PROFILE=1` prints
+    pipeline compile times and the viewer's batch times; `examples/base_levels` times z0..=Z.
+
 - **Bindings** (`bindings/`): tile access from C and Python. Open a world's tile store (the
   world given like `terrain -c FILE --seed N`) and get a layer of tile z/x/y; missing tiles are
   generated (GPU if available, else CPU) and stored first.

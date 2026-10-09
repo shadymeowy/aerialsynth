@@ -130,7 +130,13 @@ and builds the same world:
   (and lake requests) → drainage pieces per 16-px bin → rest of pass A (and site requests) →
   pass B (adaptive supersampling) → canopy opening → output layers.
 * **Startup:** the compiled pipelines are kept in `$XDG_CACHE_HOME/terrain/` (default
-  `~/.cache/terrain/`; the driver's own shader cache is per executable); after the first run the generator is ready in ~0.1 s.
+  `~/.cache/terrain/`; the driver's own shader cache is per executable); after the first run the
+  generator is ready in ~0.1 s. The first compilation (new install, new driver, changed shaders)
+  takes ~25–30 s, set by pass B (`TERRAGEN_PROFILE=1` prints each pipeline's time). The driver
+  inlines every call, so the shaders call the big functions (the surface model, the pixel-field
+  fBm, a town) from one site each: with five call sites of the surface model pass B took
+  ~150 s. `terrain view` compiles in the background and generates on the CPU meanwhile
+  (`Generator::prepare_gpu_in_background`).
 
 | | CPU (8 threads) | GPU (RTX 2080 Ti) |
 |---|---|---|
@@ -138,8 +144,16 @@ and builds the same world:
 | `configs/quick.yaml` planned tiles (357, z0–z17) | 57.6 s | 5.7 s |
 | its completion (280 tiles, mostly z1–z8 near the poles) | 148 s | 13 s |
 | `terrain view` snapshot from an empty store (592 tiles: the whole globe at z0–z4 and the view's tiles) | 323 s | 33 s |
+| base levels z0–z4 (341 tiles; `examples/base_levels`, loaded machine) | ~620 s (z3–z4 ~0.5 tiles/s) | 25 s (z3–z4 9–14 tiles/s) |
+| `terrain view`, empty store: first tiles drawn (warm / cold pipeline cache) | z0 in 0.4–0.8 s | ~1 s / ~1 s (was 2 s / 137–157 s) |
+| `terrain view --view fly:39.9,32.8,600,0,-12`, empty store: the view's 1321 tiles in | | 29 s (was 51 s: the base levels went first) |
 
-Low-zoom tiles are the most work per tile on both backends, for two reasons:
+On the RTX 6000 Ada of a shared server, cold pipeline cache, globe snapshot from an empty store:
+first tiles 157 s → 0.7 s, the view's tiles 172 s → 29 s, all base levels 188 s → 45 s.
+
+Low-zoom tiles are the most work per tile on both backends (`TERRAGEN_PROFILE=1`: a batch of
+four polar z3/z4 tiles takes 0.3–0.8 s on the GPU, ~0.6 s of it for 30,000–40,000 land-use
+regions, each needing a point evaluation with the finest drainage network), for two reasons:
 * **Polar pixels:** a Mercator pixel of z3 at 80° is 3.4 km, so lakes and land-use regions
   switch on over thousands of kilometres.
 * **Lake levels:** every lake's level takes 11 terrain evaluations with the finest drainage

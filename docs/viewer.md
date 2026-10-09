@@ -19,8 +19,11 @@ Both views share one flight and one tile store. By default the tiles a view want
 generated in the background and stored (`--no-generate`: stored tiles only, the store opened
 read-only, so a store of another generator version can be viewed). On start, levels
 z0..=`--base-zoom` (4) are completed for the whole planet (341 tiles; low zooms are the
-slowest tiles to generate, see `docs/gpu.md`). `--base-zoom` is at most 8 (87,381 tiles) and
-`tiles.max_zoom`.
+slowest tiles to generate, see `docs/gpu.md`): z0–z2 first (the first frame waits for z0
+only), then the tiles the view wants, and the rest of the base levels whenever the view wants
+nothing generated. `--base-zoom` is at most 8 (87,381 tiles) and `tiles.max_zoom`. While the
+GPU generator's pipelines compile (the first run on a machine, ~30 s), tiles are generated on
+the CPU.
 
 The viewer needs a GPU (wgpu: Vulkan, Metal or DX12). Run it on the machine's own display;
 over SSH X forwarding it runs, but slowly.
@@ -87,7 +90,9 @@ It uses wgpu 30 (shared with the dataset renderer) and egui / eframe 0.36.
     drawn); under the camera, from the finest stored tile's DSM.
 - **Tile service (`tiles.rs`):**
   - Two loader threads read tiles from the store. A generator thread generates in batches of
-    half the cores and writes them to the store; the base levels go first.
+    half the cores and writes them to the store: base levels z0–z2 first (one level per
+    batch), then the view's wishes, then the deeper base levels.
+  - The GPU generator is set up on a background thread; the CPU generates until it is ready.
   - The active view replaces the wish lists every frame.
 - **Map (`globe.rs`):**
   - **Level of detail:** a quadtree from z0, with frustum and horizon culling. A tile is
@@ -122,7 +127,8 @@ It uses wgpu 30 (shared with the dataset renderer) and egui / eframe 0.36.
 
 `--snapshot` renders a map view without a window, once the view's tiles are in (or after
 `--wait` seconds). `--view` is either `lat,lon,km,heading,tilt` (orbit) or
-`fly:lat,lon,agl_m,heading,pitch`.
+`fly:lat,lon,agl_m,heading,pitch`. It reports when the first tiles were drawn and when the
+view's tiles were all in (`TERRAGEN_PROFILE=1` also times each generated batch).
 
 ```sh
 terrain view -c configs/view.yaml --snapshot out/fly.png --view fly:39.9,32.8,600,0,-12 --wait 45 --size 1280x720
