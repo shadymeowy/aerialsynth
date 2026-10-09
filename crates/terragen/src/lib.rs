@@ -20,8 +20,10 @@
 pub mod atlas_stub;
 pub mod config;
 pub mod eco;
+pub mod features;
 #[cfg(feature = "gpu")]
 pub mod gpu;
+pub mod instances;
 pub mod kernels;
 pub mod kits;
 pub mod landcover;

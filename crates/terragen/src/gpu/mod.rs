@@ -150,6 +150,7 @@ struct Kernels {
     open_apply: wgpu::ComputePipeline,
     finish: wgpu::ComputePipeline,
     l_lat: wgpu::BindGroupLayout,
+    #[allow(dead_code)]
     l_globals: wgpu::BindGroupLayout,
     dk: DrainKernels,
 }

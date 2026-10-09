@@ -96,10 +96,14 @@ pub struct Kit {
     /// the WGSL of the relief operator (included in every module with pass A: tiles, points,
     /// drainage; no tile-only bindings)
     pub relief_wgsl: &'static str,
+    /// its instance families (`crate::instances`)
+    pub families: &'static [crate::instances::Family],
+    /// its host-built linear features and stamps (`crate::features`)
+    pub host: Option<crate::features::HostFn>,
 }
 
 impl Kit {
-    pub const EMPTY: Kit = Kit { name: "", biomes_yaml: "", wgsl: "", layers: &[], kernels: &[], relief: None, relief_wgsl: "" };
+    pub const EMPTY: Kit = Kit { name: "", biomes_yaml: "", wgsl: "", layers: &[], kernels: &[], relief: None, relief_wgsl: "", families: &[], host: None };
 }
 
 /// Run the kits' layers of `slot`.
