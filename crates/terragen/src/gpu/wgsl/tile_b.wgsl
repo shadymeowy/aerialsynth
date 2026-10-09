@@ -324,6 +324,12 @@ fn sample_b(ti: TileInfo, i: u32, j: u32, sx: u32, sy: u32, slope: f32, gsd: f32
     return o;
 }
 
+// one vote for the majority class of a pixel (pass B's `counts`: 8-bit counters, 4 per word)
+fn vote(counts: ptr<function, array<u32, 32>>, cls: u32) {
+    let c = min(cls, LC_MAX_CLASSES - 1u);
+    (*counts)[c >> 2u] += 1u << ((c & 3u) * 8u);
+}
+
 /// Pass B per pixel of the tile and its 1-pixel apron: the supersampled surface.
 @compute @workgroup_size(16, 16)
 fn pass_b(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -351,6 +357,7 @@ fn pass_b(@builtin(global_invocation_id) gid: vec3<u32>) {
     var acc_h = 0.0;
     var acc_l = 0.0;
     var acc_g = 0.0;
+    // votes per class: LC_MAX_CLASSES 8-bit counters, four per word (at most 16 samples)
     var counts: array<u32, 32>;
     var taken = ss * ss;
     if ((cfg.flags & CF_ADAPTIVE) != 0u) {
@@ -365,8 +372,8 @@ fn pass_b(@builtin(global_invocation_id) gid: vec3<u32>) {
         acc_h += s0.s.height + s1.s.height;
         acc_l += s0.s.lit + s1.s.lit;
         acc_g += s0.ground + s1.ground;
-        counts[min(s0.s.cls, 31u)] += 1u;
-        counts[min(s1.s.cls, 31u)] += 1u;
+        vote(&counts, s0.s.cls);
+        vote(&counts, s1.s.cls);
         if (similar) {
             taken = 2u;
         } else {
@@ -377,8 +384,8 @@ fn pass_b(@builtin(global_invocation_id) gid: vec3<u32>) {
             acc_h += s2.s.height + s3.s.height;
             acc_l += s2.s.lit + s3.s.lit;
             acc_g += s2.ground + s3.ground;
-            counts[min(s2.s.cls, 31u)] += 1u;
-            counts[min(s3.s.cls, 31u)] += 1u;
+            vote(&counts, s2.s.cls);
+            vote(&counts, s3.s.cls);
         }
     } else {
         for (var sy = 0u; sy < ss; sy++) {
@@ -389,7 +396,7 @@ fn pass_b(@builtin(global_invocation_id) gid: vec3<u32>) {
                 acc_h += s.s.height;
                 acc_l += s.s.lit;
                 acc_g += s.ground;
-                counts[min(s.s.cls, 31u)] += 1u;
+                vote(&counts, s.s.cls);
             }
         }
     }
@@ -397,10 +404,17 @@ fn pass_b(@builtin(global_invocation_id) gid: vec3<u32>) {
     // the most frequent cls (the last of equals, as `max_by_key`)
     var cls = 0u;
     var best = 0u;
-    for (var k = 0u; k < 32u; k++) {
-        if (counts[k] >= best && counts[k] > 0u) {
-            best = counts[k];
-            cls = k;
+    for (var w = 0u; w < LC_MAX_CLASSES / 4u; w++) {
+        let cw = counts[w];
+        if (cw == 0u) {
+            continue;
+        }
+        for (var b = 0u; b < 4u; b++) {
+            let n = (cw >> (b * 8u)) & 0xFFu;
+            if (n >= best && n > 0u) {
+                best = n;
+                cls = w * 4u + b;
+            }
         }
     }
     let b = (ti.pix0 + j * NA2 + i) * PB_F;

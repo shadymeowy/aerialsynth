@@ -27,7 +27,7 @@ pub const AS_LAYER_ELEVATION: as_layer = 2;
 pub const AS_LAYER_NORMAL: as_layer = 3;
 /// Land-cover class id (0 unknown, 1 ocean, 2 lake, 3 river, 4 beach, 5 sand, 6 rock, 7 snow,
 /// 8 grass, 9 shrub, 10 forest, 11 crop, 12 building, 13 road, 14 wetland, 15 tundra, 16 bare,
-/// 17 urban). u8 x 1.
+/// 17 urban; the land-cover classes v2 add ids 20-110: docs/formats.md). u8 x 1.
 pub const AS_LAYER_LANDCOVER: as_layer = 4;
 /// Night-time artificial light: linear radiance = 16 * (v/255)^3. u8 x 3.
 pub const AS_LAYER_EMISSION: as_layer = 5;

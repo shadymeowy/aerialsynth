@@ -57,7 +57,7 @@ aerialsynth.LAYERS["normal"]   # LayerInfo(name='normal', dtype=dtype('int8'), c
 | `albedo` | uint8 | 256 × 256 × 3 | unlit surface colour, sRGB encoded |
 | `elevation` | float32 | 256 × 256 | DSM (ground, canopy, buildings, water), m above the WGS84 ellipsoid, at pixel centres |
 | `normal` | int8 | 256 × 256 × 3 | unit normal (east, north, up) × 127 |
-| `landcover` | uint8 | 256 × 256 | class id: 0 unknown, 1 ocean, 2 lake, 3 river, 4 beach, 5 sand, 6 rock, 7 snow, 8 grass, 9 shrub, 10 forest, 11 crop, 12 building, 13 road, 14 wetland, 15 tundra, 16 bare, 17 urban |
+| `landcover` | uint8 | 256 × 256 | class id: 0 unknown, 1 ocean, 2 lake, 3 river, 4 beach, 5 sand, 6 rock, 7 snow, 8 grass, 9 shrub, 10 forest, 11 crop, 12 building, 13 road, 14 wetland, 15 tundra, 16 bare, 17 urban; classes v2 add 20–110 (`docs/formats.md`) |
 | `emission` | uint8 | 256 × 256 × 3 | night lights, linear radiance = 16 (v/255)³ |
 
 ## Rendering

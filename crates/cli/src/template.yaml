@@ -49,3 +49,4 @@ imu: {}                        # omit for no IMU
 output:
   file: out/seq.h5             # the sequence: poses, IMU, every camera's modalities
   png_dir: null                # also PNG / NPY files per frame
+  landcover: v2                # land-cover ids written: v2 (classes 0-127) | legacy (0-17) | group (0-10)

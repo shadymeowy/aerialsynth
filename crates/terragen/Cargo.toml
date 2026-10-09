@@ -26,6 +26,8 @@ gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
 
 [dev-dependencies]
 image.workspace = true
+# validates the generated WGSL of the class table (the version wgpu uses)
+naga = { version = "30", features = ["wgsl-in"] }
 
 [[example]]
 name = "gpu_vs_cpu"

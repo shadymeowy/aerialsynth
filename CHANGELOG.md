@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Land-cover classes v2** (`terragen::landcover`, `docs/formats.md`): one table of 82 classes
+  as data (id, name, group, legacy class, display colour, material). Ids 0–17 keep their
+  meaning; the new classes (20–110: reservoirs, sea ice, glaciers, lava, forest types, savanna,
+  rice paddies, vineyards, greenhouses, residential / industrial, motorways, runways, …) are
+  reserved for the coming terrain kits (the generator still emits 0–17). 11 stable groups.
+  - The shaders get the table as WGSL generated from it (`gpu/wgsl/classes.wgsl`, checked by a
+    test): `LC_*` / `LG_*` constants, `lc_group`, `lc_material`, `lc_palette`.
+  - Materials replace the water test in both renderers: glint weight, specular F0, roughness
+    and self-emission per class (water renders as before).
+  - The tile generator's majority vote of a pixel's class counts 128 classes (CPU and GPU).
+  - Sequence files: `output.landcover: v2 | legacy | group` (default `v2`) chooses the values
+    `landcover` datasets hold; new attributes `class_groups`, `class_legacy`, `class_mapping`
+    next to `class_names`.
+  - The viewer's and `terrain tiles --png`'s land-cover palettes come from the table.
 - **Bindings** (`bindings/`): tile access from C and Python. Open a world's tile store (the
   world given like `terrain -c FILE --seed N`) and get a layer of tile z/x/y; missing tiles are
   generated (GPU if available, else CPU) and stored first.

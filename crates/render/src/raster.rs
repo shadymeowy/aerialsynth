@@ -1168,14 +1168,26 @@ impl Renderer {
                 mul += e * (0.2 * sun_state.lights);
             }
         }
-        if self.settings.shading == Shading::Relit && self.settings.water_glint && terragen::landcover::is_water(view.landcover(z, gx, gy)) {
+        // the class's material (landcover::Material; the same table as `lc_material` in
+        // shade.wgsl): self-emission with the lights, and the glint of water (sky reflection
+        // with Schlick Fresnel, sun glint) and other glossy classes
+        let mat = if self.settings.shading == Shading::Relit {
+            terragen::landcover::material(view.landcover(z, gx, gy))
+        } else {
+            terragen::landcover::Material::MATTE
+        };
+        if mat.emissive > 0.0 && sun_state.lights > 1e-3 {
+            mul += DVec3::splat(mat.emissive as f64 * sun_state.lights);
+        }
+        if self.settings.water_glint && mat.glint > 0.0 {
+            let (g, f0) = (mat.glint as f64, mat.specular as f64);
             let sun = atmo.sun_dir;
             let hv = (v + sun).normalize();
             let nh = up.dot(hv).max(0.0);
-            let fres = 0.02 + 0.98 * (1.0 - v.dot(up).max(0.0)).powi(5);
+            let fres = f0 + (1.0 - f0) * (1.0 - v.dot(up).max(0.0)).powi(5);
             let sky_c = atmo.sky((dir_w - up * 2.0 * dir_w.dot(up)).normalize(), up);
-            mul *= 1.0 - fres;
-            add += sky_c * fres + atmo.sun_color() * (shadow * 1.5 * nh.powf(300.0));
+            mul *= 1.0 - g * fres;
+            add += (sky_c * fres + atmo.sun_color() * (shadow * 1.5 * nh.powf(mat.shininess() as f64))) * g;
         }
         // height of the point above the ellipsoid (closed form given its geodetic latitude)
         let p_w = cam_pos - v * range;

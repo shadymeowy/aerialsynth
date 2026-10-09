@@ -340,3 +340,15 @@ fn polar_tile() {
         eprintln!("  {name:10} mean {mean:8.4} off {:7.3}% max {mx:8.2}", bad * 100.0);
     }
 }
+
+/// The generator's shaders (with the generated class table) parse and validate, without a GPU.
+#[test]
+fn shaders_validate() {
+    let (points, tile, drain) = sources();
+    for (name, src) in [("points", points), ("tile", tile), ("drain", drain)] {
+        let m = naga::front::wgsl::parse_str(&src).unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&src)));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+            .validate(&m)
+            .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&src)));
+    }
+}
