@@ -150,6 +150,7 @@ struct Kernels {
     open_apply: wgpu::ComputePipeline,
     finish: wgpu::ComputePipeline,
     l_lat: wgpu::BindGroupLayout,
+    l_globals: wgpu::BindGroupLayout,
     dk: DrainKernels,
 }
 
@@ -211,6 +212,9 @@ pub struct GpuGenerator {
     gpu: Arc<Gpu>,
     k: Kernels,
     globals: wgpu::BindGroup,
+    /// the buffers of `globals` (tests rebind them with other kernel layers)
+    #[allow(dead_code)]
+    globals_bufs: Vec<wgpu::Buffer>,
     cache: Mutex<Cache>,
     lat: Mutex<Lattice>,
 }
@@ -266,6 +270,7 @@ impl GpuGenerator {
         let l_lat = layout(d, "drainage", &[Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw]);
         let l_tile = layout(d, "tile", &[Ro, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw]);
         let globals = bind(d, &l_globals, &[&g_cfg, &g_grads, &g_octs, &g_fbms, &g_pal, &g_biomes, &g_crowns, &g_zones, &g_layers, &g_band_ranges, &g_band_idx]);
+        let globals_bufs = vec![g_cfg, g_grads, g_octs, g_fbms, g_pal, g_biomes, g_crowns, g_zones, g_layers, g_band_ranges, g_band_idx];
         let (src_points, src_tile, src_drain) = sources();
         let t_compile = std::time::Instant::now();
         let cache = PipelineCache::open(&gpu);
@@ -364,6 +369,7 @@ impl GpuGenerator {
             l_points,
             l_tile,
             l_lat,
+            l_globals,
             dk,
         };
         let lat = Lattice {
@@ -379,7 +385,7 @@ impl GpuGenerator {
             cap: LAT_CAP,
             used: 0,
         };
-        Ok(GpuGenerator { world, surface, gpu, k, globals, cache: Mutex::new(Cache::default()), lat: Mutex::new(lat) })
+        Ok(GpuGenerator { world, surface, gpu, k, globals, globals_bufs, cache: Mutex::new(Cache::default()), lat: Mutex::new(lat) })
     }
 
     /// Evaluate points on the GPU (pass A with exact macro fields, see `points.wgsl`): their

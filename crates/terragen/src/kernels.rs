@@ -397,6 +397,10 @@ pub fn compile_params(
             }
         }
     }
+    // the GPU reads the parameters as f32: both backends use those values (a noise wavelength
+    // off by one f32 ulp shifts its phase by ~|p| / λ · 6e-8 cells at ECEF coordinates)
+    k.v = k.v.map(|x| x as f32 as f64);
+    k.col = k.col.map(|c| c.as_vec3().as_dvec3());
     Ok(k)
 }
 
@@ -858,8 +862,10 @@ fn lobes(k: &KParams, i: &KIn) -> KOut {
             if da.abs() > half {
                 continue;
             }
-            // margin: lobate (a few lobes across the span) and noisy
-            let lobe = (da / half * 2.5 + u01k(h, 7) * 6.3).sin() * 0.5 + 0.5 * perlin3(h, i.p / (0.3 * r));
+            // margin: lobate (a few lobes across the span) and noisy (noise in the local frame:
+            // a per-instance wavelength at ECEF coordinates would differ between backends)
+            let ql = (i.q - c) / (0.3 * r);
+            let lobe = (da / half * 2.5 + u01k(h, 7) * 6.3).sin() * 0.5 + 0.5 * perlin3(h, DVec3::new(ql.x, ql.y, 0.5));
             let re = r * (1.0 - v[5] * 0.5 + v[5] * 0.5 * lobe) * (1.0 - (da / half).powi(4));
             let cov = band_cov(d - 0.5 * re, 0.5 * re, i.fw);
             if cov <= 0.0 {

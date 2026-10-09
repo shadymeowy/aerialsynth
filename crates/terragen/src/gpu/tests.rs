@@ -368,3 +368,206 @@ fn wgsl_compiles() {
         }
     }
 }
+
+// ---------------------------------------------------------------- kernel parity (for kits)
+
+const KERNEL_TEST: &str = r#"
+struct KTest {
+    p: vec4<f64>,
+    east: vec4<f32>,
+    north: vec4<f32>,
+    aux: vec4<f32>,
+    q: vec2<f32>,
+    gsd: f32,
+    fw: f32,
+    amount: f32,
+    li: u32,
+    _p0: u32,
+    _p1: u32,
+}
+@group(3) @binding(0) var<storage, read> kt_in: array<KTest>;
+@group(3) @binding(1) var<storage, read_write> kt_out: array<vec4<f32>>;
+
+@compute @workgroup_size(64)
+fn kernel_test(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= arrayLength(&kt_in)) {
+        return;
+    }
+    let t = kt_in[i];
+    var k: KIn;
+    k.q = t.q;
+    k.p = t.p.xyz;
+    k.east = t.east.xyz;
+    k.north = t.north.xyz;
+    k.gsd = t.gsd;
+    k.fw = t.fw;
+    k.amount = t.amount;
+    k.aux = t.aux;
+    let o = kernel_eval(t.li, k);
+    kt_out[2u * i] = vec4<f32>(o.cov, o.dh, o.emit, 0.0);
+    kt_out[2u * i + 1u] = vec4<f32>(o.albedo, 0.0);
+}
+"#;
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Default)]
+struct KTest {
+    p: [f64; 4],
+    east: [f32; 4],
+    north: [f32; 4],
+    aux: [f32; 4],
+    q: [f32; 2],
+    gsd: f32,
+    fw: f32,
+    amount: f32,
+    li: u32,
+    _p: [u32; 6],
+}
+
+/// CPU / GPU parity of kernels: each `(kernel, YAML params)` evaluated at 20 000 random inputs
+/// (positions over 64 feature sizes, pixel sizes from 1/40 to 3 feature sizes: explicit, the
+/// crossfade and the mean; random amounts and `aux`) on both backends. Returns per case the
+/// share of samples whose coverage differs by more than 0.02 or albedo by more than 0.01
+/// (discrete flips at cell edges), and the largest coverage difference. Kits call it from their
+/// tests with their kernels (`None`: no GPU).
+pub(crate) fn kernel_parity(cases: &[(&str, &str)]) -> Option<Vec<(String, f64, f64)>> {
+    gpu()?;
+    let cfg = crate::Config::default();
+    let gen = GpuGenerator::new(cfg).unwrap();
+    let d = &gen.gpu.device;
+    let pal = crate::registry::BiomePal::default_pal();
+    let mut layers = Vec::new();
+    let mut ks = Vec::new();
+    for (name, y) in cases {
+        let spec = crate::kernels::spec(name).unwrap_or_else(|| panic!("unknown kernel {name}"));
+        let m: std::collections::BTreeMap<String, serde_yaml::Value> = serde_yaml::from_str(y).unwrap();
+        let k = crate::kernels::compile_params(spec, &m, mix64(0x7E57 ^ layers.len() as u64), &pal).unwrap();
+        let mean = crate::kernels::calibrate(&k);
+        let li = crate::registry::LayerInst { slot: 1, k, mean, size: crate::kernels::size(&k), win: vec![], cls: 0, clear: 0.0, hmode: 0, mat: 0 };
+        layers.push(crate::registry::gpu::klayer(&li));
+        ks.push((k, mean));
+    }
+    // inputs: near a real place, so `p` and the frame agree
+    let ctx = Ctx::new(41.0f64.to_radians(), 33.0f64.to_radians(), 1.0, &gen.world.ell);
+    let n_per = 20_000;
+    let mut ins = Vec::new();
+    let mut cpu = Vec::new();
+    for (ci, (k, mean)) in ks.iter().enumerate() {
+        let sz = crate::kernels::size(k).max(0.1);
+        for j in 0..n_per {
+            let h = mix64(0xA11 ^ ((ci as u64) << 32) ^ j as u64);
+            let q = glam::DVec2::new((u01k(h, 1) - 0.5) * 64.0 * sz, (u01k(h, 2) - 0.5) * 64.0 * sz);
+            let gsd = sz * (1.0 / 40.0) * (120.0f64).powf(u01k(h, 3));
+            let amount = 0.2 + 0.8 * u01k(h, 4);
+            let aux = match k.kind {
+                crate::kernels::kind::CONTOURS => [q.x * 0.3 + 100.0, 0.05 + 0.6 * u01k(h, 5), 0.0, 0.0],
+                crate::kernels::kind::LINEAR => [(u01k(h, 5) - 0.5) * 4.0 * sz, q.x, sz, 0.0],
+                crate::kernels::kind::WATER => [8.0 * sz * u01k(h, 5), 0.0, 0.0, 0.0],
+                crate::kernels::kind::STAMP => [q.x * 0.25, q.y * 0.25, 6.0 * sz, 4.0 * sz],
+                _ => [u01k(h, 5) * 6.0, 0.0, 0.0, 0.0],
+            };
+            let p = ctx.p + ctx.east * q.x + ctx.north * q.y;
+            let kin = crate::kernels::KIn { q, p, east: ctx.east, north: ctx.north, gsd, fw: gsd * 0.5, amount, aux };
+            cpu.push(crate::kernels::eval(k, mean, &kin));
+            let v4 = |v: DVec3| [v.x as f32, v.y as f32, v.z as f32, 0.0];
+            ins.push(KTest {
+                p: [p.x, p.y, p.z, 0.0],
+                east: v4(ctx.east),
+                north: v4(ctx.north),
+                aux: aux.map(|a| a as f32),
+                q: [q.x as f32, q.y as f32],
+                gsd: gsd as f32,
+                fw: (gsd * 0.5) as f32,
+                amount: amount as f32,
+                li: ci as u32,
+                _p: [0; 6],
+            });
+        }
+    }
+    // the tile module with the test entry; group 0 with the test layers
+    let (_, tile, _) = sources();
+    let module = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("kernel test"), source: wgpu::ShaderSource::Wgsl(format!("{tile}{KERNEL_TEST}").into()) });
+    let l_test = layout(d, "kernel test", &[Bind::Ro, Bind::Rw]);
+    let pl = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("kernel test"),
+        bind_group_layouts: &[Some(&gen.k.l_globals), Some(&gen.k.l_tables), Some(&gen.k.l_tile), Some(&l_test)],
+        immediate_size: 0,
+    });
+    let pipe = d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("kernel test"),
+        layout: Some(&pl),
+        module: &module,
+        entry_point: Some("kernel_test"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    let b_layers = storage(d, "test layers", &layers);
+    let gb = &gen.globals_bufs;
+    let g0 = bind(d, &gen.k.l_globals, &[&gb[0], &gb[1], &gb[2], &gb[3], &gb[4], &gb[5], &gb[6], &gb[7], &b_layers, &gb[9], &gb[10]]);
+    let dummies: Vec<wgpu::Buffer> = (0..34).map(|_| output(d, "-", 256)).collect();
+    let g1 = bind(d, &gen.k.l_tables, &dummies[..14].iter().collect::<Vec<_>>());
+    let g2 = bind(d, &gen.k.l_tile, &dummies[14..34].iter().collect::<Vec<_>>());
+    let b_in = storage(d, "test inputs", &ins);
+    let b_out = output(d, "test outputs", (ins.len() * 32) as u64);
+    let g3 = bind(d, &l_test, &[&b_in, &b_out]);
+    let mut enc = d.create_command_encoder(&Default::default());
+    {
+        let mut cp = enc.begin_compute_pass(&Default::default());
+        cp.set_pipeline(&pipe);
+        cp.set_bind_group(0, &g0, &[]);
+        cp.set_bind_group(1, &g1, &[]);
+        cp.set_bind_group(2, &g2, &[]);
+        cp.set_bind_group(3, &g3, &[]);
+        let groups = (ins.len() as u32).div_ceil(64);
+        cp.dispatch_workgroups(groups.min(65535), groups.div_ceil(65535), 1);
+    }
+    gen.gpu.queue.submit([enc.finish()]);
+    let out: Vec<[f32; 4]> = read_back(&gen.gpu, &b_out, ins.len() * 2).unwrap();
+    let mut res = Vec::new();
+    for (ci, (name, _)) in cases.iter().enumerate() {
+        let (mut bad, mut mx) = (0usize, 0.0f64);
+        for j in 0..n_per {
+            let i = ci * n_per + j;
+            let c = &cpu[i];
+            let (g, ga) = (out[2 * i], out[2 * i + 1]);
+            let dc = (g[0] as f64 - c.cov).abs();
+            let da = (0..3).map(|k| (ga[k] as f64 - c.albedo[k]).abs() * c.cov.min(g[0] as f64)).fold(0.0, f64::max);
+            mx = mx.max(dc);
+            if dc > 0.02 || da > 0.01 {
+                bad += 1;
+            }
+        }
+        res.push((name.to_string(), bad as f64 / n_per as f64, mx));
+    }
+    Some(res)
+}
+
+/// Every core kernel agrees between the backends (a few samples flip at cell edges).
+#[test]
+fn kernels_match_the_cpu() {
+    let cases = [
+        ("scatter", "{cell: 8, density: 0.6, radius: [2, 3], height: [3, 6], shape: dome}"),
+        ("scatter", "{cell: 12, density: 0.5, radius: [3, 5], height: [4, 7], shape: star, colour_var: 0.4}"),
+        ("scatter", "{cell: 30, density: 0.3, radius: [4, 9], height: [5, 9], shape: rect, aspect: 1.6}"),
+        ("rows", "{spacing: 3, along: 2, radius: 0.7, height: 2, angle: 0.4}"),
+        ("rows", "{spacing: 2.5, radius: 0.5, height: 1, direction: aux}"),
+        ("cells", "{cell: 20, fill: 0.5, edge: 1.5, aspect: 1.5}"),
+        ("stripes", "{wavelength: 40, threshold: 0.4, height: 3}"),
+        ("contours", "{step: 3, line: 0.6}"),
+        ("contours", "{step: 2.5, mode: terraces, riser: 0.25}"),
+        ("radial", "{cell: 200, density: 0.5, radius: [40, 80], height: [10, 20], crater: 0.3, arms: 5, arm_amp: 0.3}"),
+        ("crescent", "{cell: 200, density: 0.5, radius: [40, 80], direction: aux}"),
+        ("lobes", "{cell: 400, density: 0.5, radius: [100, 180], channels: 6}"),
+        ("patches", "{scale: 80, fraction: 0.3, octaves: 3}"),
+        ("linear", "{profile: crowned, shoulder: 1.5, marking: 0.2, dash: 6, height: 0.3}"),
+        ("stamp", "{template: blocks, a: 8, b: 4, height: 6}"),
+        ("canopy", "{cell: 30}"),
+        ("water", "{depth_scale: 5, foam_depth: 0.5, foam_width: 0.2}"),
+    ];
+    let Some(res) = kernel_parity(&cases) else { return };
+    for (name, bad, mx) in &res {
+        eprintln!("  {name:10} off {:.3}% max coverage difference {mx:.3}", bad * 100.0);
+        assert!(*bad < 0.005, "{name}: {:.2}% of the samples differ", bad * 100.0);
+    }
+}

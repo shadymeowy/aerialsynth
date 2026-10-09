@@ -396,7 +396,8 @@ fn k_lobes(k: KP, i: KIn) -> KOut {
             if (abs(da) > half) {
                 continue;
             }
-            let lobe = sin(da / half * 2.5 + u01k(h, 7lu) * 6.3) * 0.5 + 0.5 * perlin3(h, i.p * (1.0lf / f64(0.3 * r)));
+            let ql = rel / (0.3 * r);
+            let lobe = sin(da / half * 2.5 + u01k(h, 7lu) * 6.3) * 0.5 + 0.5 * perlin3(h, vec3<f64>(f64(ql.x), f64(ql.y), 0.5lf));
             let re = r * (1.0 - k.v[5] * 0.5 + k.v[5] * 0.5 * lobe) * (1.0 - pow(da / half, 4.0));
             let cov = kband_cov(d - 0.5 * re, 0.5 * re, i.fw);
             if (cov <= 0.0) {
@@ -421,15 +422,16 @@ fn patch_u(seed: u64, p: vec3<f64>, scale: f32, oct: f32, rough: f32, gsd: f32) 
     var n = 0.0;
     var a = 1.0;
     var norm = 0.0;
-    var lam = scale;
+    // (wavelengths in f64: see `kernels::compile_params`)
+    var lam = f64(scale);
     for (var o = 0u; o < 3u; o++) {
         if (f32(o) >= oct) {
             break;
         }
-        n += a * perlin3(seed ^ (0x9A7lu + u64(o)), p * (1.0lf / f64(lam))) * band(lam, gsd);
+        n += a * perlin3(seed ^ (0x9A7lu + u64(o)), p * (1.0lf / lam)) * band(f32(lam), gsd);
         norm += a * a;
         a *= rough;
-        lam *= 0.43;
+        lam *= 0.43lf;
     }
     let s = n / (0.27 * sqrt(norm));
     return 1.0 / (1.0 + exp(-1.7 * s));
@@ -443,7 +445,7 @@ fn k_patches(k: KP, i: KIn) -> KOut {
     if (cov <= 0.0) {
         return kout_none();
     }
-    let t = 0.5 + 0.5 * perlin3(k.seed ^ 0x77lu, i.p * (1.0lf / f64(0.37 * k.v[0])));
+    let t = 0.5 + 0.5 * perlin3(k.seed ^ 0x77lu, i.p * (1.0lf / (0.37lf * f64(k.v[0]))));
     var o = kout_none();
     o.cov = cov;
     o.albedo = (k.col[0] + (k.col[1] - k.col[0]) * t) * (1.0 + k.v[5] * (u - 0.5));
