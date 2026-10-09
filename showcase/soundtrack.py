@@ -3,7 +3,6 @@
 flight itself, mixed and muxed into the video.
 
     ~/.venv/bin/python showcase/soundtrack.py      # → out/airliner/soundtrack.wav, airliner_sound.mp4
-    ~/.venv/bin/python showcase/soundtrack.py --music-only out/showcase/showcase.mp4   # the score alone → showcase_music.mp4
 
 Music (generated here, no samples): D dorian at 76 bpm, slow pads, a plucked arpeggio with a
 ping-pong echo, sub bass and sparse bells in a long reverb; sections follow the video (globe,
@@ -330,38 +329,7 @@ def callouts(total, off, tl, route):
     return buf
 
 
-def music_only(video_in, out):
-    """The score alone under an existing video (e.g. the showcase): the pulse enters after the
-    title card, fuller through the middle, settling into the outro; muxed without re-encoding."""
-    total = duration(video_in)
-    cues = {"globe_end": 5.0, "takeoff": 5.5, "cruise": 25.0, "descent": total * 0.72, "final": total - 40.0,
-            "landing": total - 20.0, "outro": total - 7.0}
-    mus = music(total, cues)
-    n = mus.shape[1]
-    fade = np.ones(n)
-    fade[: int(1.5 * SR)] = np.linspace(0, 1, int(1.5 * SR))
-    fade[-int(4.0 * SR):] = np.linspace(1, 0, int(4.0 * SR)) ** 1.5
-    mus = mus / (np.sqrt(np.mean(mus ** 2)) + 1e-12) * 0.12
-    mix = np.tanh(mus * fade * 1.4) / 1.4
-    mix *= 0.89 / np.max(np.abs(mix))
-    wav = os.path.splitext(out)[0] + ".wav"
-    import wave
-    with wave.open(wav, "wb") as w:
-        w.setnchannels(2)
-        w.setsampwidth(2)
-        w.setframerate(SR)
-        w.writeframes((mix.T * 32767).astype("<i2").tobytes())
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", video_in, "-i", wav, "-map", "0:v", "-map", "1:a", "-c:v", "copy",
-                    "-c:a", "aac", "-b:a", "256k", "-shortest", "-movflags", "+faststart", out], check=True)
-    print(f"wrote {out} ({total:.1f} s)")
-
-
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] == "--music-only":
-        # soundtrack.py --music-only VIDEO [OUT]: the score alone under an existing video
-        src = sys.argv[2]
-        music_only(src, sys.argv[3] if len(sys.argv) > 3 else os.path.splitext(src)[0] + "_music.mp4")
-        return
     story_path = sys.argv[1] if len(sys.argv) > 1 else ma.STORY
     story = yaml.safe_load(open(story_path))
     ma.STORY = story_path

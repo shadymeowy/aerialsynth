@@ -5,7 +5,7 @@ A promotional video of aerialsynth, fully reproducible from this folder:
 ```
 cargo build --release
 python showcase/make_showcase.py          # renders every shot, writes out/showcase/showcase.mp4
-~/.venv/bin/python showcase/soundtrack.py --music-only out/showcase/showcase.mp4   # + music → showcase_music.mp4
+~/.venv/bin/python showcase/showcase_score.py   # + its score (needs scipy) → out/showcase/showcase_music.mp4
 ```
 
 | file | what |
@@ -13,6 +13,7 @@ python showcase/make_showcase.py          # renders every shot, writes out/showc
 | `base.yaml` | base scenario of every shot: one world (seed 1), one shared tile store, 1920×1080 camera, sensor look |
 | `storyboard.yaml` | the shots: caption (bottom left), description (bottom right), duration, layout and the scenario overrides (deep-merged onto `base.yaml`) |
 | `make_showcase.py` | renders the shots with `terrain run`, composes the video (captions, cross-fades, title collage, 2×2 panels, tile map, outro) and pipes it into ffmpeg (H.264) |
+| `showcase_score.py` | the video's score, synthesised here (no samples): electronic, 120 bpm in A minor (kick, hats, clap, a rolling bass pumped by the kick, a pluck arpeggio, pads, bells, a lead motif) on a beat grid through the cuts; its sections follow the storyboard (quiet under the title and globe, the groove from the first landscape, a sunset drop, a drum-less night section, the peak through the steep turns, settling into the outro) |
 | `fonts/` | Noto Sans Light / Medium (SIL Open Font License, `fonts/OFL.txt`) |
 
 Everything is rendered from generated tiles — there is no imagery or elevation data anywhere.
