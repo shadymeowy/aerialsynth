@@ -32,6 +32,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "geodesy",
+ "rayon",
  "render",
  "serde_yaml",
  "terragen",

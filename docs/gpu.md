@@ -144,3 +144,19 @@ Low-zoom tiles are the most work per tile on both backends, for two reasons:
   switch on over thousands of kilometres.
 * **Lake levels:** every lake's level takes 11 terrain evaluations with the finest drainage
   network around it.
+
+## Troubleshooting
+
+- **Several GPUs:** `AERIALSYNTH_GPU` picks the one to use, for the CLI, the viewer and the C /
+  Python bindings: an index, a PCI bus id (`0000:83:00.0`) or part of the adapter name
+  (`AERIALSYNTH_GPU=6000`). Without it the first high-performance adapter is used. A value
+  that matches no single GPU is an error that lists the adapters (`AERIALSYNTH_GPU=list`).
+
+- **No suitable GPU:** with `backend: auto` (the default) generation and rendering fall back to
+  the CPU; `backend: gpu` makes a missing GPU an error instead. Tile generation
+  needs 64-bit float and integer shaders and 256 MiB storage buffers; adapters without them
+  (many integrated GPUs, software Vulkan, Metal on macOS) use the CPU generator, while
+  rendering may still run on the GPU.
+- **A GPU process hangs at start over SSH:** with X forwarding (`DISPLAY` set to a remote
+  display), some NVIDIA Vulkan drivers block while creating the device. Run headless work with
+  `env -u DISPLAY terrain …` (the same for Python and C programs).

@@ -9,6 +9,10 @@ returned::
     with aerialsynth.World("out/world.h5") as w:          # created if missing
         rgb = w.tile(12, 2200, 1500, "rgb")              # uint8 (256, 256, 3)
         h = w.tile(12, 2200, 1500, "elevation")          # float32 (256, 256), m above WGS84
+        block = w.tiles([(12, x, y) for y in range(1500, 1504) for x in range(2200, 2204)])
+                                                          # uint8 (16, 256, 256, 3), one call
+
+Decoded tiles are kept in an in-memory cache (``cache_mb``, default 256 MiB) of the world.
 
 A :class:`Camera` renders images of the world from a pose, with the renderer of ``terrain run``
 (the tiles in view are generated into the store when missing)::
@@ -42,6 +46,9 @@ __all__ = [
     "TILE_SIZE",
     "MAX_ZOOM",
     "DEFAULT_MAX_ZOOM",
+    "DEFAULT_CACHE_MB",
+    "MAX_PREFETCH_TILES",
+    "CacheInfo",
     "MAX_IMAGE_SIZE",
     "SKY",
     "__version__",
@@ -54,6 +61,10 @@ TILE_SIZE: int = _native.TILE_SIZE
 MAX_ZOOM: int = _native.MAX_ZOOM
 #: Zoom limit of a world whose config sets no ``tiles.max_zoom``.
 DEFAULT_MAX_ZOOM: int = _native.DEFAULT_MAX_ZOOM
+#: Default size of a world's tile cache in MiB.
+DEFAULT_CACHE_MB: int = _native.DEFAULT_CACHE_MB
+#: Most tiles :meth:`World.prefetch` takes (its box over its zooms).
+MAX_PREFETCH_TILES: int = _native.MAX_PREFETCH_TILES
 
 #: Largest image width or height of a camera.
 MAX_IMAGE_SIZE: int = _native.MAX_IMAGE_SIZE
@@ -88,6 +99,21 @@ def _layer(name: str, dtype: str, channels: int, size: int, description: str) ->
 LAYERS: dict[str, LayerInfo] = {t[0]: _layer(*t) for t in _native.layers()}
 
 
+class CacheInfo(NamedTuple):
+    """Usage of a world's tile cache (:meth:`World.cache_info`)."""
+
+    #: size limit in MiB (0: off)
+    size_mb: int
+    #: bytes held
+    bytes: int
+    #: layers of tiles held
+    entries: int
+    #: lookups that found the layer since the world was opened
+    hits: int
+    #: lookups that did not
+    misses: int
+
+
 class World:
     """The tile store ``tiles_file`` of one world, generating missing tiles on demand.
 
@@ -96,6 +122,8 @@ class World:
         ``tiles.max_zoom`` the zoom limit, default 18; other sections are ignored) or a bare world
         config; ``None`` is the default world. Like ``terrain -c``.
     :param seed: overrides the config's seed (like ``terrain --seed``).
+    :param cache_mb: size of the in-memory cache of decoded tiles in MiB (0: no cache; see
+        :attr:`cache_mb`).
     :raises RuntimeError: the store holds another world (or generator version), or the config is
         invalid.
     :raises OSError: the config file cannot be read.
@@ -105,12 +133,19 @@ class World:
     by one ``World`` per process at a time (a second one raises ``RuntimeError``).
     """
 
-    def __init__(self, tiles_file: PathLike, config: Optional[PathLike] = None, seed: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        tiles_file: PathLike,
+        config: Optional[PathLike] = None,
+        seed: Optional[int] = None,
+        cache_mb: int = DEFAULT_CACHE_MB,
+    ) -> None:
         if seed is not None:
             seed = int(seed)
             if not 0 <= seed < 2**64:
                 raise ValueError(f"seed {seed} is out of range 0 .. 2**64 - 1")
-        self._w = _native.World(os.fspath(tiles_file), None if config is None else os.fspath(config), seed)
+        cache_mb = _index(cache_mb, "cache_mb")
+        self._w = _native.World(os.fspath(tiles_file), None if config is None else os.fspath(config), seed, cache_mb)
 
     def tile(self, z: int, x: int, y: int, layer: LayerName = "rgb") -> np.ndarray:
         """A layer of tile ``z/x/y`` (generated and stored if missing).
@@ -126,6 +161,72 @@ class World:
             raise ValueError(f"unknown layer {layer!r} (layers: {', '.join(LAYERS)})")
         buf = self._w.tile(int(z), int(x), int(y), layer)
         return np.frombuffer(buf, dtype=info.dtype).reshape(info.shape)
+
+    def tiles(self, coords, layer: LayerName = "rgb") -> np.ndarray:
+        """A layer of many tiles at once: ``coords`` is a sequence (or an array) of ``(z, x, y)``,
+        shape ``(n, 3)``; the result has shape ``(n,) + LAYERS[layer].shape``, tile ``i`` at
+        index ``i``.
+
+        Faster than :meth:`tile` in a loop: every coordinate is checked before any work (one out
+        of range raises ``ValueError`` and nothing is read or generated), cached tiles are copied,
+        stored ones are read and decompressed in parallel, and missing ones are generated
+        together (in batches of up to 64 tiles: on the GPU, many tiles per dispatch) and stored.
+        A tile listed several times is read or generated once. The GIL is released meanwhile.
+
+        :raises ValueError: bad coordinates or layer name, or the world is closed.
+        :raises RuntimeError: reading, generating or storing a tile failed (the tiles generated
+            before the failure are stored).
+        """
+        info = LAYERS.get(layer)
+        if info is None:
+            raise ValueError(f"unknown layer {layer!r} (layers: {', '.join(LAYERS)})")
+        c = np.asarray(coords)
+        if c.size == 0:
+            c = c.reshape(0, 3)
+        if c.ndim != 2 or c.shape[1] != 3:
+            raise ValueError(f"coords: (z, x, y) triples expected (shape (n, 3)), got shape {c.shape}")
+        if c.dtype.kind not in "iu" and c.size:
+            raise TypeError(f"coords must be integers, not {c.dtype}")
+        if c.size and (c.min() < 0 or c.max() >= 2**32):
+            raise ValueError("coords: z, x and y must be in 0 .. 2**32 - 1")
+        zxy = np.ascontiguousarray(c, dtype="<u4").tobytes()
+        buf = self._w.tiles(zxy, layer)
+        return np.frombuffer(buf, dtype=info.dtype).reshape((len(c),) + info.shape)
+
+    def prefetch(self, bbox: tuple, zooms: Union[int, tuple]) -> int:
+        """Generate and store the missing tiles of a box, without returning them.
+
+        :param bbox: ``(lat_min, lon_min, lat_max, lon_max)`` in degrees (``lon_min > lon_max``
+            is a box across the antimeridian); the tiles intersecting it are taken.
+        :param zooms: a zoom or a ``(z_min, z_max)`` range (inclusive), at most :attr:`max_zoom`.
+        :returns: the number of tiles generated (the stored ones are skipped).
+        :raises ValueError: a bad box or zoom range, or more than :data:`MAX_PREFETCH_TILES`
+            tiles over those zooms (stored ones included); nothing is generated then.
+        :raises RuntimeError: generating or storing failed (the batches done are stored).
+
+        Tiles are generated in batches of up to 64 (as :meth:`tiles`); the GIL is released, but
+        the call cannot be interrupted.
+        """
+        lat_min, lon_min, lat_max, lon_max = (float(v) for v in bbox)
+        z0, z1 = (zooms, zooms) if not isinstance(zooms, (tuple, list)) else zooms
+        return self._w.prefetch(lat_min, lon_min, lat_max, lon_max, _index(z0, "z_min"), _index(z1, "z_max"))
+
+    @property
+    def cache_mb(self) -> int:
+        """Size of the in-memory cache of decoded tiles in MiB (default 256): :meth:`tile` and
+        :meth:`tiles` copy cached tiles instead of reading and decompressing them from the store.
+        Tiles read or generated are cached (a generated tile with all its layers, ~1.1 MiB; an
+        rgb layer is 192 KiB), the least recently used dropped beyond the size. Settable; 0 turns
+        the cache off and frees it."""
+        return self.cache_info().size_mb
+
+    @cache_mb.setter
+    def cache_mb(self, mb: int) -> None:
+        self._w.set_cache_mb(_index(mb, "cache_mb"))
+
+    def cache_info(self) -> CacheInfo:
+        """Usage of the tile cache."""
+        return CacheInfo(*self._w.cache_info())
 
     def camera(
         self,

@@ -13,6 +13,9 @@ import aerialsynth
 with aerialsynth.World("out/world.h5", config=None, seed=None) as w:   # created if missing
     rgb = w.tile(12, 2200, 1500, "rgb")          # uint8 (256, 256, 3)
     h = w.tile(12, 2200, 1500, "elevation")      # float32 (256, 256), m above the WGS84 ellipsoid
+    block = w.tiles([(12, x, y) for y in range(1500, 1508) for x in range(2200, 2208)], "rgb")
+                                                 # uint8 (64, 256, 256, 3): many tiles in one call
+    w.prefetch((45.0, 10.0, 45.2, 10.3), (10, 14))  # generate and store a box's missing tiles
 
 aerialsynth.LAYERS["normal"]   # LayerInfo(name='normal', dtype=dtype('int8'), channels=3, shape=(256, 256, 3), ...)
 ```
@@ -25,10 +28,26 @@ aerialsynth.LAYERS["normal"]   # LayerInfo(name='normal', dtype=dtype('int8'), c
   `RuntimeError`, naming the settings that differ. Give each world its own tiles file.
 - **Tiles:** `z` at most `World.max_zoom`, `x, y < 2**z`; row 0 is the north edge. The arrays are
   writable and own their memory (no copy is made from the extension's buffer).
+- **Many tiles:** `w.tiles(coords, layer="rgb")` takes `(z, x, y)` triples (a list or an
+  `(n, 3)` integer array) and returns one array of shape `(n,) + LAYERS[layer].shape`. It is
+  much faster than `tile` in a loop: all coordinates are checked first (one bad one raises
+  `ValueError` and nothing is made), stored tiles are decompressed in parallel, missing ones are
+  generated together (batches of up to 64: 2–3× the tiles per second of single calls, see
+  [the timings](../README.md#performance)) and stored, and repeated tiles are made once. The GIL is released meanwhile.
+- **Prefetch:** `w.prefetch((lat_min, lon_min, lat_max, lon_max), zooms)` (`zooms` a zoom or a
+  `(z_min, z_max)` range) generates and stores the missing tiles of a box without returning them,
+  and returns how many it made. Boxes over `MAX_PREFETCH_TILES` (10⁶) tiles are refused before
+  any work. It cannot be interrupted (Ctrl-C waits for it).
+- **Cache:** a `World` keeps the decoded tiles it reads or generates in memory, the least
+  recently used dropped beyond `cache_mb` (default 256 MiB; a generated tile with all its layers
+  is ~1.1 MiB, an `rgb` layer 192 KiB). A cached tile is a copy (~0.02 ms) instead of a store
+  read and decompression (~0.8 ms for `rgb`). `World(..., cache_mb=0)` or `w.cache_mb = 0` turns
+  it off; `w.cache_info()` gives its size, bytes and entries held, hits and misses.
 - **Errors:** `ValueError` for bad coordinates, layer names, seeds or a closed world;
   `FileNotFoundError` / `OSError` for an unreadable config; `RuntimeError` for a store of another
   world, an invalid config, or a failed read / generation.
-- **Threads:** a `World` can be used from several threads; generation releases the GIL. A tiles
+- **Threads:** a `World` can be used from several threads; reading and generation release the
+  GIL. A tiles
   file can be open by only one `World` per process at a time (a second one raises
   `RuntimeError`): share it, or close the first.
 

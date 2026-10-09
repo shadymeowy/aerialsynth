@@ -46,8 +46,24 @@ pixel-centre registered, channels last, little-endian:
 A generated tile is stored with all its layers, so the other layers of it are read, not
 generated. Tiles are deterministic: the same world gives the same bytes.
 
+**Many tiles at once** (`as_tiles` / `World.tiles`): every coordinate is checked before any
+work (one out of range fails the call and nothing is read or generated); cached tiles are
+copied, stored ones are read and decompressed in parallel, and the missing ones are generated
+together, in batches of up to 64 tiles (the GPU generator dispatches many tiles at once; ~70 MB
+per batch), each batch stored with one write. A tile listed several times is made once.
+**Prefetch** (`as_prefetch` / `World.prefetch`) generates and stores the missing tiles of a
+latitude / longitude box over a zoom range without returning them (at most 10⁶ tiles, checked
+before any work).
+
+**Cache:** a handle keeps the decoded tiles it reads or generates in memory: one entry per layer
+of a tile (as returned), the least recently used dropped beyond the cache size (default 256 MiB;
+a generated tile goes in with all its layers, ~1.1 MiB; an `rgb` layer is 192 KiB). A cached
+tile is copied instead of read and decompressed. One lock guards the index and is held only to
+look up, insert or evict (no copying under it). Size 0 turns the cache off (`as_set_cache_mb` /
+`World(..., cache_mb=)`, `World.cache_mb`). Prefetched tiles are not cached.
+
 **Threads:** a handle (`as_world *` / `aerialsynth.World`) may be used by several threads at
-once. Store reads run in parallel, writes are serialized; two threads asking for the same missing
+once. Store reads run in parallel, writes are serialized, the cache is shared; two threads asking for the same missing
 tile may both generate it (identical result, stored once). Close a handle only when no other
 thread uses it. A tiles file can be open by only one handle per process (a second open fails
 while the first is alive): share the handle.
@@ -149,6 +165,10 @@ size_t n = as_layer_size(AS_LAYER_ELEVATION);          /* 256 * 256 * 4 */
 float *h = malloc(n);
 int rc = as_tile(w, 12, 2200, 1500, AS_LAYER_ELEVATION, h, n);
 if (rc != AS_OK) fprintf(stderr, "%d: %s\n", rc, as_last_error());
+
+uint32_t zxy[] = {12, 2200, 1500,  12, 2201, 1500,  12, 2200, 1501,  12, 2201, 1501};
+float *block = malloc(4 * n);                          /* tile i at block + i * n bytes */
+rc = as_tiles(w, zxy, 4, AS_LAYER_ELEVATION, block, 4 * n);
 as_close(w);
 ```
 
@@ -156,6 +176,9 @@ as_close(w);
 |---|---|
 | `as_world *as_open(const char *tiles_file, const char *config_yaml, int64_t seed)` | open / create the store; NULL on error |
 | `int as_tile(const as_world *w, uint32_t z, uint32_t x, uint32_t y, as_layer layer, void *out, size_t out_len)` | write a layer of a tile (generated and stored if missing); `AS_OK` or `AS_ERR_*` |
+| `int as_tiles(const as_world *w, const uint32_t *zxy, size_t n, as_layer layer, void *out, size_t out_len)` | a layer of `n` tiles (`zxy`: n × (z, x, y)), tile `i` at `out + i * as_layer_size(layer)` |
+| `int as_prefetch(const as_world *w, double lat_min, double lon_min, double lat_max, double lon_max, uint32_t z_min, uint32_t z_max, size_t *generated)` | generate and store the missing tiles of a box (at most `AS_MAX_PREFETCH_TILES`); the count into `*generated` (may be NULL) |
+| `int as_set_cache_mb(const as_world *w, size_t mb)` | size of the decoded-tile cache in MiB (default `AS_DEFAULT_CACHE_MB` = 256; 0 = off) |
 | `void as_close(as_world *w)` | close (NULL is ignored) |
 | `size_t as_layer_size(as_layer layer)` | bytes of a tile of `layer` (0: unknown layer) |
 | `int as_layer_describe(as_layer layer, as_layer_info *info)` | name, dtype, channels, element size, size |
@@ -200,6 +223,31 @@ aerialsynth-capi --release --crate-type staticlib -- --print native-static-libs`
 `aerialsynth.dll.lib`) and `aerialsynth.lib`, on macOS `libaerialsynth.dylib` and
 `libaerialsynth.a`.
 
+## Performance
+
+Measured with `cargo run --release -p aerialsynth-core --example tile_bench -- DIR 64` (CPU only:
+`VK_DRIVER_FILES=/nonexistent.json VK_ICD_FILENAMES=/nonexistent.json`, 32 tiles) on an RTX 2080
+Ti and a Xeon W-2125 (8 threads); the default world at zoom 12; milliseconds per tile. The
+machine was shared with other jobs (about 3 of the 8 threads busy), so the numbers are rough;
+compare within a column. "Store" is the first read after opening (decompression from the HDF5
+store; the OS file cache is warm), "cached" a second read.
+
+| ms per tile | GPU | CPU only |
+|---|---|---|
+| generate missing tiles, one `as_tile` / `tile` call each | 85 | 395 |
+| generate missing tiles, one `as_tiles` / `tiles` call | **32** | **188** |
+| rgb from the store, one call each | 0.87–1.05 | 0.83 |
+| rgb from the store, one batch call | **0.41** | **0.26** |
+| rgb cached, one call each / one batch call | **0.026 / 0.016** | **0.019 / 0.011** |
+| elevation: store one call each / store batch / cached | 0.79 / **0.35** / **0.036** | 0.65 / **0.18** / **0.032** |
+| landcover: store one call each / store batch / cached | 0.084 / **0.043** / **0.008** | 0.12 / **0.04** / **0.005** |
+
+Before the cache and the batch calls, every read cost the "one call each, from the store" time
+(rgb 0.85 ms, elevation 0.7 ms, landcover 0.08 ms on a quiet machine) and a missing tile was
+generated alone (48 ms per tile on the GPU, ~250 ms on the CPU on a quiet machine; `terrain
+tiles` makes about 60 tiles/s on the GPU). Batch decompression is limited by the HDF5 reads,
+which are serialized.
+
 ## Python
 
 See [`python/README.md`](python/README.md).
@@ -210,6 +258,7 @@ import aerialsynth
 with aerialsynth.World("out/world.h5", config=None, seed=None) as w:   # created if missing
     rgb = w.tile(12, 2200, 1500, "rgb")          # np.uint8 (256, 256, 3)
     h = w.tile(12, 2200, 1500, "elevation")      # np.float32 (256, 256)
+    hs = w.tiles([(12, 2200, 1500), (12, 2201, 1500)], "elevation")  # np.float32 (2, 256, 256)
     cam = w.camera(width=640, height=480, hfov=90)               # or w.camera(config="scenario.yaml", camera="/cam0")
     f = cam.render(lat=45.0, lon=10.0, height=w.surface_height(45.0, 10.0) + 300,
                    roll=0, pitch=-30, yaw=90, time="2026-06-21T07:30:00Z", depth=True)

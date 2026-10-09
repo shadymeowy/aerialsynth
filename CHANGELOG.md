@@ -22,6 +22,20 @@
   - Python: `World.camera(...)`, `Camera.render(lat, lon, height, roll, pitch, yaw, time=...,
     rgb=, depth=, landcover=)` returning a `Frame`, `World.surface_height(lat, lon)`; rendering
     releases the GIL.
+- **Faster tile access in the bindings:**
+  - An in-memory LRU cache of decoded tiles per world (default 256 MiB; tiles read or generated
+    go into it): a cached tile is a copy (~0.02 ms) instead of a read and decompression
+    (~0.8 ms for rgb). C `as_set_cache_mb`, Python `World(..., cache_mb=256)` /
+    `World.cache_mb` / `World.cache_info()`; 0 turns it off.
+  - Many tiles in one call: C `as_tiles(w, zxy, n, layer, out, out_len)`, Python
+    `World.tiles(coords, layer) -> (n, 256, 256[, c])` array (GIL released). Coordinates are all
+    checked first; stored tiles are decompressed in parallel (2–3× faster), missing ones
+    generated together in batches of up to 64 and stored with one write per batch (2–3× the
+    tiles per second of one call per tile); repeated tiles are made once.
+  - Prefetch: C `as_prefetch`, Python `World.prefetch(bbox, zooms)` generate and store the
+    missing tiles of a box over a zoom range (at most 10⁶ tiles).
+  - `examples/tile.c` also reads a 2 × 2 block with `as_tiles`; `tile_bench` example of
+    `aerialsynth-core` (timings in `bindings/README.md`).
 - `render`: `LightingConfig::sun_at_utc`, the lighting at a UTC instant whatever the mode.
 - **Platforms:** CI builds and tests on Linux, macOS (Apple silicon and Intel) and Windows
   (MSVC), including `cargo install --path crates/cli`. On Windows the C runtime is linked

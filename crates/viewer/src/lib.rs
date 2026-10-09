@@ -129,6 +129,12 @@ pub fn run(scn: Scenario, store: Arc<TileStore>, gen: Arc<Generator>, mut opts: 
     eprintln!("view: store {} ({} tiles), seed {}, camera {}", store.path().display(), store.len(), gen.config().seed, spec.path);
     let mut setup = egui_wgpu::WgpuSetupCreateNew::without_display_handle();
     // texture arrays of hundreds of tiles: the adapter's own limits, not the portable defaults
+    // AERIALSYNTH_GPU chooses the GPU (as for headless work); else eframe's default choice
+    if std::env::var(terragen::gpu::device::GPU_ENV).is_ok_and(|s| !s.trim().is_empty()) {
+        setup.native_adapter_selector = Some(Arc::new(|adapters: &[wgpu::Adapter], _surface: Option<&wgpu::Surface<'_>>| {
+            terragen::gpu::device::pick_adapter(adapters).map_err(|e| e.to_string())?.ok_or_else(|| "no GPU selected".to_string())
+        }));
+    }
     setup.device_descriptor =
         Arc::new(|adapter: &wgpu::Adapter| wgpu::DeviceDescriptor { label: Some("viewer"), required_limits: adapter.limits(), ..Default::default() });
     let options = eframe::NativeOptions {
