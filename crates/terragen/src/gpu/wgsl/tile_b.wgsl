@@ -353,43 +353,36 @@ fn pass_b(@builtin(global_invocation_id) gid: vec3<u32>) {
     var acc_g = 0.0;
     var counts: array<u32, 32>;
     var taken = ss * ss;
-    if ((cfg.flags & CF_ADAPTIVE) != 0u) {
-        // the diagonal pair first; the other two only where it disagrees
-        let s0 = sample_b(ti, i, j, 0u, 0u, slope, gsd, &pf);
-        let s1 = sample_b(ti, i, j, 1u, 1u, slope, gsd, &pf);
-        let da = abs(s0.s.albedo - s1.s.albedo);
-        let de = abs(s0.s.emission - s1.s.emission);
-        let similar = s0.s.cls == s1.s.cls && max3(da) < 0.012 && max3(de) < 0.02 && abs(s0.s.height - s1.s.height) < 0.15 && abs(s0.s.lit - s1.s.lit) < 0.05;
-        acc_a += s0.s.albedo + s1.s.albedo;
-        acc_e += s0.s.emission + s1.s.emission;
-        acc_h += s0.s.height + s1.s.height;
-        acc_l += s0.s.lit + s1.s.lit;
-        acc_g += s0.ground + s1.ground;
-        counts[min(s0.s.cls, 31u)] += 1u;
-        counts[min(s1.s.cls, 31u)] += 1u;
-        if (similar) {
-            taken = 2u;
-        } else {
-            let s2 = sample_b(ti, i, j, 1u, 0u, slope, gsd, &pf);
-            let s3 = sample_b(ti, i, j, 0u, 1u, slope, gsd, &pf);
-            acc_a += s2.s.albedo + s3.s.albedo;
-            acc_e += s2.s.emission + s3.s.emission;
-            acc_h += s2.s.height + s3.s.height;
-            acc_l += s2.s.lit + s3.s.lit;
-            acc_g += s2.ground + s3.ground;
-            counts[min(s2.s.cls, 31u)] += 1u;
-            counts[min(s3.s.cls, 31u)] += 1u;
+    // One call site of `sample_b` (the driver inlines the whole surface model at every call:
+    // five of them took minutes to compile). Adaptive (ss = 2): the diagonal pair first, the
+    // other two only where it disagrees.
+    let adaptive = (cfg.flags & CF_ADAPTIVE) != 0u;
+    var first_s: Surface;
+    for (var k = 0u; k < ss * ss; k++) {
+        var sx = k % ss;
+        var sy = k / ss;
+        if (adaptive) {
+            // (0, 0), (1, 1), (1, 0), (0, 1)
+            sx = select(k & 1u, 1u - (k & 1u), k >= 2u);
+            sy = k & 1u;
         }
-    } else {
-        for (var sy = 0u; sy < ss; sy++) {
-            for (var sx = 0u; sx < ss; sx++) {
-                let s = sample_b(ti, i, j, sx, sy, slope, gsd, &pf);
-                acc_a += s.s.albedo;
-                acc_e += s.s.emission;
-                acc_h += s.s.height;
-                acc_l += s.s.lit;
-                acc_g += s.ground;
-                counts[min(s.s.cls, 31u)] += 1u;
+        let s = sample_b(ti, i, j, sx, sy, slope, gsd, &pf);
+        acc_a += s.s.albedo;
+        acc_e += s.s.emission;
+        acc_h += s.s.height;
+        acc_l += s.s.lit;
+        acc_g += s.ground;
+        counts[min(s.s.cls, 31u)] += 1u;
+        if (adaptive && k == 0u) {
+            first_s = s.s;
+        }
+        if (adaptive && k == 1u) {
+            let da = abs(first_s.albedo - s.s.albedo);
+            let de = abs(first_s.emission - s.s.emission);
+            let similar = first_s.cls == s.s.cls && max3(da) < 0.012 && max3(de) < 0.02 && abs(first_s.height - s.s.height) < 0.15 && abs(first_s.lit - s.s.lit) < 0.05;
+            if (similar) {
+                taken = 2u;
+                break;
             }
         }
     }
