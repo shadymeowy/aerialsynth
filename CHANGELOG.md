@@ -9,6 +9,20 @@
     (`as_open`, `as_tile`, `as_close`, layer descriptions, per-thread error messages).
   - Python: the `aerialsynth` package (maturin, one `cp310-abi3` wheel for CPython ≥ 3.10)
     returning numpy arrays; `World(tiles_file, config, seed).tile(z, x, y, layer)`.
+- **Rendering in the bindings:** camera images of a world from a pose with the renderer of
+  `terrain run` (CPU or GPU, `auto` by default), tiles in view generated into the store on
+  demand. A camera is a pinhole (size, horizontal field of view, `forward` or `nadir` mount) or
+  a camera of a scenario YAML (its intrinsics, mount, sensor and render settings). Pose: latitude,
+  longitude, height above WGS84 and body roll / pitch / yaw (NED); time: UTC (sun, moon, stars).
+  Outputs: RGB after the sensor model (deterministic noise), depth (z or range, inf = sky) and
+  land cover (255 = sky), each only when asked for. Plus the surface height at a point.
+  - C: `as_camera_pinhole`, `as_camera_open`, `as_render`, `as_camera_size`,
+    `as_camera_backend`, `as_camera_close`, `as_surface_height`; `examples/render.c` writes a
+    PPM.
+  - Python: `World.camera(...)`, `Camera.render(lat, lon, height, roll, pitch, yaw, time=...,
+    rgb=, depth=, landcover=)` returning a `Frame`, `World.surface_height(lat, lon)`; rendering
+    releases the GIL.
+- `render`: `LightingConfig::sun_at_utc`, the lighting at a UTC instant whatever the mode.
 
 ## 0.1.0 — 2026-10-09
 

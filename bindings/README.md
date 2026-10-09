@@ -1,9 +1,11 @@
-# Bindings: tile access from C and Python
+# Bindings: tiles and camera images from C and Python
 
-One thing only: **a layer of tile z/x/y of a world**. A world's tiles live in its HDF5 tile store
-([`docs/formats.md`](../docs/formats.md)); a tile that is not stored yet is generated (on the GPU
-when it has 64-bit shaders, else on the CPU, see [`docs/gpu.md`](../docs/gpu.md)), written to
-the store and returned. Rendering, flights and sensors are not exposed.
+Two things: **a layer of tile z/x/y of a world**, and **a camera image of the world from a pose**.
+A world's tiles live in its HDF5 tile store ([`docs/formats.md`](../docs/formats.md)); a tile that
+is not stored yet is generated (on the GPU when it has 64-bit shaders, else on the CPU, see
+[`docs/gpu.md`](../docs/gpu.md)), written to the store and returned. Cameras render with the
+renderer of `terrain run` ([rendering](#rendering)), generating the tiles in view the same way.
+Flights, IMU, event cameras and sequence files are not exposed (use `terrain run`).
 
 ```
 bindings/core     aerialsynth-core: the implementation, shared by both bindings (Rust)
@@ -50,6 +52,49 @@ tile may both generate it (identical result, stored once). Close a handle only w
 thread uses it. A tiles file can be open by only one handle per process (a second open fails
 while the first is alive): share the handle.
 
+## Rendering
+
+A **camera** over a world renders frames from poses with the renderer of `terrain run`
+(`crates/render`: level-of-detail tile selection, CPU or GPU rasterizer, sky and atmosphere, sun /
+moon / stars, night lights, the camera sensor model, depth and land-cover ground truth), so its
+images match the CLI's datasets. The tiles in view are read from the world's store, or generated
+and stored when missing (as `terrain run` with `tiles.lazy: true`).
+
+A camera is either
+
+- a **pinhole** camera: width, height, horizontal field of view (degrees), optionally the
+  principal point (Python), mounted `forward` (default) or `nadir`, with the default render
+  settings (Python: or those of a scenario), or
+- a **scenario camera**: one of the `cameras` of a scenario YAML (by HDF5 path such as `/cam0` or
+  index; default the first), with the scenario's `render` section (backend, supersample,
+  shading, lighting, atmosphere, stars), the camera's `intrinsics` (any model of the camera YAML
+  schema), `extrinsics` (mount), `rgb.sensor` and `depth.kind`, and the `tiles` zoom range and
+  cache size. The scenario's `world:` section is ignored: the world is the one of the handle the
+  camera is made from.
+
+Conventions (as in the datasets, [`docs/scenario.md`](../docs/scenario.md)):
+
+| | |
+|---|---|
+| position | geodetic latitude, longitude (degrees) and height above the WGS84 ellipsoid (m); `World.surface_height` / `as_surface_height` give the surface height below (DSM) for heights above ground |
+| attitude | of the **body** (FRD: x forward, y right, z down): aerospace Z-Y-X Euler angles (degrees) in the local NED frame: yaw = heading clockwise from north, pitch nose-up positive, roll right-wing-down positive |
+| mount | the camera on the body: the scenario camera's `extrinsics` (default `nadir`); a pinhole camera's `forward` mount (optical axis = body forward, image top = up) makes the angles the camera's own: yaw = heading of the optical axis, pitch = its elevation (−30 looks 30° down); `nadir` (optical axis = body down, image top = body forward) looks straight down when level |
+| camera frame | OpenCV: x right, y down, z = optical axis; pixel (0, 0) = centre of the top-left pixel; images row-major, row 0 = top |
+| time | UTC as Unix seconds (Python also `datetime`, naive = UTC, and ISO 8601 strings): places the sun, moon and stars at that instant (the lighting `clock` mode); none (C: `NAN`) = the scenario's lighting (by default a fixed sun at 52° elevation) |
+| rgb | u8 × 3 sRGB after the camera sensor model of the scenario camera (`rgb.sensor`; default settings otherwise): auto exposure converged on the frame (as a sequence's first frame), optics, noise, tone curve; no motion blur. The noise is deterministic, a function of the camera, the pose and the time: the same call gives the same image |
+| depth | f32 metres: z-depth along the optical axis (the dataset default), or the range along the pixel ray when the scenario camera has `depth: { kind: range }`; +inf = sky. Needs an odd supersample (the default 3 is) |
+| landcover | u8 class ids of the `landcover` layer, 255 = sky |
+| backend | `auto` (the GPU when there is a usable one that takes the camera model, else the CPU), `cpu` or `gpu` (an error without a usable GPU); default: the scenario's `render.backend` (auto). CPU and GPU images agree closely, not bit for bit |
+
+Only the images asked for are made (no RGB: shading is skipped). A camera's tile cache holds up to
+`tiles.cache_tiles` tiles (default 2000, ~0.7 MB each) in memory.
+
+**Threads:** renders of one camera are serialized (it holds one renderer); different cameras,
+also of the same world, render concurrently (GPU work is serialized by the device). Python
+releases the GIL while rendering. A camera keeps its world's store open: in C the world may be
+closed first (the store closes with its last camera); in Python closing the world closes its
+cameras.
+
 ## C
 
 ```sh
@@ -58,6 +103,9 @@ cargo build --release -p aerialsynth-capi
 cc -std=c99 bindings/c/examples/tile.c -I bindings/c/include -L target/release -laerialsynth \
    -Wl,-rpath,$PWD/target/release -o tile
 ./tile out/world.h5 - 12 2200 1500     # TILES.h5 [CONFIG.yaml|- [Z X Y]]
+cc -std=c99 bindings/c/examples/render.c -I bindings/c/include -L target/release -laerialsynth \
+   -Wl,-rpath,$PWD/target/release -o render
+./render out/world.h5 - 45 10 1500 view.ppm   # TILES.h5 [CONFIG.yaml|- [LAT LON HEIGHT_ABOVE_GROUND [OUT.ppm]]]
 ```
 
 ```c
@@ -80,17 +128,39 @@ as_close(w);
 | `size_t as_layer_size(as_layer layer)` | bytes of a tile of `layer` (0: unknown layer) |
 | `int as_layer_describe(as_layer layer, as_layer_info *info)` | name, dtype, channels, element size, size |
 | `int as_max_zoom(const as_world *w)` | the world's max zoom |
+| `int as_surface_height(const as_world *w, double lat_deg, double lon_deg, double *height_m)` | DSM height at a point (m above WGS84) |
+| `as_camera *as_camera_pinhole(const as_world *w, uint32_t width, uint32_t height, double hfov_deg, as_mount mount, as_backend backend)` | a pinhole camera (`AS_MOUNT_FORWARD` / `AS_MOUNT_NADIR`); NULL on error |
+| `as_camera *as_camera_open(const as_world *w, const char *scenario_yaml, const char *camera, as_backend backend)` | a scenario camera (`camera`: "/cam0", "0" or NULL = the first); NULL on error |
+| `int as_camera_size(const as_camera *c, uint32_t *width, uint32_t *height)` | image size |
+| `int as_camera_backend(const as_camera *c)` | `AS_BACKEND_CPU` or `AS_BACKEND_GPU` |
+| `int as_render(const as_camera *c, const as_pose *pose, double unix_time, uint8_t *rgb, size_t rgb_len, float *depth, size_t depth_len, uint8_t *landcover, size_t landcover_len)` | render a frame: the non-NULL buffers (lengths in elements: w·h·3, w·h, w·h); `unix_time` `NAN` = the scenario's lighting |
+| `void as_camera_close(as_camera *c)` | close a camera (NULL is ignored) |
 | `const char *as_last_error(void)` | message of this thread's last failure; valid until its next failure |
 | `const char *as_version(void)` | library version |
 
-Errors: `AS_ERR_INVALID_ARGUMENT` (-1: NULL pointer, unknown layer, tile out of range),
+Rendering (`examples/render.c` writes a PPM):
+
+```c
+as_camera *cam = as_camera_pinhole(w, 640, 480, 90.0, AS_MOUNT_FORWARD, AS_BACKEND_DEFAULT);
+if (!cam) { fprintf(stderr, "%s\n", as_last_error()); return 1; }
+double ground;
+as_surface_height(w, 45.0, 10.0, &ground);
+as_pose pose = {45.0, 10.0, ground + 300.0, 0.0 /* roll */, -30.0 /* pitch */, 90.0 /* yaw */};
+uint8_t *rgb = malloc(640 * 480 * 3);
+float *depth = malloc(640 * 480 * sizeof(float));
+int rc = as_render(cam, &pose, 1782027000.0 /* 2026-06-21T07:30:00Z */, rgb, 640 * 480 * 3, depth, 640 * 480, NULL, 0);
+as_camera_close(cam);
+```
+
+Errors: `AS_ERR_INVALID_ARGUMENT` (-1: NULL pointer, unknown layer, tile out of range, a pose or
+camera setting out of range),
 `AS_ERR_BUFFER_TOO_SMALL` (-2), `AS_ERR_FAILED` (-3: store, config or generation),
 `AS_ERR_PANIC` (-4: an internal error, caught). Rust panics never cross the API.
 
 The header is generated by [cbindgen](https://github.com/mozilla/cbindgen) from
 `c/src/lib.rs` (`c/cbindgen.toml`) and committed; `cargo test -p aerialsynth-capi` checks that it
-is up to date (`AERIALSYNTH_BLESS=1` regenerates it) and compiles and runs `examples/tile.c` with
-the system C compiler (skipped without one). Linking the static `libaerialsynth.a` needs the
+is up to date (`AERIALSYNTH_BLESS=1` regenerates it) and compiles and runs `examples/tile.c` and
+`examples/render.c` with the system C compiler (skipped without one). Linking the static `libaerialsynth.a` needs the
 system libraries Rust reports (`cargo rustc -p aerialsynth-capi --release --crate-type staticlib
 -- --print native-static-libs`); on Linux `-ldl -lgcc_s -lutil -lrt -lpthread -lm -lc`.
 
@@ -104,6 +174,10 @@ import aerialsynth
 with aerialsynth.World("out/world.h5", config=None, seed=None) as w:   # created if missing
     rgb = w.tile(12, 2200, 1500, "rgb")          # np.uint8 (256, 256, 3)
     h = w.tile(12, 2200, 1500, "elevation")      # np.float32 (256, 256)
+    cam = w.camera(width=640, height=480, hfov=90)               # or w.camera(config="scenario.yaml", camera="/cam0")
+    f = cam.render(lat=45.0, lon=10.0, height=w.surface_height(45.0, 10.0) + 300,
+                   roll=0, pitch=-30, yaw=90, time="2026-06-21T07:30:00Z", depth=True)
+    f.rgb, f.depth                               # np.uint8 (480, 640, 3), np.float32 (480, 640)
 aerialsynth.LAYERS["elevation"]                  # LayerInfo(name, dtype, channels, shape, size, description)
 ```
 
@@ -119,8 +193,8 @@ each `v*` tag; the same build runs locally with
 `docker run quay.io/pypa/manylinux_2_28_x86_64` and `maturin build --release --manylinux 2_28`.
 
 The extension uses the stable ABI (PyO3 `abi3-py310`): one wheel for CPython 3.10 and newer.
-It returns tiles as `bytearray`s and the Python layer views them with `np.frombuffer` (writable
-arrays, no copy), so the extension needs no numpy C API; numpy is the only dependency.
+It returns tiles and images as `bytearray`s and the Python layer views them with `np.frombuffer`
+(writable arrays, no copy), so the extension needs no numpy C API; numpy is the only dependency.
 
 ### Cargo and libpython
 

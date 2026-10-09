@@ -1,4 +1,4 @@
-"""Tiles of a procedural planet as numpy arrays.
+"""Tiles and camera images of a procedural planet as numpy arrays.
 
 A :class:`World` is an HDF5 tile store of one world (seed + world config). :meth:`World.tile`
 reads a layer of a Web-Mercator XYZ tile (256 x 256 pixels) from the store; a tile that is not
@@ -10,12 +10,22 @@ returned::
         rgb = w.tile(12, 2200, 1500, "rgb")              # uint8 (256, 256, 3)
         h = w.tile(12, 2200, 1500, "elevation")          # float32 (256, 256), m above WGS84
 
+A :class:`Camera` renders images of the world from a pose, with the renderer of ``terrain run``
+(the tiles in view are generated into the store when missing)::
+
+        cam = w.camera(width=640, height=480, hfov=90)
+        ground = w.surface_height(45.0, 10.0)
+        f = cam.render(45.0, 10.0, ground + 300, pitch=-30, yaw=90,
+                       time="2026-06-21T07:30:00Z", depth=True)
+        f.rgb, f.depth                                    # uint8 (480, 640, 3), float32 (480, 640)
+
 Arrays are writable and own their memory (a view of a fresh ``bytearray``; no copy is made).
-Row 0 is the north edge, column 0 the west edge.
+Tile row 0 is the north edge, column 0 the west edge; image row 0 is the image top.
 """
 
 from __future__ import annotations
 
+import datetime as _dt
 import os
 from typing import Literal, NamedTuple, Optional, Union
 
@@ -23,7 +33,19 @@ import numpy as np
 
 from . import _native
 
-__all__ = ["World", "LayerInfo", "LAYERS", "TILE_SIZE", "MAX_ZOOM", "DEFAULT_MAX_ZOOM", "__version__"]
+__all__ = [
+    "World",
+    "Camera",
+    "Frame",
+    "LayerInfo",
+    "LAYERS",
+    "TILE_SIZE",
+    "MAX_ZOOM",
+    "DEFAULT_MAX_ZOOM",
+    "MAX_IMAGE_SIZE",
+    "SKY",
+    "__version__",
+]
 
 __version__: str = _native.__version__
 #: Width and height of a tile in pixels.
@@ -33,8 +55,15 @@ MAX_ZOOM: int = _native.MAX_ZOOM
 #: Zoom limit of a world whose config sets no ``tiles.max_zoom``.
 DEFAULT_MAX_ZOOM: int = _native.DEFAULT_MAX_ZOOM
 
+#: Largest image width or height of a camera.
+MAX_IMAGE_SIZE: int = _native.MAX_IMAGE_SIZE
+#: Land-cover class of sky pixels in a rendered frame.
+SKY: int = 255
+
 LayerName = Literal["rgb", "albedo", "elevation", "normal", "landcover", "emission"]
+BackendName = Literal["auto", "cpu", "gpu"]
 PathLike = Union[str, "os.PathLike[str]"]
+TimeLike = Union[float, int, str, _dt.datetime, None]
 
 
 class LayerInfo(NamedTuple):
@@ -98,8 +127,68 @@ class World:
         buf = self._w.tile(int(z), int(x), int(y), layer)
         return np.frombuffer(buf, dtype=info.dtype).reshape(info.shape)
 
+    def camera(
+        self,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        hfov: Optional[float] = None,
+        *,
+        cx: Optional[float] = None,
+        cy: Optional[float] = None,
+        mount: Literal["forward", "nadir"] = "forward",
+        config: Optional[PathLike] = None,
+        camera: Union[str, int, None] = None,
+        backend: Optional[BackendName] = None,
+    ) -> "Camera":
+        """A camera over this world, for :meth:`Camera.render`.
+
+        Either a distortion-free pinhole camera, ``width`` x ``height`` pixels with a horizontal
+        field of view of ``hfov`` degrees (principal point ``cx, cy`` in pixels, default the image
+        centre; ``mount`` "forward": the pose's angles are the camera's own, or "nadir": a level
+        pose looks straight down), or a camera of the scenario ``config`` (``camera``: its HDF5
+        path such as ``"/cam0"`` or its index; default the first one).
+
+        :param config: a scenario YAML (as for ``terrain run``). Its ``render`` section (backend,
+            supersample, shading, lighting, atmosphere, sensor of its cameras...), ``tiles`` zoom
+            range and cache size and ``cameras`` are used; its ``world`` section is ignored (the
+            world is this one). ``None``: the default settings.
+        :param backend: "auto" (the GPU when there is a usable one, else the CPU), "cpu" or "gpu";
+            default: the scenario's ``render.backend`` (auto).
+        :raises ValueError: bad camera settings, an unknown camera, or the world is closed.
+        :raises RuntimeError: an invalid scenario, or ``backend="gpu"`` without a usable GPU.
+        :raises OSError: the config file cannot be read.
+
+        The camera keeps the store open until it is closed; closing the world closes its cameras.
+        """
+        if camera is not None and not isinstance(camera, str):
+            camera = str(_index(camera, "camera"))
+        size = [None if v is None else _index(v, name) for v, name in ((width, "width"), (height, "height"))]
+        for v, name in zip(size, ("width", "height")):
+            if v is not None and not 0 < v <= MAX_IMAGE_SIZE:
+                raise ValueError(f"{name} {v} is out of range 1 .. {MAX_IMAGE_SIZE}")
+        c = self._w.camera(
+            size[0],
+            size[1],
+            None if hfov is None else float(hfov),
+            None if cx is None else float(cx),
+            None if cy is None else float(cy),
+            mount,
+            None if config is None else os.fspath(config),
+            camera,
+            backend,
+        )
+        return Camera(c)
+
+    def surface_height(self, lat: float, lon: float) -> float:
+        """The DSM height (ground, canopy, buildings, water surface) at ``lat``, ``lon`` (degrees)
+        in metres above the WGS84 ellipsoid: about what the tiles of the max zoom hold there
+        (evaluated by the generator; no tile is made). Add a height above ground to it for
+        :meth:`Camera.render`.
+        """
+        return self._w.surface_height(float(lat), float(lon))
+
     def close(self) -> None:
-        """Close the store (idempotent)."""
+        """Close the store and the cameras of this world (idempotent)."""
         self._w.close()
 
     @property
@@ -130,3 +219,201 @@ class World:
     def __repr__(self) -> str:
         state = "closed" if self.closed else f"seed {self.seed}, max zoom {self.max_zoom}"
         return f"aerialsynth.World({self.path!r}, {state})"
+
+
+def _index(v: object, name: str) -> int:
+    """A non-negative integer argument."""
+    if isinstance(v, bool) or not isinstance(v, (int, np.integer)):
+        raise TypeError(f"{name} must be an integer, not {type(v).__name__}")
+    if v < 0:
+        raise ValueError(f"{name} {v} must be >= 0")
+    return int(v)
+
+
+def _unix_time(time: TimeLike) -> Optional[float]:
+    """UTC Unix seconds of a time argument (None stays None)."""
+    if time is None:
+        return None
+    if isinstance(time, str):
+        s = time.strip()
+        if s.endswith(("Z", "z")):
+            s = s[:-1] + "+00:00"
+        try:
+            time = _dt.datetime.fromisoformat(s)
+        except ValueError:
+            raise ValueError(f"time {time!r}: an ISO 8601 date and time such as 2026-06-21T07:30:00Z expected") from None
+    if isinstance(time, _dt.datetime):
+        if time.tzinfo is None:
+            time = time.replace(tzinfo=_dt.timezone.utc)  # naive: UTC
+        return time.timestamp()
+    if isinstance(time, (int, float, np.integer, np.floating)) and not isinstance(time, bool):
+        return float(time)
+    raise TypeError(f"time must be Unix seconds, a datetime or an ISO 8601 string, not {type(time).__name__}")
+
+
+class Frame(NamedTuple):
+    """A rendered frame. Images are row-major, row 0 = image top; ``None`` when not asked for."""
+
+    #: (H, W, 3) uint8 sRGB after the camera sensor model
+    rgb: Optional[np.ndarray]
+    #: (H, W) float32 metres: z-depth along the optical axis (or the range along the pixel ray
+    #: when the scenario camera's ``depth.kind`` is ``range``); +inf = sky
+    depth: Optional[np.ndarray]
+    #: (H, W) uint8 land-cover class ids (as the ``landcover`` layer); 255 (:data:`SKY`) = sky
+    landcover: Optional[np.ndarray]
+    #: (exposure time s, gain, EV) of the RGB image, else None
+    exposure: Optional[tuple]
+    #: (3,) camera centre in ECEF metres
+    position_ecef: np.ndarray
+    #: (3, 3) rotation camera -> ECEF (columns: the camera's x right, y down, z forward axes)
+    r_ecef_cam: np.ndarray
+    #: UTC of the lighting (Unix seconds): the time asked for, or the scenario's
+    time: float
+    #: sun azimuth (clockwise from north) and elevation at the camera, degrees
+    sun_azimuth: float
+    sun_elevation: float
+
+    @property
+    def datetime(self) -> _dt.datetime:
+        """:attr:`time` as an aware UTC datetime."""
+        return _dt.datetime.fromtimestamp(self.time, _dt.timezone.utc)
+
+
+class Camera:
+    """A camera over a :class:`World` (made by :meth:`World.camera`), rendering frames from poses.
+
+    One camera renders one frame at a time (calls from several threads are serialized; rendering
+    releases the GIL); several cameras render concurrently. A camera keeps its world's store open
+    until it is closed (``close``, ``with``, or closing the world).
+    """
+
+    def __init__(self, native: "_native.Camera") -> None:
+        self._c = native
+
+    def render(
+        self,
+        lat: float,
+        lon: float,
+        height: float,
+        roll: float = 0.0,
+        pitch: float = 0.0,
+        yaw: float = 0.0,
+        *,
+        time: TimeLike = None,
+        rgb: bool = True,
+        depth: bool = False,
+        landcover: bool = False,
+    ) -> Frame:
+        """Render a frame from a pose; tiles in view are generated and stored when missing.
+
+        :param lat, lon: geodetic position in degrees (``|lat| <= 90``).
+        :param height: metres above the WGS84 ellipsoid (see :meth:`World.surface_height`).
+        :param roll, pitch, yaw: attitude of the body in degrees, aerospace Z-Y-X Euler angles
+            in the local north-east-down frame: yaw = heading clockwise from north, pitch nose-up
+            positive, roll right-wing-down positive. The camera sits on the body by its mount: a
+            "forward" pinhole camera looks along the heading (pitch -30 looks 30 degrees down),
+            a "nadir" one straight down when level; scenario cameras by their ``extrinsics``.
+        :param time: UTC of the sun, moon and stars: Unix seconds, a ``datetime`` (naive = UTC)
+            or an ISO 8601 string ("2026-06-21T07:30:00Z"); None: the scenario's lighting (a
+            fixed sun by default).
+        :param rgb, depth, landcover: the images to make (only those are computed).
+        :raises ValueError: a pose out of range or non-finite, a bad time, or the camera is
+            closed.
+        :raises RuntimeError: rendering failed (e.g. the GPU device was lost).
+
+        The RGB image is that of the first frame of a ``terrain run`` sequence at this pose: the
+        auto exposure converged on it, no motion blur. Its noise is deterministic (a function of
+        the camera, the pose and the time): the same call gives the same image.
+        """
+        t = _unix_time(time)
+        r = self._c.render(float(lat), float(lon), float(height), float(roll), float(pitch), float(yaw), t, bool(rgb), bool(depth), bool(landcover))
+        h, w = self._c.height, self._c.width
+        img, dep, lc, exposure, pos, rot, unix, sun_az, sun_el = r
+        return Frame(
+            rgb=None if img is None else np.frombuffer(img, dtype=np.uint8).reshape(h, w, 3),
+            depth=None if dep is None else np.frombuffer(dep, dtype="<f4").reshape(h, w),
+            landcover=None if lc is None else np.frombuffer(lc, dtype=np.uint8).reshape(h, w),
+            exposure=exposure,
+            position_ecef=np.array(pos, dtype=np.float64),
+            r_ecef_cam=np.array(rot, dtype=np.float64).reshape(3, 3),
+            time=unix,
+            sun_azimuth=sun_az,
+            sun_elevation=sun_el,
+        )
+
+    @property
+    def width(self) -> int:
+        return self._c.width
+
+    @property
+    def height(self) -> int:
+        return self._c.height
+
+    @property
+    def shape(self) -> tuple:
+        """(height, width) of the images."""
+        return (self._c.height, self._c.width)
+
+    @property
+    def backend(self) -> str:
+        """Where frames are rendered: "cpu" or "gpu" (auto resolved)."""
+        return self._c.backend
+
+    @property
+    def supersample(self) -> int:
+        """Samples per pixel and axis of the RGB image."""
+        return self._c.supersample
+
+    @property
+    def path(self) -> str:
+        """The camera's HDF5 path in the scenario ("/cam0" for a pinhole camera)."""
+        return self._c.path
+
+    @property
+    def model(self) -> str:
+        """Camera model of the camera YAML schema: pinhole, pinhole_full, kannala_brandt, mei,
+        scaramuzza."""
+        return self._c.model
+
+    @property
+    def intrinsics(self) -> tuple:
+        """The model's ``intrinsics`` values (pinhole: fx, fy, cx, cy in pixels; OpenCV pixel
+        coordinates, (0, 0) = centre of the top-left pixel)."""
+        return tuple(self._c.intrinsics)
+
+    @property
+    def distortion(self) -> tuple:
+        """The model's ``distortion`` values (pinhole: k1, k2, p1, p2)."""
+        return tuple(self._c.distortion)
+
+    @property
+    def K(self) -> Optional[np.ndarray]:
+        """3 x 3 camera matrix of a pinhole model (None for the other models)."""
+        if self.model not in ("pinhole", "pinhole_full"):
+            return None
+        fx, fy, cx, cy = self.intrinsics[:4]
+        return np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]])
+
+    @property
+    def depth_is_range(self) -> bool:
+        """Is :attr:`Frame.depth` the range along the pixel ray (scenario ``depth.kind: range``)
+        rather than the z-depth?"""
+        return self._c.depth_is_range
+
+    def close(self) -> None:
+        """Close the camera (idempotent)."""
+        self._c.close()
+
+    @property
+    def closed(self) -> bool:
+        return self._c.closed
+
+    def __enter__(self) -> "Camera":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def __repr__(self) -> str:
+        state = "closed" if self.closed else self.backend
+        return f"aerialsynth.Camera({self.path!r}, {self.model} {self.width}x{self.height}, {state})"

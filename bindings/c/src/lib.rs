@@ -1,16 +1,18 @@
 //! C API of aerialsynth: a layer of a tile of a world, read from its HDF5 tile store and generated
-//! (and stored) when missing. `include/aerialsynth.h` is generated from this file by cbindgen
-//! (`tests/header.rs` checks it is up to date; `AERIALSYNTH_BLESS=1` rewrites it).
+//! (and stored) when missing; camera images of the world rendered from a pose.
+//! `include/aerialsynth.h` is generated from this file by cbindgen (`tests/header.rs` checks it
+//! is up to date; `AERIALSYNTH_BLESS=1` rewrites it).
 //!
 //! The implementation is `aerialsynth-core`, shared with the Python bindings.
 
 #![allow(non_camel_case_types)]
 
-use aerialsynth_core::{Error, Layer, World};
+use aerialsynth_core::{Backend, Camera, CameraDef, Error, Layer, Mount, Outputs, Pinhole, Pose, World};
 use std::cell::RefCell;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// A layer of a tile: one of the `AS_LAYER_*` values.
 pub type as_layer = u32;
@@ -58,7 +60,51 @@ pub const AS_TILE_SIZE: u32 = 256;
 
 /// A tile store opened for one world. Opaque; made by `as_open`, freed by `as_close`.
 pub struct as_world {
-    world: World,
+    world: Arc<World>,
+}
+
+/// Where a camera renders: one of the `AS_BACKEND_*` values.
+pub type as_backend = u32;
+/// The scenario's `render.backend` (`AS_BACKEND_AUTO` without a scenario).
+pub const AS_BACKEND_DEFAULT: as_backend = 0;
+/// The GPU when there is a usable one (that can take the camera model), else the CPU.
+pub const AS_BACKEND_AUTO: as_backend = 1;
+/// The CPU reference renderer.
+pub const AS_BACKEND_CPU: as_backend = 2;
+/// The GPU: opening the camera fails without a usable GPU.
+pub const AS_BACKEND_GPU: as_backend = 3;
+
+/// How a pinhole camera sits on the body: one of the `AS_MOUNT_*` values.
+pub type as_mount = u32;
+/// Optical axis = body forward, image top = body up: the pose's angles are the camera's own (yaw
+/// = heading of the optical axis, pitch = its elevation, negative looks down).
+pub const AS_MOUNT_FORWARD: as_mount = 0;
+/// Optical axis = body down, image top = body forward (the scenario default mount): a level
+/// pose looks straight down.
+pub const AS_MOUNT_NADIR: as_mount = 1;
+
+/// A camera over a world, rendering images from poses. Opaque; made by `as_camera_open` or
+/// `as_camera_pinhole`, freed by `as_camera_close`.
+pub struct as_camera {
+    camera: Camera,
+}
+
+/// Position and body attitude of a render.
+///
+/// Position: geodetic latitude and longitude (degrees) and height above the WGS84 ellipsoid
+/// (metres). Attitude: aerospace Z-Y-X Euler angles (degrees) of the body (x forward, y right,
+/// z down) in the local north-east-down frame: yaw = heading clockwise from north, pitch nose-up
+/// positive, roll right-wing-down positive. The camera sits on the body by its mount (the
+/// scenario camera's `extrinsics`, or `as_mount` for a pinhole camera).
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct as_pose {
+    pub lat_deg: f64,
+    pub lon_deg: f64,
+    pub height_m: f64,
+    pub roll_deg: f64,
+    pub pitch_deg: f64,
+    pub yaw_deg: f64,
 }
 
 /// Pixel format of a layer (`as_layer_describe`).
@@ -173,14 +219,15 @@ pub unsafe extern "C" fn as_open(tiles_file: *const c_char, config_yaml: *const 
         let config = unsafe { path(config_yaml, "config_yaml") }?;
         let seed = u64::try_from(seed).ok();
         let world = World::open(&tiles, config.as_deref(), seed).map_err(status)?;
-        out = Box::into_raw(Box::new(as_world { world }));
+        out = Box::into_raw(Box::new(as_world { world: Arc::new(world) }));
         Ok(())
     });
     out
 }
 
 /// Close a world (flushing its store). NULL is ignored. The handle must not be in use by another
-/// thread, and is invalid afterwards.
+/// thread, and is invalid afterwards. Cameras of the world stay usable: the store is closed when
+/// the world and all its cameras are closed.
 ///
 /// # Safety
 /// `w` is NULL or a handle from `as_open` not closed yet.
@@ -228,6 +275,208 @@ pub unsafe extern "C" fn as_max_zoom(w: *const as_world) -> c_int {
     match unsafe { w.as_ref() } {
         Some(w) => w.world.max_zoom() as c_int,
         None => -1,
+    }
+}
+
+/// The DSM height (ground, canopy, buildings, water surface; metres above the WGS84 ellipsoid) at
+/// latitude / longitude `lat_deg`, `lon_deg` into `*height_m`: about what the tiles of the max
+/// zoom hold there (evaluated by the generator; no tile is made). For heights above ground.
+/// Returns `AS_OK` or a negative `AS_ERR_*` code.
+///
+/// # Safety
+/// `w` is a handle from `as_open`; `height_m` points to a writable double.
+#[no_mangle]
+pub unsafe extern "C" fn as_surface_height(w: *const as_world, lat_deg: f64, lon_deg: f64, height_m: *mut f64) -> c_int {
+    guard(|| {
+        let Some(w) = (unsafe { w.as_ref() }) else { return Err(invalid("world handle is NULL")) };
+        if height_m.is_null() {
+            return Err(invalid("height_m is NULL"));
+        }
+        let h = w.world.surface_height(lat_deg, lon_deg).map_err(status)?;
+        unsafe { height_m.write(h) };
+        Ok(())
+    })
+}
+
+fn backend(b: as_backend) -> Result<Option<Backend>, (c_int, String)> {
+    match b {
+        AS_BACKEND_DEFAULT => Ok(None),
+        AS_BACKEND_AUTO => Ok(Some(Backend::Auto)),
+        AS_BACKEND_CPU => Ok(Some(Backend::Cpu)),
+        AS_BACKEND_GPU => Ok(Some(Backend::Gpu)),
+        _ => Err(invalid(format!("unknown backend {b} (AS_BACKEND_DEFAULT, _AUTO, _CPU or _GPU)"))),
+    }
+}
+
+/// A camera of a scenario over world `w`.
+///
+/// `scenario_yaml` is the path of a scenario YAML (as for `terrain run`) or NULL for the default
+/// settings: its `render` section (backend, supersample, shading, lighting, atmosphere, ...),
+/// `tiles` zoom range and cache size and `cameras` are used; its `world` section is ignored (the
+/// world is `w`'s). `camera` picks one of its `cameras` by HDF5 path ("/cam0") or index ("0");
+/// NULL is the first one (the default camera, 640 x 512 with a 70 degree field of view on a nadir
+/// mount, when there is none). `backend` overrides `render.backend` (`AS_BACKEND_DEFAULT` keeps
+/// it).
+///
+/// The camera keeps the world's store open (`as_close` of the world may come first). Returns NULL
+/// on error (see `as_last_error`). Close the camera with `as_camera_close`.
+///
+/// # Safety
+/// `w` is a handle from `as_open`; `scenario_yaml` and `camera` are NULL or NUL-terminated.
+#[no_mangle]
+pub unsafe extern "C" fn as_camera_open(w: *const as_world, scenario_yaml: *const c_char, camera: *const c_char, backend: as_backend) -> *mut as_camera {
+    let mut out = std::ptr::null_mut();
+    guard(|| {
+        let Some(w) = (unsafe { w.as_ref() }) else { return Err(invalid("world handle is NULL")) };
+        let config = unsafe { path(scenario_yaml, "scenario_yaml") }?;
+        let sel =
+            if camera.is_null() { None } else { Some(unsafe { CStr::from_ptr(camera) }.to_str().map_err(|_| invalid("camera is not UTF-8"))?.to_string()) };
+        let b = self::backend(backend)?;
+        let camera = Camera::new(w.world.clone(), config.as_deref(), CameraDef::Scenario(sel), b).map_err(status)?;
+        out = Box::into_raw(Box::new(as_camera { camera }));
+        Ok(())
+    });
+    out
+}
+
+/// A distortion-free pinhole camera over world `w`: `width` x `height` pixels, horizontal field
+/// of view `hfov_deg` (0 < hfov < 180), principal point at the image centre, mounted by `mount`
+/// (`AS_MOUNT_FORWARD` or `AS_MOUNT_NADIR`), with the default render settings; `backend`
+/// (`AS_BACKEND_DEFAULT` = `AS_BACKEND_AUTO`).
+///
+/// The camera keeps the world's store open. Returns NULL on error (see `as_last_error`). Close
+/// the camera with `as_camera_close`.
+///
+/// # Safety
+/// `w` is a handle from `as_open`.
+#[no_mangle]
+pub unsafe extern "C" fn as_camera_pinhole(w: *const as_world, width: u32, height: u32, hfov_deg: f64, mount: as_mount, backend: as_backend) -> *mut as_camera {
+    let mut out = std::ptr::null_mut();
+    guard(|| {
+        let Some(w) = (unsafe { w.as_ref() }) else { return Err(invalid("world handle is NULL")) };
+        let mount = match mount {
+            AS_MOUNT_FORWARD => Mount::Forward,
+            AS_MOUNT_NADIR => Mount::Nadir,
+            m => return Err(invalid(format!("unknown mount {m} (AS_MOUNT_FORWARD or AS_MOUNT_NADIR)"))),
+        };
+        let b = self::backend(backend)?;
+        let p = Pinhole { mount, ..Pinhole::new(width, height, hfov_deg) };
+        let camera = Camera::new(w.world.clone(), None, CameraDef::Pinhole(p), b).map_err(status)?;
+        out = Box::into_raw(Box::new(as_camera { camera }));
+        Ok(())
+    });
+    out
+}
+
+/// The image size of camera `c` into `*width` and `*height` (either may be NULL). Returns `AS_OK`
+/// or `AS_ERR_INVALID_ARGUMENT` (`c` is NULL).
+///
+/// # Safety
+/// `c` is NULL or a camera handle; `width` and `height` are NULL or point to writable `uint32_t`s.
+#[no_mangle]
+pub unsafe extern "C" fn as_camera_size(c: *const as_camera, width: *mut u32, height: *mut u32) -> c_int {
+    guard(|| {
+        let Some(c) = (unsafe { c.as_ref() }) else { return Err(invalid("camera handle is NULL")) };
+        if !width.is_null() {
+            unsafe { width.write(c.camera.width()) };
+        }
+        if !height.is_null() {
+            unsafe { height.write(c.camera.height()) };
+        }
+        Ok(())
+    })
+}
+
+/// The backend camera `c` renders on: `AS_BACKEND_CPU` or `AS_BACKEND_GPU` (auto resolved), or
+/// `AS_ERR_INVALID_ARGUMENT` if `c` is NULL.
+///
+/// # Safety
+/// `c` is NULL or a camera handle.
+#[no_mangle]
+pub unsafe extern "C" fn as_camera_backend(c: *const as_camera) -> c_int {
+    let mut out = AS_ERR_INVALID_ARGUMENT;
+    guard(|| {
+        let Some(c) = (unsafe { c.as_ref() }) else { return Err(invalid("camera handle is NULL")) };
+        out = match c.camera.backend() {
+            Backend::Gpu => AS_BACKEND_GPU,
+            _ => AS_BACKEND_CPU,
+        } as c_int;
+        Ok(())
+    });
+    out
+}
+
+/// Render a frame of camera `c` from `pose` at `unix_time` (UTC, Unix seconds; NAN: the
+/// scenario's lighting time). Tiles the view needs are read from the store, or generated and
+/// stored when missing. Only the images whose buffer is not NULL are made; each `*_len` is the
+/// buffer's length in elements and must be at least:
+///
+/// - `rgb`: width * height * 3 bytes, row-major (row 0 = image top), sRGB after the camera
+///   sensor model (auto exposure converged on the frame, optics, noise, tone curve; no motion
+///   blur). The noise is deterministic: the same camera, pose and time give the same image.
+/// - `depth`: width * height floats, metres: the z-depth along the optical axis (OpenCV camera
+///   frame: x right, y down, z forward), or the range along the pixel ray when the scenario
+///   camera's `depth.kind` is `range`; +infinity where there is no terrain (sky).
+/// - `landcover`: width * height class ids (as `AS_LAYER_LANDCOVER`), 255 = sky.
+///
+/// The time places the sun, moon and stars (as the lighting `clock` mode at that instant).
+/// Renders of one camera are serialized; different cameras render concurrently. Returns `AS_OK`
+/// or a negative `AS_ERR_*` code (`AS_ERR_INVALID_ARGUMENT`: a NULL camera or pose, a pose out
+/// of range (|lat| > 90, non-finite values), a non-finite time; `AS_ERR_BUFFER_TOO_SMALL`).
+///
+/// # Safety
+/// `c` is a camera handle; `pose` points to an `as_pose`; each buffer is NULL or points to
+/// `*_len` writable elements.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn as_render(
+    c: *const as_camera,
+    pose: *const as_pose,
+    unix_time: f64,
+    rgb: *mut u8,
+    rgb_len: usize,
+    depth: *mut f32,
+    depth_len: usize,
+    landcover: *mut u8,
+    landcover_len: usize,
+) -> c_int {
+    guard(|| {
+        let Some(c) = (unsafe { c.as_ref() }) else { return Err(invalid("camera handle is NULL")) };
+        let Some(p) = (unsafe { pose.as_ref() }) else { return Err(invalid("pose is NULL")) };
+        let n = c.camera.width() as usize * c.camera.height() as usize;
+        for (what, null, len, need) in
+            [("rgb", rgb.is_null(), rgb_len, 3 * n), ("depth", depth.is_null(), depth_len, n), ("landcover", landcover.is_null(), landcover_len, n)]
+        {
+            if !null && len < need {
+                return Err((AS_ERR_BUFFER_TOO_SMALL, format!("{what} buffer of {len} elements is too small ({need} needed)")));
+            }
+        }
+        let pose = Pose { lat_deg: p.lat_deg, lon_deg: p.lon_deg, height_m: p.height_m, roll_deg: p.roll_deg, pitch_deg: p.pitch_deg, yaw_deg: p.yaw_deg };
+        let want = Outputs { rgb: !rgb.is_null(), depth: !depth.is_null(), landcover: !landcover.is_null() };
+        let time = (!unix_time.is_nan()).then_some(unix_time);
+        let f = c.camera.render(&pose, time, want).map_err(status)?;
+        if let Some(v) = f.rgb {
+            unsafe { std::slice::from_raw_parts_mut(rgb, v.len()) }.copy_from_slice(&v);
+        }
+        if let Some(v) = f.depth {
+            unsafe { std::slice::from_raw_parts_mut(depth, v.len()) }.copy_from_slice(&v);
+        }
+        if let Some(v) = f.landcover {
+            unsafe { std::slice::from_raw_parts_mut(landcover, v.len()) }.copy_from_slice(&v);
+        }
+        Ok(())
+    })
+}
+
+/// Close a camera. NULL is ignored. The handle must not be in use by another thread, and is
+/// invalid afterwards.
+///
+/// # Safety
+/// `c` is NULL or a camera handle not closed yet.
+#[no_mangle]
+pub unsafe extern "C" fn as_camera_close(c: *mut as_camera) {
+    if !c.is_null() {
+        let _ = catch_unwind(AssertUnwindSafe(|| drop(unsafe { Box::from_raw(c) })));
     }
 }
 
@@ -331,6 +580,81 @@ mod tests {
             // another seed: refused
             assert!(as_open(tiles.as_ptr(), cfgc.as_ptr(), 3).is_null());
             assert!(last_error().contains("world.seed (2 → 3)"), "{}", last_error());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rendering_through_the_c_api() {
+        let dir = std::env::temp_dir().join(format!("aerialsynth-capi-render-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("w.yaml");
+        std::fs::write(&cfg, "world: { tile_supersample: 1 }\ntiles: { max_zoom: 8 }\n").unwrap();
+        let scn = dir.join("scn.yaml");
+        std::fs::write(&scn, "cameras:\n  - path: /down\n    intrinsics: { model: pinhole, width: 24, height: 16, intrinsics: [20, 20, 11.5, 7.5] }\n")
+            .unwrap();
+        let c = |p: &std::path::Path| CString::new(p.to_str().unwrap()).unwrap();
+        let (tiles, cfgc, scnc) = (c(&dir.join("w.h5")), c(&cfg), c(&scn));
+        unsafe {
+            let w = as_open(tiles.as_ptr(), cfgc.as_ptr(), 1);
+            assert!(!w.is_null(), "{}", last_error());
+            let mut ground = 0.0;
+            assert_eq!(as_surface_height(w, 45.0, 10.0, &mut ground), AS_OK, "{}", last_error());
+            assert!(ground.is_finite() && ground.abs() < 9000.0);
+            assert_eq!(as_surface_height(w, 95.0, 10.0, &mut ground), AS_ERR_INVALID_ARGUMENT);
+            let cam = as_camera_pinhole(w, 32, 24, 60.0, AS_MOUNT_FORWARD, AS_BACKEND_CPU);
+            assert!(!cam.is_null(), "{}", last_error());
+            let (mut cw, mut ch) = (0u32, 0u32);
+            assert_eq!(as_camera_size(cam, &mut cw, &mut ch), AS_OK);
+            assert_eq!((cw, ch), (32, 24));
+            assert_eq!(as_camera_backend(cam), AS_BACKEND_CPU as c_int);
+            let n = 32 * 24;
+            let (mut rgb, mut depth, mut lc) = (vec![0u8; 3 * n], vec![0f32; n], vec![0u8; n]);
+            let pose = as_pose { lat_deg: 45.0, lon_deg: 10.0, height_m: ground + 2000.0, roll_deg: 0.0, pitch_deg: -45.0, yaw_deg: 30.0 };
+            let rc = as_render(cam, &pose, 1.7e9, rgb.as_mut_ptr(), rgb.len(), depth.as_mut_ptr(), depth.len(), lc.as_mut_ptr(), lc.len());
+            assert_eq!(rc, AS_OK, "{}", last_error());
+            assert!(depth.iter().all(|z| z.is_finite() && *z > 0.0));
+            assert!(lc.iter().all(|c| *c < 18) && rgb.iter().any(|v| *v > 0));
+            // depth only, the scenario's time (NAN)
+            let mut d2 = vec![0f32; n];
+            let rc = as_render(cam, &pose, f64::NAN, std::ptr::null_mut(), 0, d2.as_mut_ptr(), n, std::ptr::null_mut(), 0);
+            assert_eq!(rc, AS_OK, "{}", last_error());
+            assert_eq!(d2, depth);
+            // errors
+            let r = |p: &as_pose, t: f64, d: &mut [f32]| as_render(cam, p, t, std::ptr::null_mut(), 0, d.as_mut_ptr(), d.len(), std::ptr::null_mut(), 0);
+            assert_eq!(r(&pose, 0.0, &mut d2[..n - 1]), AS_ERR_BUFFER_TOO_SMALL);
+            assert_eq!(r(&as_pose { lat_deg: -90.5, ..pose }, 0.0, &mut d2), AS_ERR_INVALID_ARGUMENT);
+            assert!(last_error().contains("latitude"), "{}", last_error());
+            assert_eq!(r(&pose, f64::INFINITY, &mut d2), AS_ERR_INVALID_ARGUMENT);
+            assert_eq!(
+                as_render(cam, std::ptr::null(), 0.0, std::ptr::null_mut(), 0, std::ptr::null_mut(), 0, std::ptr::null_mut(), 0),
+                AS_ERR_INVALID_ARGUMENT
+            );
+            assert_eq!(
+                as_render(std::ptr::null(), &pose, 0.0, std::ptr::null_mut(), 0, std::ptr::null_mut(), 0, std::ptr::null_mut(), 0),
+                AS_ERR_INVALID_ARGUMENT
+            );
+            assert!(as_camera_pinhole(w, 32, 24, 60.0, 7, AS_BACKEND_CPU).is_null());
+            assert!(as_camera_pinhole(w, 32, 24, 60.0, AS_MOUNT_NADIR, 9).is_null());
+            assert!(as_camera_pinhole(w, 0, 24, 60.0, AS_MOUNT_NADIR, AS_BACKEND_CPU).is_null());
+            assert!(as_camera_pinhole(std::ptr::null(), 32, 24, 60.0, AS_MOUNT_NADIR, AS_BACKEND_CPU).is_null());
+            assert_eq!(as_camera_backend(std::ptr::null()), AS_ERR_INVALID_ARGUMENT);
+            // a scenario camera by path; the world closed first: the camera keeps the store open
+            let down = as_camera_open(w, scnc.as_ptr(), c"/down".as_ptr(), AS_BACKEND_CPU);
+            assert!(!down.is_null(), "{}", last_error());
+            assert!(as_camera_open(w, scnc.as_ptr(), c"/up".as_ptr(), AS_BACKEND_CPU).is_null());
+            assert!(last_error().contains("no camera /up"), "{}", last_error());
+            as_close(w);
+            assert_eq!(as_camera_size(down, &mut cw, std::ptr::null_mut()), AS_OK);
+            assert_eq!(cw, 24);
+            let mut d3 = vec![0f32; 24 * 16];
+            let level = as_pose { pitch_deg: 0.0, ..pose };
+            assert_eq!(as_render(down, &level, 0.0, std::ptr::null_mut(), 0, d3.as_mut_ptr(), d3.len(), std::ptr::null_mut(), 0), AS_OK, "{}", last_error());
+            assert!(d3.iter().all(|z| z.is_finite() && *z > 1000.0), "nadir view from 2 km");
+            as_camera_close(down);
+            as_camera_close(cam);
+            as_camera_close(std::ptr::null_mut());
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
