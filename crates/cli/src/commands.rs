@@ -168,6 +168,12 @@ fn open_store(s: &Scenario, gen: &Generator) -> Result<Arc<TileStore>> {
     Ok(Arc::new(store))
 }
 
+/// Print the renderer's lines (tiles it generates lazily) above the progress bar `b`.
+fn log_around(b: &ProgressBar) {
+    let b = b.clone();
+    pipeline::set_log(Some(Arc::new(move |s: &str| b.suspend(|| eprintln!("{s}")))));
+}
+
 fn do_render(s: &Scenario) -> Result<()> {
     if s.cameras.is_empty() && s.imu.is_none() {
         bail!("nothing to render: the scenario has no `cameras` and no `imu`");
@@ -177,6 +183,7 @@ fn do_render(s: &Scenario) -> Result<()> {
     let store = open_store(s, &gen)?;
     let b = bar(0, "render");
     b.set_style(ProgressStyle::with_template("render {msg:12} {bar:40} {pos}/{len} [{elapsed_precise} < {eta_precise}] {per_sec}").unwrap());
+    log_around(&b);
     let t0 = std::time::Instant::now();
     let rep = pipeline::render_sequence(s, &poses, store, Some(gen), &|cam, done, total| {
         b.set_message(cam.to_string());
@@ -205,6 +212,7 @@ fn do_events(s: &Scenario) -> Result<()> {
     let store = open_store(s, &gen)?;
     let b = ProgressBar::new(1000);
     b.set_style(ProgressStyle::with_template("events {msg:12} {bar:40} {percent}% [{elapsed_precise} < {eta_precise}]").unwrap());
+    log_around(&b);
     let t0 = std::time::Instant::now();
     let res = pipeline::render_events(s, &poses, store, Some(gen), &|cam, done, total| {
         b.set_message(cam.to_string());

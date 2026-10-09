@@ -106,7 +106,11 @@ On the author's machine (Xeon W-2125, 8 threads; RTX 2080 Ti):
 | generation | GPU (default, `docs/gpu.md`): ~60 tiles/s at z13–z15; CPU: ~7 tiles/s at z17, ~6 at z16, ~5 at z15, ~1.5 at z6–10 (8 threads, `world.tile_supersample` 2) |
 | rendering 640×360, 2×2 supersampled, shadows | ~1.3 s per frame on the CPU, ~40× faster on the GPU ([`gpu.md`](gpu.md)) |
 
-`terrain run --lazy` generates exactly the tiles each view needs while rendering. The live
+`terrain run --lazy` generates exactly the tiles each view needs while rendering: the
+level-of-detail selection generates the tiles whose elevation range decides it, one zoom level
+per pass, and selects again until it knows them all (so a view selects the same tiles whether
+they were stored before or not), then the neighbours and ancestors of the selected tiles. The
+bindings' cameras do the same. The live
 camera view (`terrain view`) renders 640×360 at ~40 frames/s, 1280×720 at ~14 (`docs/viewer.md`).
 
 Event simulation renders every step that moves the image by `max_px_per_step` (~100 s of

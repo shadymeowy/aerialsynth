@@ -573,10 +573,25 @@ impl Renderer {
         }
     }
 
-    pub fn select_units(&self, cam: &CamPose) -> Vec<Unit> {
+    /// The LOD units of the view. With lazy generation the tiles the selection looks at without
+    /// knowing their elevation range are generated first (one zoom level more per pass), until
+    /// it knows them all: the units are then those of a store holding every tile, whatever the
+    /// store held before (the same view gives the same image on the first and later renders).
+    pub fn select_units(&self, cam: &CamPose) -> anyhow::Result<Vec<Unit>> {
         let params = LodParams { min_zoom: self.settings.min_zoom, max_zoom: self.settings.max_zoom, texel_px: self.settings.texel_px, ..Default::default() };
         let sel = Selector::new(cam, self.model.as_ref(), self.ell, &params, self.cache.as_ref());
-        sel.select()
+        if !self.cache.lazy() {
+            return Ok(sel.select());
+        }
+        // (each pass makes the tiles of one more zoom level known)
+        for _ in 0..params.max_zoom as usize + 2 {
+            let s = sel.selection();
+            if s.unknown.is_empty() {
+                return Ok(s.units);
+            }
+            self.cache.try_prefetch(&s.unknown)?;
+        }
+        anyhow::bail!("LOD selection: the elevation ranges of generated tiles stay unknown")
     }
 
     /// Tiles of the selected units with their neighbours and ancestors (the texture pyramid).
@@ -814,7 +829,7 @@ impl Renderer {
         let (w, h) = (ms.width() as usize, ms.height() as usize);
         let prof = std::env::var_os("RENDER_PROFILE").is_some();
         let t0 = std::time::Instant::now();
-        let units = self.select_units(cam);
+        let units = self.select_units(cam)?;
         let t_sel = t0.elapsed().as_secs_f64();
         let view = self.gather(&units, sun_state);
         let t_fetch = t0.elapsed().as_secs_f64();

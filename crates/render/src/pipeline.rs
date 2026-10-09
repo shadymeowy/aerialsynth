@@ -1,7 +1,7 @@
 //! High-level operations used by the CLI: plan tiles, generate tiles, render a sequence
 //! (every camera's frame modalities, body poses, IMU), simulate event cameras.
 
-use crate::cache::TileCache;
+use crate::cache::{Log, TileCache};
 use crate::camera::CameraModel;
 use crate::lod::{LodParams, PlanOracle, Selector, TileOracle};
 use crate::output::{self, BodySample, CameraWriter, Frame, PngWriter};
@@ -135,6 +135,9 @@ pub fn plan(scn: &Scenario, poses: &[Pose], gen: Option<&Generator>) -> Result<B
     };
     let every = scn.tiles.plan_every.max(1);
     let mut set: BTreeSet<TileId> = BTreeSet::new();
+    // the visible tiles refined on the way (the renderer's dry runs want them: their ranges
+    // decide its selection), also those without a unit below (all their children culled)
+    let mut refined: BTreeSet<TileId> = BTreeSet::new();
     for spec in &scn.cameras {
         let model = spec.intrinsics.build()?;
         let mut times = frame_times(scn, spec, win)?;
@@ -148,10 +151,13 @@ pub fn plan(scn: &Scenario, poses: &[Pose], gen: Option<&Generator>) -> Result<B
                 continue;
             }
             let cam = trajectory::interpolate(poses, *t).camera(&spec.extrinsics, &ell);
-            set.extend(Selector::new(&cam, model.as_ref(), ell, &params, &oracle).select().into_iter().map(|u| u.id));
+            let sel = Selector::new(&cam, model.as_ref(), ell, &params, &oracle).selection();
+            set.extend(sel.units.into_iter().map(|u| u.id));
+            refined.extend(sel.refined);
         }
     }
     with_margin_and_ancestors(scn, &mut set);
+    set.extend(refined);
     Ok(set)
 }
 
@@ -202,34 +208,44 @@ impl TileOracle for DryRunOracle<'_> {
 
 /// Tiles the renderer will select that the store lacks: a dry run of the renderer's own LOD
 /// selection (its zoom limits and texel threshold) at every frame of every camera (event cameras
-/// at 4× their frame rate), plus margins and ancestors. Run after generating a plan, it finds
-/// the tiles that the plan's estimated elevation ranges missed; repeated until empty, the render
-/// needs no lazy generation.
+/// at 4× their frame rate). It wants the tiles the selection needs but does not know (see
+/// [`crate::lod::Selection::unknown`]: their elevation ranges decide the selection), and the
+/// margins and ancestors of the units it selects among stored tiles. Run after generating a
+/// plan, it finds the tiles that the plan's estimated elevation ranges missed (one zoom level
+/// deeper per pass where they were too far off); repeated until empty, the render needs no lazy
+/// generation, and its selection is that of a store holding every tile.
 pub fn plan_missing(scn: &Scenario, poses: &[Pose], store: &TileStore) -> Result<BTreeSet<TileId>> {
     let ell = store.meta().ellipsoid();
     let win = Window::new(scn, poses)?;
     let max_zoom = scn.tiles.max_zoom;
     let params = LodParams { min_zoom: scn.tiles.min_zoom, max_zoom, texel_px: scn.render.texel_px, ..Default::default() };
     let oracle = DryRunOracle { store, max_zoom };
-    let mut want: BTreeSet<TileId> = BTreeSet::new();
+    let mut units: BTreeSet<TileId> = BTreeSet::new();
+    let mut unknown: BTreeSet<TileId> = BTreeSet::new();
     for spec in &scn.cameras {
         let model = spec.intrinsics.build()?;
         let mut times = frame_times(scn, spec, win)?;
         if spec.events.is_some() {
             times.extend(uniform_times(win, 0.0, 4.0 * spec.frame_rate, None)?);
         }
-        let sel: Vec<Vec<TileId>> = times
+        let sel: Vec<crate::lod::Selection> = times
             .par_iter()
             .map(|t| {
                 let cam = trajectory::interpolate(poses, *t).camera(&spec.extrinsics, &ell);
-                Selector::new(&cam, model.as_ref(), ell, &params, &oracle).select().into_iter().map(|u| u.id).collect()
+                Selector::new(&cam, model.as_ref(), ell, &params, &oracle).selection()
             })
             .collect();
-        want.extend(sel.into_iter().flatten());
+        for s in sel {
+            unknown.extend(s.unknown);
+            units.extend(s.units.iter().map(|u| u.id).filter(|id| store.contains(*id)));
+        }
     }
-    with_margin_and_ancestors(scn, &mut want);
-    want.retain(|id| !store.contains(*id));
-    Ok(want)
+    // margins around the units that stay (an unknown unit may still be refined: its margin
+    // follows once it is stored and selected again)
+    with_margin_and_ancestors(scn, &mut units);
+    units.extend(unknown);
+    units.retain(|id| !store.contains(*id));
+    Ok(units)
 }
 
 /// Generate tiles into the store (skipping existing ones unless `force`). Calls `progress(done, total)`.
@@ -257,6 +273,20 @@ pub fn generator(scn: &Scenario) -> Result<Generator> {
 /// The scenario's tile store for adding tiles (created if missing); it must hold this world.
 pub fn open_or_create_store(scn: &Scenario, gen: &Generator) -> Result<TileStore> {
     gen.open_store_rw(&scn.tiles.file)
+}
+
+/// Where [`render_sequence`] and [`render_events`] report tiles generated lazily (`tiles.lazy`):
+/// stderr, unless [`set_log`] routes it elsewhere.
+static LOG: std::sync::Mutex<Option<Log>> = std::sync::Mutex::new(None);
+
+/// Route the progress lines of lazy tile generation during [`render_sequence`] and
+/// [`render_events`] (e.g. around a progress bar); None: stderr.
+pub fn set_log(log: Option<Log>) {
+    *LOG.lock().unwrap_or_else(|e| e.into_inner()) = log;
+}
+
+fn log() -> Log {
+    LOG.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_else(|| Arc::new(|s: &str| eprintln!("{s}")))
 }
 
 /// Tile cache with the layers the shading mode needs (~40% less memory per cached tile), lazily
@@ -570,6 +600,7 @@ pub fn render_sequence(
     let ell = store.meta().ellipsoid();
     let win = Window::new(scn, poses)?;
     let cache = tile_cache(scn, store, gen);
+    cache.set_log(Some(log()));
     let file = output::create_file(scn, win.t0).with_context(|| format!("creating {}", scn.output.file.display()))?;
     let mut report = RenderReport::default();
 
@@ -619,6 +650,7 @@ pub fn render_events(
     let ell = store.meta().ellipsoid();
     let win = Window::new(scn, poses)?;
     let cache = tile_cache(scn, store, gen);
+    cache.set_log(Some(log()));
     let path = &scn.output.file;
     let file = output::open_file(path).with_context(|| format!("opening {} (make it with `terrain run`)", path.display()))?;
     let mut out = vec![];
