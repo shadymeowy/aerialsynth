@@ -2,6 +2,14 @@
 
 <p align="center"><img src="showcase/media/globe.jpg" width="440" alt="The generated planet (seed 1) seen from 15,000 km: continents, deserts, forests and oceans"></p>
 
+> [!WARNING]
+> **The terrain generator on `master` is being rewritten** (a modular generator with
+> climate-driven biomes, cultures and landscape kits; generator version 4). Until that work
+> is finished, `master` may look unfinished or change between commits, and tile stores made
+> with it are not compatible with releases. **To try aerialsynth, use the latest release,
+> [v0.2.0](https://github.com/shadymeowy/aerialsynth/releases/tag/v0.2.0)** (prebuilt
+> wheels and binaries there, or `git checkout v0.2.0` to build from source).
+
 A procedural planet for aerial vision research. `terrain` generates a deterministic world as
 Web-Mercator XYZ tiles, flies cameras and an IMU over it, and writes datasets with exact
 ground truth. A viewer flies over the world in realtime. There is no imagery or elevation data
