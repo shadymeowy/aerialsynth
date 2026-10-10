@@ -346,9 +346,12 @@ impl World {
         self.atlas.get_or_init(|| crate::atlas::Atlas::for_world(self))
     }
 
-    /// The moisture index 0..1 of an annual precipitation (mm): ln(P / 150) / ln 30.
-    pub fn moisture_index(precip_mm: f64) -> f64 {
-        ((precip_mm.max(1.0) / 150.0).ln() / 30f64.ln()).clamp(-0.3, 1.3)
+    /// The moisture index of an annual precipitation (mm) at a mean temperature (°C): from the
+    /// aridity r = P / (20 T + 140) (Köppen's dry threshold): 0.15 at r = ½ (deserts below),
+    /// 0.33 at r = 1 (steppe below), +0.18 per doubling (forests from r ≈ 2).
+    pub fn moisture_index(precip_mm: f64, temp_c: f64) -> f64 {
+        let r = precip_mm.max(1.0) / (20.0 * temp_c.max(0.0) + 140.0);
+        (0.33 + 0.18 * r.log2()).clamp(-0.3, 1.3)
     }
 
     /// Continent field (>0 land), smooth at ≥100 km scales.
@@ -602,7 +605,7 @@ impl World {
             // sea-level temperature and moisture from the atlas (rain shadows, currents,
             // continentality), with a little local noise on the moisture
             temp: a.temp_c,
-            moist: Self::moisture_index(a.precip_mm) + 0.06 * self.moist_n.eval(p, 20.0 * KM) * self.moist_n.norm() * 1.6,
+            moist: Self::moisture_index(a.precip_mm, a.temp_c) + 0.06 * self.moist_n.eval(p, 20.0 * KM) * self.moist_n.norm() * 1.6,
             uplift: a.uplift,
             coast_km: a.coast_km,
             wind_e: a.wind_e,
@@ -724,12 +727,12 @@ impl World {
     /// Gradient (east, north, per meter) of the relief low-passed at half the gully wavelength,
     /// by finite differences.
     #[allow(clippy::too_many_arguments)]
-    fn low_relief_gradient(&self, ctx: &Ctx, m: &Macro, mountain: f64, amp_m: f64, hill_amp: f64, gain: f64, lam_e: f64) -> [f64; 2] {
+    fn low_relief_gradient(&self, ctx: &Ctx, m: &Macro, _mountain: f64, amp_m: f64, hill_amp: f64, gain: f64, lam_e: f64) -> [f64; 2] {
         let p = ctx.p;
         let gl = lam_e * 0.5;
         let low = |q: DVec3| -> f64 {
             let mut v = hill_amp * self.hills(q, gl, gain).0;
-            if mountain > 1e-3 {
+            if amp_m > 0.0 {
                 let wp = DVec2::new(m.mtn_warp[0], m.mtn_warp[1]) * 9.0 * KM;
                 v += amp_m * self.ridged(q + ctx.east * wp.x + ctx.north * wp.y, gl, 1.6 + 0.8 * m.style[2]).0;
             }
@@ -800,12 +803,15 @@ impl World {
         // (the old belts count as mountains by their share: 0.55 at the default 0.45)
         let wb = (r.belt_mountains / 0.45 * 0.55).clamp(0.0, 1.0);
         let mountain = 1.0 - (1.0 - wb * mb) * (1.0 - mt);
-        (mountain.clamp(0.0, 1.0), amp_b + amp_t)
+        // (amplitudes of a few metres fade out: the ridged octaves are skipped there)
+        let amp = amp_b + amp_t;
+        (mountain.clamp(0.0, 1.0), amp * smoothstep(4.0, 12.0, amp))
     }
 
     /// Lowering (m) of rift grabens and trenches (negative tectonic uplift) on land.
     fn tect_base(&self, m: &Macro) -> f64 {
-        900.0 * m.uplift.min(0.0) * self.cfg.relief.tectonic_mountains * smoothstep(0.02, 0.15, m.cont)
+        // (inland only: near the coasts a trench side's negative uplift drowned the plains)
+        350.0 * m.uplift.min(0.0) * self.cfg.relief.tectonic_mountains * smoothstep(0.12, 0.3, m.cont)
     }
 
     fn hill_amplitude(&self, m: &Macro) -> f64 {
@@ -982,7 +988,7 @@ impl World {
 
         // ---- mountain belts
         let (mountain, amp_m) = self.mountain_mask(m);
-        let (ridged, ridged_low) = if mountain > 1e-3 {
+        let (ridged, ridged_low) = if amp_m > 0.0 {
             let wp = DVec2::new(m.mtn_warp[0], m.mtn_warp[1]) * 9.0 * KM;
             let pw = p + ctx.east * wp.x + ctx.north * wp.y;
             let sharp = 1.6 + 0.8 * m.style[2];

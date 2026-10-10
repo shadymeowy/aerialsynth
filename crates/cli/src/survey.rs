@@ -211,7 +211,7 @@ pub struct Probe {
     /// mean annual temperature (°C) and moisture (0..1)
     pub temp: f64,
     pub moist: f64,
-    /// Ecoregion / biome id (hook for the next generator; None today).
+    /// The biome of the ecoregion (registry index).
     pub biome: Option<u32>,
 }
 
@@ -237,7 +237,7 @@ impl Sampler for Generator {
             river: t.river_wet > 0.5 && t.river_hw > 3.0 && t.river_d.abs() < t.river_hw + 150.0,
             temp: t.temp,
             moist: t.moist,
-            biome: None,
+            biome: Some(self.biome(&t).0 as u32),
         }
     }
 
