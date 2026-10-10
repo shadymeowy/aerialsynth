@@ -438,6 +438,11 @@ signed distance, along-distance and fraction — the `aux` of the `linear` and `
 
 ---
 
+> **Height in the azonal slot:** the core's `azonal::finish_ground` sets the ground height
+> after the azonal slot (`height = ground + micro`), so a height (`dh`) a kit adds there is
+> overwritten. Add relief that must survive (e.g. barchans) in the disturbance slot, or as a
+> pass-A relief operator when drainage and the DSM must follow it.
+
 ## Rules (invariants)
 
 The generator's invariants (`docs/design/terrain-next.md` §1) apply to every kit:

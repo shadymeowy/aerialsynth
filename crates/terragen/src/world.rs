@@ -788,7 +788,7 @@ impl World {
     /// Mountain mask 0..1 and the amplitude (m) of the ridged mountains: ranges along the plate
     /// boundaries (the atlas' tectonic uplift: arcs, collision belts, rift shoulders) and the
     /// noise belts as old orogens and uplands (`relief.belt_mountains` of their height).
-    fn mountain_mask(&self, m: &Macro) -> (f64, f64) {
+    pub(crate) fn mountain_mask(&self, m: &Macro) -> (f64, f64) {
         let r = &self.cfg.relief;
         let b1 = 1.0 - m.belt.abs();
         let b2 = 1.0 - m.belt2.abs();
@@ -814,7 +814,7 @@ impl World {
         350.0 * m.uplift.min(0.0) * self.cfg.relief.tectonic_mountains * smoothstep(0.12, 0.3, m.cont)
     }
 
-    fn hill_amplitude(&self, m: &Macro) -> f64 {
+    pub(crate) fn hill_amplitude(&self, m: &Macro) -> f64 {
         let land = smoothstep(-0.06, 0.05, m.cont);
         self.cfg.relief.hill_height_m * (0.15 + 0.85 * smoothstep(-0.5, 0.6, m.hill_amp)) * (0.25 + 0.75 * land)
     }

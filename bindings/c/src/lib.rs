@@ -785,7 +785,8 @@ mod tests {
             let rc = as_render(cam, &pose, 1.7e9, rgb.as_mut_ptr(), rgb.len(), depth.as_mut_ptr(), depth.len(), lc.as_mut_ptr(), lc.len());
             assert_eq!(rc, AS_OK, "{}", last_error());
             assert!(depth.iter().all(|z| z.is_finite() && *z > 0.0));
-            assert!(lc.iter().all(|c| *c < 18) && rgb.iter().any(|v| *v > 0));
+            // land-cover classes v2 (ids < 128); no sky in this view
+            assert!(lc.iter().all(|c| *c < 128) && rgb.iter().any(|v| *v > 0));
             // depth only, the scenario's time (NAN)
             let mut d2 = vec![0f32; n];
             let rc = as_render(cam, &pose, f64::NAN, std::ptr::null_mut(), 0, d2.as_mut_ptr(), n, std::ptr::null_mut(), 0);
