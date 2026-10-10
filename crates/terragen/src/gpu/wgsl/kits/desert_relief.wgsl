@@ -214,7 +214,7 @@ fn desert_stars(c: Ctx, amount: f32) -> f32 {
     let er3 = (DS_STAR_R0 + DS_STAR_R1) * (DS_STAR_R0 * DS_STAR_R0 + DS_STAR_R1 * DS_STAR_R1) / 4.0;
     let mean = amount * DS_STAR_DENS * DS_STAR_CV * 0.2 * er3 / (DS_STAR_CELL * DS_STAR_CELL);
     let e = smoothstep1(1.2 * gsd, 3.0 * gsd, DS_STAR_R0);
-    if (e <= 0.0) {
+    if (e <= 0.02) {
         return mean;
     }
     let st = desert_slab_sites(cfg.seed ^ DS_STAR, c.p, c.east, c.north, DS_STAR_CELL, 0.45 * DS_STAR_CELL);
@@ -275,6 +275,10 @@ fn desert_playas_exists(s: InstSite) -> InstOut {
     if (u01k(s.id, 5lu) >= DS_PLAYA_DENS) {
         return o;
     }
+    let a = atlas_sample(vec3<f32>(normalize(s.center)));
+    if (moisture_index(a.precip_mm) > 0.29 || a.temp_c < 2.0 || a.coast_km < 0.0) {
+        return o;
+    }
     let f = desert_site_fields(s.center);
     if (desert_aridity(f.moist) < 0.5 || f.temp < 4.0 || f.cont < 0.05 || f.mountain > 0.1 || f.hills > 130.0 || f.sand > 0.4 || f.mesa > 0.3) {
         return o;
@@ -291,12 +295,12 @@ fn desert_inselbergs_exists(s: InstSite) -> InstOut {
     if (u01k(s.id, 5lu) >= DS_INS_DENS) {
         return o;
     }
-    let f = desert_site_fields(s.center);
-    if (f.moist > 0.42 || f.cont < 0.05 || f.mountain > 0.15 || f.sand > 0.6 || f.mesa > 0.3) {
+    let a = atlas_sample(vec3<f32>(normalize(s.center)));
+    if ((atlas_litho(a) != 2u && u01k(s.id, 13lu) >= 0.3) || moisture_index(a.precip_mm) > 0.52 || a.coast_km < 0.0) {
         return o;
     }
-    let a = atlas_sample(vec3<f32>(normalize(s.center)));
-    if (atlas_litho(a) != 2u && u01k(s.id, 13lu) >= 0.3) {
+    let f = desert_site_fields(s.center);
+    if (f.moist > 0.42 || f.cont < 0.05 || f.mountain > 0.15 || f.sand > 0.6 || f.mesa > 0.3) {
         return o;
     }
     o.ok = true;

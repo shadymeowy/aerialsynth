@@ -326,8 +326,9 @@ fn stars(w: &World, seed: u64, c: &Ctx, amount: f64) -> f64 {
     let gsd = c.gsd;
     let er3 = (STAR_R[0] + STAR_R[1]) * (STAR_R[0] * STAR_R[0] + STAR_R[1] * STAR_R[1]) / 4.0;
     let mean = amount * STAR_DENS * STAR_CV * 0.2 * er3 / (STAR_CELL * STAR_CELL);
+    // (switched off where the explicit share is a few per cent: R-cutoff)
     let e = smoothstep(1.2 * gsd, 3.0 * gsd, STAR_R[0]);
-    if e <= 0.0 {
+    if e <= 0.02 {
         return mean;
     }
     let st = slab_sites(w, seed ^ S_STAR, c.p, c.east, c.north, STAR_CELL, 0.45 * STAR_CELL);
@@ -404,6 +405,11 @@ fn playa_exists(w: &World, s: &crate::instances::InstSite) -> Option<[f32; 8]> {
     if u01k(s.id, 5) >= PLAYA_DENS {
         return None;
     }
+    // cheap tests on the atlas first (the macro fields cost ~60 noise octaves)
+    let a = w.atlas().sample(s.center.normalize());
+    if World::moisture_index(a.precip_mm) > 0.29 || a.temp_c < 2.0 || a.coast_km < 0.0 {
+        return None;
+    }
     let f = site_fields(w, s.center);
     if aridity(f.moist) < 0.5 || f.temp < 4.0 || f.cont < 0.05 || f.mountain > 0.1 || f.hills > 130.0 || f.sand > 0.4 || f.mesa > 0.3 {
         return None;
@@ -417,12 +423,12 @@ fn inselberg_exists(w: &World, s: &crate::instances::InstSite) -> Option<[f32; 8
     if u01k(s.id, 5) >= INS_DENS {
         return None;
     }
-    let f = site_fields(w, s.center);
-    if f.moist > 0.42 || f.cont < 0.05 || f.mountain > 0.15 || f.sand > 0.6 || f.mesa > 0.3 {
+    let a = w.atlas().sample(s.center.normalize());
+    if (a.litho as u8 != 2 && u01k(s.id, 13) >= 0.3) || World::moisture_index(a.precip_mm) > 0.52 || a.coast_km < 0.0 {
         return None;
     }
-    let a = w.atlas().sample(s.center.normalize());
-    if a.litho as u8 != 2 && u01k(s.id, 13) >= 0.3 {
+    let f = site_fields(w, s.center);
+    if f.moist > 0.42 || f.cont < 0.05 || f.mountain > 0.15 || f.sand > 0.6 || f.mesa > 0.3 {
         return None;
     }
     Some([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
