@@ -13,6 +13,8 @@ struct Layer {
     mat: u32,
     clear: f32,
     water: bool,
+    /// a solid surface over water (ice): no longer water
+    solid: bool,
 }
 
 fn layer_none() -> Layer {
@@ -28,6 +30,7 @@ fn layer_none() -> Layer {
     l.mat = 0u;
     l.clear = 0.0;
     l.water = false;
+    l.solid = false;
     return l;
 }
 
@@ -141,7 +144,9 @@ fn st_apply(s: ptr<function, Stack>, ly: Layer) {
     }
     if (a > 0.5 && ly.water) {
         (*s).is_water = true;
-        (*s).done = true;
+    }
+    if (a > 0.5 && ly.solid) {
+        (*s).is_water = false;
     }
 }
 
@@ -280,8 +285,17 @@ fn s_field(s: ptr<function, Stack>, f: u32) -> f32 {
         case 27u: { return t.style.w; }
         case 28u: { return (*s).bio.edge_km; }
         case 29u: { return (*s).bio.site.y; }
-        case 30u: { return (*s).bio.site.z; }
+        case 30u: { return t.temp_range; }
         case 31u: { return (*s).bio.site.w; }
+        case 32u: { return t.coast_km; }
+        case 33u: { return t.wind.x; }
+        case 34u: { return t.wind.y; }
+        case 35u: { return t.volcanism; }
+        case 36u: { return t.glaciation; }
+        case 37u: { return t.population; }
+        case 38u: { return t.development; }
+        case 39u: { return t.uplift; }
+        case 40u: { return t.regime; }
         default: { return 0.0; }
     }
 }
@@ -632,7 +646,7 @@ fn layer_linear(s: ptr<function, Stack>) {
     let fw = l.fw;
     let slope = l.slope;
     let steep = smoothstep1(-0.02, 0.02, 0.5 - slope);
-    let habit = smoothstep1(-0.005, 0.005, t.habit - 0.03) * steep * (1.0 - (*s).m.snow) * (1.0 - t.sand * 0.7);
+    let habit = smoothstep1(-0.005, 0.005, t.habit - 0.03 - 0.05 * (1.0 - t.development)) * steep * (1.0 - (*s).m.snow) * (1.0 - t.sand * 0.7);
     var road_cov = 0.0;
     var road_col = pal3(PAL_ASPHALT);
     if (habit > 0.0) {
@@ -728,7 +742,7 @@ fn layer_built(s: ptr<function, Stack>) {
         var ly = layer_paint(tp.cov, tp.col, tp.cls);
         ly.dh = tp.h;
         ly.hmode = in_dsm;
-        ly.emit = tp.em * tp.cov;
+        ly.emit = tp.em * (tp.cov * (0.55 + 0.9 * t.development));
         ly.lit = 1.0 - (*s).town.shadow;
         composite(s, ly);
     }
@@ -1067,7 +1081,7 @@ fn surface_eval(c: Ctx, t: Terrain, l: Local, pf: ptr<function, PixFields>) -> S
             biome_layers(sp, SLOT_WATER);
             kits_slot_water(sp);
         }
-        if (!s.done) {
+        if (!s.done && !s.is_water) {
             layer_snow(sp);
             biome_layers(sp, SLOT_SEASONAL);
             kits_slot_seasonal(sp);

@@ -77,7 +77,7 @@ Pass B evaluates every sub-sample as a fixed stack of layers (`src/stack.rs`,
 
 | slot | `slot::` | core content | kits typically add |
 |---|---|---|---|
-| 0 | `WATER_BODY` | standing water returns early: the water layers (slot 8) run on it | – |
+| 0 | `WATER_BODY` | standing water returns early, after its surface and the slot-8 layers (biome and kits) | – |
 | 1 | `ZONAL` | soil / grass / tundra / marsh ground of the biome, textures, drainage lines | ground textures of a biome |
 | 2 | `ALTITUDINAL` | – | alpine meadows, krummholz, nival zones |
 | 3 | `AZONAL` | rock on slopes, sand seas, beaches; then masks, micro-relief, riparian belts | coasts, playas, scree, glaciers, wetlands, ice-wedge polygons |
@@ -88,6 +88,12 @@ Pass B evaluates every sub-sample as a fixed stack of layers (`src/stack.rs`,
 | 7 | `BUILT` | farmsteads, towns, their lights | settlements, airports, ports, mines, solar farms |
 | 8 | `WATER` | rivers; the surface of oceans and lakes | reefs, sea ice, frozen lakes, sediment plumes |
 | 9 | `SEASONAL` | snow cover | seasonal snow, autumn colours |
+
+On standing water (oceans, lakes) the stack is: the water surface, then the slot-8 biome
+layers and kits (`s.l.water > s.l.ground`, `s.l.water_kind`; depth `s.l.water - s.l.ground`);
+a layer with `solid: true` (sea ice, frozen lakes) covering more than half makes the sample
+land again (`is_water` false). On land the seasonal slot (9) is skipped where the sample is
+water.
 
 Order of evaluation: water body → snow mask → frame → 1 → 2 → 3 → (masks) → 4 → 5 → **6, 7**
 → canopy → 8 → 9. Layers 6 and 7 are evaluated *before* the canopy (so towns can clear it)
@@ -109,7 +115,8 @@ pub struct Layer {
     pub relit: f64,      // weight resetting lit to 1 (× cov): roads 0.5, water 1
     pub mat: u8,         // material id (land-cover v2 material table)
     pub clear: f64,      // share of the natural vegetation it removes (× cov), layers before the canopy
-    pub water: bool,     // the sample is a water surface where cov > 0.5 (ends the stack)
+    pub water: bool,     // the sample is a water surface where cov > 0.5
+    pub solid: bool,     // a solid surface over water where cov > 0.5 (sea ice, frozen lakes): clears `is_water`
 }
 ```
 
@@ -124,7 +131,7 @@ with `s.composite(layer)` / `composite(s, ly)`. Class ids are the v2 ids of
 |---|---|---|
 | `s.ctx` (`p`, `east`, `north`, `up`, `lat`, `gsd`) | `(*s).c` | the sample |
 | `s.t: &Terrain` | `(*s).t` | pass A at the pixel: climate (`temp`, `moist`), `mountain`, `sand`, `mesa`, `floodplain`, `gully`, `agri`, `habit`, `style`, river, sites |
-| `s.l: &Local` | `(*s).l` | interpolated: `ground`, `water`, `water_kind`, `river_d`, `river_hw`, `river_level`, `slope`, `fw` (filter width), `eco_edge` |
+| `s.l: &Local` | `(*s).l` | interpolated: `ground`, `water`, `water_kind`, `river_d`, `river_hw`, `river_level`, `slope`, `grad` (east, north m/m: aspect, flow), `fw` (filter width), `eco_edge`, `blk` (WGSL: the block of instance / feature lists) |
 | `s.pf` | `(*s).pf` | pixel fields (`detail`, `patch`, `land`, `forest`, `snow`; lazy: `s.sm.pf_lazy(s.pf, PF_…)` / `s_pf_lazy(s, PF_…)`) |
 | `s.bio` | `(*s).bio` | the sample's biome(s) `a`, `b`, blend weight `w`, the ecoregion style `style` / `st`, site climate |
 | `s.m: Masks` | `(*s).m` | what lower layers published: `cover`, `rock`, `sand`, `beach`, `snow`, `shore_keep`, `natural_ok`, `flat_ok`, `micro`, `riparian`, `woodlot`, `field_cov`, `town_urban`, `town_cov`, `river_clear`, `road_major_cov`, `road_cov`, `river_cov`, `veg` |
@@ -152,7 +159,8 @@ changes only the keys given).
 - id: hot_desert_reg                  # lower_snake_case, unique
   group: bare                         # land-cover group of its natural cover (reporting)
   koppen: [BWh]                       # Köppen classes at the ecoregion site (empty: any)
-  envelope: { temp: [18, 35], precip_mm: [0, 250], dry_months: [9, 12] }   # at the site
+  envelope: { temp: [18, 35], precip_mm: [0, 250], dry_months: [9, 12],   # at the site
+              regime: [-1, 1], temp_range: [0, 40] }
   lithology: [sedimentary, crystalline]   # or `any`
   weight: 1.0                         # pick weight among the biomes that fit
   min_share: 0.01                     # variety test: at least this share of land samples
@@ -183,8 +191,9 @@ changes only the keys given).
 ```
 
 **How biomes are picked.** The world is tiled by ~100 km ecoregions (`src/eco.rs`). At each
-ecoregion's site the atlas gives the climate (Köppen class, mean temperature, annual
-precipitation, dry months) and lithology; the biomes whose `koppen`, `envelope` and
+ecoregion's site the planetary atlas (`src/atlas/`) gives the climate (Köppen class at the
+site's smooth elevation, mean temperature, annual precipitation, dry months, precipitation
+regime, temperature range), lithology and culture; the biomes whose `koppen`, `envelope` and
 `lithology` fit are drawn by `weight` (none fits: the nearest envelope). A sample takes its
 ecoregion's biome, then that biome's `zonation` entry by its own temperature (lapse rate), with
 a dithered ±1 °C transition. Within 10 km of an ecoregion border each ~220 m patch belongs to
@@ -212,7 +221,10 @@ sodium/development/site temperature/site precipitation, `arch`, `litho`).
 | `height` | ground (m) | `lat` | |latitude| (°) |
 | `river_dist` | m from the river bank (1e6: none) | `urban`, `field`, `natural`, `veg` | masks published so far |
 | `patch`, `detail`, `land`, `forest`, `snow_noise` | pixel noise fields ~[-1, 1] | `style0..3` | regional style channels 0..1 |
-| `eco_edge` | km to the ecoregion border | `precip_mm`, `temp_range`, `dry_months` | site climate |
+| `eco_edge` | km to the ecoregion border | `precip_mm`, `dry_months` | the ecoregion site's climate |
+| `coast_km` | signed coast distance (km, > 0 land; atlas) | `wind_e`, `wind_n` | annual wind (m/s; atlas) |
+| `volcanism`, `glaciation` | 0..1 (atlas: arcs, rifts, hotspots; last-glacial ice) | `uplift` | tectonic relief potential −1..1 |
+| `population`, `development` | 0..1 (atlas) | `regime`, `temp_range` | precipitation regime −1..1, warmest − coldest month (°C) |
 
 A window is `[lo, hi]` (soft edges of 10 % of its width), `[a0, a1, b0, b1]` (in over a0..a1,
 out over b0..b1), `null` for an open end.
@@ -365,7 +377,7 @@ are below the pixel) and volume-preserving where widened (R-energy): the elevati
 
 ## Instance families
 
-*(available from milestone 2; the API below is final)* Sparse landforms and objects with a
+Sparse landforms and objects with a
 bounded reach — volcanoes, atolls, inselbergs, kettle lakes, cinder cones, quarries — are
 instances of a **family**: the sites of a 3D jittered lattice (seamless on the sphere), each
 existing by an analytic test at its centre.
@@ -384,7 +396,14 @@ pub struct Family {
 Each 16 × 16-pixel block lists the instances (≤ 8 per family, by id) that can reach it; a
 sample evaluates only those (`s.instances(FAMILY)` / `inst_count(f, blk)`, `inst_get(f, blk,
 k)`; in relief operators `instances::near(w, FAMILY, p)`). The existence test sees the
-instance's id, centre (surface point below its site) and the analytic fields there; its
+instance's id, centre (surface point below its site) and the analytic fields there — macro
+fields, and the atlas (`w.atlas().sample(site.center.normalize())`; WGSL
+`atlas_sample(vec3<f32>(normalize(site.center)))`: `boundary`, `volcanism`, `hotspot`,
+`litho`, `glaciation` …). Its WGSL `<name>_exists` goes into the kit's relief WGSL (every
+module), with the family constants `FAM_<NAME>`. A layer reads a family with
+`inst_list(FAM_X, (*s).l.blk, (*s).c.p)` (CPU `s.instances(i)`), a relief operator with
+`inst_list(FAM_X, r.blk, c.p)` (CPU `r.instances(w, i)`), returning an `InstList { n, items }`
+of `Inst { id, center, v }`; its
 decision must not depend on per-pixel values (R-site). More than 8 instances of a family in a
 block is an error: choose a larger cell or a lower density (the density test in
 `tests/invariants.rs` checks the default world).
@@ -393,7 +412,7 @@ block is an error: choose a larger cell or a lower density (the density test in
 
 ## Linear features and stamps
 
-*(available from milestone 2; the API below is final)* Graphs and sites that need terrain samples
+Graphs and sites that need terrain samples
 (roads, rail, power lines, dams, airports, ports, deltas) are built by **host** Rust code shared
 by both backends and arrive per tile as binned lists:
 
@@ -502,3 +521,26 @@ a kit may add at most **5 %** to the tiles/s of any zoom of the default bench pl
 - [ ] stills before / after at z8, z12, z14, z16 of the places the kit changes
 - [ ] `zoom_bench` before / after: within the performance budget
 - [ ] `CHANGELOG.md` (Unreleased) line; `GENERATOR_VERSION` is the lead's (one bump per release)
+
+---
+
+## The planetary atlas
+
+`src/atlas/` (branch `next-atlas`) precomputes per world, on a ~20 km cube map, what cannot be
+computed locally: rain shadows and monsoons, temperature with currents and seasonality, plates
+and boundary types, tectonic uplift and volcanism, lithology, glaciation, coast distance,
+cultures, development and population. The core uses it for:
+
+* **relief** — mountain ranges along plate boundaries (arcs, collision belts, rift shoulders:
+  amplitude from `max(uplift, 0)`, `relief.tectonic_mountains`), the noise belts kept as old
+  orogens (`relief.belt_mountains`), grabens from negative uplift;
+* **climate** — temperature = atlas sea-level temperature − lapse × height; moisture =
+  ln(P / 150 mm) / ln 30 plus a little noise;
+* **ecoregions** — biome by the site's Köppen class, envelope, lithology; culture and archetype
+  from the atlas' culture areas;
+* **land use** — town density by population, roads and lights by development.
+
+Pass A samples it once per 16-pixel grid node (`Macro`, interpolated); the per-pixel values
+reach the stack in `Terrain` (`uplift`, `coast_km`, `wind`, `volcanism`, `glaciation`,
+`population`, `development`, `temp_range`, `regime`) and as mask fields. Kits sample it
+directly only at instance centres or host sites.

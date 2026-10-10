@@ -354,6 +354,7 @@ impl Generator {
             road_major: t.road_major.min(1e7),
             road_minor: t.road_minor.min(1e7),
             slope: 0.0,
+            grad: [0.0; 2],
             fw: gsd,
         };
         let mut caches = Caches::default();
@@ -607,6 +608,15 @@ impl Generator {
         });
 
         // ---------------- slope of the bare ground at pixel scale
+        let grad: Vec<[f64; 2]> = (0..na * na)
+            .map(|k| {
+                let (i, j) = ((k % na) as isize, (k / na) as isize);
+                let dx = (at(i + 1, j).ground - at(i - 1, j).ground) / (2.0 * row_gsd[j as usize]);
+                let dy = (at(i, j + 1).ground - at(i, j - 1).ground) / (2.0 * row_gsd_ns[j as usize]);
+                // (rows run south: the north gradient is −dy)
+                [dx, -dy]
+            })
+            .collect();
         let slope: Vec<f64> = (0..na * na)
             .map(|k| {
                 let (i, j) = ((k % na) as isize, (k / na) as isize);
@@ -722,6 +732,7 @@ impl Generator {
                                 road_major,
                                 road_minor,
                                 slope: slope[j * na + i],
+                                grad: grad[j * na + i],
                                 fw,
                             };
                             let px = ox + i as f64 - 1.0 + 0.5 + fxo;

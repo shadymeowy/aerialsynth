@@ -19,7 +19,7 @@
 //! the land-use regions): every discrete choice (biome, archetype, field systems) is the same
 //! on both. Results are cached; they are pure functions of (world, id).
 
-use crate::atlas_stub as atlas;
+use crate::atlas;
 use crate::noise::*;
 use crate::registry::{Registry, SiteClimate};
 use crate::world::World;
@@ -278,21 +278,36 @@ impl Ecoregions {
     }
 }
 
-/// An ecoregion's parameters (pure function of the world and the site).
+/// Months (0..12) with less than 60 mm of rain, from the annual sum and the regime.
+pub fn dry_months(s: &atlas::AtlasSample) -> f64 {
+    let pm = s.precip_mm.max(0.0) / 12.0;
+    let a = s.regime.abs().min(1.0);
+    // monthly rain p(m) = pm (1 + a cos θ): the share of months below 60 mm
+    if pm * (1.0 + a) < 60.0 {
+        return 12.0;
+    }
+    if pm * (1.0 - a) >= 60.0 {
+        return 0.0;
+    }
+    let c = ((60.0 / pm - 1.0) / a.max(1e-6)).clamp(-1.0, 1.0);
+    12.0 * (1.0 - c.acos() / std::f64::consts::PI)
+}
+
+/// An ecoregion's parameters (pure function of the world and the site): the atlas at the site
+/// (Köppen class at its smooth elevation, precipitation, dry months, lithology, culture).
 pub fn compute(w: &World, reg: &Registry, id: u64, site: DVec3) -> EcoParams {
-    let a = atlas::StubAtlas { world: w };
     let dir = site.normalize_or(DVec3::X);
-    let s = a.sample(dir);
+    let s = w.atlas().sample(dir);
     let g = geodesy::ecef2geodetic(dir * w.ell.a, &w.ell);
     let surface = geodesy::geodetic2ecef(geodesy::Geodetic::new(g.lat, g.lon, 0.0), &w.ell);
     let elev = s.elevation_m.max(0.0);
     let lapse = w.cfg.climate.lapse_rate_c_per_km;
     let k = atlas::koppen_with_lapse(&s, elev, lapse);
     let temp = s.temp_c - lapse * elev / KM;
-    let dry = atlas::dry_months(&s);
+    let dry = dry_months(&s);
     let climate = SiteClimate { temp_c: temp, precip_mm: s.precip_mm, temp_range_c: s.temp_range_c, dry_months: dry, koppen: k as u32 };
     let arch = s.archetype as usize;
-    let biome = reg.pick(k as u32, temp, s.precip_mm, dry, s.litho as u8, u01k(id, 0xB10), |_| 1.0);
+    let biome = reg.pick(k as u32, temp, s.precip_mm, dry, s.regime, s.temp_range_c, s.litho as u8, u01k(id, 0xB10), |_| 1.0);
     let style = draw_style(id, &s, arch, temp);
     EcoParams { id, site: surface, climate, biome, culture: s.culture, style }
 }

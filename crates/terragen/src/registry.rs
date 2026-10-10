@@ -84,7 +84,17 @@ pub mod field {
     pub const PRECIP: usize = 29;
     pub const TEMP_RANGE: usize = 30;
     pub const DRY_MONTHS: usize = 31;
-    pub const N: usize = 32;
+    /// planetary atlas fields at the sample
+    pub const COAST_KM: usize = 32;
+    pub const WIND_E: usize = 33;
+    pub const WIND_N: usize = 34;
+    pub const VOLCANISM: usize = 35;
+    pub const GLACIATION: usize = 36;
+    pub const POPULATION: usize = 37;
+    pub const DEVELOPMENT: usize = 38;
+    pub const UPLIFT: usize = 39;
+    pub const REGIME: usize = 40;
+    pub const N: usize = 41;
     /// YAML names (index = id)
     pub const NAMES: [&str; N] = [
         "temp",
@@ -119,6 +129,15 @@ pub mod field {
         "precip_mm",
         "temp_range",
         "dry_months",
+        "coast_km",
+        "wind_e",
+        "wind_n",
+        "volcanism",
+        "glaciation",
+        "population",
+        "development",
+        "uplift",
+        "regime",
     ];
     pub fn id(name: &str) -> Option<usize> {
         NAMES.iter().position(|n| *n == name)
@@ -159,6 +178,10 @@ struct EnvelopeYaml {
     temp: Option<[f64; 2]>,
     precip_mm: Option<[f64; 2]>,
     dry_months: Option<[f64; 2]>,
+    /// −1 dry summers … +1 summer rains
+    regime: Option<[f64; 2]>,
+    /// warmest − coldest month (°C)
+    temp_range: Option<[f64; 2]>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -476,8 +499,9 @@ pub struct Biome {
     pub group: String,
     /// bit k: Köppen class k (`atlas::Koppen as usize`); 0: any
     pub koppen: u32,
-    /// [lo, hi] of temperature (°C at the ecoregion site), precipitation (mm/yr), dry months
-    pub env: [[f64; 2]; 3],
+    /// [lo, hi] of temperature (°C at the ecoregion site), precipitation (mm/yr), dry months,
+    /// precipitation regime (−1..1), temperature range (°C)
+    pub env: [[f64; 2]; 5],
     /// bit k: lithology k; 0: any
     pub litho: u8,
     pub weight: f64,
@@ -639,14 +663,17 @@ impl Registry {
             // koppen, envelope, lithology
             let mut koppen = 0u32;
             for k in d.koppen.iter().flatten() {
-                match crate::atlas_stub::Koppen::from_code(k) {
+                match crate::atlas::Koppen::ALL.iter().copied().find(|c| c.code() == k) {
                     Some(c) => koppen |= 1 << c as u32,
                     None => e.push(&format!("{key}.koppen"), format!("unknown Köppen class {k:?}")),
                 }
             }
             let env_y = d.envelope.clone().unwrap_or_default();
-            let mut env = [[-100.0, 100.0], [0.0, 1e5], [0.0, 12.0]];
-            for (i, (nm, v)) in [("temp", env_y.temp), ("precip_mm", env_y.precip_mm), ("dry_months", env_y.dry_months)].iter().enumerate() {
+            let mut env = [[-100.0, 100.0], [0.0, 1e5], [0.0, 12.0], [-1.0, 1.0], [0.0, 100.0]];
+            for (i, (nm, v)) in [("temp", env_y.temp), ("precip_mm", env_y.precip_mm), ("dry_months", env_y.dry_months), ("regime", env_y.regime), ("temp_range", env_y.temp_range)]
+                .iter()
+                .enumerate()
+            {
                 if let Some([a, b]) = v {
                     if !(a.is_finite() && b.is_finite() && a <= b) {
                         e.push(&format!("{key}.envelope.{nm}"), format!("[{a}, {b}] must be finite and increasing"));
@@ -658,13 +685,13 @@ impl Registry {
                 None => 0,
                 Some(LithoYaml::Any(s)) if s == "any" => 0,
                 Some(LithoYaml::Any(s)) => {
-                    e.push(&format!("{key}.lithology"), format!("{s:?}: `any` or a list of {:?}", crate::atlas_stub::Lithology::ALL.map(|l| l.name())));
+                    e.push(&format!("{key}.lithology"), format!("{s:?}: `any` or a list of {:?}", crate::atlas::Lithology::ALL.map(|l| l.name())));
                     0
                 }
                 Some(LithoYaml::List(l)) => {
                     let mut m = 0u8;
                     for n in l {
-                        match crate::atlas_stub::Lithology::ALL.iter().find(|x| x.name() == n) {
+                        match crate::atlas::Lithology::ALL.iter().find(|x| x.name() == n) {
                             Some(x) => m |= 1 << *x as u8,
                             None => e.push(&format!("{key}.lithology"), format!("unknown lithology {n:?}")),
                         }
@@ -906,13 +933,11 @@ impl Registry {
 
     /// The biome picked for an ecoregion: those whose Köppen classes, envelope and lithology
     /// fit, drawn by weight (× `pref`) with `u` ∈ [0, 1); none fitting: the nearest envelope.
-    pub fn pick(&self, k: u32, temp: f64, precip: f64, dry: f64, litho: u8, u: f64, pref: impl Fn(&Biome) -> f64) -> u16 {
+    #[allow(clippy::too_many_arguments)]
+    pub fn pick(&self, k: u32, temp: f64, precip: f64, dry: f64, regime: f64, trange: f64, litho: u8, u: f64, pref: impl Fn(&Biome) -> f64) -> u16 {
+        let x = [temp, precip, dry, regime, trange];
         let fits = |b: &Biome| {
-            (b.koppen == 0 || b.koppen & (1 << k) != 0)
-                && (b.litho == 0 || b.litho & (1 << litho) != 0)
-                && (b.env[0][0]..=b.env[0][1]).contains(&temp)
-                && (b.env[1][0]..=b.env[1][1]).contains(&precip)
-                && (b.env[2][0]..=b.env[2][1]).contains(&dry)
+            (b.koppen == 0 || b.koppen & (1 << k) != 0) && (b.litho == 0 || b.litho & (1 << litho) != 0) && (0..5).all(|i| (b.env[i][0]..=b.env[i][1]).contains(&x[i]))
         };
         let w: Vec<f64> = self.biomes.iter().map(|b| if fits(b) { b.weight * pref(b) } else { 0.0 }).collect();
         let total: f64 = w.iter().sum();
@@ -930,7 +955,7 @@ impl Registry {
         let dist = |b: &Biome| {
             let d = |x: f64, r: [f64; 2], s: f64| ((r[0] - x).max(0.0) + (x - r[1]).max(0.0)) / s;
             let kp = if b.koppen == 0 || b.koppen & (1 << k) != 0 { 0.0 } else { 10.0 };
-            kp + d(temp, b.env[0], 5.0) + d(precip, b.env[1], 400.0) + d(dry, b.env[2], 3.0)
+            kp + d(temp, b.env[0], 5.0) + d(precip, b.env[1], 400.0) + d(dry, b.env[2], 3.0) + d(regime, b.env[3], 0.3) + d(trange, b.env[4], 8.0)
         };
         (0..self.biomes.len()).min_by(|&a, &b| dist(&self.biomes[a]).total_cmp(&dist(&self.biomes[b]))).unwrap_or(0) as u16
     }

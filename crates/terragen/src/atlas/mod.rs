@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// Version of the atlas' contents: part of the cache key (bump it whenever the fields change).
-pub const ATLAS_VERSION: u32 = 1;
+pub const ATLAS_VERSION: u32 = 2;
 /// Apron texels on each side of a face.
 pub const APRON: usize = 2;
 /// 32-bit words per texel (two 16-bit slots each).

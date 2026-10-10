@@ -20,7 +20,6 @@
 //! * [`store`]: the generator's [`tilestore`] binding (config and version stored with the tiles).
 
 pub mod atlas;
-pub mod atlas_stub;
 pub mod config;
 pub mod eco;
 pub mod features;

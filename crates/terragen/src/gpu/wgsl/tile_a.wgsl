@@ -62,17 +62,18 @@ const TF_ROADS_GRID: u32 = 8u;
 const NA2: u32 = 260u;
 /// bins of 16 x 16 pass-A pixels
 const NBIN: u32 = 17u;
-/// floats per grid node: Macro (19), the interpolated `Pre` inputs (37), pixel fields (16),
+/// floats per grid node: Macro (29), the interpolated `Pre` inputs (37), pixel fields (16),
 /// the `Pre` flags
-const NODE_F: u32 = 76u;
+const NODE_F: u32 = 84u;
 const NODE_MAC: u32 = 0u;
-const NODE_PRE: u32 = 19u;
+const NODE_PRE: u32 = 29u;
 const NODE_NPRE: u32 = 37u;
-const NODE_PF: u32 = 56u;
-/// floats per pass-A pixel: Macro (19), Relief (11)
-const PIX_F: u32 = 32u;
+const NODE_PF: u32 = 66u;
+/// floats per pass-A pixel: Macro (29), Relief (11)
+const PIX_F: u32 = 40u;
+const PIX_REL: u32 = 29u;
 /// the `Pre` fields a node holds (P_* flags, as f32 bits)
-const NODE_FLAGS: u32 = 72u;
+const NODE_FLAGS: u32 = 82u;
 
 @group(2) @binding(0) var<storage, read> tiles: array<TileInfo>;
 @group(2) @binding(1) var<storage, read> rows: array<Row>;
@@ -114,9 +115,22 @@ fn macro_put(base: u32, m: Macro) {
     node_f[base + 16u] = m.river_width;
     node_f[base + 17u] = m.mtn_warp.x;
     node_f[base + 18u] = m.mtn_warp.y;
+    node_f[base + 19u] = m.uplift;
+    node_f[base + 20u] = m.coast_km;
+    node_f[base + 21u] = m.wind_e;
+    node_f[base + 22u] = m.wind_n;
+    node_f[base + 23u] = m.volcanism;
+    node_f[base + 24u] = m.glaciation;
+    node_f[base + 25u] = m.population;
+    node_f[base + 26u] = m.development;
+    node_f[base + 27u] = m.temp_range;
+    node_f[base + 28u] = m.regime;
 }
 
-fn macro_from(a: array<f32, 19>) -> Macro {
+/// floats of a `Macro`
+const NMAC: u32 = 29u;
+
+fn macro_from(a: array<f32, 29>) -> Macro {
     var m: Macro;
     m.cont = a[0];
     m.plateau = a[1];
@@ -133,6 +147,16 @@ fn macro_from(a: array<f32, 19>) -> Macro {
     m.style = vec4<f32>(a[12], a[13], a[14], a[15]);
     m.river_width = a[16];
     m.mtn_warp = vec2<f32>(a[17], a[18]);
+    m.uplift = a[19];
+    m.coast_km = a[20];
+    m.wind_e = a[21];
+    m.wind_n = a[22];
+    m.volcanism = a[23];
+    m.glaciation = a[24];
+    m.population = a[25];
+    m.development = a[26];
+    m.temp_range = a[27];
+    m.regime = a[28];
     return m;
 }
 
@@ -271,12 +295,12 @@ fn node_index(ti: TileInfo, i: u32, j: u32) -> u32 {
 /// The macro fields at a pixel: bilinear between the nodes (`Macro::bilerp`); the mountain
 /// warp from the Catmull-Rom interpolation when on the grid, else exact.
 fn grid_macro(ti: TileInfo, g: GridPos, ctx: Ctx) -> Macro {
-    var a: array<f32, 19>;
+    var a: array<f32, 29>;
     let n00 = node_index(ti, g.i0, g.j0) * NODE_F;
     let n10 = node_index(ti, g.i0 + 1u, g.j0) * NODE_F;
     let n01 = node_index(ti, g.i0, g.j0 + 1u) * NODE_F;
     let n11 = node_index(ti, g.i0 + 1u, g.j0 + 1u) * NODE_F;
-    for (var k = 0u; k < 19u; k++) {
+    for (var k = 0u; k < NMAC; k++) {
         let x = node_f[n00 + k];
         let y = node_f[n10 + k];
         let z = node_f[n01 + k];
@@ -403,36 +427,18 @@ fn pass_a1(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocat
         }
         let rl = relief(ctx, m, pre, ti.bin0 + wg.y * NBIN + wg.x);
         let b = (ti.pix0 + j * NA2 + i) * PIX_F;
-        pix_a[b + 0u] = m.cont;
-        pix_a[b + 1u] = m.plateau;
-        pix_a[b + 2u] = m.belt;
-        pix_a[b + 3u] = m.belt2;
-        pix_a[b + 4u] = m.belt_var;
-        pix_a[b + 5u] = m.hill_amp;
-        pix_a[b + 6u] = m.rough;
-        pix_a[b + 7u] = m.temp;
-        pix_a[b + 8u] = m.moist;
-        pix_a[b + 9u] = m.mesa;
-        pix_a[b + 10u] = m.sand;
-        pix_a[b + 11u] = m.agri;
-        pix_a[b + 12u] = m.style.x;
-        pix_a[b + 13u] = m.style.y;
-        pix_a[b + 14u] = m.style.z;
-        pix_a[b + 15u] = m.style.w;
-        pix_a[b + 16u] = m.river_width;
-        pix_a[b + 17u] = m.mtn_warp.x;
-        pix_a[b + 18u] = m.mtn_warp.y;
-        pix_a[b + 19u] = rl.h;
-        pix_a[b + 20u] = rl.smooth_h;
-        pix_a[b + 21u] = rl.temp0;
-        pix_a[b + 22u] = rl.moist;
-        pix_a[b + 23u] = rl.mountain;
-        pix_a[b + 24u] = rl.ridged;
-        pix_a[b + 25u] = rl.hill_amp;
-        pix_a[b + 26u] = rl.micro;
-        pix_a[b + 27u] = rl.mesa;
-        pix_a[b + 28u] = rl.sand;
-        pix_a[b + 29u] = rl.gully_n;
+        pix_put(b, m);
+        pix_a[b + PIX_REL + 0u] = rl.h;
+        pix_a[b + PIX_REL + 1u] = rl.smooth_h;
+        pix_a[b + PIX_REL + 2u] = rl.temp0;
+        pix_a[b + PIX_REL + 3u] = rl.moist;
+        pix_a[b + PIX_REL + 4u] = rl.mountain;
+        pix_a[b + PIX_REL + 5u] = rl.ridged;
+        pix_a[b + PIX_REL + 6u] = rl.hill_amp;
+        pix_a[b + PIX_REL + 7u] = rl.micro;
+        pix_a[b + PIX_REL + 8u] = rl.mesa;
+        pix_a[b + PIX_REL + 9u] = rl.sand;
+        pix_a[b + PIX_REL + 10u] = rl.gully_n;
         atomicMax(&wg_hmax, orderable(rl.h));
         lake_requests(ctx, m, pre, rl, li);
     } else {
@@ -532,26 +538,36 @@ fn flush_lake_requests() {
 }
 
 fn pix_macro(b: u32) -> Macro {
-    var a: array<f32, 19>;
-    for (var k = 0u; k < 19u; k++) {
+    var a: array<f32, 29>;
+    for (var k = 0u; k < NMAC; k++) {
         a[k] = pix_a[b + k];
     }
     return macro_from(a);
 }
 
+/// The macro fields into pass-A pixel record `b` (the order of `macro_put`).
+fn pix_put(b: u32, m: Macro) {
+    let v = array<f32, 29>(m.cont, m.plateau, m.belt, m.belt2, m.belt_var, m.hill_amp, m.rough, m.temp, m.moist, m.mesa, m.sand, m.agri,
+        m.style.x, m.style.y, m.style.z, m.style.w, m.river_width, m.mtn_warp.x, m.mtn_warp.y,
+        m.uplift, m.coast_km, m.wind_e, m.wind_n, m.volcanism, m.glaciation, m.population, m.development, m.temp_range, m.regime);
+    for (var k = 0u; k < NMAC; k++) {
+        pix_a[b + k] = v[k];
+    }
+}
+
 fn pix_relief(b: u32) -> Relief {
     var r: Relief;
-    r.h = pix_a[b + 19u];
-    r.smooth_h = pix_a[b + 20u];
-    r.temp0 = pix_a[b + 21u];
-    r.moist = pix_a[b + 22u];
-    r.mountain = pix_a[b + 23u];
-    r.ridged = pix_a[b + 24u];
-    r.hill_amp = pix_a[b + 25u];
-    r.micro = pix_a[b + 26u];
-    r.mesa = pix_a[b + 27u];
-    r.sand = pix_a[b + 28u];
-    r.gully_n = pix_a[b + 29u];
+    r.h = pix_a[b + PIX_REL + 0u];
+    r.smooth_h = pix_a[b + PIX_REL + 1u];
+    r.temp0 = pix_a[b + PIX_REL + 2u];
+    r.moist = pix_a[b + PIX_REL + 3u];
+    r.mountain = pix_a[b + PIX_REL + 4u];
+    r.ridged = pix_a[b + PIX_REL + 5u];
+    r.hill_amp = pix_a[b + PIX_REL + 6u];
+    r.micro = pix_a[b + PIX_REL + 7u];
+    r.mesa = pix_a[b + PIX_REL + 8u];
+    r.sand = pix_a[b + PIX_REL + 9u];
+    r.gully_n = pix_a[b + PIX_REL + 10u];
     return r;
 }
 
@@ -751,8 +767,10 @@ fn instance_lists(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (NFAM == 0u || k >= NBIN * NBIN * NFAM) {
         return;
     }
-    let bin = k / NFAM;
-    let f = k % NFAM;
+    // (NFAM is a constant; 0 without families: no division by it)
+    let nf = max(NFAM, 1u);
+    let bin = k / nf;
+    let f = k % nf;
     let d = bin_disc(ti, bin);
     var over = false;
     let l = inst_scan_n(f, d.c, d.r, &over);

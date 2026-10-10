@@ -401,121 +401,12 @@ pub(super) fn build(world: &World) -> Atlas {
     let dev_noise = on2_up(&|p| nval(&n_dev, p));
     lap.lap("geometry, noises");
 
-    // ---- smooth elevation and mountain amplitude, band-limited at the texel size
-    let relief: Vec<(f64, f64)> = par(n, |k| world.smooth_relief(geos[k].p, gsd));
-    let elev: Vec<f64> = relief.iter().map(|r| r.0).collect();
-    let amp_m: Vec<f64> = relief.iter().map(|r| r.1).collect();
+    // ---- smooth elevation and mountain amplitude, band-limited at the texel size: first
+    // without the tectonic ranges (the plates' crust comes from it), then with them (coasts,
+    // climate and everything else follow the final relief)
+    let relief0: Vec<(f64, f64)> = par(n, |k| world.smooth_relief_u(geos[k].p, gsd, 0.0));
+    let elev: Vec<f64> = relief0.iter().map(|r| r.0).collect();
     lap.lap("elevation");
-
-    // ---- signed coast distance: jump flooding from the texels next to the other class
-    let land: Vec<bool> = elev.iter().map(|&h| h > 0.0).collect();
-    let coast_seeds: Vec<bool> = par(n, |k| nb4[k].iter().any(|&m| land[m] != land[k]));
-    let near = jfa(&e, &dirs, &coast_seeds);
-    let coast: Vec<f64> = par(n, |k| {
-        let d = if near[k] == NONE { 20000.0 } else { angle(dirs[k], dirs[near[k] as usize]) * a_m / KM + 0.5 * gsd / KM };
-        if land[k] {
-            d
-        } else {
-            -d
-        }
-    });
-    lap.lap("coast distance");
-
-    // ---- ocean currents (on the half-resolution grid, from the land fractions along rays to
-    // the west and east: smooth) and the sea-level temperature before continentality
-    let elev2 = downsample(&g2, &g, &elev);
-    let land2 = downsample(&g2, &g, &land.iter().map(|&l| l as u8 as f64).collect::<Vec<_>>());
-    let coast2 = downsample(&g2, &g, &coast);
-    let currents = if ac.currents { 1.0 } else { 0.0 };
-    let land_along = |k: usize, sign: f64| -> f64 {
-        let ge = &geos2[k];
-        let (mut s, mut ws) = (0.0, 0.0);
-        for (d_km, w) in [(150.0, 1.0), (300.0, 1.0), (500.0, 0.8), (800.0, 0.6), (1200.0, 0.4)] {
-            let a = d_km * KM / a_m;
-            let q = ge.dir * a.cos() + ge.east * (sign * a.sin());
-            s += w * g2.bilinear(q).iter().map(|&(t, wt)| wt * land2[t]).sum::<f64>();
-            ws += w;
-        }
-        s / ws
-    };
-    let cur2: Vec<[f64; 3]> = par(n2, |k| {
-        let (lw, le) = (land_along(k, -1.0), land_along(k, 1.0));
-        let al = geos2[k].lat.abs();
-        let ad = coast2[k].abs();
-        let lf = land2[k];
-        // cold eastern-boundary currents and upwelling off subtropical west coasts
-        let cold = (1.0 - lw)
-            * le.max(lf)
-            * (-ad / if coast2[k] > 0.0 { 350.0 } else { 600.0 }).exp()
-            * smoothstep(8.0, 16.0, al)
-            * (1.0 - smoothstep(32.0, 42.0, al));
-        // warm western-boundary currents off subtropical east coasts
-        let warm_e = lw.max(lf) * (1.0 - le) * (-ad / 450.0).exp() * smoothstep(12.0, 20.0, al) * (1.0 - smoothstep(38.0, 48.0, al));
-        // warm drift reaching high-latitude west coasts (carried inland by the westerlies)
-        let warm_w = (1.0 - lw) * le.max(lf) * (-ad / 900.0).exp() * smoothstep(42.0, 52.0, al) * (1.0 - smoothstep(68.0, 78.0, al));
-        [cold, warm_e, warm_w].map(|x| x * currents)
-    });
-    let cold2: Vec<f64> = cur2.iter().map(|c| c[0]).collect();
-    let cur_t = upsample(&g2, &g, &cur2.iter().map(|c| -7.0 * c[0] + 2.5 * c[1] + 6.0 * c[2]).collect::<Vec<_>>());
-    let c = &cfg.climate;
-    let temp0: Vec<f64> = par(n, |k| {
-        let la = geos[k].lat.abs() / 90.0;
-        c.equator_temp_c - c.pole_drop_c * la.powf(1.6) + temp_noise[k] + cur_t[k]
-    });
-
-    // ---- winds: the stream function of the pressure perturbations and the land heating
-    let psi = Fbm::new(mix64(seed ^ 0x9517), 3000.0 * KM, 3, 2.0, 0.5);
-    let wind_inputs = |dirs: &[DVec3], geos: &[Geo], coast: &[f64], nb: &[[usize; 4]]| -> Vec<WindIn> {
-        // the land fraction smoothed to ~300 km (smooth gradients, unlike the coast distance's
-        // at its medial axes): the monsoon flows up its gradient
-        let land: Vec<f64> = coast.iter().map(|&c| (c > 0.0) as u8 as f64).collect();
-        let sigma = 300.0 * KM / (a_m * texel_spacing(dirs.len()));
-        let gl = gradient(dirs, nb, &smooth(nb, &land, (4.0 * sigma * sigma) as usize));
-        par(dirs.len(), |k| {
-            let (_, gp) = psi.eval_d(geos[k].p, gsd, 99);
-            let d = dirs[k];
-            WindIn { geo: geos[k], coast_km: coast[k], grad_land: gl[k] * (800.0 * KM / a_m), grad_psi: gp - d * d.dot(gp) }
-        })
-    };
-    lap.lap("temperature");
-
-    // ---- moisture advection on the half-resolution grid, two seasons; the orography is the
-    // elevation smoothed to ~100 km (only ranges cast rain shadows, not every hill)
-    let temp2 = downsample(&g2, &g, &temp0);
-    let oro2 = smooth(&nb2, &elev2.iter().map(|&h| h.max(0.0)).collect::<Vec<_>>(), 25);
-    let wind2 = wind_inputs(&dirs2, &geos2, &coast2, &nb2);
-    lap.lap("climate grid");
-    let jul = advect(ac, world, &g2, &dirs2, &wind2, &moist2, &oro2, &land2, &temp2, &cold2, 1.0);
-    let jan = advect(ac, world, &g2, &dirs2, &wind2, &moist2, &oro2, &land2, &temp2, &cold2, -1.0);
-    let p_scale = 365.0 * ac.precipitation * (1.5 * c.moisture_bias).exp();
-    // the condensate falls over some distance: spread it (~40 km)
-    let jul = Season { precip: smooth(&nb2, &jul.precip, 4), ..jul };
-    let jan = Season { precip: smooth(&nb2, &jan.precip, 4), ..jan };
-    let precip2: Vec<f64> = par(n2, |k| 0.5 * (jul.precip[k] + jan.precip[k]) * p_scale);
-    // (the regime is a regional shape of the year: smoothed to ~80 km, else every windward
-    // slope of one season's wind shows)
-    let regime2: Vec<f64> = par(n2, |k| {
-        let (s, w) = if geos2[k].lat >= 0.0 { (jul.precip[k], jan.precip[k]) } else { (jan.precip[k], jul.precip[k]) };
-        // (no seasons at the equator: fade out the flip of the hemispheres' summer)
-        (s - w) / (s + w + 0.05) * smoothstep(1.0, 8.0, geos2[k].lat.abs())
-    });
-    let regime2 = smooth(&nb2, &regime2, 16);
-    let maritime2: Vec<f64> = par(n2, |k| 0.5 * (jul.maritime[k] + jan.maritime[k]));
-    lap.lap("moisture advection");
-    let precip = upsample(&g2, &g, &precip2);
-    let regime = upsample(&g2, &g, &regime2);
-    let maritime = upsample(&g2, &g, &maritime2);
-
-    // ---- temperature, seasonality, annual wind
-    let (temp, trange): (Vec<f64>, Vec<f64>) = par(n, |k| {
-        let lat = geos[k].lat;
-        let m = if coast[k] <= 0.0 { 1.0 } else { maritime[k].max((-coast[k] / 120.0).exp()).clamp(0.0, 1.0) };
-        let range = range_continental(lat) * (0.22 + 0.78 * (1.0 - m).powf(0.8));
-        (temp0[k] - 5.0 * (1.0 - m) * smoothstep(35.0, 70.0, lat.abs()), range)
-    })
-    .into_iter()
-    .unzip();
-    let wind_ann = upsample3(&g2, &g, &par(n2, |k| 0.5 * (wind(ac, &wind2[k], 1.0) + wind(ac, &wind2[k], -1.0))));
 
     // ---- plates: a weighted, warped spherical Voronoi diagram
     let np = ac.plates as usize;
@@ -641,6 +532,122 @@ pub(super) fn build(world: &World) -> Atlas {
     // the tectonic fields, smoothed over ~30 km (no steps where the boundary kind changes)
     let uplift = smooth(&nb4, &par(n, |k| (tect[k].3 + 0.25 * track[k]).clamp(-1.0, 1.0)), 9);
     let volcanism = smooth(&nb4, &par(n, |k| tect[k].4.max(track[k]).clamp(0.0, 1.0)), 9);
+
+    let relief: Vec<(f64, f64)> = par(n, |k| world.smooth_relief_u(geos[k].p, gsd, uplift[k]));
+    let elev: Vec<f64> = relief.iter().map(|r| r.0).collect();
+    let amp_m: Vec<f64> = relief.iter().map(|r| r.1).collect();
+    lap.lap("elevation with the tectonic ranges");
+
+    // ---- signed coast distance: jump flooding from the texels next to the other class
+    let land: Vec<bool> = elev.iter().map(|&h| h > 0.0).collect();
+    let coast_seeds: Vec<bool> = par(n, |k| nb4[k].iter().any(|&m| land[m] != land[k]));
+    let near = jfa(&e, &dirs, &coast_seeds);
+    let coast: Vec<f64> = par(n, |k| {
+        let d = if near[k] == NONE { 20000.0 } else { angle(dirs[k], dirs[near[k] as usize]) * a_m / KM + 0.5 * gsd / KM };
+        if land[k] {
+            d
+        } else {
+            -d
+        }
+    });
+    lap.lap("coast distance");
+
+    // ---- ocean currents (on the half-resolution grid, from the land fractions along rays to
+    // the west and east: smooth) and the sea-level temperature before continentality
+    let elev2 = downsample(&g2, &g, &elev);
+    let land2 = downsample(&g2, &g, &land.iter().map(|&l| l as u8 as f64).collect::<Vec<_>>());
+    let coast2 = downsample(&g2, &g, &coast);
+    let currents = if ac.currents { 1.0 } else { 0.0 };
+    let land_along = |k: usize, sign: f64| -> f64 {
+        let ge = &geos2[k];
+        let (mut s, mut ws) = (0.0, 0.0);
+        for (d_km, w) in [(150.0, 1.0), (300.0, 1.0), (500.0, 0.8), (800.0, 0.6), (1200.0, 0.4)] {
+            let a = d_km * KM / a_m;
+            let q = ge.dir * a.cos() + ge.east * (sign * a.sin());
+            s += w * g2.bilinear(q).iter().map(|&(t, wt)| wt * land2[t]).sum::<f64>();
+            ws += w;
+        }
+        s / ws
+    };
+    let cur2: Vec<[f64; 3]> = par(n2, |k| {
+        let (lw, le) = (land_along(k, -1.0), land_along(k, 1.0));
+        let al = geos2[k].lat.abs();
+        let ad = coast2[k].abs();
+        let lf = land2[k];
+        // cold eastern-boundary currents and upwelling off subtropical west coasts
+        let cold = (1.0 - lw)
+            * le.max(lf)
+            * (-ad / if coast2[k] > 0.0 { 350.0 } else { 600.0 }).exp()
+            * smoothstep(8.0, 16.0, al)
+            * (1.0 - smoothstep(32.0, 42.0, al));
+        // warm western-boundary currents off subtropical east coasts
+        let warm_e = lw.max(lf) * (1.0 - le) * (-ad / 450.0).exp() * smoothstep(12.0, 20.0, al) * (1.0 - smoothstep(38.0, 48.0, al));
+        // warm drift reaching high-latitude west coasts (carried inland by the westerlies)
+        let warm_w = (1.0 - lw) * le.max(lf) * (-ad / 900.0).exp() * smoothstep(42.0, 52.0, al) * (1.0 - smoothstep(68.0, 78.0, al));
+        [cold, warm_e, warm_w].map(|x| x * currents)
+    });
+    let cold2: Vec<f64> = cur2.iter().map(|c| c[0]).collect();
+    let cur_t = upsample(&g2, &g, &cur2.iter().map(|c| -7.0 * c[0] + 2.5 * c[1] + 6.0 * c[2]).collect::<Vec<_>>());
+    let c = &cfg.climate;
+    let temp0: Vec<f64> = par(n, |k| {
+        let la = geos[k].lat.abs() / 90.0;
+        c.equator_temp_c - c.pole_drop_c * la.powf(1.6) + temp_noise[k] + cur_t[k]
+    });
+
+    // ---- winds: the stream function of the pressure perturbations and the land heating
+    let psi = Fbm::new(mix64(seed ^ 0x9517), 3000.0 * KM, 3, 2.0, 0.5);
+    let wind_inputs = |dirs: &[DVec3], geos: &[Geo], coast: &[f64], nb: &[[usize; 4]]| -> Vec<WindIn> {
+        // the land fraction smoothed to ~300 km (smooth gradients, unlike the coast distance's
+        // at its medial axes): the monsoon flows up its gradient
+        let land: Vec<f64> = coast.iter().map(|&c| (c > 0.0) as u8 as f64).collect();
+        let sigma = 300.0 * KM / (a_m * texel_spacing(dirs.len()));
+        let gl = gradient(dirs, nb, &smooth(nb, &land, (4.0 * sigma * sigma) as usize));
+        par(dirs.len(), |k| {
+            let (_, gp) = psi.eval_d(geos[k].p, gsd, 99);
+            let d = dirs[k];
+            WindIn { geo: geos[k], coast_km: coast[k], grad_land: gl[k] * (800.0 * KM / a_m), grad_psi: gp - d * d.dot(gp) }
+        })
+    };
+    lap.lap("temperature");
+
+    // ---- moisture advection on the half-resolution grid, two seasons; the orography is the
+    // elevation smoothed to ~100 km (only ranges cast rain shadows, not every hill)
+    let temp2 = downsample(&g2, &g, &temp0);
+    let oro2 = smooth(&nb2, &elev2.iter().map(|&h| h.max(0.0)).collect::<Vec<_>>(), 25);
+    let wind2 = wind_inputs(&dirs2, &geos2, &coast2, &nb2);
+    lap.lap("climate grid");
+    let jul = advect(ac, world, &g2, &dirs2, &wind2, &moist2, &oro2, &land2, &temp2, &cold2, 1.0);
+    let jan = advect(ac, world, &g2, &dirs2, &wind2, &moist2, &oro2, &land2, &temp2, &cold2, -1.0);
+    let p_scale = 365.0 * ac.precipitation * (1.5 * c.moisture_bias).exp();
+    // the condensate falls over some distance: spread it (~40 km)
+    let jul = Season { precip: smooth(&nb2, &jul.precip, 4), ..jul };
+    let jan = Season { precip: smooth(&nb2, &jan.precip, 4), ..jan };
+    let precip2: Vec<f64> = par(n2, |k| 0.5 * (jul.precip[k] + jan.precip[k]) * p_scale);
+    // (the regime is a regional shape of the year: smoothed to ~80 km, else every windward
+    // slope of one season's wind shows)
+    let regime2: Vec<f64> = par(n2, |k| {
+        let (s, w) = if geos2[k].lat >= 0.0 { (jul.precip[k], jan.precip[k]) } else { (jan.precip[k], jul.precip[k]) };
+        // (no seasons at the equator: fade out the flip of the hemispheres' summer)
+        (s - w) / (s + w + 0.05) * smoothstep(1.0, 8.0, geos2[k].lat.abs())
+    });
+    let regime2 = smooth(&nb2, &regime2, 16);
+    let maritime2: Vec<f64> = par(n2, |k| 0.5 * (jul.maritime[k] + jan.maritime[k]));
+    lap.lap("moisture advection");
+    let precip = upsample(&g2, &g, &precip2);
+    let regime = upsample(&g2, &g, &regime2);
+    let maritime = upsample(&g2, &g, &maritime2);
+
+    // ---- temperature, seasonality, annual wind
+    let (temp, trange): (Vec<f64>, Vec<f64>) = par(n, |k| {
+        let lat = geos[k].lat;
+        let m = if coast[k] <= 0.0 { 1.0 } else { maritime[k].max((-coast[k] / 120.0).exp()).clamp(0.0, 1.0) };
+        let range = range_continental(lat) * (0.22 + 0.78 * (1.0 - m).powf(0.8));
+        (temp0[k] - 5.0 * (1.0 - m) * smoothstep(35.0, 70.0, lat.abs()), range)
+    })
+    .into_iter()
+    .unzip();
+    let wind_ann = upsample3(&g2, &g, &par(n2, |k| 0.5 * (wind(ac, &wind2[k], 1.0) + wind(ac, &wind2[k], -1.0))));
+
 
     // ---- glaciation (ice at the last glacial maximum: ~6 °C colder, more towards the poles)
     let glaciation: Vec<f64> = par(n, |k| {

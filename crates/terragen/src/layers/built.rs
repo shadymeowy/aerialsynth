@@ -482,8 +482,9 @@ pub fn layer(s: &mut crate::stack::Stack) {
         let e = DVec3::new(1.0, 0.80, 0.55) * (4.0 * (-(dl * dl) / (2.0 * 0.5 * 0.5)).exp() * dots * smoothstep(0.25, 0.45, m.town_urban));
         s.composite(Layer { emit: e, ..Default::default() });
     }
-    // ---- the town
+    // ---- the town (its lights by the atlas' development)
     if let Some((tcol, th, cov, cls, shadow, em)) = s.town_px {
-        s.composite(Layer { cov, albedo: tcol, dh: th, hmode: in_dsm, cls, emit: em * cov, lit: 1.0 - shadow, ..Default::default() });
+        let dev = 0.55 + 0.9 * t.development;
+        s.composite(Layer { cov, albedo: tcol, dh: th, hmode: in_dsm, cls, emit: em * (cov * dev), lit: 1.0 - shadow, ..Default::default() });
     }
 }

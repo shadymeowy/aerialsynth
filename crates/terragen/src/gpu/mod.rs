@@ -48,9 +48,9 @@ const NA2: usize = N + 4;
 const PB_F: usize = 12;
 const OUT_U: usize = 6;
 const NBIN: usize = 17;
-const NODE_F: usize = 76;
+const NODE_F: usize = 84;
 const NODE_IDS: usize = 10;
-const PIX_F: usize = 32;
+const PIX_F: usize = 40;
 /// grid node spacing (pixels)
 const G: f64 = 16.0;
 const NG: usize = N / 16 + 5;
@@ -1504,6 +1504,8 @@ fn gpu_cfg(w: &World, s: &SurfaceModel) -> GCfg {
     g.saturation = c.albedo.saturation as f32;
     g.brightness = c.albedo.brightness as f32;
     g.eco_cell = (c.ecoregions.cell_km * 1000.0) as f32;
+    g.belt_mtn = c.relief.belt_mountains as f32;
+    g.tect_mtn = c.relief.tectonic_mountains as f32;
     g.ecotone = (c.ecoregions.ecotone_km * 1000.0) as f32;
     g
 }

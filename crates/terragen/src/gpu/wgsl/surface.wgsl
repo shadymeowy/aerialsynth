@@ -312,6 +312,8 @@ struct Local {
     road_major: f32,
     road_minor: f32,
     slope: f32,
+    /// gradient of the ground (east, north; m/m): aspect, flow direction
+    grad: vec2<f32>,
     fw: f32,
     /// the pixel's block (instance lists: `inst_list(f, (*s).l.blk, (*s).c.p)`)
     blk: u32,

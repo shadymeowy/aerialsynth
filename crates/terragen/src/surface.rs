@@ -59,6 +59,8 @@ pub struct Local<'a> {
     pub road_minor: f64,
     /// Terrain slope (tan) at pixel scale.
     pub slope: f64,
+    /// Gradient of the ground (east, north; m/m) at pixel scale: aspect, flow direction.
+    pub grad: [f64; 2],
     /// Sub-sample filter width (m) for analytic edge antialiasing.
     pub fw: f64,
     /// the instance lists of the pixel's block (per family; empty: not known)
@@ -634,7 +636,8 @@ impl SurfaceModel {
             let tc = world.terrain(&ctx);
             let eco = self.eco.params(world, &self.registry, cache, tc.eco.id, tc.eco.center);
             culture = crate::eco::town_style(id, &eco.style);
-            let p_exist = (tc.habit * 1.1 * world.cfg.landuse.towns * culture.0).min(0.95);
+            // (the atlas' population potential sets the density around the culture's)
+            let p_exist = (tc.habit * 1.1 * world.cfg.landuse.towns * culture.0 * (0.45 + 1.1 * tc.population)).min(0.95);
             u01k(id, 1) < p_exist && tc.water_kind == water::NONE && tc.ground > 2.0 && tc.ground < 4000.0
         };
         let ang = u01k(id, 2) * std::f64::consts::FRAC_PI_2;

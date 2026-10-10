@@ -152,6 +152,10 @@ pub struct Relief {
     pub erosion: f64,
     /// Wavelength of the coarsest gully octave (m).
     pub gully_wavelength_m: f64,
+    /// Mountain ranges along plate boundaries (the atlas' tectonic uplift): 0 none, 1 default.
+    pub tectonic_mountains: f64,
+    /// Share of the noise belts' mountains (old orogens, uplands) next to the tectonic ranges.
+    pub belt_mountains: f64,
 }
 impl Default for Relief {
     fn default() -> Self {
@@ -164,6 +168,8 @@ impl Default for Relief {
             dune_height_m: 35.0,
             erosion: 1.0,
             gully_wavelength_m: 1400.0,
+            tectonic_mountains: 1.0,
+            belt_mountains: 0.45,
         }
     }
 }
@@ -402,6 +408,8 @@ impl Config {
         nonneg("relief.mesas", r.mesas);
         nonneg("relief.dune_height_m", r.dune_height_m);
         nonneg("relief.erosion", r.erosion);
+        nonneg("relief.tectonic_mountains", r.tectonic_mountains);
+        nonneg("relief.belt_mountains", r.belt_mountains);
         for (i, l) in self.hydro.levels.iter().enumerate() {
             nonneg(&format!("hydro.levels[{i}].width_m[0]"), l.width_m[0]);
             nonneg(&format!("hydro.levels[{i}].width_m[1]"), l.width_m[1]);

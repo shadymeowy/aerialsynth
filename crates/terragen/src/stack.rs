@@ -2,7 +2,8 @@
 //! fixed sequence of layers, each returning a [`Layer`] that is composited over what lies below.
 //!
 //! ```text
-//!  0 relief & water (pass A)   standing water returns early (its surface: slot 8 layers)
+//!  0 relief & water (pass A)   standing water returns early after its surface and the slot-8
+//!                              layers (sea ice, frozen lakes, reefs: `Layer::solid`)
 //!  1 zonal biome               ground of the ecoregion's biome (soil, grass, textures)
 //!  2 altitudinal zone          zonation by lapse temperature (alpine meadow, nival …)
 //!  3 azonal overrides          rock, sand seas, beaches, riparian, wetlands, coast kit …
@@ -87,11 +88,13 @@ pub struct Layer {
     pub clear: f64,
     /// a water surface where `cov` > 0.5 (the sample is water: glint, class)
     pub water: bool,
+    /// a solid surface over water where `cov` > 0.5 (sea ice, frozen lakes): no longer water
+    pub solid: bool,
 }
 
 impl Default for Layer {
     fn default() -> Self {
-        Layer { cov: 0.0, albedo: DVec3::ZERO, dh: 0.0, hmode: hmode::NONE, cls: 0, emit: DVec3::ZERO, lit: 1.0, relit: 0.0, mat: 0, clear: 0.0, water: false }
+        Layer { cov: 0.0, albedo: DVec3::ZERO, dh: 0.0, hmode: hmode::NONE, cls: 0, emit: DVec3::ZERO, lit: 1.0, relit: 0.0, mat: 0, clear: 0.0, water: false, solid: false }
     }
 }
 
@@ -194,7 +197,8 @@ pub struct Stack<'a> {
     pub lit: f64,
     pub emission: DVec3,
     pub is_water: bool,
-    /// a layer ended the stack (a water surface): the rest is skipped
+    /// a layer ended the stack: the rest is skipped (set by kits; water surfaces skip only the
+    /// seasonal slot, while `is_water`)
     pub done: bool,
     /// layers 6–7: evaluated before the canopy, composited after it
     deferring: bool,
@@ -301,7 +305,9 @@ impl<'a> Stack<'a> {
         }
         if a > 0.5 && ly.water {
             self.is_water = true;
-            self.done = true;
+        }
+        if a > 0.5 && ly.solid {
+            self.is_water = false;
         }
     }
 
@@ -384,8 +390,17 @@ impl<'a> Stack<'a> {
             STYLE3 => t.style[3],
             ECO_EDGE => self.bio.edge_km,
             PRECIP => self.bio.site.precip_mm,
-            TEMP_RANGE => self.bio.site.temp_range_c,
+            TEMP_RANGE => t.temp_range,
             DRY_MONTHS => self.bio.site.dry_months,
+            COAST_KM => t.coast_km,
+            WIND_E => t.wind[0],
+            WIND_N => t.wind[1],
+            VOLCANISM => t.volcanism,
+            GLACIATION => t.glaciation,
+            POPULATION => t.population,
+            DEVELOPMENT => t.development,
+            UPLIFT => t.uplift,
+            REGIME => t.regime,
             _ => 0.0,
         }
     }
@@ -467,13 +482,13 @@ pub fn eval(sm: &SurfaceModel, world: &World, cache: &mut Caches, ctx: &Ctx, l: 
     biome(&mut s, slot::CANOPY);
     kits::slot(slot::CANOPY, &mut s);
     s.flush();
-    // ---- 8, 9
+    // ---- 8, 9 (the seasonal layers skip water: ice over it clears `is_water`)
     core::water::rivers(&mut s);
     if !s.done {
         biome(&mut s, slot::WATER);
         kits::slot(slot::WATER, &mut s);
     }
-    if !s.done {
+    if !s.done && !s.is_water {
         core::snow::layer(&mut s);
         biome(&mut s, slot::SEASONAL);
         kits::slot(slot::SEASONAL, &mut s);

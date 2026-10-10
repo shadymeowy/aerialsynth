@@ -369,7 +369,7 @@ impl<'a> Prep<'a> {
             };
             let eco = self.eco(tc.eco_id, ctx.p)?;
             culture = crate::eco::town_style(id, &eco.style);
-            let p_exist = (tc.habit as f64 * 1.1 * lu.towns * culture.0).min(0.95);
+            let p_exist = (tc.habit as f64 * 1.1 * lu.towns * culture.0 * (0.45 + 1.1 * tc.population as f64)).min(0.95);
             u01k(id, 1) < p_exist && tc.water_kind == W_NONE && tc.ground > 2.0 && tc.ground < 4000.0
         } else {
             false

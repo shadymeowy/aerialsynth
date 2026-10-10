@@ -294,7 +294,7 @@ struct Sample {
     ground: f32,
 }
 
-fn sample_b(ti: TileInfo, i: u32, j: u32, sx: u32, sy: u32, slope: f32, gsd: f32, pf: ptr<function, PixFields>) -> Sample {
+fn sample_b(ti: TileInfo, i: u32, j: u32, sx: u32, sy: u32, slope: f32, grad: vec2<f32>, gsd: f32, pf: ptr<function, PixFields>) -> Sample {
     let ss = ti.ss;
     let fxo = sub_offset(sx, ss);
     let fyo = sub_offset(sy, ss);
@@ -357,6 +357,7 @@ fn sample_b(ti: TileInfo, i: u32, j: u32, sx: u32, sy: u32, slope: f32, gsd: f32
     let es = vec4<f32>(select(-1.0, 1.0, n00.eco_id == t.eco_id), select(-1.0, 1.0, n10.eco_id == t.eco_id), select(-1.0, 1.0, n01.eco_id == t.eco_id), select(-1.0, 1.0, n11.eco_id == t.eco_id));
     l.eco_edge = bilerp4(ee * es, fx, fy);
     l.slope = slope;
+    l.grad = grad;
     l.fw = gsd / f32(ss);
     l.blk = ti.bin0 + ((j + 1u) / 16u) * NBIN + (i + 1u) / 16u;
     let r = rows[ti.row_b + j * ss + sy];
@@ -416,7 +417,7 @@ fn pass_b(@builtin(global_invocation_id) gid: vec3<u32>) {
             sx = select(k & 1u, 1u - (k & 1u), k >= 2u);
             sy = k & 1u;
         }
-        let s = sample_b(ti, i, j, sx, sy, slope, gsd, &pf);
+        let s = sample_b(ti, i, j, sx, sy, slope, vec2<f32>(dx, -dy), gsd, &pf);
         acc_a += s.s.albedo;
         acc_e += s.s.emission;
         acc_h += s.s.height;

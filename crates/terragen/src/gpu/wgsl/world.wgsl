@@ -51,11 +51,17 @@ struct Cfg {
     /// ecoregion lattice cell and ecotone width (m)
     eco_cell: f32,
     ecotone: f32,
-    _p2: f32,
+    /// relief.belt_mountains
+    belt_mtn: f32,
     /// per drainage level: cell (m), width min, width max, valley half width (m)
     lvl_a: array<vec4<f32>, 4>,
     /// per drainage level: wet moisture, meander, max depth (m), meander wavelength (m)
     lvl_b: array<vec4<f32>, 4>,
+    /// relief.tectonic_mountains
+    tect_mtn: f32,
+    _t0: f32,
+    _t1: f32,
+    _t2: f32,
 }
 
 const CF_RIVERS: u32 = 1u;
@@ -134,6 +140,17 @@ struct Macro {
     style: vec4<f32>,
     river_width: f32,
     mtn_warp: vec2<f32>,
+    /// from the planetary atlas (`Macro`)
+    uplift: f32,
+    coast_km: f32,
+    wind_e: f32,
+    wind_n: f32,
+    volcanism: f32,
+    glaciation: f32,
+    population: f32,
+    development: f32,
+    temp_range: f32,
+    regime: f32,
 }
 
 /// Smooth inputs from the tile's coarse grid (`Pre`); `flags` marks the fields that are there.
@@ -364,8 +381,20 @@ fn macro_at(p: vec3<f64>, gsd: f32) -> Macro {
     m.belt_var = fbm(FBM_BELT_VAR, p, gsd) * fbm_norm(FBM_BELT_VAR) * 1.6;
     m.hill_amp = fbm(FBM_HILL_AMP, p, gsd) * fbm_norm(FBM_HILL_AMP) * 1.6;
     m.rough = fbm(FBM_ROUGH, p, gsd) * fbm_norm(FBM_ROUGH) * 1.6;
-    m.temp = 5.0 * fbm(FBM_TEMP, p, 50.0 * KM);
-    m.moist = fbm(FBM_MOIST, p, 20.0 * KM) * fbm_norm(FBM_MOIST) * 1.6;
+    // climate and tectonics from the atlas (`World::macro_at`)
+    let a = atlas_sample(vec3<f32>(p / sqrt(dot(p, p))));
+    m.temp = a.temp_c;
+    m.moist = moisture_index(a.precip_mm) + 0.06 * fbm(FBM_MOIST, p, 20.0 * KM) * fbm_norm(FBM_MOIST) * 1.6;
+    m.uplift = a.uplift;
+    m.coast_km = a.coast_km;
+    m.wind_e = a.wind.x;
+    m.wind_n = a.wind.y;
+    m.volcanism = a.volcanism;
+    m.glaciation = a.glaciation;
+    m.population = a.population;
+    m.development = a.development;
+    m.temp_range = a.temp_range_c;
+    m.regime = a.regime;
     m.mesa = fbm(FBM_MESA, p, gsd) * fbm_norm(FBM_MESA) * 1.8;
     m.sand = fbm(FBM_SAND, p, gsd) * fbm_norm(FBM_SAND) * 1.8;
     m.agri = fbm(FBM_AGRI, p, gsd) * fbm_norm(FBM_AGRI) * 1.8;
@@ -435,13 +464,29 @@ fn base_elevation(s: f32) -> f32 {
 }
 
 /// (mountain mask, mountain amplitude)
+/// The moisture index of an annual precipitation (`World::moisture_index`).
+fn moisture_index(p_mm: f32) -> f32 {
+    return clamp(log(max(p_mm, 1.0) / 150.0) / log(30.0), -0.3, 1.3);
+}
+
+/// Mountain mask and amplitude (`World::mountain_mask`): plate-boundary ranges and old belts.
 fn mountain_mask(m: Macro) -> vec2<f32> {
     let b1 = 1.0 - abs(m.belt);
     let b2 = 1.0 - abs(m.belt2);
     let belt = max(b1 * 0.75 + b2 * 0.45 + 0.35 * m.belt_var, 0.0);
-    let mountain = smoothstep1(0.62, 0.92, belt) * smoothstep1(-0.04, 0.08, m.cont);
-    let amp_m = cfg.mtn_height * (0.55 + 0.45 * smoothstep1(-0.4, 0.6, m.belt_var)) * mountain;
-    return vec2<f32>(mountain, amp_m);
+    let mb = smoothstep1(0.62, 0.92, belt) * smoothstep1(-0.04, 0.08, m.cont);
+    let amp_b = cfg.mtn_height * (0.55 + 0.45 * smoothstep1(-0.4, 0.6, m.belt_var)) * mb * cfg.belt_mtn;
+    let u = max(m.uplift, 0.0) * cfg.tect_mtn;
+    let mt = smoothstep1(0.08, 0.5, u) * smoothstep1(-0.2, 0.05, m.cont);
+    let amp_t = cfg.mtn_height * (0.35 + 0.85 * smoothstep1(0.2, 1.0, u)) * mt;
+    let wb = clamp(cfg.belt_mtn / 0.45 * 0.55, 0.0, 1.0);
+    let mountain = 1.0 - (1.0 - wb * mb) * (1.0 - mt);
+    return vec2<f32>(clamp(mountain, 0.0, 1.0), amp_b + amp_t);
+}
+
+/// Lowering of rift grabens and trenches on land (`World::tect_base`).
+fn tect_base(m: Macro) -> f32 {
+    return 900.0 * min(m.uplift, 0.0) * cfg.tect_mtn * smoothstep1(0.02, 0.15, m.cont);
 }
 
 fn hill_amplitude(m: Macro) -> f32 {
@@ -450,20 +495,11 @@ fn hill_amplitude(m: Macro) -> f32 {
 }
 
 /// Climate (temperature °C, moisture 0..1) at a given elevation.
+/// Climate at an elevation (`World::climate`): the atlas' sea-level temperature by the lapse
+/// rate, its moisture index.
 fn climate(m: Macro, lat: f32, elev: f32) -> vec2<f32> {
-    let la = abs(lat) / (0.5 * PI);
-    var t = cfg.eq_temp - cfg.pole_drop * pow(la, 1.6) + m.temp;
-    t -= cfg.lapse * max(elev, 0.0) / KM;
-    let latd = abs(lat) * (180.0 / PI);
-    let x = (latd - 24.0) / 9.0;
-    let hadley = exp(-(x * x));
-    var w = 0.56 + 0.62 * m.moist;
-    w -= 0.40 * hadley;
-    w += 0.12 * (1.0 - smoothstep1(0.0, 0.25, m.cont));
-    w -= 0.22 * smoothstep1(0.15, 0.55, m.cont);
-    w -= 0.10 * smoothstep1(1500.0, 3500.0, elev);
-    w += cfg.moist_bias;
-    return vec2<f32>(t, clamp(w, 0.0, 1.0));
+    let t = m.temp - cfg.lapse * max(elev, 0.0) / KM;
+    return vec2<f32>(t, clamp(m.moist, 0.0, 1.0));
 }
 
 /// Low-passed relief at `q` (for the gully gradient).
@@ -607,7 +643,7 @@ fn relief(c: Ctx, m: Macro, pre: Pre, blk: u32) -> Relief {
     let s = m.cont;
     var o: Relief;
 
-    let base = base_elevation(s);
+    let base = base_elevation(s) + tect_base(m);
     let plateau = smoothstep1(0.15, 0.55, m.plateau) * 900.0 * smoothstep1(0.02, 0.15, s);
 
     // mountain belts
@@ -777,6 +813,16 @@ struct Terrain {
     /// the ecoregion and its neighbour across the nearest border
     eco_id: u64,
     eco_id2: u64,
+    /// atlas fields at the pixel (`Terrain`)
+    uplift: f32,
+    coast_km: f32,
+    wind: vec2<f32>,
+    volcanism: f32,
+    glaciation: f32,
+    population: f32,
+    development: f32,
+    temp_range: f32,
+    regime: f32,
 }
 
 // ---------------------------------------------------------------- drainage and lakes (batch data)
@@ -1225,5 +1271,14 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
     t.agri = agri;
     t.habit = habit;
     t.style = style;
+    t.uplift = m.uplift;
+    t.coast_km = m.coast_km;
+    t.wind = vec2<f32>(m.wind_e, m.wind_n);
+    t.volcanism = m.volcanism;
+    t.glaciation = m.glaciation;
+    t.population = m.population;
+    t.development = m.development;
+    t.temp_range = m.temp_range;
+    t.regime = m.regime;
     return t;
 }

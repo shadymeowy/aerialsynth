@@ -21,7 +21,8 @@ pub fn layer(s: &mut Stack) {
     // a road is there or not (crisp cutoffs): roads fading with habitation or slope were
     // half-transparent ghosts with the trees showing through
     let steep = smoothstep(-0.02, 0.02, 0.5 - slope);
-    let habit = smoothstep(-0.005, 0.005, t.habit - 0.03) * steep * (1.0 - s.m.snow) * (1.0 - t.sand * 0.7);
+    // (fewer roads where development is low: the threshold rises)
+    let habit = smoothstep(-0.005, 0.005, t.habit - 0.03 - 0.05 * (1.0 - t.development)) * steep * (1.0 - s.m.snow) * (1.0 - t.sand * 0.7);
     let mut road_cov: f64 = 0.0;
     let mut road_col = pal.asphalt;
     if habit > 0.0 {
