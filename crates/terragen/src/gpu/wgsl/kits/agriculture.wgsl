@@ -1159,8 +1159,14 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
         }
         dh += t_dh;
     }
-    if (d.trees > 0.0) {
-        let tr = agri_scatter_tree(pl.seed, q, 30.0, d.trees, gsd, fw);
+    var trees = d.trees;
+    var tcell = 30.0;
+    if (pl.sys == AG_PASTURE && pl.e.temp > 18.0) {
+        trees = 0.12;
+        tcell = 60.0;
+    }
+    if (trees > 0.0) {
+        let tr = agri_scatter_tree(pl.seed, q, tcell, trees, gsd, fw);
         if (tr.x > 0.0) {
             col = mixc(col, px.crown * (0.85 + 0.25 * u01k(pc.id, 50lu)), tr.x);
             dh = lerp(dh, tr.y, tr.x);

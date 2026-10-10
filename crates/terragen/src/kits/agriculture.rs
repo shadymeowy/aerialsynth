@@ -156,7 +156,7 @@ const SYS: [SysDef; sys::N] = {
         SysDef { part: GRID, size: [1300.0, 900.0], kinds: [CROP, FALLOW, PASTURE, HAY], kw: [0.68, 0.22, 0.06, 0.04], borders: [BELT, TRACK], bp: [0.82, 0.1], ..D },
         SysDef { part: STRIP, size: [520.0, 24.0], kinds: [CROP, FALLOW, HAY, PASTURE], kw: [0.72, 0.12, 0.12, 0.04], borders: [MARGIN, MARGIN], bp: [1.0, 0.0], ..D },
         SysDef { part: VOR, size: [170.0, 1.5], kinds: [PASTURE, CROP, HAY, FALLOW], kw: [0.5, 0.3, 0.14, 0.06], borders: [HEDGE, WALL], bp: [0.88, 0.06], slope: [0.3, 0.42], ..D },
-        SysDef { part: VOR, size: [48.0, 1.8], kinds: [CROP, FALLOW, PASTURE, YARD], kw: [0.6, 0.24, 0.1, 0.06], borders: [MARGIN, HEDGE], bp: [0.6, 0.08], slope: [0.3, 0.42], trees: 0.2, ..D },
+        SysDef { part: VOR, size: [48.0, 1.8], kinds: [CROP, FALLOW, PASTURE, YARD], kw: [0.6, 0.24, 0.1, 0.06], borders: [MARGIN, HEDGE], bp: [0.6, 0.08], slope: [0.3, 0.42], trees: 0.3, ..D },
         SysDef { part: GRID, size: [130.0, 90.0], kinds: [PADDY, POND, CROP, YARD], kw: [0.9, 0.025, 0.065, 0.01], borders: [NONE, CANAL], bp: [0.75, 0.25], slope: [0.7, 0.9], terraces: 1.0, ..D },
         SysDef { part: VOR, size: [110.0, 1.3], kinds: [CROP, OLIVE, FALLOW, ORCHARD], kw: [0.42, 0.28, 0.2, 0.1], borders: [WALL, MARGIN], bp: [0.75, 0.25], slope: [0.7, 0.9], terraces: 1.0, ..D },
         SysDef { part: GRID, size: [140.0, 70.0], kinds: [VINE, OLIVE, ORCHARD, FALLOW], kw: [0.7, 0.1, 0.1, 0.1], borders: [TRACK, MARGIN], bp: [0.15, 0.85], slope: [0.6, 0.8], ..D },
@@ -1152,8 +1152,10 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
         dh += t_dh;
     }
     // scattered trees (farmed parkland)
-    if d.trees > 0.0 {
-        let (tc, th) = scatter_tree(pl.seed, q, 30.0, d.trees, gsd, fw);
+    // (and in warm pastures: savanna trees)
+    let (trees, tcell) = if pl.sys == sys::PASTURE && pl.e.temp > 18.0 { (0.12, 60.0) } else { (d.trees, 30.0) };
+    if trees > 0.0 {
+        let (tc, th) = scatter_tree(pl.seed, q, tcell, trees, gsd, fw);
         if tc > 0.0 {
             col = mixc(col, px.crown * (0.85 + 0.25 * u01k(pc.id, 50)), tc);
             dh = lerp(dh, th, tc);
