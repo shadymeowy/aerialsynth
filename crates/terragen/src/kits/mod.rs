@@ -24,7 +24,7 @@ use crate::world::{Ctx, Macro};
 
 // mod coast;
 
-// mod tropical;
+mod tropical;
 
 // mod temperate;
 
@@ -49,7 +49,7 @@ pub static KITS: &[&Kit] = &[
 
     // &coast::KIT,
 
-    // &tropical::KIT,
+    &tropical::KIT,
 
     // &temperate::KIT,
 
