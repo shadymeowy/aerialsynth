@@ -538,7 +538,7 @@ mod tests {
         assert_eq!((rgb.len(), depth.len(), lc.len()), (80 * 60 * 3, 80 * 60, 80 * 60));
         // looking 60° down from 3 km: terrain everywhere, at a few km
         assert!(depth.iter().all(|z| z.is_finite() && *z > 500.0 && *z < 20_000.0), "{:?}", &depth[..8]);
-        assert!(lc.iter().all(|c| *c < 18));
+        assert!(lc.iter().all(|c| terragen::landcover::class(*c).is_some()), "unknown land-cover class");
         let mean = rgb.iter().map(|v| *v as f64).sum::<f64>() / rgb.len() as f64;
         assert!(mean > 20.0 && mean < 235.0, "mean {mean}");
         assert!(f.exposure.unwrap().time > 0.0);

@@ -39,7 +39,7 @@ def test_tiles_are_generated_then_read(tmp_path, config):
         for name, a in tiles.items():
             info = aerialsynth.LAYERS[name]
             assert a.dtype == info.dtype and a.shape == info.shape
-        assert tiles["landcover"].max() < 18
+        assert tiles["landcover"].max() < 128  # land-cover classes v2
         n = tiles["normal"].astype(np.float32) / 127
         assert np.allclose(np.linalg.norm(n, axis=-1), 1, atol=0.03) and (n[..., 2] > 0).all()
         assert tiles["rgb"].flags.writeable  # an array of its own
