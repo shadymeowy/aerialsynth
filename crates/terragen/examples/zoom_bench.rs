@@ -122,7 +122,8 @@ fn find(cfg: terragen::Config, n: usize) -> anyhow::Result<()> {
             (i, lat, lon, t)
         })
         .collect();
-    let classes: [(&str, fn(&terragen::world::Terrain) -> bool); 10] = [
+    type IsClass = fn(&terragen::world::Terrain) -> bool;
+    let classes: [(&str, IsClass); 10] = [
         ("desert_sand", |t| t.sand > 0.5),
         ("desert_bare", |t| t.moist < 0.15 && t.sand < 0.2 && t.temp > 10.0),
         ("rainforest", |t| t.temp > 22.0 && t.moist > 0.7),

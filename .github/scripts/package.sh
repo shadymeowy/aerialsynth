@@ -9,7 +9,8 @@
 #         libaerialsynth.dylib + libaerialsynth.a       macOS
 #         aerialsynth.dll + aerialsynth.dll.lib (import library) + aerialsynth.lib (static)  Windows
 #         native-static-libs.txt (the system libraries to link with the static library)
-#     include/aerialsynth.h, examples/{tile,render}.c, configs/, README.md, LICENSE, NOTICE, CHANGELOG.md
+#     include/aerialsynth.h, examples/{tile,render}.c, configs/, docs/, bindings/README.md,
+#     bindings/python/README.md, README.md, LICENSE, NOTICE, CHANGELOG.md
 set -euo pipefail
 target=$1
 version=$2
@@ -34,6 +35,11 @@ cp bindings/c/include/aerialsynth.h "$stage/include/"
 cp bindings/c/examples/*.c "$stage/examples/"
 cp -r configs "$stage/"
 cp README.md LICENSE NOTICE CHANGELOG.md "$stage/"
+# the documents README.md links to
+cp -r docs "$stage/"
+mkdir -p "$stage/bindings/python"
+cp bindings/README.md "$stage/bindings/"
+cp bindings/python/README.md "$stage/bindings/python/"
 cd dist
 case "$target" in
   *windows*) 7z a -tzip -bso0 "$name.zip" "$name" && echo "dist/$name.zip" ;;

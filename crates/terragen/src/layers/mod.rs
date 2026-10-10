@@ -120,7 +120,17 @@ pub fn biome_layers(s: &mut Stack, slot: usize) {
             if o.cov <= 0.0 && o.emit <= 0.0 {
                 continue;
             }
-            s.composite(Layer { cov: o.cov, albedo: o.albedo, dh: o.dh, hmode: l.hmode, cls: l.cls, emit: l.k.col[2] * o.emit, clear: l.clear, mat: l.mat, ..Default::default() });
+            s.composite(Layer {
+                cov: o.cov,
+                albedo: o.albedo,
+                dh: o.dh,
+                hmode: l.hmode,
+                cls: l.cls,
+                emit: l.k.col[2] * o.emit,
+                clear: l.clear,
+                mat: l.mat,
+                ..Default::default()
+            });
         }
     }
 }

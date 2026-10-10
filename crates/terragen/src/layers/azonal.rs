@@ -73,7 +73,9 @@ pub fn finish_ground(s: &mut Stack) {
     let gsd = s.ctx.gsd;
     let t = s.t;
     let m = &mut s.m;
-    m.micro = (0.30 * perlin3(0x9A01, p / 9.0) * band(9.0, gsd) + 0.14 * perlin3(0x9A02, p / 3.2) * band(3.2, gsd) + 0.06 * perlin3(0x9A03, p / 1.1) * band(1.1, gsd))
+    m.micro = (0.30 * perlin3(0x9A01, p / 9.0) * band(9.0, gsd)
+        + 0.14 * perlin3(0x9A02, p / 3.2) * band(3.2, gsd)
+        + 0.06 * perlin3(0x9A03, p / 1.1) * band(1.1, gsd))
         * (1.0 - 0.5 * m.rock)
         * (1.0 - 0.7 * m.beach);
     s.height = s.l.ground + s.m.micro;

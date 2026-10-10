@@ -211,7 +211,20 @@ struct VegYaml {
 
 impl Default for VegYaml {
     fn default() -> Self {
-        VegYaml { trees: 1.0, conifer: 0.0, tropic: 0.0, shrubs: 1.0, savanna: 1.0, groves: 1.0, woodlots: 1.0, tall: 0.0, laterite: 1.0, meadow: 1.0, crown_scale: 1.0, gallery: 0.0 }
+        VegYaml {
+            trees: 1.0,
+            conifer: 0.0,
+            tropic: 0.0,
+            shrubs: 1.0,
+            savanna: 1.0,
+            groves: 1.0,
+            woodlots: 1.0,
+            tall: 0.0,
+            laterite: 1.0,
+            meadow: 1.0,
+            crown_scale: 1.0,
+            gallery: 0.0,
+        }
     }
 }
 
@@ -459,8 +472,20 @@ pub struct Window {
 impl Window {
     #[inline]
     pub fn eval(&self, x: f64) -> f64 {
-        let up = if self.a1 > self.a0 { smoothstep(self.a0, self.a1, x) } else if x >= self.a0 { 1.0 } else { 0.0 };
-        let down = if self.b1 > self.b0 { 1.0 - smoothstep(self.b0, self.b1, x) } else if x <= self.b0 { 1.0 } else { 0.0 };
+        let up = if self.a1 > self.a0 {
+            smoothstep(self.a0, self.a1, x)
+        } else if x >= self.a0 {
+            1.0
+        } else {
+            0.0
+        };
+        let down = if self.b1 > self.b0 {
+            1.0 - smoothstep(self.b0, self.b1, x)
+        } else if x <= self.b0 {
+            1.0
+        } else {
+            0.0
+        };
         up * down
     }
 }
@@ -670,9 +695,15 @@ impl Registry {
             }
             let env_y = d.envelope.clone().unwrap_or_default();
             let mut env = [[-100.0, 100.0], [0.0, 1e5], [0.0, 12.0], [-1.0, 1.0], [0.0, 100.0]];
-            for (i, (nm, v)) in [("temp", env_y.temp), ("precip_mm", env_y.precip_mm), ("dry_months", env_y.dry_months), ("regime", env_y.regime), ("temp_range", env_y.temp_range)]
-                .iter()
-                .enumerate()
+            for (i, (nm, v)) in [
+                ("temp", env_y.temp),
+                ("precip_mm", env_y.precip_mm),
+                ("dry_months", env_y.dry_months),
+                ("regime", env_y.regime),
+                ("temp_range", env_y.temp_range),
+            ]
+            .iter()
+            .enumerate()
             {
                 if let Some([a, b]) = v {
                     if !(a.is_finite() && b.is_finite() && a <= b) {
@@ -707,7 +738,10 @@ impl Registry {
             let mut p = def_pal;
             for (k, v) in d.palette.iter().flatten() {
                 let Some(&(_, first, n)) = pal::KEYS.iter().find(|x| x.0 == k.as_str() && x.2 > 0) else {
-                    e.push(&format!("{key}.palette.{k}"), format!("unknown entry (one of {})", pal::KEYS.iter().filter(|x| x.2 > 0).map(|x| x.0).collect::<Vec<_>>().join(", ")));
+                    e.push(
+                        &format!("{key}.palette.{k}"),
+                        format!("unknown entry (one of {})", pal::KEYS.iter().filter(|x| x.2 > 0).map(|x| x.0).collect::<Vec<_>>().join(", ")),
+                    );
                     continue;
                 };
                 let list: Vec<ColourYaml> = match v {
@@ -937,7 +971,9 @@ impl Registry {
     pub fn pick(&self, k: u32, temp: f64, precip: f64, dry: f64, regime: f64, trange: f64, litho: u8, u: f64, pref: impl Fn(&Biome) -> f64) -> u16 {
         let x = [temp, precip, dry, regime, trange];
         let fits = |b: &Biome| {
-            (b.koppen == 0 || b.koppen & (1 << k) != 0) && (b.litho == 0 || b.litho & (1 << litho) != 0) && (0..5).all(|i| (b.env[i][0]..=b.env[i][1]).contains(&x[i]))
+            (b.koppen == 0 || b.koppen & (1 << k) != 0)
+                && (b.litho == 0 || b.litho & (1 << litho) != 0)
+                && (0..5).all(|i| (b.env[i][0]..=b.env[i][1]).contains(&x[i]))
         };
         let w: Vec<f64> = self.biomes.iter().map(|b| if fits(b) { b.weight * pref(b) } else { 0.0 }).collect();
         let total: f64 = w.iter().sum();
@@ -1014,7 +1050,14 @@ pub struct BioSample {
 impl BioSample {
     /// A sample's biomes: the ecoregion (A or B, dithered within the ecotone, blended where the
     /// dither is below the pixel), then the zone of that biome by the sample's temperature.
-    pub fn at(world: &crate::world::World, sm: &crate::surface::SurfaceModel, cache: &mut crate::surface::Caches, ctx: &crate::world::Ctx, l: &crate::surface::Local, _pf: &crate::surface::PixFields) -> BioSample {
+    pub fn at(
+        world: &crate::world::World,
+        sm: &crate::surface::SurfaceModel,
+        cache: &mut crate::surface::Caches,
+        ctx: &crate::world::Ctx,
+        l: &crate::surface::Local,
+        _pf: &crate::surface::PixFields,
+    ) -> BioSample {
         let t = l.t;
         let reg = &sm.registry;
         // the pixel's pair of ecoregions; a negative border distance: the sample lies on the
@@ -1212,7 +1255,15 @@ pub mod gpu {
 
     pub fn klayer(l: &LayerInst) -> GLayer {
         let k = &l.k;
-        let fin = |x: f64| if x.is_finite() { x as f32 } else if x > 0.0 { 3.0e38 } else { -3.0e38 };
+        let fin = |x: f64| {
+            if x.is_finite() {
+                x as f32
+            } else if x > 0.0 {
+                3.0e38
+            } else {
+                -3.0e38
+            }
+        };
         let mut g = GLayer {
             head: [l.slot as u32, k.kind, l.cls as u32, l.hmode as u32 | (l.mat as u32) << 8],
             head2: [k.seed as u32, (k.seed >> 32) as u32, l.win.len() as u32, 0],
