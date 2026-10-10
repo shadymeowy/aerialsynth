@@ -1,35 +1,63 @@
 name: Wheels
 
-# The Python package's release wheel: one abi3 wheel (CPython >= 3.10) for Linux x86_64, built in
-# a manylinux_2_28 container so it installs on any glibc >= 2.28 distribution, tested on 3.10
-# and 3.13, and attached to the GitHub release of a `v*` tag.
+# The Python package's release wheels: one abi3 wheel (CPython >= 3.10) per platform, each
+# self-contained (HDF5 and zlib are compiled from source and linked statically; the extension
+# needs only system libraries), tested on CPython 3.10 and 3.13 and attached to the GitHub release
+# of a `v*` tag.
+#
+#   Linux x86_64 / aarch64   manylinux_2_28 (glibc >= 2.28), built in the manylinux container
+#   macOS arm64 / x86_64     macOS >= 11.0
+#   Windows x86_64           MSVC, static C runtime (no Visual C++ redistributable needed)
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   linux:
-    name: manylinux_2_28 x86_64
-    runs-on: ubuntu-latest
+    name: manylinux_2_28 ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-latest }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@v5
       - uses: PyO3/maturin-action@v1
         with:
           working-directory: bindings/python
+          target: ${{ matrix.arch }}
           manylinux: "2_28"
-          args: --release --out dist
-          # HDF5 is built from source and needs CMake >= 3.26
-          before-script-linux: python3 -m pip install "cmake>=3.26"
+          # `--auditwheel check`: fail (instead of bundling) if the extension needs a shared
+          # library outside the manylinux policy
+          args: --release --out dist --auditwheel check
+          # HDF5 is built from source and needs CMake >= 3.26 (the manylinux images ship 4.x)
+          before-script-linux: cmake --version
       - uses: actions/setup-python@v6
         with:
           python-version: |
-            3.13
             3.10
+            3.13
+      - name: Dependencies (auditwheel, NEEDED)
+        working-directory: bindings/python
+        run: |
+          python3.13 -m pip install -q auditwheel
+          python3.13 -m auditwheel show dist/*.whl
+          mkdir -p "$RUNNER_TEMP/whl" && python3.13 -m zipfile -e dist/*.whl "$RUNNER_TEMP/whl"
+          readelf -d "$RUNNER_TEMP"/whl/aerialsynth/_native*.so | grep NEEDED
       # no GPU on the runner: tiles are generated on the CPU
       - name: Test on 3.10 and 3.13
         working-directory: bindings/python
@@ -38,18 +66,130 @@ jobs:
           VK_ICD_FILENAMES: /nonexistent.json
         run: |
           for v in 3.10 3.13; do
-            python$v -m venv /tmp/venv$v
-            /tmp/venv$v/bin/pip install dist/*.whl pytest
-            /tmp/venv$v/bin/python -m pytest -q tests
+            python$v -m venv "$RUNNER_TEMP/venv$v"
+            "$RUNNER_TEMP/venv$v/bin/pip" install dist/*.whl pytest
+            "$RUNNER_TEMP/venv$v/bin/python" -m pytest -q tests
           done
       - uses: actions/upload-artifact@v4
         with:
-          name: wheel-linux-x86_64
+          name: wheel-linux-${{ matrix.arch }}
+          path: bindings/python/dist/*.whl
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: arm64, runner: macos-latest }
+          - { arch: x86_64, runner: macos-15-intel }
+    env:
+      # the oldest macOS the wheel (and the HDF5 / zlib objects in it) targets
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: |
+            3.10
+            3.13
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wheel
+      - name: Build the wheel
+        working-directory: bindings/python
+        run: |
+          python3.13 -m pip install "maturin>=1.9,<2"
+          python3.13 -m maturin build --release --out dist
+          ls dist
+      - name: Dependencies (delocate, otool)
+        working-directory: bindings/python
+        run: |
+          python3.13 -m pip install -q delocate
+          delocate-listdeps --all dist/*.whl
+          mkdir -p "$RUNNER_TEMP/whl" && python3.13 -m zipfile -e dist/*.whl "$RUNNER_TEMP/whl"
+          so=$(echo "$RUNNER_TEMP"/whl/aerialsynth/_native*.so)
+          otool -L "$so"
+          otool -l "$so" | grep -A4 LC_BUILD_VERSION
+          # only system libraries (/usr/lib, /System; the first line is the module's own id);
+          # Python's symbols resolve at load time
+          if otool -L "$so" | tail -n +3 | grep -vE '^[[:space:]]+(/usr/lib/|/System/Library/)'; then
+            echo "::error::the extension links a non-system library"; exit 1
+          fi
+      - name: Test on 3.10 and 3.13
+        working-directory: bindings/python
+        run: |
+          for v in 3.10 3.13; do
+            python$v -m venv "$RUNNER_TEMP/venv$v"
+            "$RUNNER_TEMP/venv$v/bin/pip" install dist/*.whl pytest
+            "$RUNNER_TEMP/venv$v/bin/python" -m pytest -q tests
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-macos-${{ matrix.arch }}
+          path: bindings/python/dist/*.whl
+
+  windows:
+    name: Windows x86_64
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        id: py310
+        with:
+          python-version: "3.10"
+      - uses: actions/setup-python@v6
+        id: py313
+        with:
+          python-version: "3.13"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wheel
+      # static C runtime (.cargo/config.toml): no Visual C++ redistributable needed
+      - name: Build the wheel
+        working-directory: bindings/python
+        env:
+          PY: ${{ steps.py313.outputs.python-path }}
+        run: |
+          "$PY" -m pip install "maturin>=1.9,<2"
+          "$PY" -m maturin build --release --out dist
+          ls dist
+      - name: Dependencies (delvewheel, PE imports)
+        working-directory: bindings/python
+        env:
+          PY: ${{ steps.py313.outputs.python-path }}
+        run: |
+          "$PY" -m pip install -q delvewheel pefile
+          "$PY" -m delvewheel show dist/*.whl
+          "$PY" ../../.github/scripts/pe_deps.py dist/*.whl
+      - name: Test on 3.10 and 3.13
+        working-directory: bindings/python
+        env:
+          PY310: ${{ steps.py310.outputs.python-path }}
+          PY313: ${{ steps.py313.outputs.python-path }}
+        run: |
+          for py in "$PY310" "$PY313"; do
+            venv="$RUNNER_TEMP/venv-$("$py" -c 'import sys; print(sys.version_info[1])')"
+            "$py" -m venv "$venv"
+            "$venv/Scripts/python" -m pip install dist/*.whl pytest
+            "$venv/Scripts/python" -m pytest -q tests
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-windows-x86_64
           path: bindings/python/dist/*.whl
 
   release:
     name: Attach to the release
-    needs: linux
+    needs: [linux, macos, windows]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -57,9 +197,12 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: wheel-linux-x86_64
+          pattern: wheel-*
+          merge-multiple: true
           path: dist
       - name: Upload
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${GITHUB_REF_NAME}" dist/*.whl --clobber --repo "${GITHUB_REPOSITORY}"
+        run: |
+          ls -l dist
+          gh release upload "${GITHUB_REF_NAME}" dist/*.whl --clobber --repo "${GITHUB_REPOSITORY}"

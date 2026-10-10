@@ -2,3 +2,16 @@
 # vectorises the 64-bit hash multiplies of the noise with emulated AVX2 multiplies.
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "target-cpu=x86-64-v2"]
+
+# Windows (MSVC): the C runtime is linked statically, so `terrain.exe`, `aerialsynth.dll` and the
+# Python extension need no Visual C++ redistributable. HDF5 (CMake) and zlib (cc) are compiled
+# against the same static runtime (/MT): cc follows `crt-static`, HDF5's CMake build reads
+# CMAKE_MSVC_RUNTIME_LIBRARY (ignored on the other platforms).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[env]
+CMAKE_MSVC_RUNTIME_LIBRARY = "MultiThreaded"

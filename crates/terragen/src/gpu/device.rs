@@ -31,11 +31,15 @@ pub const GPU_ENV: &str = "AERIALSYNTH_GPU";
 /// `adapter_list` prints it), a PCI bus id (`0000:83:00.0`), or a case-insensitive part of
 /// the adapter name (`6000`, `p4`); `Ok(None)` when the variable is unset or empty. A
 /// selection that matches nothing is an error, never a silent fallback to another GPU.
+/// `none` is no GPU: an error, so that generation and rendering run on the CPU.
 pub fn pick_adapter(adapters: &[wgpu::Adapter]) -> Result<Option<wgpu::Adapter>> {
     let Ok(sel) = std::env::var(GPU_ENV) else { return Ok(None) };
     let sel = sel.trim().to_lowercase();
     if sel.is_empty() {
         return Ok(None);
+    }
+    if sel == "none" {
+        bail!("{GPU_ENV}=none: no GPU");
     }
     let infos: Vec<wgpu::AdapterInfo> = adapters.iter().map(|a| a.get_info()).collect();
     let bus = |i: &wgpu::AdapterInfo| i.device_pci_bus_id.to_lowercase();

@@ -22,6 +22,10 @@ image.workspace = true
 wgpu = { workspace = true, optional = true }
 bytemuck = { workspace = true, optional = true }
 
+[dev-dependencies]
+# validates the shaders without a GPU (the version wgpu uses)
+naga = { version = "30", features = ["wgsl-in"] }
+
 [features]
 default = ["gpu"]
 # wgpu backend (headless) of the renderer

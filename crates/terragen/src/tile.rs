@@ -349,9 +349,12 @@ impl Generator {
             river_hw: t.river_hw,
             river_level: t.river_level,
             eco_edge: t.eco.edge,
+            inst: &[],
+            feat: None,
             road_major: t.road_major.min(1e7),
             road_minor: t.road_minor.min(1e7),
             slope: 0.0,
+            grad: [0.0; 2],
             fw: gsd,
         };
         let mut caches = Caches::default();
@@ -515,11 +518,14 @@ impl Generator {
                 let row_r = chunks.iter().map(|c| (c.2 - row_c).length() + c.3).fold(0.0, f64::max);
                 let row_h = chunks.iter().map(|c| c.4).fold(f64::MIN, f64::max);
                 let row_segs = self.world.local_segments(&segs, row_c, row_r, row_h);
+                let relief_fams = crate::instances::families().any(|f| f.relief);
                 for &(i0, i1, center, radius, h_max) in &chunks {
                     let local = self.world.local_segments(&row_segs, center, radius, h_max);
+                    // the relief families' instances that can reach the chunk
+                    let inst = if relief_fams { crate::instances::lists(&self.world, center, radius, true) } else { Vec::new() };
                     for i in i0..i1 {
                         let (ctx, m) = pt(i as f64);
-                        let near = NearSegs { local: &local, h_max, sinks: &sinks };
+                        let near = NearSegs { local: &local, h_max, sinks: &sinks, inst: &inst };
                         row.push(self.world.terrain_with_near(&ctx, &m, &segs, &near));
                     }
                 }
@@ -564,7 +570,53 @@ impl Generator {
         let row_gsd: Vec<f64> = row_lat.iter().map(|&lat| gsd_ew(lat, z, n as u32, &ell)).collect();
         let row_gsd_ns: Vec<f64> = row_lat.iter().map(|&lat| gsd_ns(lat, z, n as u32, &ell)).collect();
 
+        // ---------------- the instances that can reach each 16-pixel bin of the pass-A grid (as
+        // the GPU's `instance_lists`)
+        let inst_bins: Vec<Vec<Vec<crate::instances::Instance>>> = if crate::instances::families().count() > 0 {
+            const NBIN: usize = 17;
+            (0..NBIN * NBIN)
+                .into_par_iter()
+                .map(|bin| {
+                    let (bx, by) = (bin % NBIN, bin / NBIN);
+                    let (i0, j0) = (bx * 16, by * 16);
+                    let (i1, j1) = ((i0 + 15).min(na2 - 1), (j0 + 15).min(na2 - 1));
+                    let at_px = |i: usize, j: usize| {
+                        let (lat, lon) = pixel_to_latlon(DVec2::new(ox + i as f64 - 2.0 + 0.5, oy + j as f64 - 2.0 + 0.5), z, n as u32);
+                        (Ctx::new(lat, lon, 1.0, &ell).p, gsd_ew(lat, z, n as u32, &ell))
+                    };
+                    let (c, _) = at_px((i0 + i1) / 2, (j0 + j1) / 2);
+                    let mut r: f64 = 0.0;
+                    for (i, j) in [(i0, j0), (i1, j0), (i0, j1), (i1, j1)] {
+                        r = r.max((at_px(i, j).0 - c).length());
+                    }
+                    r += at_px(i0, j0).1.max(at_px(i0, j1).1);
+                    crate::instances::lists(&self.world, c, r, false)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        // ---------------- the kits' host-built features of the tile, binned (as the GPU's)
+        let feats: Option<crate::features::Binned> = crate::features::any().then(|| {
+            let bins = crate::features::tile_bins(&self.world, id);
+            let (lat_c, lon_c) = pixel_to_latlon(DVec2::new(ox + 128.0, oy + 128.0), z, n as u32);
+            let c = Ctx::new(lat_c, lon_c, 1.0, &ell).p;
+            let radius = bins.iter().map(|(b, r)| (*b - c).length() + r).fold(0.0, f64::max);
+            let area = crate::features::Area { center: c, radius, gsd: gsd_ew(lat_c, z, n as u32, &ell) };
+            crate::features::bin(crate::features::build(&self.world, &mut crate::features::CpuPoints(&self.world), &area), &bins)
+        });
+
         // ---------------- slope of the bare ground at pixel scale
+        let grad: Vec<[f64; 2]> = (0..na * na)
+            .map(|k| {
+                let (i, j) = ((k % na) as isize, (k / na) as isize);
+                let dx = (at(i + 1, j).ground - at(i - 1, j).ground) / (2.0 * row_gsd[j as usize]);
+                let dy = (at(i, j + 1).ground - at(i, j - 1).ground) / (2.0 * row_gsd_ns[j as usize]);
+                // (rows run south: the north gradient is −dy)
+                [dx, -dy]
+            })
+            .collect();
         let slope: Vec<f64> = (0..na * na)
             .map(|k| {
                 let (i, j) = ((k % na) as isize, (k / na) as isize);
@@ -675,9 +727,12 @@ impl Generator {
                                 river_hw: rhw,
                                 river_level: rl,
                                 eco_edge,
+                                inst: inst_bins.get(((j + 1) / 16) * 17 + (i + 1) / 16).map_or(&[][..], |v| &v[..]),
+                                feat: feats.as_ref().map(|f| (f, ((j + 1) / 16) * 17 + (i + 1) / 16)),
                                 road_major,
                                 road_minor,
                                 slope: slope[j * na + i],
+                                grad: grad[j * na + i],
                                 fw,
                             };
                             let px = ox + i as f64 - 1.0 + 0.5 + fxo;
@@ -691,14 +746,14 @@ impl Generator {
                         let mut acc_h = 0.0;
                         let mut acc_l = 0.0;
                         let mut acc_g = 0.0;
-                        let mut counts = [0u16; 128];
+                        let mut counts = [0u16; crate::landcover::MAX_CLASSES];
                         let mut add = |(s, ground): (Surface, f64)| {
                             acc_a += s.albedo;
                             acc_e += s.emission;
                             acc_h += s.height;
                             acc_l += s.lit;
                             acc_g += ground;
-                            counts[(s.class as usize).min(127)] += 1;
+                            counts[(s.class as usize).min(crate::landcover::MAX_CLASSES - 1)] += 1;
                         };
                         let mut taken = ss * ss;
                         if adaptive {

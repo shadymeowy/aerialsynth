@@ -294,7 +294,7 @@ struct Sample {
     ground: f32,
 }
 
-fn sample_b(ti: TileInfo, i: u32, j: u32, sx: u32, sy: u32, slope: f32, gsd: f32, pf: ptr<function, PixFields>) -> Sample {
+fn sample_b(ti: TileInfo, i: u32, j: u32, sx: u32, sy: u32, slope: f32, grad: vec2<f32>, gsd: f32, pf: ptr<function, PixFields>) -> Sample {
     let ss = ti.ss;
     let fxo = sub_offset(sx, ss);
     let fyo = sub_offset(sy, ss);
@@ -357,7 +357,9 @@ fn sample_b(ti: TileInfo, i: u32, j: u32, sx: u32, sy: u32, slope: f32, gsd: f32
     let es = vec4<f32>(select(-1.0, 1.0, n00.eco_id == t.eco_id), select(-1.0, 1.0, n10.eco_id == t.eco_id), select(-1.0, 1.0, n01.eco_id == t.eco_id), select(-1.0, 1.0, n11.eco_id == t.eco_id));
     l.eco_edge = bilerp4(ee * es, fx, fy);
     l.slope = slope;
+    l.grad = grad;
     l.fw = gsd / f32(ss);
+    l.blk = ti.bin0 + ((j + 1u) / 16u) * NBIN + (i + 1u) / 16u;
     let r = rows[ti.row_b + j * ss + sy];
     let c = cols[ti.col_b + i * ss + sx];
     let ctx = row_col_ctx(r, c, gsd);
@@ -365,6 +367,12 @@ fn sample_b(ti: TileInfo, i: u32, j: u32, sx: u32, sy: u32, slope: f32, gsd: f32
     o.s = surface_eval(ctx, t, l, pf);
     o.ground = ground;
     return o;
+}
+
+// one vote for the majority class of a pixel (pass B's `counts`: 8-bit counters, 4 per word)
+fn vote(counts: ptr<function, array<u32, 32>>, cls: u32) {
+    let c = min(cls, LC_MAX_CLASSES - 1u);
+    (*counts)[c >> 2u] += 1u << ((c & 3u) * 8u);
 }
 
 /// Pass B per pixel of the tile and its 1-pixel apron: the supersampled surface.
@@ -394,8 +402,7 @@ fn pass_b(@builtin(global_invocation_id) gid: vec3<u32>) {
     var acc_h = 0.0;
     var acc_l = 0.0;
     var acc_g = 0.0;
-    // the classes of the samples (majority vote below)
-    var classes: array<u32, 16>;
+    var counts: array<u32, 32>;
     var taken = ss * ss;
     // One call site of `sample_b` (the driver inlines the whole surface model at every call:
     // five of them took minutes to compile). Adaptive (ss = 2): the diagonal pair first, the
@@ -410,13 +417,13 @@ fn pass_b(@builtin(global_invocation_id) gid: vec3<u32>) {
             sx = select(k & 1u, 1u - (k & 1u), k >= 2u);
             sy = k & 1u;
         }
-        let s = sample_b(ti, i, j, sx, sy, slope, gsd, &pf);
+        let s = sample_b(ti, i, j, sx, sy, slope, vec2<f32>(dx, -dy), gsd, &pf);
         acc_a += s.s.albedo;
         acc_e += s.s.emission;
         acc_h += s.s.height;
         acc_l += s.s.lit;
         acc_g += s.ground;
-        classes[min(k, 15u)] = min(s.s.cls, 127u);
+        vote(&counts, s.s.cls);
         if (adaptive && k == 0u) {
             first_s = s.s;
         }
@@ -434,15 +441,17 @@ fn pass_b(@builtin(global_invocation_id) gid: vec3<u32>) {
     // the most frequent class (of equals the highest id, as `max_by_key` over the counts)
     var cls = 0u;
     var best = 0u;
-    let nt = min(taken, 16u);
-    for (var a = 0u; a < nt; a++) {
-        var n = 0u;
-        for (var b = 0u; b < nt; b++) {
-            n += select(0u, 1u, classes[b] == classes[a]);
+    for (var w = 0u; w < LC_MAX_CLASSES / 4u; w++) {
+        let cw = counts[w];
+        if (cw == 0u) {
+            continue;
         }
-        if (n > best || (n == best && classes[a] > cls)) {
-            best = n;
-            cls = classes[a];
+        for (var b = 0u; b < 4u; b++) {
+            let n = (cw >> (b * 8u)) & 0xFFu;
+            if (n >= best && n > 0u) {
+                best = n;
+                cls = w * 4u + b;
+            }
         }
     }
     let b = (ti.pix0 + j * NA2 + i) * PB_F;

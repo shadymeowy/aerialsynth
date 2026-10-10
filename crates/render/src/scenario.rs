@@ -289,6 +289,11 @@ pub struct OutputConfig {
     pub max_frames: Option<usize>,
     pub pose: PoseOutput,
     pub compression: Compression,
+    /// Land-cover values written by `landcover` modalities: `v2` (the class ids of
+    /// `terragen::landcover`, 0–127), `legacy` (the first classes 0–17) or `group` (the 11
+    /// class groups). The datasets' `class_names`, `class_groups` and `class_legacy`
+    /// attributes describe the values written.
+    pub landcover: terragen::landcover::Mapping,
 }
 
 impl Default for OutputConfig {
@@ -301,6 +306,7 @@ impl Default for OutputConfig {
             max_frames: None,
             pose: PoseOutput::default(),
             compression: Compression::default(),
+            landcover: terragen::landcover::Mapping::V2,
         }
     }
 }

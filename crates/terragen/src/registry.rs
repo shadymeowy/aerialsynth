@@ -84,7 +84,17 @@ pub mod field {
     pub const PRECIP: usize = 29;
     pub const TEMP_RANGE: usize = 30;
     pub const DRY_MONTHS: usize = 31;
-    pub const N: usize = 32;
+    /// planetary atlas fields at the sample
+    pub const COAST_KM: usize = 32;
+    pub const WIND_E: usize = 33;
+    pub const WIND_N: usize = 34;
+    pub const VOLCANISM: usize = 35;
+    pub const GLACIATION: usize = 36;
+    pub const POPULATION: usize = 37;
+    pub const DEVELOPMENT: usize = 38;
+    pub const UPLIFT: usize = 39;
+    pub const REGIME: usize = 40;
+    pub const N: usize = 41;
     /// YAML names (index = id)
     pub const NAMES: [&str; N] = [
         "temp",
@@ -119,38 +129,28 @@ pub mod field {
         "precip_mm",
         "temp_range",
         "dry_months",
+        "coast_km",
+        "wind_e",
+        "wind_n",
+        "volcanism",
+        "glaciation",
+        "population",
+        "development",
+        "uplift",
+        "regime",
     ];
     pub fn id(name: &str) -> Option<usize> {
         NAMES.iter().position(|n| *n == name)
     }
 }
 
-/// Land-cover class names of the registry (v2 ids, `docs/design/terrain-next.md` §7.2).
+/// Land-cover class names of the registry: the class table of [`crate::landcover`].
 pub mod classes {
-    #[rustfmt::skip]
-    pub const TABLE: &[(&str, u8)] = &[
-        ("unknown", 0), ("ocean", 1), ("lake", 2), ("river", 3), ("beach", 4), ("sand", 5), ("rock", 6), ("snow", 7),
-        ("grass", 8), ("shrub", 9), ("forest", 10), ("crop", 11), ("building", 12), ("road", 13), ("wetland", 14),
-        ("tundra", 15), ("bare", 16), ("urban", 17),
-        ("reservoir", 20), ("lagoon", 21), ("canal", 22), ("aquaculture", 23), ("tidal_flat", 24), ("coral_reef", 25),
-        ("sea_ice", 26), ("glacier", 27), ("frozen_water", 28), ("dry_riverbed", 29), ("salt_flat", 30), ("lava", 31),
-        ("volcanic_ash", 32), ("gravel", 33), ("badlands", 34), ("scree", 35), ("moraine", 36), ("cliff", 37),
-        ("tropical_rainforest", 40), ("mangrove", 41), ("broadleaf_forest", 42), ("needleleaf_forest", 43),
-        ("mixed_forest", 44), ("woodland", 45),
-        ("savanna", 52), ("steppe", 53), ("desert_scrub", 54), ("maquis", 55), ("alpine_meadow", 56),
-        ("polygon_tundra", 57), ("bog", 58), ("marsh", 59), ("burn_scar", 60), ("clear_cut", 61),
-        ("rice_paddy", 70), ("orchard", 71), ("vineyard", 72), ("plantation", 73), ("pasture", 74),
-        ("greenhouse", 75), ("fallow", 76), ("hedgerow", 77), ("farmyard", 78),
-        ("residential", 80), ("commercial", 81), ("industrial", 82), ("building_tall", 83), ("park", 84),
-        ("sports", 85), ("paved", 86), ("solar_farm", 87), ("port", 88), ("cemetery", 89), ("quarry", 90),
-        ("motorway", 100), ("road_major", 101), ("road_minor", 102), ("track", 103), ("railway", 104),
-        ("runway", 105), ("taxiway", 106), ("bridge", 107), ("dam", 108), ("seasonal_snow", 110),
-    ];
     pub fn id(name: &str) -> Option<u8> {
-        TABLE.iter().find(|(n, _)| *n == name).map(|e| e.1)
+        crate::landcover::CLASSES.iter().find(|c| c.name == name).map(|c| c.id)
     }
     pub fn name(id: u8) -> &'static str {
-        TABLE.iter().find(|e| e.1 == id).map_or("?", |e| e.0)
+        crate::landcover::name(id)
     }
 }
 
@@ -178,6 +178,10 @@ struct EnvelopeYaml {
     temp: Option<[f64; 2]>,
     precip_mm: Option<[f64; 2]>,
     dry_months: Option<[f64; 2]>,
+    /// −1 dry summers … +1 summer rains
+    regime: Option<[f64; 2]>,
+    /// warmest − coldest month (°C)
+    temp_range: Option<[f64; 2]>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -495,8 +499,9 @@ pub struct Biome {
     pub group: String,
     /// bit k: Köppen class k (`atlas::Koppen as usize`); 0: any
     pub koppen: u32,
-    /// [lo, hi] of temperature (°C at the ecoregion site), precipitation (mm/yr), dry months
-    pub env: [[f64; 2]; 3],
+    /// [lo, hi] of temperature (°C at the ecoregion site), precipitation (mm/yr), dry months,
+    /// precipitation regime (−1..1), temperature range (°C)
+    pub env: [[f64; 2]; 5],
     /// bit k: lithology k; 0: any
     pub litho: u8,
     pub weight: f64,
@@ -658,14 +663,17 @@ impl Registry {
             // koppen, envelope, lithology
             let mut koppen = 0u32;
             for k in d.koppen.iter().flatten() {
-                match crate::atlas_stub::Koppen::from_code(k) {
+                match crate::atlas::Koppen::ALL.iter().copied().find(|c| c.code() == k) {
                     Some(c) => koppen |= 1 << c as u32,
                     None => e.push(&format!("{key}.koppen"), format!("unknown Köppen class {k:?}")),
                 }
             }
             let env_y = d.envelope.clone().unwrap_or_default();
-            let mut env = [[-100.0, 100.0], [0.0, 1e5], [0.0, 12.0]];
-            for (i, (nm, v)) in [("temp", env_y.temp), ("precip_mm", env_y.precip_mm), ("dry_months", env_y.dry_months)].iter().enumerate() {
+            let mut env = [[-100.0, 100.0], [0.0, 1e5], [0.0, 12.0], [-1.0, 1.0], [0.0, 100.0]];
+            for (i, (nm, v)) in [("temp", env_y.temp), ("precip_mm", env_y.precip_mm), ("dry_months", env_y.dry_months), ("regime", env_y.regime), ("temp_range", env_y.temp_range)]
+                .iter()
+                .enumerate()
+            {
                 if let Some([a, b]) = v {
                     if !(a.is_finite() && b.is_finite() && a <= b) {
                         e.push(&format!("{key}.envelope.{nm}"), format!("[{a}, {b}] must be finite and increasing"));
@@ -677,13 +685,13 @@ impl Registry {
                 None => 0,
                 Some(LithoYaml::Any(s)) if s == "any" => 0,
                 Some(LithoYaml::Any(s)) => {
-                    e.push(&format!("{key}.lithology"), format!("{s:?}: `any` or a list of {:?}", crate::atlas_stub::Lithology::ALL.map(|l| l.name())));
+                    e.push(&format!("{key}.lithology"), format!("{s:?}: `any` or a list of {:?}", crate::atlas::Lithology::ALL.map(|l| l.name())));
                     0
                 }
                 Some(LithoYaml::List(l)) => {
                     let mut m = 0u8;
                     for n in l {
-                        match crate::atlas_stub::Lithology::ALL.iter().find(|x| x.name() == n) {
+                        match crate::atlas::Lithology::ALL.iter().find(|x| x.name() == n) {
                             Some(x) => m |= 1 << *x as u8,
                             None => e.push(&format!("{key}.lithology"), format!("unknown lithology {n:?}")),
                         }
@@ -925,13 +933,11 @@ impl Registry {
 
     /// The biome picked for an ecoregion: those whose Köppen classes, envelope and lithology
     /// fit, drawn by weight (× `pref`) with `u` ∈ [0, 1); none fitting: the nearest envelope.
-    pub fn pick(&self, k: u32, temp: f64, precip: f64, dry: f64, litho: u8, u: f64, pref: impl Fn(&Biome) -> f64) -> u16 {
+    #[allow(clippy::too_many_arguments)]
+    pub fn pick(&self, k: u32, temp: f64, precip: f64, dry: f64, regime: f64, trange: f64, litho: u8, u: f64, pref: impl Fn(&Biome) -> f64) -> u16 {
+        let x = [temp, precip, dry, regime, trange];
         let fits = |b: &Biome| {
-            (b.koppen == 0 || b.koppen & (1 << k) != 0)
-                && (b.litho == 0 || b.litho & (1 << litho) != 0)
-                && (b.env[0][0]..=b.env[0][1]).contains(&temp)
-                && (b.env[1][0]..=b.env[1][1]).contains(&precip)
-                && (b.env[2][0]..=b.env[2][1]).contains(&dry)
+            (b.koppen == 0 || b.koppen & (1 << k) != 0) && (b.litho == 0 || b.litho & (1 << litho) != 0) && (0..5).all(|i| (b.env[i][0]..=b.env[i][1]).contains(&x[i]))
         };
         let w: Vec<f64> = self.biomes.iter().map(|b| if fits(b) { b.weight * pref(b) } else { 0.0 }).collect();
         let total: f64 = w.iter().sum();
@@ -949,7 +955,7 @@ impl Registry {
         let dist = |b: &Biome| {
             let d = |x: f64, r: [f64; 2], s: f64| ((r[0] - x).max(0.0) + (x - r[1]).max(0.0)) / s;
             let kp = if b.koppen == 0 || b.koppen & (1 << k) != 0 { 0.0 } else { 10.0 };
-            kp + d(temp, b.env[0], 5.0) + d(precip, b.env[1], 400.0) + d(dry, b.env[2], 3.0)
+            kp + d(temp, b.env[0], 5.0) + d(precip, b.env[1], 400.0) + d(dry, b.env[2], 3.0) + d(regime, b.env[3], 0.3) + d(trange, b.env[4], 8.0)
         };
         (0..self.biomes.len()).min_by(|&a, &b| dist(&self.biomes[a]).total_cmp(&dist(&self.biomes[b]))).unwrap_or(0) as u16
     }
@@ -1192,9 +1198,6 @@ pub mod gpu {
         c("HM_ABS", hmode::ABS as u32);
         c("MAX_CROWNS", MAX_CROWNS as u32);
         c("NBANDS", BANDS as u32);
-        for (n, id) in classes::TABLE.iter().filter(|e| e.1 > 17) {
-            c(&format!("LC_{}", n.to_uppercase()), *id as u32);
-        }
         o
     }
 

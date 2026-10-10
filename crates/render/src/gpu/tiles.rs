@@ -74,6 +74,15 @@ impl TilePool {
         }
     }
 
+    /// Drop tiles `ids` from the pool (their slots become free).
+    pub fn forget(&mut self, ids: &[TileId]) {
+        for id in ids {
+            if let Some((slot, _, _)) = self.resident.remove(id) {
+                self.free.push(slot);
+            }
+        }
+    }
+
     /// Make `tiles` resident (uploading those that are not) and return (id, slot, flags) per tile.
     /// Tiles of this call are never evicted by it; at most `slots` tiles per frame.
     pub fn ensure(&mut self, queue: &wgpu::Queue, tiles: &[(TileId, &TileData)]) -> Vec<(TileId, u32, u32)> {

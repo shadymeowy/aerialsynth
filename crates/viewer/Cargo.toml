@@ -25,3 +25,6 @@ half = { version = "2", features = ["bytemuck"] }
 pollster.workspace = true
 image.workspace = true
 
+[dev-dependencies]
+# validates the shaders without a GPU (the version wgpu uses)
+naga = { version = "30", features = ["wgsl-in"] }

@@ -236,13 +236,13 @@ pub fn layer(s: &mut crate::stack::Stack) {
         let cls = if dens < 0.05 && shrub > dens {
             lc::SHRUB
         } else if tropic > 0.5 && wet > 0.6 {
-            40 // tropical rainforest
+            lc::TROPICAL_RAINFOREST
         } else if conifer > 0.7 {
-            43 // needleleaf
+            lc::NEEDLELEAF_FOREST
         } else if conifer < 0.3 {
-            42 // broadleaf
+            lc::BROADLEAF_FOREST
         } else {
-            44 // mixed
+            lc::MIXED_FOREST
         };
         let hm = if veg.trees_in_dsm { hmode::MAX } else { hmode::NONE };
         s.composite(Layer { cov: tcov, albedo: tc, dh: th, hmode: hm, cls, ..Default::default() });

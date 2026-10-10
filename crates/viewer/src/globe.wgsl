@@ -83,29 +83,9 @@ fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
     return select(1.055 * pow(x, vec3<f32>(1.0 / 2.4)) - 0.055, x * 12.92, x <= vec3<f32>(0.0031308));
 }
 
+// land-cover display colour (lc_palette: classes.wgsl, generated from terragen::landcover)
 fn palette(c: u32) -> vec3<f32> {
-    var p = vec3<f32>(255.0, 0.0, 255.0);
-    switch c {
-        case 1u: { p = vec3<f32>(20.0, 50.0, 110.0); }
-        case 2u: { p = vec3<f32>(40.0, 90.0, 160.0); }
-        case 3u: { p = vec3<f32>(60.0, 130.0, 200.0); }
-        case 4u: { p = vec3<f32>(240.0, 220.0, 160.0); }
-        case 5u: { p = vec3<f32>(220.0, 190.0, 120.0); }
-        case 6u: { p = vec3<f32>(130.0, 120.0, 110.0); }
-        case 7u: { p = vec3<f32>(250.0, 250.0, 255.0); }
-        case 8u: { p = vec3<f32>(140.0, 190.0, 80.0); }
-        case 9u: { p = vec3<f32>(150.0, 150.0, 70.0); }
-        case 10u: { p = vec3<f32>(30.0, 100.0, 40.0); }
-        case 11u: { p = vec3<f32>(230.0, 200.0, 60.0); }
-        case 12u: { p = vec3<f32>(200.0, 60.0, 60.0); }
-        case 13u: { p = vec3<f32>(60.0, 60.0, 60.0); }
-        case 14u: { p = vec3<f32>(70.0, 140.0, 130.0); }
-        case 15u: { p = vec3<f32>(160.0, 160.0, 130.0); }
-        case 16u: { p = vec3<f32>(160.0, 120.0, 90.0); }
-        case 17u: { p = vec3<f32>(180.0, 150.0, 150.0); }
-        default: {}
-    }
-    return srgb_to_linear(p / 255.0);
+    return srgb_to_linear(lc_palette(c));
 }
 
 // hypsometric tint, sea level to ~5 km
