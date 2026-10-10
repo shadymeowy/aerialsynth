@@ -267,7 +267,9 @@ impl Generator {
     /// (`Ok`); else the error.
     #[cfg(feature = "gpu")]
     fn on_gpu_failure(&self, e: anyhow::Error) -> anyhow::Result<()> {
-        if self.backend != Backend::Auto {
+        // `AERIALSYNTH_GPU_STRICT=1` (development, CI): a GPU failure is an error, never a
+        // silent switch to the (much slower) CPU
+        if self.backend != Backend::Auto || std::env::var("AERIALSYNTH_GPU_STRICT").is_ok_and(|v| !v.is_empty() && v != "0") {
             return Err(e);
         }
         if !self.gpu_failed.swap(true, std::sync::atomic::Ordering::Relaxed) {

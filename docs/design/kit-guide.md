@@ -404,9 +404,11 @@ module), with the family constants `FAM_<NAME>`. A layer reads a family with
 `inst_list(FAM_X, (*s).l.blk, (*s).c.p)` (CPU `s.instances(i)`), a relief operator with
 `inst_list(FAM_X, r.blk, c.p)` (CPU `r.instances(w, i)`), returning an `InstList { n, items }`
 of `Inst { id, center, v }`; its
-decision must not depend on per-pixel values (R-site). More than 8 instances of a family in a
-block is an error: choose a larger cell or a lower density (the density test in
-`tests/invariants.rs` checks the default world).
+decision must not depend on per-pixel values (R-site). At most 8 instances of a family reach one
+block: where more would, both backends keep the first 8 by id (deterministic, identical) and the
+generator warns once. Treat the warning as a bug in the kit: choose a larger cell or a lower
+density, or draw dense objects (mounds, small trees) with a `scatter` kernel; families are for
+sparse landmarks (the density test in `tests/invariants.rs` checks the default world).
 
 ---
 
