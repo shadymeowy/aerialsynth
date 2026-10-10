@@ -56,7 +56,7 @@ fn desert_wind(p: vec3<f64>, lat: f32, wa: vec2<f32>) -> DesertWind {
         ns = -1.0;
     }
     let trade = 1.0 - smoothstep1(25.0, 35.0, latd);
-    let belt = vec2<f32>(-0.7071, -0.7071 * ns) * trade + vec2<f32>(0.966, 0.259 * ns) * (1.0 - trade);
+    let belt = vec2<f32>(-0.70710678, -0.70710678 * ns) * trade + vec2<f32>(0.966, 0.259 * ns) * (1.0 - trade);
     let v = wa + belt * 0.6;
     let th = atan2(v.y, v.x) + 0.3 * perlin3(cfg.seed ^ DS_WIND2, p / 260000.0lf);
     let speed = length(wa);

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Desert kit** (`docs/kits/desert.md`): sand seas whose dunes follow the atlas wind and its
+  variability (transverse ridges, linear seif dunes with Y-junctions, star dunes, small dunes on
+  the big ones), barchans on a stony fringe, playas with salt crust, cracks, brine pools and
+  paleo-shorelines, arid lakes dried into salt pans, braided dry washes, yardangs, inselbergs;
+  sand colours by palette and lithology; six desert biomes (erg, hamada, basalt harrat,
+  gypsum, scrubland, Gobi) and the kit's textures on the two core deserts.
+
 ## 0.2.0 — 2026-10-10
 
 - **`terrain show SEQ.h5`**: a viewer for sequence files (new crate `seqview`, `docs/show.md`).

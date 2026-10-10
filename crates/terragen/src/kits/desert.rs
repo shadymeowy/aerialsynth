@@ -129,7 +129,7 @@ pub fn wind(seed: u64, p: DVec3, lat: f64, wa: DVec2) -> (DVec2, f64) {
     let latd = lat.abs().to_degrees();
     let ns = if lat >= 0.0 { 1.0 } else { -1.0 };
     let trade = 1.0 - smoothstep(25.0, 35.0, latd);
-    let belt = DVec2::new(-0.7071, -0.7071 * ns) * trade + DVec2::new(0.966, 0.259 * ns) * (1.0 - trade);
+    let belt = DVec2::new(-std::f64::consts::FRAC_1_SQRT_2, -std::f64::consts::FRAC_1_SQRT_2 * ns) * trade + DVec2::new(0.966, 0.259 * ns) * (1.0 - trade);
     let v = wa + belt * 0.6;
     let th = v.y.atan2(v.x) + 0.3 * perlin3(seed ^ S_WIND2, p / 260_000.0);
     let speed = wa.length();
