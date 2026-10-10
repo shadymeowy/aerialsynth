@@ -344,7 +344,7 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
     let (w, h) = (ms.width(), ms.height());
     let (ow, oh) = (r.model.width(), r.model.height());
     // ---------------- CPU: LOD units, tiles, meshes (shared with the CPU renderer)
-    let units = r.select_units(cam);
+    let units = r.select_units(cam)?;
     let need = r.gather_ids(&units);
     r.cache.prefetch(&need);
     let tiles: Vec<(TileId, Arc<TileData>)> = need.iter().filter_map(|id| r.cache.get(*id).map(|t| (*id, t))).collect();

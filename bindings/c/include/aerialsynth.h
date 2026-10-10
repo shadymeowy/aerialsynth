@@ -351,6 +351,18 @@ int as_prefetch(const struct as_world *w,
 int as_set_cache_mb(const struct as_world *w, size_t mb);
 
 /**
+ * Report tile generation on stderr (`on` != 0) or not (0, the default): a line per batch of
+ * tiles generated (count, zooms, CPU or GPU, time) by `as_tile`, `as_tiles`, `as_prefetch` and
+ * the renders of the world's cameras (`as_render`). The first render at a new place generates
+ * the tiles in view, which on the CPU can take minutes. Returns `AS_OK` or
+ * `AS_ERR_INVALID_ARGUMENT` (`w` is NULL).
+ *
+ * # Safety
+ * `w` is NULL or a handle from `as_open`.
+ */
+int as_set_verbose(const struct as_world *w, int on);
+
+/**
  * The highest zoom the world serves (`tiles.max_zoom` of its config, default 18), or -1 if `w`
  * is NULL.
  *

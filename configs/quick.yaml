@@ -1,25 +1,28 @@
-# Small smoke-test scenario: 10 s of flight, 5 fps, nadir camera at ~1000 m AGL.
+# Smoke test: 3 s of flight at 5 fps (16 frames), a 320 x 256 nadir camera ~1000 m above
+# ground, tiles up to zoom 15: ~75 tiles. About a minute on 4 CPU cores without a GPU (mostly
+# the ~20 coarse tiles from zoom 0 down), seconds with one.
 world:
   seed: 1
 tiles:
   file: out/quick/world.h5
-  max_zoom: 17
+  max_zoom: 15
+  margin: 1
 trajectory:
   file: out/quick/traj.csv
   synth:
     kind: random
     altitude_m: 1000
     speed_mps: 50
-    duration_s: 10
+    duration_s: 3
 render:
   supersample: 3
 cameras:
   - path: /cam0
     intrinsics:
       model: pinhole
-      width: 640
-      height: 512
-      intrinsics: [457.0, 457.0, 319.5, 255.5]
+      width: 320
+      height: 256
+      intrinsics: [228.5, 228.5, 159.5, 127.5]
       distortion: [-0.05, 0.01, 0.0, 0.0]
     frame_rate: 5
     rgb: {}

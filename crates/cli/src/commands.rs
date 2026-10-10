@@ -168,6 +168,12 @@ fn open_store(s: &Scenario, gen: &Generator) -> Result<Arc<TileStore>> {
     Ok(Arc::new(store))
 }
 
+/// Print the renderer's lines (tiles it generates lazily) above the progress bar `b`.
+fn log_around(b: &ProgressBar) {
+    let b = b.clone();
+    pipeline::set_log(Some(Arc::new(move |s: &str| b.suspend(|| eprintln!("{s}")))));
+}
+
 fn do_render(s: &Scenario) -> Result<()> {
     if s.cameras.is_empty() && s.imu.is_none() {
         bail!("nothing to render: the scenario has no `cameras` and no `imu`");
@@ -177,6 +183,7 @@ fn do_render(s: &Scenario) -> Result<()> {
     let store = open_store(s, &gen)?;
     let b = bar(0, "render");
     b.set_style(ProgressStyle::with_template("render {msg:12} {bar:40} {pos}/{len} [{elapsed_precise} < {eta_precise}] {per_sec}").unwrap());
+    log_around(&b);
     let t0 = std::time::Instant::now();
     let rep = pipeline::render_sequence(s, &poses, store, Some(gen), &|cam, done, total| {
         b.set_message(cam.to_string());
@@ -205,6 +212,7 @@ fn do_events(s: &Scenario) -> Result<()> {
     let store = open_store(s, &gen)?;
     let b = ProgressBar::new(1000);
     b.set_style(ProgressStyle::with_template("events {msg:12} {bar:40} {percent}% [{elapsed_precise} < {eta_precise}]").unwrap());
+    log_around(&b);
     let t0 = std::time::Instant::now();
     let res = pipeline::render_events(s, &poses, store, Some(gen), &|cam, done, total| {
         b.set_message(cam.to_string());
@@ -317,7 +325,8 @@ pub fn run(a: RunArgs) -> Result<()> {
 pub struct TilesArgs {
     #[command(flatten)]
     pub common: Common,
-    /// Tiles of a region instead of the flight's: lat_min,lon_min,lat_max,lon_max (deg).
+    /// Tiles of a region instead of the flight's: lat_min,lon_min,lat_max,lon_max (deg;
+    /// lon_min > lon_max is a box across the antimeridian).
     #[arg(long, allow_hyphen_values = true, help_heading = "Which tiles")]
     pub bbox: Option<String>,
     /// Zoom range of --bbox.
@@ -361,6 +370,23 @@ fn parse_floats(s: &str, n: usize, what: &str) -> Result<Vec<f64>> {
     Ok(v)
 }
 
+/// `--bbox lat_min,lon_min,lat_max,lon_max` (degrees): lat_min < lat_max; lon_min > lon_max is
+/// a box across the antimeridian.
+fn parse_bbox(s: &str) -> Result<LatLonBounds> {
+    let v = parse_floats(s, 4, "--bbox lat_min,lon_min,lat_max,lon_max")?;
+    let (lat_min, lon_min, lat_max, lon_max) = (v[0], v[1], v[2], v[3]);
+    if !v.iter().all(|x| x.is_finite()) || lat_min.abs() > 90.0 || lat_max.abs() > 90.0 || lon_min.abs() > 180.0 || lon_max.abs() > 180.0 {
+        bail!("--bbox {s}: degrees with |latitude| <= 90 and |longitude| <= 180 expected");
+    }
+    if lat_min >= lat_max {
+        bail!("--bbox {s}: lat_min ({lat_min}) must be less than lat_max ({lat_max}); the order is lat_min,lon_min,lat_max,lon_max");
+    }
+    if lon_min == lon_max {
+        bail!("--bbox {s}: lon_min and lon_max are equal (lon_min > lon_max is a box across the antimeridian)");
+    }
+    Ok(LatLonBounds { lat_min: lat_min.to_radians(), lon_min: lon_min.to_radians(), lat_max: lat_max.to_radians(), lon_max: lon_max.to_radians() })
+}
+
 pub fn tiles(a: TilesArgs) -> Result<()> {
     let s = setup(&a.common)?;
     if let Some(prefix) = &a.png {
@@ -373,13 +399,12 @@ pub fn tiles(a: TilesArgs) -> Result<()> {
     let tiles: Vec<TileId> = if let Some(t) = &a.list {
         parse_tile_list(t)?
     } else if let Some(bb) = &a.bbox {
-        let v = parse_floats(bb, 4, "--bbox lat_min,lon_min,lat_max,lon_max")?;
+        let b = parse_bbox(bb)?;
         let (z0, z1) = a.zooms.split_once('-').map(|(a, b)| (a.parse::<u8>(), b.parse::<u8>())).context("--zooms a-b")?;
         let (z0, z1) = (z0?, z1?);
         if z0 > z1 || z1 > s.tiles.max_zoom {
             bail!("--zooms {z0}-{z1}: needs {z0} <= {z1} <= tiles.max_zoom ({})", s.tiles.max_zoom);
         }
-        let b = LatLonBounds { lat_min: v[0].to_radians(), lon_min: v[1].to_radians(), lat_max: v[2].to_radians(), lon_max: v[3].to_radians() };
         let n: u64 = (z0..=z1).map(|z| count_tiles_in_bounds(&b, z)).sum();
         if n > MAX_LISTED_TILES {
             bail!("--bbox at zooms {z0}-{z1} holds {n} tiles (at most {MAX_LISTED_TILES}): use a smaller box or fewer zooms");
@@ -424,6 +449,8 @@ pub struct ViewArgs {
 pub fn view(a: ViewArgs) -> Result<()> {
     let s = setup(&a.common)?;
     viewer::check_options(&a.view, s.tiles.max_zoom)?;
+    // before the store is created: a failed start leaves nothing behind
+    view_preflight(&a.view).map_err(|e| e.context("terrain view needs a GPU (see docs/viewer.md)"))?;
     let gen = pipeline::generator(&s)?;
     // (read-only without generation: a store of another generator version can be viewed)
     let store = if a.view.no_generate {
@@ -432,6 +459,17 @@ pub fn view(a: ViewArgs) -> Result<()> {
         pipeline::open_or_create_store(&s, &gen)?
     };
     viewer::run(s, Arc::new(store), Arc::new(gen), a.view)
+}
+
+/// What `terrain view` needs: a display for its window (unless it renders headless:
+/// `--snapshot`, `--record`) and a GPU adapter.
+fn view_preflight(o: &viewer::ViewOptions) -> Result<()> {
+    let headless = o.snapshot.is_some() || o.record.is_some();
+    let unset = |v: &str| std::env::var_os(v).is_none_or(|s| s.is_empty());
+    if !headless && cfg!(all(unix, not(target_os = "macos"))) && unset("DISPLAY") && unset("WAYLAND_DISPLAY") {
+        bail!("no display (DISPLAY and WAYLAND_DISPLAY are unset); without one, --snapshot PNG renders a view headless");
+    }
+    render::gpu::device::shared().map(drop)
 }
 
 #[derive(Args)]
@@ -524,6 +562,20 @@ fn store_info(path: &Path, st: &TileStore) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bbox_is_checked() {
+        let b = parse_bbox("39.8,32.7,40.0,32.9").unwrap();
+        assert!(b.lat_min < b.lat_max && b.lon_min < b.lon_max);
+        // across the antimeridian
+        let b = parse_bbox("-10,170,10,-170").unwrap();
+        assert!(b.lon_min > b.lon_max && count_tiles_in_bounds(&b, 2) > 0);
+        for bad in ["40.0,32.7,39.8,32.9", "39.8,32.7,39.8,32.9", "39.8,32.7,40.0,32.7", "91,0,92,1", "0,0,1,181", "0,0,nan,1", "0,0,1"] {
+            assert!(parse_bbox(bad).is_err(), "{bad}");
+        }
+        let e = parse_bbox("40.0,32.7,39.8,32.9").unwrap_err().to_string();
+        assert!(e.contains("lat_min (40) must be less than lat_max (39.8)"), "{e}");
+    }
 
     /// The template parses, and every value it shows is the default.
     #[test]

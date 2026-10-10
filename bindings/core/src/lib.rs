@@ -20,6 +20,7 @@ use anyhow::Context;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use terragen::{Config, Generator};
 use tilestore::{TileData, TileStore, TILE_SIZE};
@@ -236,6 +237,8 @@ pub struct World {
     path: PathBuf,
     max_zoom: u32,
     cache: TileCache,
+    /// Report tile generation on stderr ([`World::set_verbose`]; shared with the cameras).
+    verbose: Arc<AtomicBool>,
     /// The store's entry in [`OPEN`]; after `store`, so it is dropped after the store is closed.
     _open: OpenFile,
 }
@@ -292,7 +295,8 @@ impl World {
                 )));
             }
         }
-        let store = gen.open_store_rw(tiles_file).with_context(|| format!("opening the tile store {}", tiles_file.display()))?;
+        // (the store's errors name the file and lead with the reason: "… is a directory")
+        let store = gen.open_store_rw(tiles_file)?;
         let key = tiles_file.canonicalize().with_context(|| format!("resolving {}", tiles_file.display()))?;
         open.push(key.clone());
         Ok(World {
@@ -301,7 +305,30 @@ impl World {
             path: tiles_file.to_path_buf(),
             max_zoom: spec.max_zoom,
             cache: TileCache::new(DEFAULT_CACHE_MB << 20),
+            verbose: Arc::new(AtomicBool::new(false)),
             _open: OpenFile(key),
+        })
+    }
+
+    /// Report tile generation (by [`World::tile`], [`World::tiles_into`], [`World::prefetch`] and
+    /// the renders of cameras over this world) on stderr: a line per batch of tiles, with the
+    /// count, zooms, backend and time. Off by default.
+    pub fn set_verbose(&self, on: bool) {
+        self.verbose.store(on, Ordering::Relaxed);
+    }
+
+    /// Is tile generation reported ([`World::set_verbose`])?
+    pub fn verbose(&self) -> bool {
+        self.verbose.load(Ordering::Relaxed)
+    }
+
+    /// Where reports of tile generation go: stderr while [`World::set_verbose`] is on.
+    pub(crate) fn log(&self) -> render::cache::Log {
+        let on = self.verbose.clone();
+        Arc::new(move |s: &str| {
+            if on.load(Ordering::Relaxed) {
+                eprintln!("aerialsynth: {s}");
+            }
         })
     }
 
@@ -472,8 +499,14 @@ impl World {
             )));
         }
         let todo: Vec<TileId> = (z_min..=z_max).flat_map(|z| geodesy::tiles::tiles_in_bounds(&b, z as u8)).filter(|&id| !self.store.contains(id)).collect();
-        for chunk in todo.chunks(GEN_BATCH) {
+        if self.verbose() {
+            eprintln!("aerialsynth: prefetch: {} of {n} tiles are missing (z{z_min}-{z_max})", todo.len());
+        }
+        for (k, chunk) in todo.chunks(GEN_BATCH).enumerate() {
             self.generate(chunk, None)?;
+            if self.verbose() && todo.len() > GEN_BATCH {
+                eprintln!("aerialsynth: prefetch: {}/{} tiles", (k * GEN_BATCH + chunk.len()), todo.len());
+            }
         }
         Ok(todo.len())
     }
@@ -505,7 +538,11 @@ impl World {
     /// requested one last: the most recently used) and return that layer of each.
     fn generate(&self, ids: &[TileId], layer: Option<Layer>) -> Result<Vec<Option<Bytes>>> {
         let what = || if ids.len() == 1 { format!("tile {}", ids[0]) } else { format!("{} tiles", ids.len()) };
+        let t0 = std::time::Instant::now();
         let tiles = self.gen.tiles(ids).with_context(|| format!("generating {}", what()))?;
+        if self.verbose() {
+            eprintln!("aerialsynth: generated {} on the {} in {:.1} s", what(), self.gen.backend_name(), t0.elapsed().as_secs_f64());
+        }
         if tiles.len() != ids.len() || tiles.iter().zip(ids).any(|(t, id)| t.id != *id) {
             return Err(Error::Failed(anyhow::anyhow!("the generator returned other tiles than asked for")));
         }
@@ -758,6 +795,18 @@ pub(crate) mod tests {
         let e = World::open(&d.0.join("bad.h5"), Some(&bad), None).err().expect("planet.a = 0");
         assert!(e.to_string().contains("planet.a"), "{e}");
         assert!(!d.0.join("bad.h5").exists());
+    }
+
+    #[test]
+    fn a_directory_or_another_file_is_not_a_store() {
+        let d = TempDir::new("notastore");
+        let text = d.0.join("notes.txt");
+        std::fs::write(&text, "hello").unwrap();
+        for (p, want) in [(&d.0, "is a directory"), (&text, "is not an HDF5 file")] {
+            let e = World::open(p, None, None).err().expect("not a store, opened").to_string();
+            assert!(e.starts_with(&format!("{} {want}", p.display())), "{e}");
+            assert_eq!(e.lines().count(), 1, "{e}");
+        }
     }
 
     #[test]

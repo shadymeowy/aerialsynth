@@ -141,8 +141,8 @@ and builds the same world:
 | | CPU (8 threads) | GPU (RTX 2080 Ti) |
 |---|---|---|
 | 64 tiles at z15 / z13 (cold caches) | 12.7 s / 13.5 s (5 tiles/s) | 1.1 s (60 tiles/s) |
-| `configs/quick.yaml` planned tiles (357, z0–z17) | 57.6 s | 5.7 s |
-| its completion (280 tiles, mostly z1–z8 near the poles) | 148 s | 13 s |
+| the 0.2.0 `configs/quick.yaml` (10 s, 640 × 512): planned tiles (357, z0–z17) | 57.6 s | 5.7 s |
+| its completion (280 tiles: margins around coarse tiles of unknown range, which the dry runs no longer add: now 2 tiles) | 148 s | 13 s |
 | `terrain view` snapshot from an empty store (592 tiles: the whole globe at z0–z4 and the view's tiles) | 323 s | 33 s |
 | base levels z0–z4 (341 tiles; `examples/base_levels`, loaded machine) | ~620 s (z3–z4 ~0.5 tiles/s) | 25 s (z3–z4 9–14 tiles/s) |
 | `terrain view`, empty store: first tiles drawn (warm / cold pipeline cache) | z0 in 0.4–0.8 s | ~1 s / ~1 s (was 2 s / 137–157 s) |

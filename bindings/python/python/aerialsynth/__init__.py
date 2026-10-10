@@ -23,6 +23,10 @@ A :class:`Camera` renders images of the world from a pose, with the renderer of 
                        time="2026-06-21T07:30:00Z", depth=True)
         f.rgb, f.depth                                    # uint8 (480, 640, 3), float32 (480, 640)
 
+The first render at a new place generates the tiles it needs: on the CPU (no GPU that
+generates tiles) that takes minutes; ``World(..., verbose=True)`` reports it on stderr, and
+:meth:`World.prefetch` makes an area's tiles ahead. Later renders read them from the store.
+
 Arrays are writable and own their memory (a view of a fresh ``bytearray``; no copy is made).
 Tile row 0 is the north edge, column 0 the west edge; image row 0 is the image top.
 """
@@ -30,6 +34,7 @@ Tile row 0 is the north edge, column 0 the west edge; image row 0 is the image t
 from __future__ import annotations
 
 import datetime as _dt
+import operator
 import os
 from typing import Literal, NamedTuple, Optional, Union
 
@@ -124,6 +129,7 @@ class World:
     :param seed: overrides the config's seed (like ``terrain --seed``).
     :param cache_mb: size of the in-memory cache of decoded tiles in MiB (0: no cache; see
         :attr:`cache_mb`).
+    :param verbose: report tile generation on stderr (see :attr:`verbose`).
     :raises RuntimeError: the store holds another world (or generator version), or the config is
         invalid.
     :raises OSError: the config file cannot be read.
@@ -139,13 +145,15 @@ class World:
         config: Optional[PathLike] = None,
         seed: Optional[int] = None,
         cache_mb: int = DEFAULT_CACHE_MB,
+        verbose: bool = False,
     ) -> None:
         if seed is not None:
-            seed = int(seed)
+            seed = _int(seed, "seed")
             if not 0 <= seed < 2**64:
                 raise ValueError(f"seed {seed} is out of range 0 .. 2**64 - 1")
         cache_mb = _index(cache_mb, "cache_mb")
         self._w = _native.World(os.fspath(tiles_file), None if config is None else os.fspath(config), seed, cache_mb)
+        self._w.verbose = bool(verbose)
 
     def tile(self, z: int, x: int, y: int, layer: LayerName = "rgb") -> np.ndarray:
         """A layer of tile ``z/x/y`` (generated and stored if missing).
@@ -153,13 +161,14 @@ class World:
         ``z`` must be at most :attr:`max_zoom`, ``x`` and ``y`` less than ``2**z`` (XYZ scheme,
         ``y = 0`` at the north). The array has the layer's dtype and shape (see :data:`LAYERS`).
 
+        :raises TypeError: a coordinate is not an integer (Python or numpy).
         :raises ValueError: bad coordinates or layer name, or the world is closed.
         :raises RuntimeError: reading, generating or storing the tile failed.
         """
         info = LAYERS.get(layer)
         if info is None:
             raise ValueError(f"unknown layer {layer!r} (layers: {', '.join(LAYERS)})")
-        buf = self._w.tile(int(z), int(x), int(y), layer)
+        buf = self._w.tile(_int(z, "z"), _int(x, "x"), _int(y, "y"), layer)
         return np.frombuffer(buf, dtype=info.dtype).reshape(info.shape)
 
     def tiles(self, coords, layer: LayerName = "rgb") -> np.ndarray:
@@ -173,6 +182,7 @@ class World:
         together (in batches of up to 64 tiles: on the GPU, many tiles per dispatch) and stored.
         A tile listed several times is read or generated once. The GIL is released meanwhile.
 
+        :raises TypeError: ``coords`` is not an integer array.
         :raises ValueError: bad coordinates or layer name, or the world is closed.
         :raises RuntimeError: reading, generating or storing a tile failed (the tiles generated
             before the failure are stored).
@@ -227,6 +237,17 @@ class World:
     def cache_info(self) -> CacheInfo:
         """Usage of the tile cache."""
         return CacheInfo(*self._w.cache_info())
+
+    @property
+    def verbose(self) -> bool:
+        """Report tile generation on stderr: a line per batch of tiles generated (count, zooms,
+        CPU or GPU, time) by :meth:`tile`, :meth:`tiles`, :meth:`prefetch` and the renders of
+        this world's cameras. Settable; off by default."""
+        return self._w.verbose
+
+    @verbose.setter
+    def verbose(self, on: bool) -> None:
+        self._w.verbose = bool(on)
 
     def camera(
         self,
@@ -322,13 +343,23 @@ class World:
         return f"aerialsynth.World({self.path!r}, {state})"
 
 
+def _int(v: object, name: str) -> int:
+    """An integer argument: an ``int`` or a numpy integer (anything with ``__index__``), not a
+    float or a bool (no silent truncation)."""
+    if isinstance(v, (bool, np.bool_)):
+        raise TypeError(f"{name} must be an integer, not {type(v).__name__}")
+    try:
+        return operator.index(v)  # type: ignore[arg-type]
+    except TypeError:
+        raise TypeError(f"{name} must be an integer, not {type(v).__name__}") from None
+
+
 def _index(v: object, name: str) -> int:
     """A non-negative integer argument."""
-    if isinstance(v, bool) or not isinstance(v, (int, np.integer)):
-        raise TypeError(f"{name} must be an integer, not {type(v).__name__}")
-    if v < 0:
-        raise ValueError(f"{name} {v} must be >= 0")
-    return int(v)
+    i = _int(v, name)
+    if i < 0:
+        raise ValueError(f"{name} {i} must be >= 0")
+    return i
 
 
 def _unix_time(time: TimeLike) -> Optional[float]:
@@ -405,7 +436,9 @@ class Camera:
         depth: bool = False,
         landcover: bool = False,
     ) -> Frame:
-        """Render a frame from a pose; tiles in view are generated and stored when missing.
+        """Render a frame from a pose; tiles in view are generated and stored when missing (the
+        first render at a new place: minutes on the CPU, see :attr:`World.verbose` and
+        :meth:`World.prefetch`).
 
         :param lat, lon: geodetic position in degrees (``|lat| <= 90``).
         :param height: metres above the WGS84 ellipsoid (see :meth:`World.surface_height`).

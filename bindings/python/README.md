@@ -43,9 +43,13 @@ aerialsynth.LAYERS["normal"]   # LayerInfo(name='normal', dtype=dtype('int8'), c
   is ~1.1 MiB, an `rgb` layer 192 KiB). A cached tile is a copy (~0.02 ms) instead of a store
   read and decompression (~0.8 ms for `rgb`). `World(..., cache_mb=0)` or `w.cache_mb = 0` turns
   it off; `w.cache_info()` gives its size, bytes and entries held, hits and misses.
-- **Errors:** `ValueError` for bad coordinates, layer names, seeds or a closed world;
-  `FileNotFoundError` / `OSError` for an unreadable config; `RuntimeError` for a store of another
-  world, an invalid config, or a failed read / generation.
+- **Errors:** `TypeError` for coordinates, zooms or seeds that are not integers (Python or numpy
+  integers; floats are not truncated); `ValueError` for bad coordinates, layer names, seeds or a
+  closed world; `FileNotFoundError` / `OSError` for an unreadable config; `RuntimeError` for a
+  store of another world, a path that is not a tile store (a directory, a file that is not
+  HDF5), an invalid config, or a failed read / generation.
+- **Progress:** `World(..., verbose=True)` / `w.verbose = True` reports tile generation on
+  stderr (a line per batch: count, zooms, CPU or GPU, time), also for the renders of its cameras.
 - **Threads:** a `World` can be used from several threads; reading and generation release the
   GIL. A tiles
   file can be open by only one `World` per process at a time (a second one raises
@@ -83,6 +87,15 @@ with aerialsynth.World("out/world.h5") as w:
 
 `Camera.render` uses the renderer of `terrain run`, so the images match the CLI's datasets; the
 tiles in view are generated into the store when missing (like `terrain run` with lazy tiles).
+
+**The first render at a new place takes a while on the CPU:** it generates the few hundred tiles
+the view needs (the coarse levels, then the view's own and their neighbours). Without a GPU that
+generates tiles, the example above takes ~4.6 min on 4 cores the first time and ~1 s afterwards
+(the tiles are then read from the store); with one, ~30 s. `World(...,
+verbose=True)` (or `w.verbose = True`) prints a line per batch of tiles generated on stderr;
+`w.prefetch(box, zooms)` makes an area's tiles ahead (in large batches), e.g. before many
+renders there. The image does not depend on whether the tiles were generated or read: the same
+call gives the same image.
 
 - **Cameras:** `w.camera(width, height, hfov, cx=None, cy=None, mount="forward")` is a
   distortion-free pinhole camera (principal point default the image centre); `mount="forward"`
@@ -130,8 +143,12 @@ zlib are linked statically; nothing else to install besides numpy):
 | Windows x86_64 | `aerialsynth-<version>-cp310-abi3-win_amd64.whl` |
 
 ```sh
-pip install https://github.com/shadymeowy/aerialsynth/releases/download/v0.2.0/aerialsynth-0.2.0-cp310-abi3-manylinux_2_28_x86_64.whl
+python3 -m venv .venv          # PEP 668 distributions refuse a system-wide pip install (Debian / Ubuntu: apt install python3-venv)
+.venv/bin/pip install https://github.com/shadymeowy/aerialsynth/releases/download/v0.2.0/aerialsynth-0.2.0-cp310-abi3-manylinux_2_28_x86_64.whl
+.venv/bin/python -c "import aerialsynth; print(aerialsynth.__version__)"
 ```
+
+(Windows: `py -m venv .venv` and `.venv\Scripts\pip install <wheel URL>`.)
 
 A GPU is optional: without a suitable one, images are rendered on the CPU, and tiles are
 generated on the CPU (on macOS always: Metal has no 64-bit floats). Other platforms: build from
@@ -146,9 +163,10 @@ the [main README](../../README.md#requirements)), and
 
 ```sh
 cd bindings/python
-maturin build --release -o dist        # or: pip install .
-pip install dist/aerialsynth-*.whl
-pip install pytest && pytest tests
+maturin build --release -o dist        # or: pip install . (in a virtual environment)
+python3 -m venv .venv                  # PEP 668 distributions refuse a system-wide pip install (Debian / Ubuntu: apt install python3-venv)
+.venv/bin/pip install dist/aerialsynth-*.whl pytest
+.venv/bin/pytest tests
 ```
 
 The only Python dependency is numpy.

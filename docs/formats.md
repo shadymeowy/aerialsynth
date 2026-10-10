@@ -38,6 +38,8 @@ Both files are HDF5 and open in h5py or any HDF5 reader. `terrain info FILE` sum
 - **Planning:** the plan covers every camera along the trajectory, plus `tiles.margin`
   (default 2) rings of neighbours per zoom, so a consumer whose pose estimate is slightly off
   still finds the surrounding tiles. `terrain tiles --dry-run -o tiles.txt` writes the plan.
+  After generating it, `run` and `tiles` do dry runs of the renderer's selection on the real
+  elevation ranges and generate what it adds (with margins), until nothing is missing.
 
 ## Sequence file (`output.file`)
 

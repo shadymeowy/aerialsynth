@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+- **Lazy tile generation** (the bindings' cameras, `terrain run --lazy`):
+  - The level of detail no longer over-refines a new place: tiles of unknown elevation range
+    were refined on a default range (-100..6000 m), which put the camera inside their bounding
+    spheres, so the first render generated the finest zoom around it (the C example: 2,900
+    tiles to z18 for a 160 × 120 image whose pixels are ~14 m on the ground; > 6 GB, 13 min on
+    4 CPU cores). The selection now generates the tiles whose range it needs, one zoom level
+    per pass, and selects again until it knows them all (`lod::Selection::unknown`): 220 tiles
+    to z15, 1 GB, ~3 min (the Python example: 1,900 tiles, 3.4 GB, 8.5 min before; 500
+    tiles, 1.3 GB, 4.6 min now).
+  - The same call gives the same image: the selection is the one a store holding every tile
+    gives, so a render that generates its tiles and one that reads them select the same tiles
+    (the first render differed by up to 1 DN before).
+  - Missing tiles are generated in batches (`tiles.cache_tiles` bounds what the cache holds;
+    before, one render's missing tiles were generated in a single batch).
+  - Progress: `terrain run` prints the tiles a render generates; the bindings report
+    generation on stderr with `as_set_verbose(w, 1)` (C) / `World(..., verbose=True)`,
+    `World.verbose` (Python).
+- **Planning:** the dry runs of `terrain run` / `terrain tiles` no longer add margin rings around
+  tiles of unknown range (only around the tiles the renderer keeps), and the plan includes the
+  tiles its selection refines: the previous `configs/quick.yaml` needed 357 + 280 tiles, now 357 + 2.
+  A new cull drops tiles above the top of a downward view cone (the coarse tiles beside a low
+  nadir camera, whose bounding spheres contain it).
+- `configs/quick.yaml` is quick: 3 s at 5 fps, a 320 × 256 camera, zoom 15, margin 1 (~75 tiles).
+- `terrain view` checks for a display and a GPU first ("terrain view needs a GPU (see
+  docs/viewer.md): …") and creates no tile store when it cannot start.
+- `terrain tiles --bbox` refuses lat_min >= lat_max (swapped bounds selected nothing) and
+  out-of-range values; lon_min > lon_max stays a box across the antimeridian.
+- A directory or a file that is not HDF5 given as a tile store fails with "… is a directory" /
+  "… is not an HDF5 file" instead of an HDF5 error stack (CLI and bindings).
+- Python: tile coordinates, zooms, seeds and sizes must be integers (`operator.index`: Python or
+  numpy integers); `w.tile(3.5, 0, 0)` raises `TypeError` instead of truncating. The type stub
+  `_native.pyi` covers the whole extension module.
+
 ## 0.2.0 — 2026-10-10
 
 - **`terrain show SEQ.h5`**: a viewer for sequence files (new crate `seqview`, `docs/show.md`).
