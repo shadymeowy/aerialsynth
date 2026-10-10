@@ -101,7 +101,9 @@ pub(crate) fn climate(s: &Stack) -> ColdClimate {
     let site = &s.bio.site;
     let f = |x: f64| x as f32 as f64;
     let d = year_date(f(site.temp_c), f(site.precip_mm), f(site.temp_range_c), s.bio.style.season);
-    let date = ts - half * (std::f64::consts::TAU * (d - 0.04)).cos();
+    // (where the ecoregions' mosaic is below the pixel, the date's effect fades to the border,
+    // where both sides meet at the annual mean: no seam between a winter and a summer ecoregion)
+    let date = ts - half * (std::f64::consts::TAU * (d - 0.04)).cos() * (1.0 - 2.0 * s.bio.w).max(0.0);
     ColdClimate { t: ts, summer: ts + 0.95 * half, date }
 }
 
@@ -167,9 +169,9 @@ pub(crate) fn ice(s: &Stack, c: &ColdClimate) -> Ice {
     let rv = if l.river_hw > 0.0 { 1.0 - smoothstep(l.river_hw + 80.0, l.river_hw + 500.0, l.river_d.abs()) } else { 0.0 };
     let valley = rv.max(0.6 * hollow);
     let g = pi - 2.6 * valley;
-    let steep = 1.0 - smoothstep(0.55, 0.9, l.slope + 0.1 * n);
+    let steep = 1.0 - smoothstep(0.45, 0.75, l.slope + 0.1 * n + 0.15 * spur);
     let ice = smoothstep(0.15, -0.15, g + 0.4) * steep;
-    let snow = smoothstep(0.15, -0.15, pi) * (1.0 - 0.75 * smoothstep(0.9, 1.6, l.slope));
+    let snow = smoothstep(0.15, -0.15, pi) * (1.0 - 0.85 * smoothstep(0.7, 1.2, l.slope));
     Ice { p: pi, g, ice, snow: snow.max(ice), n }
 }
 
@@ -562,7 +564,7 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     let firn = srgb(236.0, 241.0, 247.0) * (1.0 + tex);
     // bare ice: blue-grey, dirtier towards the margin and the snout
     let dirt = smoothstep(-0.2, 0.5, perlin3(SEED_ICE + 6, p / 150.0) * band(150.0, gsd) + 0.6 * smoothstep(-1.4, -0.4, g.g));
-    let bare = mixc(srgb(170.0, 194.0, 208.0), srgb(146.0, 150.0, 150.0), 0.55 * dirt) * (1.0 + 1.5 * tex);
+    let bare = mixc(srgb(158.0, 190.0, 212.0), srgb(128.0, 128.0, 124.0), 0.6 * dirt) * (1.0 + 1.5 * tex);
     let mut col = mixc(firn, bare, abl);
     let mut dh = 0.0;
     // blue ice on cold flat ice caps
@@ -583,16 +585,16 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     if cs > 0.0 {
         let spacing = 6.0 / sl;
         let e = smoothstep(1.2 * gsd, 3.0 * gsd, spacing);
-        let on = smoothstep(-0.08, 0.08, perlin3(SEED_ICE + 9, p / 35.0) + 0.9 * cs - 0.55);
+        let on = smoothstep(-0.08, 0.08, perlin3(SEED_ICE + 9, p / 35.0) + 1.2 * cs - 0.5);
         let mut cr = 0.0;
         if e > 0.0 {
             let x = l.ground / 6.0 + 0.35 * perlin3(SEED_ICE + 10, p / 45.0);
             let f = x - x.floor();
             let d = f.min(1.0 - f) * spacing;
-            cr = band_cov(d, 1.2, fw) * on * e;
+            cr = band_cov(d, 1.6, fw) * on * e;
         }
         // the mean of unresolved crevasses: their area share
-        cr += (1.0 - e) * on * (2.4 / spacing).min(1.0);
+        cr += (1.0 - e) * on * (3.2 / spacing).min(1.0);
         let cr = cr * cs;
         col = mixc(col, srgb(34.0, 62.0, 88.0), cr);
         dh -= 4.0 * cr;
@@ -638,7 +640,7 @@ fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     let gsd = s.ctx.gsd;
     let hollow = smoothstep(0.1, 0.8, -t.gully);
     let spur = smoothstep(0.2, 0.8, t.gully);
-    let mut n = s.pf.snow - 1.2 * hollow + 0.4 * spur;
+    let mut n = 0.6 * s.pf.snow - 1.6 * hollow + 0.5 * spur;
     let b45 = band(45.0, gsd);
     if b45 > 0.0 {
         n += 0.5 * perlin3(SEED_SNOW + 2, p / 45.0) * b45;
@@ -793,6 +795,148 @@ mod tests {
         // a summer ecoregion: the warm half of the year
         let d = 0.17 + 0.66 * 0.5;
         assert!((std::f64::consts::TAU * (d - 0.04)).cos() < -0.9);
+    }
+
+    /// Places of the default world where the kit draws, by feature (for stills):
+    /// `cargo test --release -p terragen find_cold_places -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn find_cold_places() {
+        use rayon::prelude::*;
+        let w = crate::world::World::new(crate::Config::default());
+        let n = 400_000;
+        let pts: Vec<(f64, f64, crate::world::Terrain)> = (0..n)
+            .into_par_iter()
+            .map(|i| {
+                let h = mix64(0xC01D ^ i as u64);
+                let lat = (2.0 * u01k(h, 1) - 1.0).asin().to_degrees();
+                let lon = 360.0 * u01k(h, 2) - 180.0;
+                (lat, lon, w.terrain(&crate::world::Ctx::new(lat.to_radians(), lon.to_radians(), 100.0, &w.ell)))
+            })
+            .collect();
+        let summer = |lat: f64, t: &crate::world::Terrain| t.temp + 0.95 * half_range(lat.abs(), t.cont);
+        let tela = |t: &crate::world::Terrain| -2.0 + 5.0 * smoothstep(0.15, 0.85, t.moist);
+        let land = |t: &crate::world::Terrain| t.water_kind == 0 && t.ground > 2.0;
+        #[allow(clippy::type_complexity)]
+        let kinds: [(&str, Box<dyn Fn(f64, &crate::world::Terrain) -> bool + Sync>); 7] = [
+            ("valley_glacier", Box::new(|la, t| land(t) && t.mountain > 0.5 && (-2.5..0.0).contains(&(summer(la, t) - tela(t))))),
+            ("ice_cap", Box::new(|la, t| land(t) && summer(la, t) - tela(t) < -4.0)),
+            ("polygon_lakes", Box::new(|_, t| land(t) && t.temp < -5.0 && t.ground < 250.0 && t.mountain < 0.1 && t.moist > 0.45 && t.style[0] > 0.6)),
+            ("kettle_lakes", Box::new(|la, t| land(t) && la.abs() > 60.0 && t.cont > 0.25 && (-1.0..5.0).contains(&t.temp) && t.ground < 250.0 && t.mountain < 0.1 && t.moist > 0.45 && t.style[0] > 0.6)),
+            ("forest_tundra", Box::new(|_, t| land(t) && (-6.0..-2.0).contains(&t.temp) && t.mountain < 0.2 && t.moist > 0.45)),
+            ("polar_desert", Box::new(|_, t| land(t) && t.temp < -10.0 && t.moist < 0.3)),
+            ("sea_ice", Box::new(|la, t| t.water_kind == 1 && t.water - t.ground < 40.0 && summer(la, t) < 2.0)),
+        ];
+        for (name, f) in &kinds {
+            let hits: Vec<String> = pts.iter().filter(|(la, _, t)| f(*la, t)).take(8).map(|(la, lo, t)| format!("({la:.3}, {lo:.3}) t {:.1} h {:.0}", t.temp, t.ground)).collect();
+            let count = pts.iter().filter(|(la, _, t)| f(*la, t)).count();
+            eprintln!("{name} ({count}): {}", hits.join("; "));
+        }
+    }
+
+    /// Places of the default world where the kit draws: (name, lat, lon).
+    pub(crate) const PLACES: &[(&str, f64, f64)] = &[
+        ("valley_glaciers", 61.032, 178.195),
+        ("ice_field", 62.305, -125.431),
+        ("polygon_lakes", -71.317, -95.151),
+        ("kettle_lakes", -66.241, 15.112),
+        ("forest_tundra", -65.788, -76.369),
+        ("sea_ice", -76.305, -75.558),
+    ];
+
+    fn tile_at(name: &str, z: u8) -> geodesy::tiles::TileId {
+        let &(_, lat, lon) = PLACES.iter().find(|p| p.0 == name).unwrap();
+        geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)
+    }
+
+    /// Share of samples differing by more than `tol`, and the mean difference.
+    fn off<T: Copy>(a: &[T], b: &[T], tol: f64, f: impl Fn(T) -> f64) -> (f64, f64) {
+        let (mut bad, mut sum) = (0usize, 0.0);
+        for (x, y) in a.iter().zip(b) {
+            let e = (f(*x) - f(*y)).abs();
+            sum += e;
+            bad += (e > tol) as usize;
+        }
+        (bad as f64 / a.len() as f64, sum / a.len() as f64)
+    }
+
+    /// Parent ≈ mean of its children (elevation, albedo) where the kit draws: glaciers, lakes.
+    #[test]
+    fn lod_consistent_at_cold_places() {
+        let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+        let n = crate::TILE_SIZE;
+        for (name, z) in [("valley_glaciers", 12u8), ("polygon_lakes", 13)] {
+            let parent = tile_at(name, z);
+            let p = g.tile(parent);
+            let kids = parent.children().map(|c| g.tile(c));
+            let (mut eh, mut ea, mut cnt) = (0.0, 0.0, 0.0);
+            for (k, kid) in kids.iter().enumerate() {
+                let (ox, oy) = ((k % 2) * n / 2, (k / 2) * n / 2);
+                for j in (0..n).step_by(2) {
+                    for i in (0..n).step_by(2) {
+                        let ix = [j * n + i, j * n + i + 1, (j + 1) * n + i, (j + 1) * n + i + 1];
+                        let m: f32 = ix.iter().map(|&q| kid.elevation[q]).sum::<f32>() / 4.0;
+                        let pi = (oy + j / 2) * n + ox + i / 2;
+                        eh += (m - p.elevation[pi]).abs() as f64;
+                        for c in 0..3 {
+                            let ma: f64 = ix.iter().map(|&q| kid.albedo[3 * q + c] as f64).sum::<f64>() / 4.0;
+                            ea += (ma - p.albedo[3 * pi + c] as f64).abs();
+                        }
+                        cnt += 1.0;
+                    }
+                }
+            }
+            let (eh, ea) = (eh / cnt, ea / (3.0 * cnt));
+            eprintln!("{name} z{z}: |parent − mean(children)| elevation {eh:.2} m, albedo {ea:.2} DN");
+            assert!(eh < 6.0, "{name}: elevation {eh}");
+            assert!(ea < 12.0, "{name}: albedo {ea}");
+        }
+    }
+
+    /// No seam between neighbouring tiles where the kit draws.
+    #[test]
+    fn seamless_at_cold_places() {
+        let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+        let n = crate::TILE_SIZE;
+        for (name, z) in [("valley_glaciers", 14u8), ("polygon_lakes", 15)] {
+            let id = tile_at(name, z);
+            let a = g.tile(id);
+            let b = g.tile(geodesy::tiles::TileId::new(z, id.x + 1, id.y));
+            let (mut across, mut inside) = (0.0, 0.0);
+            for j in 0..n {
+                for c in 0..3 {
+                    across += (a.albedo[3 * (j * n + n - 1) + c] as f64 - b.albedo[3 * (j * n) + c] as f64).abs();
+                    inside += (a.albedo[3 * (j * n + n - 2) + c] as f64 - a.albedo[3 * (j * n + n - 1) + c] as f64).abs();
+                }
+            }
+            eprintln!("{name} z{z}: albedo across {across:.0} inside {inside:.0}");
+            assert!(across < 2.0 * inside + 2.0 * n as f64, "{name}: across {across} inside {inside}");
+        }
+    }
+
+    /// The GPU's tiles are the CPU's where the kit draws.
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn tiles_match_the_cpu() {
+        let cfg = crate::Config::default();
+        let gen = match crate::gpu::GpuGenerator::new(cfg.clone()) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("no GPU generator ({e}): skipped");
+                return;
+            }
+        };
+        let cpu = crate::Generator::new(cfg);
+        for (name, z) in [("valley_glaciers", 15u8), ("valley_glaciers", 12), ("ice_field", 14), ("polygon_lakes", 15), ("polygon_lakes", 17), ("kettle_lakes", 14), ("forest_tundra", 16), ("sea_ice", 13)] {
+            let id = tile_at(name, z);
+            let g = gen.tiles(&[id]).unwrap().remove(0);
+            let c = cpu.tile_cpu(id);
+            let rgb = off(&g.rgb, &c.rgb, 2.0, |v| v as f64);
+            let el = off(&g.elevation, &c.elevation, 0.05, |v| v as f64);
+            let lc = off(&g.landcover, &c.landcover, 0.5, |v| v as f64);
+            eprintln!("{name} z{z}: rgb off {:.3}% elevation off {:.3}% landcover off {:.3}%", rgb.0 * 100.0, el.0 * 100.0, lc.0 * 100.0);
+            assert!(rgb.0 < 0.005 && el.0 < 0.005 && lc.0 < 0.005, "{name} z{z}");
+        }
     }
 
     fn params(y: &str) -> KParams {

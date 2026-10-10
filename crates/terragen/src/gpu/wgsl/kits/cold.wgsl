@@ -42,7 +42,7 @@ fn cold_climate(s: ptr<function, Stack>) -> ColdClimate {
     var c: ColdClimate;
     c.t = ts;
     c.summer = ts + 0.95 * half;
-    c.date = ts - half * cos(TAU * (d - 0.04));
+    c.date = ts - half * cos(TAU * (d - 0.04)) * max(1.0 - 2.0 * (*s).bio.w, 0.0);
     return c;
 }
 
@@ -99,9 +99,9 @@ fn cold_ice(s: ptr<function, Stack>, c: ColdClimate) -> ColdIce {
     }
     let valley = max(rv, 0.6 * hollow);
     let g = pi - 2.6 * valley;
-    let steep = 1.0 - smoothstep1(0.55, 0.9, l.slope + 0.1 * n);
+    let steep = 1.0 - smoothstep1(0.45, 0.75, l.slope + 0.1 * n + 0.15 * spur);
     let ice = smoothstep1(0.15, -0.15, g + 0.4) * steep;
-    let snow = smoothstep1(0.15, -0.15, pi) * (1.0 - 0.75 * smoothstep1(0.9, 1.6, l.slope));
+    let snow = smoothstep1(0.15, -0.15, pi) * (1.0 - 0.85 * smoothstep1(0.7, 1.2, l.slope));
     o.p = pi;
     o.g = g;
     o.ice = ice;
@@ -515,7 +515,7 @@ fn cold_glacier(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
     let tex = 0.025 * perlin3(COLD_SEED_ICE + 3lu, p * (1.0lf / 7.0lf)) * band(7.0, gsd) + 0.02 * perlin3(COLD_SEED_ICE + 4lu, p * (1.0lf / 2.5lf)) * band(2.5, gsd) + 0.03 * perlin3(COLD_SEED_ICE + 5lu, p * (1.0lf / 120.0lf)) * band(120.0, gsd);
     let firn = srgb(236.0, 241.0, 247.0) * (1.0 + tex);
     let dirt = smoothstep1(-0.2, 0.5, perlin3(COLD_SEED_ICE + 6lu, p * (1.0lf / 150.0lf)) * band(150.0, gsd) + 0.6 * smoothstep1(-1.4, -0.4, g.g));
-    let bare = mixc(srgb(170.0, 194.0, 208.0), srgb(146.0, 150.0, 150.0), 0.55 * dirt) * (1.0 + 1.5 * tex);
+    let bare = mixc(srgb(158.0, 190.0, 212.0), srgb(128.0, 128.0, 124.0), 0.6 * dirt) * (1.0 + 1.5 * tex);
     var col = mixc(firn, bare, abl);
     var dh = 0.0;
     if (g.p < -4.0 && slope < 0.08) {
@@ -532,15 +532,15 @@ fn cold_glacier(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
     if (cs > 0.0) {
         let spacing = 6.0 / sl;
         let e = smoothstep1(1.2 * gsd, 3.0 * gsd, spacing);
-        let on = smoothstep1(-0.08, 0.08, perlin3(COLD_SEED_ICE + 9lu, p * (1.0lf / 35.0lf)) + 0.9 * cs - 0.55);
+        let on = smoothstep1(-0.08, 0.08, perlin3(COLD_SEED_ICE + 9lu, p * (1.0lf / 35.0lf)) + 1.2 * cs - 0.5);
         var cr = 0.0;
         if (e > 0.0) {
             let x = l.ground / 6.0 + 0.35 * perlin3(COLD_SEED_ICE + 10lu, p * (1.0lf / 45.0lf));
             let f = x - floor(x);
             let d = min(f, 1.0 - f) * spacing;
-            cr = kband_cov(d, 1.2, fw) * on * e;
+            cr = kband_cov(d, 1.6, fw) * on * e;
         }
-        cr += (1.0 - e) * on * min(2.4 / spacing, 1.0);
+        cr += (1.0 - e) * on * min(3.2 / spacing, 1.0);
         cr = cr * cs;
         col = mixc(col, srgb(34.0, 62.0, 88.0), cr);
         dh -= 4.0 * cr;
@@ -589,7 +589,7 @@ fn cold_snow(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
     let gsd = (*s).c.gsd;
     let hollow = smoothstep1(0.1, 0.8, -t.gully);
     let spur = smoothstep1(0.2, 0.8, t.gully);
-    var n = (*s).pf.f[PF_SNOW] - 1.2 * hollow + 0.4 * spur;
+    var n = 0.6 * (*s).pf.f[PF_SNOW] - 1.6 * hollow + 0.5 * spur;
     let b45 = band(45.0, gsd);
     if (b45 > 0.0) {
         n += 0.5 * perlin3(COLD_SEED_SNOW + 2lu, p * (1.0lf / 45.0lf)) * b45;
