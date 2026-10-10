@@ -187,6 +187,7 @@ impl Ctx {
     fn new() -> anyhow::Result<Ctx> {
         let gpu = device::shared()?;
         let d = &gpu.device;
+        let compiling = gpu.compiling();
         let gmod =
             d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("mesh"), source: wgpu::ShaderSource::Wgsl(include_str!("mesh.wgsl").into()) });
         let gbuf_pipe = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -229,6 +230,7 @@ impl Ctx {
             compilation_options: Default::default(),
             cache: None,
         });
+        drop(compiling);
         Ok(Ctx {
             gpu,
             meshes: HashMap::new(),

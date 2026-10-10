@@ -2775,6 +2775,7 @@ dependencies = [
  "geodesy",
  "glam",
  "image",
+ "libc",
  "naga",
  "pollster",
  "rayon",

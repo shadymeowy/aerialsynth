@@ -301,6 +301,7 @@ impl GpuGenerator {
         let globals_bufs = vec![g_cfg, g_grads, g_octs, g_fbms, g_pal, g_atlas, g_biomes, g_crowns, g_zones, g_layers, g_band_ranges, g_band_idx];
         let (src_points, src_tile, src_drain) = sources();
         let t_compile = std::time::Instant::now();
+        let compiling = gpu.compiling();
         let cache = PipelineCache::open(&gpu);
         let m_points = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("points"), source: wgpu::ShaderSource::Wgsl(src_points.into()) });
         let m_tile = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("tile"), source: wgpu::ShaderSource::Wgsl(src_tile.into()) });
@@ -374,6 +375,7 @@ impl GpuGenerator {
         if let Some(c) = &cache {
             c.save();
         }
+        drop(compiling);
         if std::env::var_os("TERRAGEN_PROFILE").is_some() {
             eprintln!("GPU generator: pipelines ready in {:.1} s", t_compile.elapsed().as_secs_f64());
         }
@@ -669,7 +671,7 @@ impl GpuGenerator {
                 if prof {
                     // each pass on its own (timing)
                     self.gpu.queue.submit([std::mem::replace(&mut enc, d.create_command_encoder(&Default::default())).finish()]);
-                    d.poll(wgpu::PollType::wait_indefinitely())?;
+                    self.gpu.wait_idle()?;
                     times += &format!(" {name} {:.3}", t.elapsed().as_secs_f64());
                 }
             }
