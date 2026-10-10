@@ -80,6 +80,12 @@
       kernel: patches
       params: { scale: 14, fraction: 0.45, octaves: 2, colour: [160, 160, 128], colour2: [118, 126, 88], colour_var: 0.15 }
       mask: { temp: [-12, 6] }
+    # open spruce taiga where it is too dry for the canopy model's forest
+    - slot: canopy
+      kernel: scatter
+      mask: { natural: [0.3, 0.6, 2, 3], veg: [0.3, 0.6, 2, 3], field: [-1, -1, 0.2, 0.5], moist: [0.1, 0.16, 0.3, 0.42] }
+      params: { cell: 6, density: 0.6, shape: cone, radius: [1.2, 2.1], height: [8, 16], jitter: 0.9, colour: [24, 38, 30], colour2: [40, 54, 36], second: 0.3, colour_var: 0.2, shade: 0.5 }
+      class: needleleaf_forest
 
 # Lichen woodland: widely spaced spruce spires on cream-white reindeer lichen (the dry
 # continental north).
@@ -104,6 +110,12 @@
       kernel: patches
       params: { scale: 9, fraction: 0.8, octaves: 2, roughness: 0.55, colour: [204, 202, 176], colour2: [172, 172, 140], colour_var: 0.12 }
       class: woodland
+    # the spruce spires stand on the lichen where it is too dry for the canopy model's forest
+    - slot: canopy
+      kernel: scatter
+      mask: { natural: [0.3, 0.6, 2, 3], veg: [0.3, 0.6, 2, 3], field: [-1, -1, 0.2, 0.5], moist: [0.05, 0.12, 0.3, 0.42] }
+      params: { cell: 8, density: 0.55, shape: cone, radius: [1.1, 2.0], height: [6, 12], jitter: 0.9, colour: [26, 40, 32], colour2: [40, 54, 36], second: 0.3, colour_var: 0.2, shade: 0.5 }
+      class: needleleaf_forest
 
 # ------------------------------------------------------------------ Mediterranean scrub
 
@@ -130,7 +142,7 @@
     - slot: canopy
       kernel: scatter
       mask: { natural: [0.3, 0.6, 2, 3], veg: [0.3, 0.6, 2, 3], field: [-1, -1, 0.2, 0.5], moist: [0.12, 0.6] }
-      params: { cell: 3.4, density: 0.95, shape: dome, radius: [1.1, 2.0], height: [1.2, 3.2], jitter: 0.85, colour: [104, 112, 80], colour2: [58, 76, 46], second: 0.45, colour_var: 0.3, shade: 0.5 }
+      params: { cell: 3.4, density: 0.95, shape: dome, radius: [1.1, 2.0], height: [1.2, 3.2], jitter: 0.85, colour: [112, 114, 90], colour2: [66, 78, 54], second: 0.45, colour_var: 0.3, shade: 0.5 }
       class: maquis
     - slot: azonal
       kernel: patches
@@ -261,7 +273,7 @@
   layers:
     - slot: zonal
       kernel: cells
-      params: { cell: 70, jitter: 0.85, fill: 0.75, aspect: 2.6, colour: [74, 60, 54], colour2: [124, 92, 98], colour_var: 0.2, edge: 0 }
+      params: { cell: 70, jitter: 0.85, fill: 0.75, aspect: 2.6, colour: [66, 54, 46], colour2: [106, 80, 82], colour_var: 0.2, edge: 0 }
       class: shrub
     - slot: zonal
       kernel: patches
