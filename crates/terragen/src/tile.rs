@@ -691,14 +691,14 @@ impl Generator {
                         let mut acc_h = 0.0;
                         let mut acc_l = 0.0;
                         let mut acc_g = 0.0;
-                        let mut counts = [0u16; 128];
+                        let mut counts = [0u16; crate::landcover::MAX_CLASSES];
                         let mut add = |(s, ground): (Surface, f64)| {
                             acc_a += s.albedo;
                             acc_e += s.emission;
                             acc_h += s.height;
                             acc_l += s.lit;
                             acc_g += ground;
-                            counts[(s.class as usize).min(127)] += 1;
+                            counts[(s.class as usize).min(crate::landcover::MAX_CLASSES - 1)] += 1;
                         };
                         let mut taken = ss * ss;
                         if adaptive {

@@ -167,7 +167,7 @@ typedef struct as_layer_info {
 /**
  * Land-cover class id (0 unknown, 1 ocean, 2 lake, 3 river, 4 beach, 5 sand, 6 rock, 7 snow,
  * 8 grass, 9 shrub, 10 forest, 11 crop, 12 building, 13 road, 14 wetland, 15 tundra, 16 bare,
- * 17 urban). u8 x 1.
+ * 17 urban; the land-cover classes v2 add ids 20-110: docs/formats.md). u8 x 1.
  */
 #define AS_LAYER_LANDCOVER 4
 

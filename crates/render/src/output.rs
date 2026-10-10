@@ -137,7 +137,7 @@ const CAMERA_DOC: &[(&str, &str, &str, &str)] = &[
     ("depth", "m", "z along the optical axis or range (attr kind); +inf = sky", ""),
     ("flow", "px", "forward optical flow to the next frame of this camera", "dx,dy"),
     ("flow_valid", "", "1 = the flow target is visible", ""),
-    ("landcover", "", "class id (attr class_names); 255 = sky", ""),
+    ("landcover", "", "class id (attrs class_names, class_groups, class_legacy, class_mapping: output.landcover); 255 = sky", ""),
     ("events/x", "px", "event column", ""),
     ("events/y", "px", "event row", ""),
     ("events/t", "us", "event time since the sequence start", ""),
@@ -188,12 +188,27 @@ pub fn describe(file: &h5::File, scn: &Scenario) -> Result<()> {
         annotate(&c.path, CAMERA_DOC)?;
         let lc = format!("{}/landcover", h5path(&c.path).trim_end_matches('/'));
         if file.root()?.exists(&lc) {
-            file.root()?.dataset(&lc)?.set_attr_str("class_names", &terragen::landcover::NAMES.join(","))?;
+            let ds = file.root()?.dataset(&lc)?;
+            describe_landcover(&ds, scn.output.landcover)?;
         }
     }
     if let Some(imu) = &scn.imu {
         annotate(&imu.path, IMU_DOC)?;
     }
+    Ok(())
+}
+
+/// The attributes of a `landcover` dataset written with `mapping` (`output.landcover`):
+/// `class_names` and `class_groups` (comma-separated, indexed by value, empty where no class has
+/// that value), `class_legacy` (the legacy class 0–17 of each value; not for groups) and
+/// `class_mapping`.
+pub fn describe_landcover(ds: &h5::Dataset, mapping: terragen::landcover::Mapping) -> Result<()> {
+    ds.set_attr_str("class_names", &mapping.value_names().join(","))?;
+    ds.set_attr_str("class_groups", &mapping.value_groups().join(","))?;
+    if let Some(l) = mapping.value_legacy() {
+        ds.set_attr_array("class_legacy", &l)?;
+    }
+    ds.set_attr_str("class_mapping", serde_yaml::to_string(&mapping)?.trim())?;
     Ok(())
 }
 
@@ -555,5 +570,50 @@ impl PngWriter {
     pub fn finish(mut self) -> Result<()> {
         self.csv.flush()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use h5::Attrs;
+    use terragen::landcover::{self as lc, Mapping};
+
+    /// The attributes of a landcover dataset name the values `output.landcover` writes.
+    #[test]
+    fn landcover_attributes_follow_the_mapping() {
+        let path = std::env::temp_dir().join(format!("lc-attrs-{}.h5", std::process::id()));
+        let f = h5::File::create(&path).unwrap();
+        for (k, m) in [Mapping::V2, Mapping::Legacy, Mapping::Group].into_iter().enumerate() {
+            let ds = f.new_dataset::<u8>().shape(&[1, 2, 2]).create(&format!("lc{k}")).unwrap();
+            describe_landcover(&ds, m).unwrap();
+            let names = ds.attr_str("class_names").unwrap();
+            let groups = ds.attr_str("class_groups").unwrap();
+            let names: Vec<&str> = names.split(',').collect();
+            let groups: Vec<&str> = groups.split(',').collect();
+            assert_eq!(names.len(), groups.len());
+            assert_eq!(ds.attr_str("class_mapping").unwrap(), ["v2", "legacy", "group"][k]);
+            match m {
+                Mapping::V2 => {
+                    assert_eq!(names[lc::RESERVOIR as usize], "reservoir");
+                    assert_eq!(groups[lc::RESERVOIR as usize], "water");
+                    assert_eq!(names[19], "");
+                    let legacy: Vec<u8> = ds.attr_array("class_legacy").unwrap();
+                    assert_eq!(legacy[lc::PASTURE as usize], lc::GRASS);
+                    assert_eq!(legacy.len(), names.len());
+                }
+                Mapping::Legacy => {
+                    assert_eq!(names, lc::NAMES.to_vec());
+                    assert_eq!(groups[lc::URBAN as usize], "built");
+                    assert_eq!(ds.attr_array::<u8>("class_legacy").unwrap(), (0..18).collect::<Vec<u8>>());
+                }
+                Mapping::Group => {
+                    assert_eq!(names, lc::GROUP_NAMES.to_vec());
+                    assert!(ds.attr_array::<u8>("class_legacy").is_err());
+                }
+            }
+        }
+        drop(f);
+        std::fs::remove_file(&path).ok();
     }
 }

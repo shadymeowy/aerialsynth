@@ -100,24 +100,7 @@ fn grid_nodes_surface(ti: TileInfo, k: u32, ctx: Ctx, nb: u32, ib: u32) {
 
 @group(0) @binding(4) var<storage, read> pal: array<vec4<f32>>;
 
-const LC_UNKNOWN: u32 = 0u;
-const LC_OCEAN: u32 = 1u;
-const LC_LAKE: u32 = 2u;
-const LC_RIVER: u32 = 3u;
-const LC_BEACH: u32 = 4u;
-const LC_SAND: u32 = 5u;
-const LC_ROCK: u32 = 6u;
-const LC_SNOW: u32 = 7u;
-const LC_GRASS: u32 = 8u;
-const LC_SHRUB: u32 = 9u;
-const LC_FOREST: u32 = 10u;
-const LC_CROP: u32 = 11u;
-const LC_BUILDING: u32 = 12u;
-const LC_ROAD: u32 = 13u;
-const LC_WETLAND: u32 = 14u;
-const LC_TUNDRA: u32 = 15u;
-const LC_BARE: u32 = 16u;
-const LC_URBAN: u32 = 17u;
+// (the class ids LC_* come from classes.wgsl, generated from landcover.rs)
 
 /// Field system of a land-use region (`RegionInfo`).
 struct Region {

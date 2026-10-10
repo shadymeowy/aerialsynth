@@ -69,6 +69,11 @@ imu: { path: /imu, rate_hz: 200 }   # omitted = no IMU
 output: { file: out/seq.h5, pose: { path: /pose, rate_hz: 200 } }
 ```
 
+- **Land-cover values:** `output.landcover` picks what `landcover` modalities write: `v2`
+  (default; the class ids 0–127 of the land-cover table), `legacy` (the first classes 0–17,
+  each class mapped to its legacy class: what readers written before the v2 classes expect) or
+  `group` (the 11 class groups 0–10). The datasets' attributes `class_names`, `class_groups`,
+  `class_legacy` and `class_mapping` describe the values written (`docs/formats.md`).
 - **Geometry-only cameras:** cameras without `rgb` are rendered geometry-only (no shading), so
   depth / flow for an event camera cost little.
 - **Supersampling:** cameras with depth / flow / land cover need an odd `render.supersample`

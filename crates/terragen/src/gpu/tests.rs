@@ -569,5 +569,6 @@ fn kernels_match_the_cpu() {
     for (name, bad, mx) in &res {
         eprintln!("  {name:10} off {:.3}% max coverage difference {mx:.3}", bad * 100.0);
         assert!(*bad < 0.005, "{name}: {:.2}% of the samples differ", bad * 100.0);
+
     }
 }

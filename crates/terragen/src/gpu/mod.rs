@@ -229,7 +229,8 @@ pub(crate) fn sources() -> (String, String, String) {
     let reg = crate::registry::gpu::wgsl_consts();
     let kits = crate::kits::wgsl();
     let points = format!("{consts}{NOISE_WGSL}{WORLD_WGSL}{relief}{POINTS_WGSL}");
-    let tile = format!("{consts}{reg}{pal}{NOISE_WGSL}{WORLD_WGSL}{relief}{TILE_A_WGSL}{REGISTRY_WGSL}{KERNELS_WGSL}{SURFACE_WGSL}{STACK_WGSL}{kits}{TILE_B_WGSL}");
+    let classes = crate::landcover::WGSL;
+    let tile = format!("{consts}{reg}{pal}{classes}{NOISE_WGSL}{WORLD_WGSL}{relief}{TILE_A_WGSL}{REGISTRY_WGSL}{KERNELS_WGSL}{SURFACE_WGSL}{STACK_WGSL}{kits}{TILE_B_WGSL}");
     let drain = format!("{consts}{NOISE_WGSL}{WORLD_WGSL}{relief}{DRAIN_WGSL}");
     (points, tile, drain)
 }

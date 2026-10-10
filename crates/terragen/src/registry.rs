@@ -125,32 +125,13 @@ pub mod field {
     }
 }
 
-/// Land-cover class names of the registry (v2 ids, `docs/design/terrain-next.md` §7.2).
+/// Land-cover class names of the registry: the class table of [`crate::landcover`].
 pub mod classes {
-    #[rustfmt::skip]
-    pub const TABLE: &[(&str, u8)] = &[
-        ("unknown", 0), ("ocean", 1), ("lake", 2), ("river", 3), ("beach", 4), ("sand", 5), ("rock", 6), ("snow", 7),
-        ("grass", 8), ("shrub", 9), ("forest", 10), ("crop", 11), ("building", 12), ("road", 13), ("wetland", 14),
-        ("tundra", 15), ("bare", 16), ("urban", 17),
-        ("reservoir", 20), ("lagoon", 21), ("canal", 22), ("aquaculture", 23), ("tidal_flat", 24), ("coral_reef", 25),
-        ("sea_ice", 26), ("glacier", 27), ("frozen_water", 28), ("dry_riverbed", 29), ("salt_flat", 30), ("lava", 31),
-        ("volcanic_ash", 32), ("gravel", 33), ("badlands", 34), ("scree", 35), ("moraine", 36), ("cliff", 37),
-        ("tropical_rainforest", 40), ("mangrove", 41), ("broadleaf_forest", 42), ("needleleaf_forest", 43),
-        ("mixed_forest", 44), ("woodland", 45),
-        ("savanna", 52), ("steppe", 53), ("desert_scrub", 54), ("maquis", 55), ("alpine_meadow", 56),
-        ("polygon_tundra", 57), ("bog", 58), ("marsh", 59), ("burn_scar", 60), ("clear_cut", 61),
-        ("rice_paddy", 70), ("orchard", 71), ("vineyard", 72), ("plantation", 73), ("pasture", 74),
-        ("greenhouse", 75), ("fallow", 76), ("hedgerow", 77), ("farmyard", 78),
-        ("residential", 80), ("commercial", 81), ("industrial", 82), ("building_tall", 83), ("park", 84),
-        ("sports", 85), ("paved", 86), ("solar_farm", 87), ("port", 88), ("cemetery", 89), ("quarry", 90),
-        ("motorway", 100), ("road_major", 101), ("road_minor", 102), ("track", 103), ("railway", 104),
-        ("runway", 105), ("taxiway", 106), ("bridge", 107), ("dam", 108), ("seasonal_snow", 110),
-    ];
     pub fn id(name: &str) -> Option<u8> {
-        TABLE.iter().find(|(n, _)| *n == name).map(|e| e.1)
+        crate::landcover::CLASSES.iter().find(|c| c.name == name).map(|c| c.id)
     }
     pub fn name(id: u8) -> &'static str {
-        TABLE.iter().find(|e| e.1 == id).map_or("?", |e| e.0)
+        crate::landcover::name(id)
     }
 }
 
@@ -1192,9 +1173,6 @@ pub mod gpu {
         c("HM_ABS", hmode::ABS as u32);
         c("MAX_CROWNS", MAX_CROWNS as u32);
         c("NBANDS", BANDS as u32);
-        for (n, id) in classes::TABLE.iter().filter(|e| e.1 > 17) {
-            c(&format!("LC_{}", n.to_uppercase()), *id as u32);
-        }
         o
     }
 
