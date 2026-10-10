@@ -1,0 +1,6 @@
+# Agriculture kit (src/kits/agriculture.rs): the field systems are code (a catalogue chosen per
+# culture × climate × terrain, drawn in place of the core's fields), not biomes. This file holds
+# the kit's patches of biomes' land use.
+#
+# Schema: docs/design/kit-guide.md ("Biomes").
+[]

@@ -28,7 +28,7 @@ use crate::world::{Ctx, Macro};
 
 // mod temperate;
 
-// mod agriculture;
+mod agriculture;
 
 // mod settlements;
 
@@ -53,7 +53,7 @@ pub static KITS: &[&Kit] = &[
 
     // &temperate::KIT,
 
-    // &agriculture::KIT,
+    &agriculture::KIT,
 
     // &settlements::KIT,
 
