@@ -1,0 +1,116 @@
+# Cold kit biomes (docs/kits/cold.md): tundra variants, polar desert, the forest–tundra
+# transition. Glaciers, snow, lakes, sea ice and frozen water are drawn by the kit's code
+# (kits/cold.rs) wherever the climate makes them, in any biome.
+#
+# Schema: docs/design/kit-guide.md ("Biomes").
+
+# Wet lowland tundra on permafrost: ice-wedge polygons (troughs, rims, ponds), moss and lichen
+# mottling.
+- id: polygon_tundra
+  group: vegetation
+  koppen: [ET]
+  envelope: { temp: [-40, -4] }
+  weight: 1.4
+  palette:
+    tundra: [116, 112, 80]
+    grass_cold: [110, 112, 78]
+    marsh: [84, 98, 60]
+    soil: [[104, 96, 80], [112, 102, 84], [96, 92, 84], [124, 114, 92]]
+  vegetation: { trees: 0.1, conifer: 0.6, shrubs: 0.7, woodlots: 0.2, meadow: 0.6 }
+  layers:
+    - slot: zonal
+      kernel: patches
+      params: { scale: 28, fraction: 0.35, octaves: 2, colour: [146, 142, 106], colour2: [124, 128, 86] }
+      height: none
+    - slot: azonal
+      kernel: cold_polygons
+      mask: { slope: [null, null, 0.04, 0.08], moist: [0.2, 0.35, null, null] }
+      params: { cell: 16, trough: 1.8, trough_depth: 0.6, rim: 1.4, rim_height: 0.35, pond: 0.14, high: 0.3, colour: [118, 114, 80], trough_colour: [62, 74, 48], pond_colour: [26, 40, 50] }
+      class: polygon_tundra
+  landuse: { agriculture: 0.0, towns: 0.3 }
+
+# Dwarf-shrub tundra: birch and willow scrub, frost boils (bare mud circles), faint high-centred
+# polygons.
+- id: shrub_tundra
+  group: vegetation
+  koppen: [ET, Dfc, Dwc]
+  envelope: { temp: [-14, 1] }
+  weight: 1.0
+  palette:
+    tundra: [112, 108, 72]
+    grass_cold: [106, 108, 70]
+    shrub: [72, 84, 48]
+  vegetation: { trees: 0.25, conifer: 0.5, shrubs: 1.6, woodlots: 0.3 }
+  layers:
+    - slot: zonal
+      kernel: scatter
+      params: { cell: 3.5, density: 0.45, shape: dome, radius: [0.6, 1.4], height: [0.3, 0.9], colour_var: 0.3, shade: 0.3, second: 0.3, colour: [70, 82, 48], colour2: [104, 88, 52] }
+      height: max
+    - slot: azonal
+      kernel: scatter
+      mask: { slope: [null, null, 0.1, 0.18] }
+      params: { cell: 7, density: 0.22, shape: disc, radius: [0.6, 1.3], height: [0, 0], colour_var: 0.2, shade: 0.0, colour: [138, 128, 108] }
+      class: bare
+      height: none
+    - slot: azonal
+      kernel: cold_polygons
+      mask: { slope: [null, null, 0.03, 0.06] }
+      params: { cell: 24, trough: 1.2, trough_depth: 0.4, rim: 0, pond: 0.04, high: 0.6, colour: [112, 108, 72], trough_colour: [70, 80, 50] }
+      class: polygon_tundra
+  landuse: { agriculture: 0.05, towns: 0.4 }
+
+# Polar desert: frost-shattered gravel, sorted circles (stone borders around fine soil), lichen.
+- id: polar_desert
+  group: bare
+  koppen: [EF, ET]
+  envelope: { temp: [-45, -8], precip_mm: [0, 320] }
+  weight: 1.0
+  palette:
+    soil: [[120, 112, 102], [108, 102, 96], [132, 122, 108], [100, 96, 92]]
+    tundra: [118, 112, 92]
+    grass_cold: [116, 112, 90]
+    rock: [[92, 88, 84], [110, 104, 98], [74, 72, 70]]
+  vegetation: { trees: 0.0, conifer: 0.0, shrubs: 0.15, woodlots: 0.0, meadow: 0.2 }
+  layers:
+    - slot: azonal
+      kernel: cold_polygons
+      mask: { slope: [null, null, 0.1, 0.2] }
+      params: { cell: 4, trough: 0.9, trough_depth: -0.15, rim: 0, pond: 0, high: 0.25, colour_var: 0.15, colour: [100, 94, 86], trough_colour: [156, 152, 144] }
+      class: bare
+    - slot: zonal
+      kernel: patches
+      params: { scale: 12, fraction: 0.2, octaves: 2, colour: [150, 146, 120], colour2: [128, 132, 104] }
+      height: none
+  landuse: { agriculture: 0.0, towns: 0.1 }
+
+# Forest–tundra: open lichen woodland of scattered spruce, thinning into the tundra; bog pools.
+- id: forest_tundra
+  group: forest
+  koppen: [Dfc, Dfd, Dwc, Dwd, ET]
+  envelope: { temp: [-16, -2] }
+  weight: 1.0
+  palette:
+    grass_cold: [146, 144, 112]
+    tundra: [140, 136, 104]
+    floor: [128, 126, 98]
+    crown_conifer: [34, 50, 40]
+  vegetation: { trees: 0.55, conifer: 0.6, shrubs: 1.3, woodlots: 0.5, crown_scale: 0.75 }
+  layers:
+    - slot: zonal
+      kernel: patches
+      params: { scale: 15, fraction: 0.45, octaves: 2, colour: [182, 178, 146], colour2: [160, 160, 126] }
+      height: none
+    - slot: azonal
+      kernel: patches
+      mask: { slope: [null, null, 0.03, 0.05], moist: [0.35, 0.5, null, null] }
+      params: { scale: 60, fraction: 0.12, octaves: 2, colour: [40, 50, 46], colour2: [56, 66, 52] }
+      class: bog
+      clear: 1.0
+    # spruce scattered over the lichen, in clumps (where the core's tree line has ended them)
+    - slot: canopy
+      kernel: scatter
+      mask: { natural: [0.4, 0.7, null, null], veg: [0.4, 0.7, null, null], forest: [-0.35, 0.1, null, null], slope: [null, null, 0.6, 0.9] }
+      params: { cell: 9, density: 0.4, shape: cone, radius: [1.1, 2.1], height: [5, 11], jitter: 0.9, colour_var: 0.25, shade: 0.4, colour: [36, 52, 40], colour2: [52, 62, 44], second: 0.2 }
+      class: needleleaf_forest
+      height: max
+  landuse: { agriculture: 0.05, towns: 0.5 }

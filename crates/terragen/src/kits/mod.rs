@@ -20,7 +20,7 @@ use crate::world::{Ctx, Macro};
 
 // mod mountains;
 
-// mod cold;
+mod cold;
 
 // mod coast;
 
@@ -45,7 +45,7 @@ pub static KITS: &[&Kit] = &[
 
     // &mountains::KIT,
 
-    // &cold::KIT,
+    &cold::KIT,
 
     // &coast::KIT,
 
