@@ -36,6 +36,55 @@ build the same world, see `docs/gpu.md`).
   - street lamps in the emission layer
 - **Roads:** curvy inter-town roads and region-border tracks.
 
+### Planetary atlas
+
+World-scale fields that cannot be computed locally are precomputed once per world
+(`terragen::atlas`, design: `docs/design/terrain-next.md` §3.6). The generator does not use them
+yet: both backends can sample them (CPU `Atlas::sample`, WGSL `atlas_sample` in
+`gpu/wgsl/atlas.wgsl`, bound by the GPU generator), and the next generator will drive its
+climate, biomes, landforms and cultures from them.
+
+- **Geometry:** a cube map with a tangent warp (texels within ±30 % of a uniform size), 6 ×
+  512² texels (`world.atlas.resolution`; ~20 km), a 2-texel apron per face. Continuous fields are
+  read with a cubic B-spline (smooth, no overshoot); within half a texel of a face edge the
+  faces meeting there are blended, so there are no seams. Discrete fields come from the
+  nearest texel.
+- **Fields** (16-bit each, 36 bytes per texel, 58 MB at 512):
+
+| field | unit | how |
+|---|---|---|
+| smooth elevation | m | `World::smooth_relief`, band-limited at the texel size |
+| coast distance | km, > 0 on land | jump flooding over the cube map from the texels next to the other class |
+| prevailing wind (east, north) | m/s | trades, westerlies and polar easterlies shifted with the seasons (more over land), a stream function of pressure perturbations (3000 km), monsoon flow towards heated continents in summer and away in winter; annual mean of the two seasons |
+| annual precipitation | mm/yr | moisture advected along the wind (semi-Lagrangian, half resolution, 100 steps per season, July and January): evaporation from the sea towards the saturation of the sea air, recycling over land, rain by a latitude rate (ITCZ, subtropical highs, storm tracks), summer convection over land, saturation of the air at the ground's elevation and orographic rain-out on ascent (on a ~100 km smoothed relief), less rain in descending air: **rain shadows** |
+| annual mean temperature at sea level | °C | latitude (`world.climate`) and the existing temperature noise, cold currents and upwelling on subtropical west coasts (**coastal deserts**: cooler, more stable air), warm currents on subtropical east coasts and high-latitude west coasts, colder continental interiors at high latitudes |
+| seasonality (warmest − coldest month) | °C | latitude × continentality (the maritime influence carried inland by the wind) |
+| precipitation regime | −1 dry summers … +1 summer rains | (summer − winter) / (summer + winter) of the two seasons: Mediterranean climates, monsoons |
+| plates, boundary distance, kind and closing speed | id, km, mm/yr | weighted, warped spherical Voronoi diagram of `world.atlas.plates` plates with Euler-pole velocities; boundary kind from the closing speed across the boundary and the crust on either side: overriding / subducting (ocean–continent), collision, island arc, rift, ridge, transform |
+| uplift, volcanism | −1..1, 0..1 | relief and volcanism potential of the boundary kind by distance (coastal range and arc inland of subduction, wide collision belts, rift grabens and shoulders, ridges); hotspot tracks (`world.atlas.hotspots`) on the plates moving over them |
+| lithology | dominant, secondary, share | sedimentary, carbonate, crystalline, volcanic, unconsolidated, from the tectonics, elevation, glaciation, aridity and noise |
+| glaciation | 0..1 | ice at the last glacial maximum (~6 °C colder, more towards the poles): sheets and mountain glaciers |
+| culture, archetype | id, 1 of 12 | warped Voronoi diagram of ~`world.atlas.culture_cell_km` areas; the archetype is drawn from the Köppen class of the area's land |
+| development | 0..1 | per culture, ± regional noise and climate comfort |
+| population potential | 0..1 | flatness × water (coast, rain) × climate comfort × soil fertility (lithology) |
+
+- **Köppen classes:** `atlas::koppen(&sample, elevation)` gives the Köppen–Geiger class from the
+  annual temperature (lowered by the lapse rate), the seasonality, the annual precipitation and
+  the regime (monthly values modelled as sinusoids).
+- **Determinism:** f64 on the CPU; every texel is a pure function of the config or the result of
+  iterations that read only the previous buffer, so the bytes do not depend on the thread count.
+- **Cost and caching:** ~3–4 s on 8 threads (shared 32-core server; mostly the elevation, the
+  advection and the jump flooding). Kept in the process for the last 4 worlds and on disk in
+  `$XDG_CACHE_HOME/terrain/atlas-<key>.bin` (default `~/.cache/terrain`; 58 MB each; written via a
+  temporary file and a rename). `TERRAGEN_ATLAS_CACHE=DIR` moves the disk cache, `=off`
+  disables it. The key hashes the settings the atlas depends on (seed, planet, home, continents,
+  relief, climate, atlas) and its format version.
+- **Settings** (`world.atlas`): `resolution` (512), `plates` (16), `hotspots` (6),
+  `culture_cell_km` (1000), `rain_shadow` (1), `currents` (true), `monsoon` (1),
+  `precipitation` (1, a multiplier), `advection_steps` (100). Preview them with
+  `cargo run --release -p terragen --example atlas_preview -- OUT_DIR [SEED] [CONFIG.yaml]`
+  (equirectangular PNGs of every field and a Köppen map).
+
 ## Rendering (`crates/render`)
 
 - **Geometry:**
@@ -129,6 +178,10 @@ cargo test --release
 - **IMU:** noise statistics, level-flight truth, lever arm and sample timing against the
   1 kHz simulator truth.
 - **Solar position** (and the lighting at a UTC instant).
+- **Planetary atlas:** f16 packing, the same bytes on 1, 3 and 8 threads, no seams across cube
+  faces, the disk cache (round trip, other worlds and damaged files refused), climate belts,
+  windward slopes wetter than leeward ones, Köppen classes, the build time, WGSL sampling
+  against the CPU's.
 - **Generator invariants:** determinism, seamless east-west and north-south tile borders, parent ≈
   mean of its children (on the default backend: the GPU).
 - **GPU generator:** noise, pass A (the macro-scale world model: relief, drainage, sites) and
