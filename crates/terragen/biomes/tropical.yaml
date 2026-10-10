@@ -12,6 +12,7 @@
 
 - id: tropical_moist
   patch: true
+  landuse: { agriculture: 0.5 }
   palette:
     crown_tropic: [30, 66, 30]
     crown_decid: [46, 78, 36]
@@ -93,6 +94,7 @@
   koppen: [Af, Am]
   envelope: { precip_mm: [1800, 100000] }
   weight: 0.35
+  landuse: { agriculture: 0.3, towns: 0.6 }
   palette:
     crown_tropic: [36, 72, 38]
     grass_wet: [70, 100, 46]
@@ -149,6 +151,7 @@
   koppen: [Am, Aw]
   envelope: { precip_mm: [1300, 100000], dry_months: [2, 7] }
   weight: 0.5
+  landuse: { agriculture: 0.7 }
   palette:
     crown_tropic: [48, 80, 38]
     crown_decid: [62, 86, 42]
@@ -371,6 +374,7 @@
   koppen: [Aw, Am]
   envelope: { temp: [20, 35], precip_mm: [900, 2400] }
   weight: 0.4
+  landuse: { agriculture: 0.5 }
   palette:
     grass_dry: [180, 160, 96]
     grass_wet: [116, 130, 60]
@@ -417,6 +421,7 @@
   koppen: [Aw, Cwa]
   envelope: { temp: [17, 28], precip_mm: [650, 1500] }
   weight: 0.6
+  landuse: { agriculture: 0.6 }
   palette:
     crown_decid: [84, 96, 50]
     crown_dry: [138, 112, 80]

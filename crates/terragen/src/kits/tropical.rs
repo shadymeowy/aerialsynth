@@ -771,31 +771,95 @@ mod tests {
         }
     }
 
-    /// Places of the default world where the kit's biomes are picked (to choose stills):
+    /// Places of the default world where the kit draws (rainforest with a floodplain river,
+    /// savanna, burn scars, slash-and-burn, cloud forest, baobabs, mangrove coast).
+    pub(crate) const PLACES: &[(&str, f64, f64)] = &[
+        ("rainforest_river", 3.3011, -16.0396),
+        ("savanna_acacia", -15.4848, 32.3650),
+        ("burn_scars", 7.4436, -125.4733),
+        ("swidden", -0.4554, -40.5656),
+        ("cloud_forest", -12.2078, -28.3089),
+        ("savanna_baobab", -14.0997, -145.1467),
+        ("mangrove", 17.4666, 138.0190),
+    ];
+
+    /// Tiles where the kit draws agree between the backends (at most 0.5 % of the pixels off).
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn tiles_match_the_cpu() {
+        let Ok(g) = crate::gpu::shared() else { return };
+        if g.check_generator().is_err() {
+            return;
+        }
+        let cfg = crate::Config::default();
+        let gen = crate::gpu::GpuGenerator::new(cfg.clone()).unwrap();
+        let cpu = crate::Generator::new(cfg);
+        let mut worst = 0.0f64;
+        for (i, &(name, lat, lon)) in PLACES.iter().enumerate() {
+            let z = [16u8, 14, 12][i % 3];
+            let id = geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z);
+            let gt = gen.tiles(&[id]).unwrap().remove(0);
+            let ct = cpu.tile_cpu(id);
+            for (layer, mean, bad, mx) in crate::gpu::tests::compare_tiles(&gt, &ct) {
+                eprintln!("  {name:16} {id} {layer:10} mean {mean:8.4} off {:7.3}% max {mx:8.2}", bad * 100.0);
+                if matches!(layer, "elevation" | "rgb" | "landcover") {
+                    worst = worst.max(bad);
+                }
+            }
+        }
+        assert!(worst <= 0.005, "{:.2}% of the pixels differ", worst * 100.0);
+    }
+
+    /// Places of the default world where the kit's biomes and features are (to choose stills):
     /// `cargo test -p terragen --release --lib kits::tropical::tests::find_places -- --ignored --nocapture`.
+    /// Per biome a few points, and per feature (meander floodplains, mangrove coasts, classes the
+    /// kit draws) points where its masks hold or its class is probed.
     #[test]
     #[ignore]
     fn find_places() {
+        let gen = crate::Generator::new(crate::Config::default());
         let w = crate::world::World::new(crate::Config::default());
         let reg = crate::registry::Registry::builtin().unwrap();
         let mut found = std::collections::BTreeMap::<String, Vec<String>>::new();
-        for i in 0..40_000u64 {
+        let mut add = |key: String, s: String| {
+            let v = found.entry(key).or_default();
+            if v.len() < 8 {
+                v.push(s);
+            }
+        };
+        let n: u64 = std::env::var("TROPICAL_FIND").ok().and_then(|s| s.parse().ok()).unwrap_or(30_000);
+        for i in 0..n {
             let h = mix64(0x7F0 ^ i);
             let lat = (2.0 * u01k(h, 1) - 1.0).asin();
-            if lat.abs() > 32f64.to_radians() {
+            if lat.abs() > 30f64.to_radians() {
                 continue;
             }
             let lon = (u01k(h, 2) - 0.5) * std::f64::consts::TAU;
             let p = geodesy::geodetic2ecef(geodesy::Geodetic::new(lat, lon, 0.0), &w.ell);
-            if w.macro_at(p, 20_000.0).cont < 0.05 {
+            if w.macro_at(p, 20_000.0).cont < 0.02 {
                 continue;
             }
             let [(id, site), _] = crate::eco::sites(&w, p);
             let e = crate::eco::compute(&w, &reg, id, site);
             let name = reg.biomes[e.biome as usize].name.clone();
-            let v = found.entry(name).or_default();
-            if v.len() < 6 {
-                v.push(format!("{:.3},{:.3} (T {:.1} P {:.0} dry {:.1})", lat.to_degrees(), lon.to_degrees(), e.climate.temp_c, e.climate.precip_mm, e.climate.dry_months));
+            if !(name.starts_with("tropical") || name.contains("savanna") || name.contains("forest") && !name.starts_with("temperate") || name.starts_with("miombo")) {
+                continue;
+            }
+            let (t, _, cls) = gen.probe(lat, lon, 2.0);
+            let s = format!("{:.4},{:.4} {name} T {:.1} moist {:.2} h {:.0} fp {:.2} river {:.0} cls {}", lat.to_degrees(), lon.to_degrees(), t.temp, t.moist, t.ground, t.floodplain, if t.river_hw > 0.0 { t.river_d.abs() - t.river_hw } else { -1.0 }, crate::registry::classes::name(cls));
+            if t.water_kind != crate::world::water::NONE && t.water > t.ground {
+                continue;
+            }
+            add(format!("biome {name}"), s.clone());
+            add(format!("class {}", crate::registry::classes::name(cls)), s.clone());
+            if t.floodplain > 0.35 && t.river_hw > 0.0 && t.river_d.abs() < 2500.0 {
+                add(format!("floodplain {name}"), s.clone());
+            }
+            if t.ground < 2.5 && t.style[1] > 0.45 {
+                add(format!("mangrove coast {name}"), s.clone());
+            }
+            if t.temp < 17.5 && t.temp > 10.0 {
+                add(format!("cloud forest {name}"), s.clone());
             }
         }
         for (b, v) in found {
