@@ -8,7 +8,10 @@
 //! * [`atlas`]: the planetary atlas: world-scale fields (climate with rain shadows and
 //!   seasons, plates, lithology, glaciation, cultures) precomputed once per world on a cube map;
 //! * [`world`]: the macro-scale world model ("pass A"): continents, relief, hydrology, climate;
-//! * [`surface`]: the fine-scale surface ("pass B"): albedo, DSM height, land cover;
+//! * [`surface`], [`stack`], [`layers`]: the fine-scale surface ("pass B"): albedo, DSM height,
+//!   land cover, as a fixed stack of composited layers;
+//! * [`registry`], [`kernels`], [`eco`], [`kits`]: biomes as data over a kernel library,
+//!   ecoregions and cultures, and the kits that add biomes, kernels and layers;
 //! * [`noise`], [`landcover`], [`config`]: noise primitives, land-cover classes, the world config;
 //! * [`tile`]: the [`Generator`] producing [`TileData`] (elevation, albedo, satellite rgb,
 //!   normals, land cover, night lights);
@@ -18,10 +21,18 @@
 
 pub mod atlas;
 pub mod config;
+pub mod eco;
+pub mod features;
 #[cfg(feature = "gpu")]
 pub mod gpu;
+pub mod instances;
+pub mod kernels;
+pub mod kits;
 pub mod landcover;
+pub mod layers;
 pub mod noise;
+pub mod registry;
+pub mod stack;
 pub mod store;
 pub mod surface;
 pub mod tile;

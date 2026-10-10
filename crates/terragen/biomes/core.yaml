@@ -1,0 +1,135 @@
+# Core biomes: the climate classes of the generator before the registry (temperate farmland
+# and forest, boreal, tropical, savanna, steppe, desert, mediterranean, polar) as explicit
+# entries, plus a few variants, so neighbouring ecoregions differ categorically.
+#
+# Schema: docs/design/kit-guide.md ("Biomes"). Kits add their biomes in their own file
+# (biomes/<kit>.yaml) and may change these with `patch: true`.
+#
+# Every key is optional; a biome without `palette`, `vegetation` or `canopy` keeps the default
+# (the generator's look before version 4). Colours are sRGB 0..255 or palette names.
+
+- id: temperate
+  group: vegetation
+  koppen: [Cfa, Cfb, Cfc, Cwb, Cwc, Dfa, Dfb, Dwa, Dwb, Dsa, Dsb]
+  weight: 1.0
+  min_share: 0.05
+
+- id: temperate_broadleaf
+  group: forest
+  koppen: [Cfa, Cfb, Cwa, Cwb, Dfa, Dfb]
+  weight: 0.6
+  palette:
+    grass_wet: [76, 116, 46]
+    crown_decid: [48, 84, 34]
+  vegetation: { trees: 1.15, conifer: -0.35, tall: 0.2 }
+
+- id: temperate_conifer
+  group: forest
+  koppen: [Cfb, Cfc, Dfb, Dsb, Dwb]
+  weight: 0.35
+  palette:
+    grass_wet: [80, 104, 56]
+    crown_conifer: [30, 50, 40]
+  vegetation: { trees: 1.2, conifer: 0.4 }
+
+- id: boreal
+  group: forest
+  koppen: [Dfc, Dfd, Dwc, Dwd, Dsc, Dsd, Cfc]
+  weight: 1.0
+  min_share: 0.02
+  palette:
+    soil: [[118, 108, 96], [124, 106, 88], [104, 100, 94], [140, 128, 108]]
+    grass_wet: [86, 104, 62]
+    grass_cold: [108, 112, 86]
+    crown_conifer: [30, 48, 38]
+  vegetation: { trees: 1.1, conifer: 0.35, woodlots: 1.3 }
+
+- id: boreal_birch
+  group: forest
+  koppen: [Dfc, Dfb, Dwc]
+  weight: 0.35
+  palette:
+    crown_decid: [70, 92, 46]
+    grass_wet: [92, 110, 60]
+  vegetation: { trees: 1.0, conifer: -0.1, crown_scale: 0.9 }
+
+- id: tropical_moist
+  group: forest
+  koppen: [Af, Am]
+  weight: 1.0
+  min_share: 0.02
+  palette:
+    crown_tropic: [34, 74, 32]
+    grass_wet: [74, 110, 44]
+  vegetation: { tropic: 0.15, laterite: 1.2, tall: 0.15 }
+
+- id: tropical_dry
+  group: vegetation
+  koppen: [Aw, Am, Cwa]
+  weight: 1.0
+  palette:
+    grass_dry: [184, 158, 96]
+    grass_wet: [104, 118, 54]
+    crown_decid: [64, 82, 40]
+  vegetation: { savanna: 2.2, trees: 0.8, laterite: 1.1 }
+
+- id: steppe
+  group: vegetation
+  koppen: [BSk, BSh, Dfa, Dfb, Dsa]
+  envelope: { precip_mm: [150, 700] }
+  weight: 0.8
+  palette:
+    grass_dry: [168, 158, 112]
+    grass_wet: [104, 116, 64]
+  vegetation: { trees: 0.55, shrubs: 1.4, groves: 0.6 }
+
+- id: semiarid_shrub
+  group: vegetation
+  koppen: [BSh, BSk, BWk]
+  weight: 0.8
+  palette:
+    grass_dry: [176, 160, 120]
+    shrub: [92, 92, 64]
+  vegetation: { trees: 0.5, shrubs: 1.8, savanna: 1.3 }
+
+- id: desert
+  group: bare
+  koppen: [BWh, BWk]
+  weight: 1.0
+  min_share: 0.02
+  palette:
+    soil: [[176, 148, 112], [168, 128, 92], [150, 136, 118], [190, 168, 130]]
+    sand: [[216, 192, 150], [204, 166, 120], [226, 210, 178]]
+  vegetation: { trees: 0.4, shrubs: 0.8 }
+
+- id: desert_red
+  group: bare
+  koppen: [BWh]
+  weight: 0.4
+  palette:
+    soil: [[172, 112, 78], [160, 98, 66], [146, 116, 96], [186, 140, 100]]
+    sand: [[214, 160, 110], [200, 138, 92], [224, 186, 140]]
+    rock: [[160, 110, 86], [176, 128, 98], [118, 92, 80]]
+  vegetation: { trees: 0.3, shrubs: 0.7 }
+
+- id: mediterranean
+  group: vegetation
+  koppen: [Csa, Csb, Csc]
+  weight: 1.0
+  min_share: 0.01
+  palette:
+    soil: [[162, 128, 92], [166, 100, 70], [150, 140, 122], [184, 164, 130]]
+    grass_dry: [180, 164, 112]
+    crown_decid: [80, 92, 58]
+    shrub: [86, 92, 62]
+  vegetation: { shrubs: 1.6, conifer: 0.1, trees: 0.85 }
+
+- id: polar
+  group: vegetation
+  koppen: [ET, EF]
+  weight: 1.0
+  min_share: 0.01
+  palette:
+    tundra: [126, 120, 96]
+    grass_cold: [110, 112, 84]
+  vegetation: { trees: 0.6, conifer: 0.3 }

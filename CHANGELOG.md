@@ -34,6 +34,45 @@
 - Python: tile coordinates, zooms, seeds and sizes must be integers (`operator.index`: Python or
   numpy integers); `w.tile(3.5, 0, 0)` raises `TypeError` instead of truncating. The type stub
   `_native.pyi` covers the whole extension module.
+- **Terrain generator version 4** (`docs/design/terrain-next.md`; stores of version 3 are
+  refused for writing, as for any generator change):
+  - **Composite stack:** pass B is a fixed stack of layers (zonal ground, altitudinal zone,
+    azonal overrides, disturbance, agriculture, canopy, linear, built, water, seasonal), each a
+    `Layer { cov, albedo, dh, cls, emit, lit, mat }`; the previous look is ported into it
+    (`stack.rs`, `layers/`, `gpu/wgsl/stack.wgsl`).
+  - **Biome registry:** biomes are YAML data (`crates/terragen/biomes/`): Köppen classes,
+    climate envelopes, lithology, weights, palettes, vegetation parameters, crown layers,
+    zonations and up to 8 kernel layers with masks over named fields. Compiled at start-up,
+    validated with keyed errors, per-GSD-band layer lists; the resolved registry is stored in
+    the world config (`biomes.resolved`), `world.biomes.overrides` changes weights.
+  - **Kernel library** (`kernels.rs`, `gpu/wgsl/kernels.wgsl`): scatter, rows, cells, stripes,
+    contours, radial, crescent, lobes, patches, linear, stamp, canopy, water and relief
+    operators, each with a calibrated mean (coarse pixels show the mean of fine ones); a CPU /
+    GPU parity harness for every kernel.
+  - **Ecoregions and cultures** (`eco.rs`, `world.ecoregions`): ~100 km ecoregions pick their
+    biome by the climate at their site and draw a style (lithology soils and rocks, tints, tree
+    density and species mix, season); 12 culture archetypes set field systems, field size,
+    hedges, roofs, building heights, blocks, lamps, agriculture and town density. Dithered
+    ecotones (10 km).
+  - **Planetary atlas wired in:** mountain ranges along plate boundaries
+    (`relief.tectonic_mountains`; the noise belts become old orogens, `relief.belt_mountains`),
+    climate from the atlas (rain shadows, currents, monsoons), biomes by Köppen class, cultures
+    from the atlas' culture areas, town density by population, roads and lights by development.
+    The atlas builds its elevation in two steps (pre-tectonic for the plates, then with their
+    uplift); `ATLAS_VERSION` 3.
+  - **Kits** (`src/kits/`, `docs/design/kit-guide.md`): biomes, kernels, layer functions,
+    relief operators, **instance families** (sparse lattices listed per 16-pixel block on both
+    backends) and **host-built linear features and stamps** (binned per tile), each kit in its
+    own files and registered by one line.
+  - Land cover: forest types (tropical, broadleaf, needleleaf, mixed), shrubs, hedgerows and
+    tracks of the v2 classes.
+  - Performance (RTX 6000 Ada, shared server, `examples/zoom_bench`, ms per tile, version 3 →
+    4): z4 ~51 → ~63, z8 ~77 → ~87, z12 ~7 → ~9, z14 ~6 → ~8, z16 ~6 → ~7; pass B alone within
+    +7 %, the rest pass A over more mountains and the atlas fields. CPU (6 threads): 0.86–0.98×
+    of version 3's time. `TERRAGEN_PROFILE=passes` times each tile kernel.
+  - Tests: tile parity asserted (< 0.1 % of pixels), kernel parity, LOD of albedo and
+    land-cover groups, variety budget (`tests/variety.rs`), a CPU speed smoke test, and
+    `wgsl_compiles` (every entry point to SPIR-V with naga, no GPU needed).
 
 ## 0.2.0 — 2026-10-10
 

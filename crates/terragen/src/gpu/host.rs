@@ -66,6 +66,8 @@ pub(crate) struct Cache {
     towns: FxHashMap<u64, TownBase>,
     /// existing towns around each cell of the town lattice: (id, town)
     pub town_cands: FxHashMap<Cell, Vec<(u64, GTown)>>,
+    /// ecoregions by id
+    pub eco: FxHashMap<u64, crate::eco::EcoParams>,
 }
 
 /// A town site before / after resolving overlaps (`TownInfo`).
@@ -115,7 +117,9 @@ impl TownBase {
 impl Cache {
     /// Bound the memory of a long-lived cache.
     pub fn trim(&mut self) {
-        if self.points.len() + self.point_sinks.len() + self.lakes.len() + self.regions.len() + self.towns_base.len() + self.town_cands.len() > 2_000_000 {
+        if self.points.len() + self.point_sinks.len() + self.lakes.len() + self.regions.len() + self.towns_base.len() + self.town_cands.len() + self.eco.len()
+            > 2_000_000
+        {
             *self = Cache::default();
         }
     }
@@ -294,6 +298,17 @@ impl<'a> Prep<'a> {
 impl<'a> Prep<'a> {
     // ------------------------------------------------------------ land-use regions and towns
 
+    /// The parameters of ecoregion `id` near `p` (cached; the same as the CPU's).
+    fn eco(&mut self, id: u64, p: DVec3) -> Option<crate::eco::EcoParams> {
+        if let Some(e) = self.c.eco.get(&id) {
+            return Some(*e);
+        }
+        let reg = crate::registry::Registry::for_config(&self.w.cfg).ok()?;
+        let e = crate::eco::params_near(self.w, &reg, id, p)?;
+        self.c.eco.insert(id, e);
+        Some(e)
+    }
+
     /// The field system of land-use region `id` with site `center` (`region_info`).
     pub fn region(&mut self, id: u64, center: DVec3) -> Option<GRegion> {
         if let Some(r) = self.c.regions.get(&id) {
@@ -306,25 +321,10 @@ impl<'a> Prep<'a> {
         let (sa, ca) = ang.sin_cos();
         let ex = east * ca + north * sa;
         let ey = north * ca - east * sa;
-        // climate at the region centre decides the field style
-        let dry = 1.0 - smoothstep(0.2, 0.4, tc.moist as f64);
-        let u = u01k(id, 2);
-        let style = if dry > 0.5 && u < 0.6 * dry {
-            2
-        } else if u < 0.5 {
-            0
-        } else if u < 0.88 {
-            1
-        } else {
-            3
-        };
-        let scale = 0.6 + 1.1 * u01k(id, 3);
-        let (fw, fh) = match style {
-            0 => (220.0 * scale, 220.0 * scale * (1.0 + 2.0 * u01k(id, 4))),
-            1 => (300.0 * scale, 0.0),
-            2 => (if u01k(id, 4) < 0.5 { 805.0 } else { 402.0 }, 0.0),
-            _ => (60.0 + 90.0 * u01k(id, 4), 400.0 + 600.0 * u01k(id, 5)),
-        };
+        // climate at the region centre and its ecoregion's culture decide the field system
+        let eco = self.eco(tc.eco_id, c)?;
+        let rs = crate::eco::region_style(id, tc.moist as f64, tc.style[3] as f64, &eco.style);
+        let (style, fw, fh) = (rs.style as u32, rs.fw, rs.fh);
         let v = |d: DVec3| [d.x as f32, d.y as f32, d.z as f32, 0.0];
         let r = GRegion {
             center: [c.x, c.y, c.z, 0.0],
@@ -337,12 +337,12 @@ impl<'a> Prep<'a> {
             _p: 0,
             fw: fw as f32,
             fh: fh as f32,
-            hedge: (if u01k(id, 7) < 0.4 { u01k(id, 8) } else { 0.0 }) as f32,
+            hedge: rs.hedge as f32,
             track: (0.2 + 0.6 * u01k(id, 9)) as f32,
             border_w: (1.5 + 3.0 * u01k(id, 10)) as f32,
             palette: u01k(id, 11) as f32,
             agri: tc.agri,
-            season: (tc.style[3] as f64 * 0.7 + 0.3 * u01k(id, 12)).clamp(0.0, 1.0) as f32,
+            season: rs.season as f32,
             _q: [0.0; 4],
         };
         self.c.regions.insert(id, r);
@@ -363,12 +363,15 @@ impl<'a> Prep<'a> {
         let ctx = site_ctx(self.w, center, 300.0);
         let (east, north) = (ctx.east, ctx.north);
         let near_surface = (center.length() - ctx.p.length()).abs() < 0.8 * cell;
+        let mut culture = (1.0, 1.0, u01k(id, 8), u01k(id, 9));
         let exists = if near_surface && u01k(id, 1) < 0.95 {
             let Some(tc) = self.point(MODE_FULL, &ctx) else {
                 self.towns_pending.insert(id);
                 return None;
             };
-            let p_exist = (tc.habit as f64 * 1.1 * lu.towns).min(0.95);
+            let eco = self.eco(tc.eco_id, ctx.p)?;
+            culture = crate::eco::town_style(id, &eco.style);
+            let p_exist = (tc.habit as f64 * 1.1 * lu.towns * culture.0 * (0.45 + 1.1 * tc.population as f64)).min(0.95);
             u01k(id, 1) < p_exist && tc.water_kind == W_NONE && tc.ground > 2.0 && tc.ground < 4000.0
         } else {
             false
@@ -389,11 +392,11 @@ impl<'a> Prep<'a> {
             ex: east * ca + north * sa,
             ey: north * ca - east * sa,
             radius: radius.min(cell * 0.45),
-            block: 70.0 + 70.0 * u01k(id, 5),
+            block: (70.0 + 70.0 * u01k(id, 5)) * culture.1,
             street: 6.5 + 6.0 * u01k(id, 6),
             organic: u01k(id, 7),
-            roof_style: u01k(id, 8),
-            height: u01k(id, 9),
+            roof_style: culture.2,
+            height: culture.3,
             lot: 13.0 + 12.0 * u01k(id, 10),
             elong,
             seed: mix64(id ^ 0x70E5),
@@ -505,4 +508,19 @@ pub(crate) fn gsink(id: u64, c: DVec3, rad: f64, level: Option<f64>) -> GSink {
 pub(crate) fn site_ctx(w: &World, pt: DVec3, gsd: f64) -> Ctx {
     let g = geodesy::ecef2geodetic(pt, &w.ell);
     Ctx::new(g.lat, g.lon, gsd, &w.ell)
+}
+
+/// Point evaluations for host-built features (`features::PointSource`): pending until the GPU
+/// evaluated them in a settle round.
+pub(crate) struct PrepPoints<'p, 'a>(pub &'p mut Prep<'a>);
+
+impl crate::features::PointSource for PrepPoints<'_, '_> {
+    fn terrain(&mut self, ctx: &Ctx) -> Option<crate::tile::PointTerrain> {
+        let t = self.0.point(MODE_FULL, ctx)?;
+        Some(crate::tile::PointTerrain {
+            ground: t.ground as f64,
+            water: if t.water_kind != 0 { t.water as f64 } else { f64::NEG_INFINITY },
+            water_kind: t.water_kind as u8,
+        })
+    }
 }

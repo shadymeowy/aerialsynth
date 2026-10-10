@@ -308,10 +308,15 @@ struct Local {
     river_d: f32,
     river_hw: f32,
     river_level: f32,
+    eco_edge: f32,
     road_major: f32,
     road_minor: f32,
     slope: f32,
+    /// gradient of the ground (east, north; m/m): aspect, flow direction
+    grad: vec2<f32>,
     fw: f32,
+    /// the pixel's block (instance lists: `inst_list(f, (*s).l.blk, (*s).c.p)`)
+    blk: u32,
 }
 
 struct Surface {
@@ -332,7 +337,8 @@ struct TreeLayer {
     seed: u64,
     closure: f32,
     height: f32,
-    conifer: f32,
+    /// crown shape (SHAPE_*)
+    shape: u32,
     scale: f32,
 }
 
@@ -344,14 +350,14 @@ struct Trees {
 }
 
 /// Tree crowns of the layers in `mask` at local position `q` (`SurfaceModel::trees`).
-fn trees(layers: array<TreeLayer, 4>, mask: u32, q: vec2<f32>, gsd: f32, fw: f32, p: vec3<f64>) -> Trees {
+fn trees(layers: array<TreeLayer, 6>, mask: u32, q: vec2<f32>, gsd: f32, fw: f32, p: vec3<f64>) -> Trees {
     var best_h = 0.0;
     var best_col = vec3<f32>(0.0);
     var cov_total = 0.0;
     var mean_col = vec3<f32>(0.0);
     var mean_w = 0.0;
     var mean_h = 0.0;
-    for (var li = 0u; li < 4u; li++) {
+    for (var li = 0u; li < 6u; li++) {
         if ((mask & (1u << li)) == 0u) {
             continue;
         }
@@ -404,7 +410,11 @@ fn trees(layers: array<TreeLayer, 4>, mask: u32, q: vec2<f32>, gsd: f32, fw: f32
                 let fade = smoothstep1(0.0, 0.3, (layer.density - u) / max(layer.density, 1e-6));
                 // crown centre relative to q (lattice units: exact small numbers)
                 let rel = vec2<f32>(f32(dx), f32(dy)) + 0.5 + 0.8 * (vec2<f32>(u01k(h, 1lu), u01k(h, 2lu)) - 0.5) - fq;
-                let r = layer.cell * (0.36 + 0.24 * u01k(h, 4lu)) * (1.0 + 0.55 * smoothstep1(0.35, 0.9, layer.closure)) * layer.scale;
+                var r = layer.cell * (0.36 + 0.24 * u01k(h, 4lu)) * (1.0 + 0.55 * smoothstep1(0.35, 0.9, layer.closure)) * layer.scale;
+                if (layer.shape == SHAPE_STAR) {
+                    // palm fronds: a star-shaped crown (angle of the sample seen from the crown)
+                    r *= 0.82 + 0.18 * cos(8.0 * atan2(-rel.y, -rel.x) + u01k(h, 10lu) * 6.3);
+                }
                 let d = length(rel) * layer.cell;
                 if (d > r + fw) {
                     continue;
@@ -412,12 +422,7 @@ fn trees(layers: array<TreeLayer, 4>, mask: u32, q: vec2<f32>, gsd: f32, fw: f32
                 let cov = clamp((r - d) / fw + 0.5, 0.0, 1.0) * expl * fade;
                 let x = min(d / r, 1.0);
                 let hh = layer.height * (0.55 + 0.9 * u01k(h, 5lu)) * (0.45 + 0.55 * layer.scale);
-                var prof = 0.0;
-                if (layer.conifer > 0.5) {
-                    prof = 0.08 + 0.92 * pow(1.0 - x, 1.15);
-                } else {
-                    prof = 0.12 + 0.88 * sqrt(1.0 - x * x);
-                }
+                let prof = crown_profile(layer.shape, x);
                 var clump = 0.0;
                 let b16 = band(1.6, gsd);
                 if (b16 > 0.0) {
@@ -485,12 +490,12 @@ fn boxc(rel: vec2<f32>, c: vec2<f32>, half: vec2<f32>, fwe: f32) -> f32 {
 }
 
 /// Farmstead: house, barn, gravel yard and yard lamp on a sparse lattice (`farmstead`).
-fn farmstead(r: Region, t: Terrain, q: vec2<f32>, gsd: f32, fw: f32) -> Built {
+fn farmstead(r: Region, agri: f32, q: vec2<f32>, gsd: f32, fw: f32) -> Built {
     var o: Built;
     o.ok = false;
     let wc = worley2(r.split ^ 0xFA4lu, q, 650.0, 0.8);
     let fid = wc.id;
-    if (u01k(fid, 1lu) > 0.55 * smoothstep1(0.05, 0.4, t.agri)) {
+    if (u01k(fid, 1lu) > 0.55 * smoothstep1(0.05, 0.4, agri)) {
         return o;
     }
     let rel0 = q - wc.point;
@@ -876,8 +881,8 @@ fn col_line(seed: u64, j: i64, i: i64, w: f32) -> f32 {
 }
 
 /// Agricultural field at rotated local coords (`SurfaceModel::field`).
-fn field(r: Region, t: Terrain, q: vec2<f32>, p: vec3<f64>, gsd: f32, fw: f32, pf: ptr<function, PixFields>) -> FieldOut {
-    let cult = smoothstep1(0.02, 0.45, t.agri);
+fn field(r: Region, t: Terrain, agri: f32, q: vec2<f32>, p: vec3<f64>, gsd: f32, fw: f32, pf: ptr<function, PixFields>) -> FieldOut {
+    let cult = smoothstep1(0.02, 0.45, agri);
     let tint = vec3<f32>(1.0 + 0.08 * (r.palette - 0.5), 1.0, 1.0 - 0.06 * (r.palette - 0.5));
     // fields near the pixel size: contrast reduced towards the mean
     var fsize = r.fw;
@@ -1393,521 +1398,3 @@ fn select_town(p: vec3<f64>, gsd: f32, slope: f32, clear: f32, warp2: f32) -> ve
     return vec2<f32>(f32(best), bu);
 }
 
-// ---------------------------------------------------------------- the surface at a sub-sample
-
-/// Flags of a sample that pass B could not evaluate exactly (the host is to provide data).
-var<private> surface_missing: u32;
-const MISS_REGION: u32 = 1u;
-const MISS_TOWN: u32 = 2u;
-
-/// Evaluate the surface at one sub-sample (`SurfaceModel::eval`).
-fn surface_eval(c: Ctx, t: Terrain, l: Local, pf: ptr<function, PixFields>) -> Surface {
-    let p = c.p;
-    let gsd = c.gsd;
-    let fw = l.fw;
-    var o: Surface;
-    o.emission = vec3<f32>(0.0);
-
-    // ---- standing water
-    if (l.water > l.ground && l.water_kind != W_NONE) {
-        let depth = l.water - l.ground;
-        var col = vec3<f32>(0.0);
-        if (l.water_kind == W_OCEAN) {
-            col = mixc(pal3(PAL_OCEAN_SHALLOW), pal3(PAL_OCEAN_DEEP), smoothstep1(0.0, 28.0, depth));
-        } else {
-            col = mixc(mixc(pal3(PAL_RIVER), pal3(PAL_OCEAN_SHALLOW), 0.25), pal3(PAL_LAKE_DEEP), smoothstep1(0.0, 5.0, depth));
-        }
-        col *= 1.0 + 0.06 * pf_lazy(pf, PF_WATER);
-        if (l.water_kind == W_OCEAN && depth < 3.0) {
-            // the sandy bottom shows through clear shallow water
-            let sh = 1.0 - smoothstep1(0.0, 3.0, depth);
-            col = mixc(col, mixc(pal3(PAL_OCEAN_SHALLOW), pal3(PAL_BEACH), 0.55) * 1.05, 0.75 * sh * sh);
-            // surf: thin broken lines of foam along the shore
-            let b3 = band(3.0, gsd);
-            if (b3 > 0.0) {
-                let wave = depth + 0.18 * perlin3(0x5F1lu, p * (1.0lf / 40.0lf));
-                let broken = smoothstep1(-0.25, 0.35, perlin3(0x5F2lu, p * (1.0lf / 22.0lf)) + 0.5 * perlin3(0x5F3lu, p * (1.0lf / 7.0lf)));
-                let a = (wave - 0.06) / 0.05;
-                let b = (wave - 0.45) / 0.05;
-                let cc = (wave - 1.0) / 0.06;
-                let foam = (0.85 * exp(-a * a) + 0.6 * broken * exp(-b * b) + 0.4 * broken * exp(-cc * cc)) * (0.75 + 0.25 * perlin3(7lu, p * (1.0lf / 3.0lf))) * b3;
-                col = mixc(col, srgb(225.0, 232.0, 230.0), min(foam, 1.0));
-            }
-        }
-        o.albedo = col;
-        o.height = l.water;
-        o.cls = select(LC_LAKE, LC_OCEAN, l.water_kind == W_OCEAN);
-        o.lit = 1.0;
-        return o;
-    }
-
-    let slope = l.slope;
-    let st = t.style;
-    // ---- natural ground
-    let detail = (*pf).f[PF_DETAIL];
-    let patchv = (*pf).f[PF_PATCH];
-    let wet = t.moist;
-    let temp = t.temp;
-    let soil_i = st.x * 3.0;
-    let i0 = min(u32(floor(soil_i)), 2u);
-    var soil = mixc(pal3(PAL_SOIL + i0), pal3(PAL_SOIL + i0 + 1u), soil_i - f32(i0));
-    // red laterite soils in hot, wet climates
-    soil = mixc(soil, srgb(146.0, 82.0, 54.0), 0.75 * smoothstep1(19.0, 25.0, temp) * smoothstep1(0.45, 0.7, wet));
-    let grass_green = mixc(pal3(PAL_GRASS_DRY), pal3(PAL_GRASS_WET), smoothstep1(0.25, 0.75, wet + 0.15 * patchv));
-    var grass = mixc(pal3(PAL_GRASS_COLD), grass_green, smoothstep1(-2.0, 8.0, temp));
-    grass = grass * vec3<f32>(1.0 + 0.10 * (st.y - 0.5), 1.0 + 0.06 * (st.w - 0.5), 1.0 - 0.08 * (st.y - 0.5));
-    let land_n = (*pf).f[PF_LAND];
-    let cover = smoothstep1(0.08, 0.45, wet + 0.25 * patchv + 0.2 * land_n) * smoothstep1(-9.0, -1.0, temp);
-    var col = mixc(soil, grass, cover) * (1.0 + 0.16 * land_n);
-    var cls = select(LC_BARE, LC_GRASS, cover > 0.5);
-    if (temp < 0.0 && cover > 0.3) {
-        col = mixc(col, pal3(PAL_TUNDRA), smoothstep1(0.0, -6.0, temp));
-        cls = LC_TUNDRA;
-    }
-    if (t.floodplain > 0.3 && wet > 0.55) {
-        let m = smoothstep1(0.3, 0.9, t.floodplain) * smoothstep1(0.55, 0.8, wet) * smoothstep1(-0.1, 0.3, patchv);
-        col = mixc(col, pal3(PAL_MARSH), m);
-        if (m > 0.5) {
-            cls = LC_WETLAND;
-        }
-    }
-    col *= 1.0 + 0.22 * detail;
-    // meadow texture
-    {
-        let b30 = band(30.0, gsd);
-        if (b30 > 0.0 && cover > 0.0) {
-            let dry_p = smoothstep1(0.05, 0.55, perlin3(0x3EADlu, p * (1.0lf / 60.0lf)) + 0.5 * perlin3(0x3EAElu, p * (1.0lf / 22.0lf))) * b30 * cover;
-            col = mixc(col, col * vec3<f32>(1.16, 1.06, 0.80), 0.45 * dry_p);
-        }
-        let b12 = band(12.0, gsd);
-        if (b12 > 0.0 && cover > 0.0) {
-            var m = 0.10 * perlin3(0x3EB1lu, p * (1.0lf / 12.0lf)) * b12;
-            let b4 = band(4.0, gsd);
-            if (b4 > 0.0) {
-                m += 0.08 * perlin3(0x3EB2lu, p * (1.0lf / 4.0lf)) * b4;
-                let b13 = band(1.3, gsd);
-                if (b13 > 0.0) {
-                    m += 0.06 * perlin3(0x3EB3lu, p * (1.0lf / 1.3lf)) * b13;
-                }
-            }
-            col *= 1.0 + m * cover;
-        }
-    }
-    // drainage lines
-    if (t.gully != 0.0) {
-        let ch = smoothstep1(0.1, 0.8, -t.gully);
-        col = mixc(col, mixc(col * 0.8, pal3(PAL_GRASS_WET) * 0.85, 0.5 * smoothstep1(-6.0, 4.0, temp)), 0.6 * ch);
-        col *= 1.0 + 0.06 * smoothstep1(0.2, 1.0, t.gully);
-    }
-
-    // ---- rock (slope + expected)
-    let resolve = 1.0 - smoothstep1(8.0, 80.0, gsd);
-    let exp_slope = 0.12 + 0.75 * t.rock_expect;
-    let slope_eff = lerp(exp_slope, max(slope, exp_slope * 0.6), resolve);
-    let rock_n = 0.7 * patchv + 0.3 * land_n;
-    let rock = smoothstep1(0.55, 0.85, slope_eff + 0.25 * detail + 0.25 * rock_n + 0.2 * (t.rock_expect - 0.4) + 0.15 * t.gully)
-        * (1.0 - 0.5 * smoothstep1(0.3, 0.8, cover) * (1.0 - t.mountain));
-    if (rock > 0.0) {
-        let ri = st.z * 2.0;
-        let j = min(u32(floor(ri)), 1u);
-        var rc = mixc(pal3(PAL_ROCK + j), pal3(PAL_ROCK + j + 1u), ri - f32(j));
-        let strata_h = 6.0 + 10.0 * st.w;
-        let strata = sin(l.ground / strata_h + 3.0 * pf_lazy(pf, PF_STRATA));
-        let strata_w = TAU * strata_h / max(slope, 0.05);
-        rc *= 1.0 + 0.06 * strata * band(strata_w, 1.5 * gsd) + 0.25 * detail + 0.12 * pf_lazy(pf, PF_STRATA2);
-        col = mixc(col, rc, rock);
-        if (rock > 0.5) {
-            cls = LC_ROCK;
-        }
-    }
-
-    // ---- sand seas, beaches
-    if (t.sand > 0.0) {
-        let si = st.y * 2.0;
-        let j = min(u32(floor(si)), 1u);
-        let sc = mixc(pal3(PAL_SAND + j), pal3(PAL_SAND + j + 1u), si - f32(j)) * (1.0 + 0.06 * detail);
-        let s = smoothstep1(0.2, 0.6, t.sand + 0.2 * patchv);
-        col = mixc(col, sc, s);
-        if (s > 0.5) {
-            cls = LC_SAND;
-        }
-    }
-    let coastal = 1.0 - smoothstep1(0.3, 0.7, t.floodplain);
-    var beach = 0.0;
-    var shore_keep = 1.0;
-    if (coastal > 0.0) {
-        shore_keep = 1.0 - coastal * (1.0 - smoothstep1(4.0, 8.0, l.ground + 2.0 * patchv));
-    }
-    if (l.ground < 6.0 && coastal > 0.0 && slope < 0.3) {
-        let b = (1.0 - smoothstep1(2.6, 4.2, l.ground + 1.0 * detail + 0.8 * patchv)) * coastal * (1.0 - smoothstep1(0.15, 0.3, slope));
-        beach = b;
-        var bm = 1.0;
-        let b9 = band(9.0, gsd);
-        if (b9 > 0.0) {
-            bm += 0.05 * perlin3(0xBE1lu, p * (1.0lf / 9.0lf)) * b9;
-            let b25 = band(2.5, gsd);
-            if (b25 > 0.0) {
-                bm += 0.04 * perlin3(0xBE2lu, p * (1.0lf / 2.5lf)) * b25;
-            }
-        }
-        let bc0 = pal3(PAL_BEACH) * bm;
-        let bc = mixc(bc0, mixc(pal3(PAL_BEACH), pal3(PAL_WET_SAND), 0.7), 1.0 - smoothstep1(0.05, 0.3, l.ground + 0.08 * perlin3(0xBE3lu, p * (1.0lf / 15.0lf))));
-        col = mixc(col, bc, b);
-        if (b > 0.5) {
-            cls = LC_BEACH;
-        }
-    }
-
-    // ---- snow
-    let snow_n = (*pf).f[PF_SNOW];
-    let snow_base = temp + 1.0 * snow_n - 1.6 * smoothstep1(0.1, 0.8, -t.gully) + 0.6 * smoothstep1(0.2, 0.8, t.gully);
-    var snow = 0.0;
-    // (the noise terms add at most ~1.3 · 0.75)
-    if (snow_base - 1.5 < -2.6) {
-        var snow_t = snow_base;
-        let b60 = band(60.0, gsd);
-        if (b60 > 0.0) {
-            snow_t += 0.5 * perlin3(0x5E0lu, p * (1.0lf / 60.0lf)) * b60;
-            let b18 = band(18.0, gsd);
-            if (b18 > 0.0) {
-                snow_t += 0.25 * perlin3(0x5E1lu, p * (1.0lf / 18.0lf)) * b18;
-            }
-        }
-        snow = smoothstep1(-2.6, -2.8, snow_t) * (1.0 - 0.75 * smoothstep1(0.9, 1.6, slope));
-    }
-    if (snow > 0.0) {
-        col = mixc(col, pal3(PAL_SNOW) * (1.0 + 0.03 * detail), snow);
-        if (snow > 0.5) {
-            cls = LC_SNOW;
-        }
-    }
-
-    // micro-relief of the ground
-    var micro_relief = 0.0;
-    let b9m = band(9.0, gsd);
-    if (b9m > 0.0) {
-        micro_relief = 0.30 * perlin3(0x9A01lu, p * (1.0lf / 9.0lf)) * b9m;
-        let b32 = band(3.2, gsd);
-        if (b32 > 0.0) {
-            micro_relief += 0.14 * perlin3(0x9A02lu, p * (1.0lf / 3.2lf)) * b32;
-            let b11 = band(1.1, gsd);
-            if (b11 > 0.0) {
-                micro_relief += 0.06 * perlin3(0x9A03lu, p * (1.0lf / 1.1lf)) * b11;
-            }
-        }
-        micro_relief *= (1.0 - 0.5 * rock) * (1.0 - 0.7 * beach);
-    }
-    var height = l.ground + micro_relief;
-    var lit = 1.0;
-    var emission = vec3<f32>(0.0);
-    let natural_ok = (1.0 - rock) * (1.0 - snow) * (1.0 - t.sand) * (1.0 - beach);
-
-    // local planar frame of the land-use region
-    var r: Region;
-    var have_region = false;
-    var q_loc = vec2<f32>(0.0);
-    var q_rot = vec2<f32>(0.0);
-    if (t.region_id != 0lu) {
-        let ri = region_find(t.region_id);
-        if (ri >= 0) {
-            r = regions[ri];
-            have_region = true;
-            let d = vec3<f32>(p - r.center.xyz);
-            q_loc = vec2<f32>(dot(d, r.east.xyz), dot(d, r.north.xyz));
-            q_rot = vec2<f32>(dot(d, r.ex.xyz), dot(d, r.ey.xyz));
-        } else {
-            surface_missing |= MISS_REGION;
-        }
-    }
-
-    // riparian belt along rivers
-    var riparian = 0.0;
-    if (l.river_hw > 0.0 && t.river_wet > 0.3) {
-        let ad = abs(l.river_d);
-        let belt = 4.0 + 0.6 * min(l.river_hw, 60.0);
-        riparian = (1.0 - smoothstep1(l.river_hw + 0.3 * belt, l.river_hw + belt, ad)) * smoothstep1(0.35, 0.6, t.moist)
-            * smoothstep1(0.3, 0.7, t.river_wet) * natural_ok * (0.55 + 0.45 * smoothstep1(-0.3, 0.3, patchv));
-    }
-
-    // woodlots
-    let fpu = 0.5 + 0.5 * (*pf).f[PF_FOREST];
-    let wl_cover = smoothstep1(0.12, 0.45, max(t.moist, 0.0)) * smoothstep1(-6.0, 2.0, t.temp) * cfg.tree_density;
-    let woodlot = smoothstep1(-0.02, 0.02, 0.34 * wl_cover - fpu) * natural_ok;
-
-    // ---- fields
-    let flat_ok = 1.0 - smoothstep1(0.22, 0.32, slope);
-    var field_cov = 0.0;
-    if (have_region && t.agri > 0.02 && natural_ok * flat_ok > 0.3 && cfg.agriculture > 0.0) {
-        let fr = field(r, t, q_rot, p, gsd, fw, pf);
-        if (fr.ok) {
-            let keep = natural_ok * flat_ok * (1.0 - riparian) * (1.0 - woodlot) * shore_keep;
-            let a = fr.cov * smoothstep1(0.45, 0.55, keep);
-            col = mixc(col, fr.col, a);
-            height += fr.h * a - 0.6 * micro_relief * a;
-            field_cov = a;
-            if (a > 0.5) {
-                if (fr.kind == 1u) {
-                    cls = LC_FOREST;
-                } else if (fr.kind == 2u) {
-                    cls = LC_ROAD;
-                } else {
-                    cls = LC_CROP;
-                }
-            }
-        }
-    }
-
-    // ---- towns (evaluated here: their lots and streets mask the trees)
-    var river_clear = 1.0;
-    if (l.river_hw > 0.0) {
-        let bank = 2.0 + 0.1 * l.river_hw;
-        river_clear = 1.0 - (1.0 - smoothstep1(l.river_hw + bank, l.river_hw + 2.0 * bank + 2.0, abs(l.river_d))) * smoothstep1(0.3, 0.6, t.river_wet);
-    }
-    let town_slope = 0.12 + 0.75 * t.rock_expect;
-    var town_i = -1;
-    var town_urban_v = 0.0;
-    if (t.town != 0u && cfg.towns > 0.0) {
-        let sel = select_town(p, gsd, town_slope, river_clear, (*pf).f[PF_WARP2]);
-        if (sel.x == -2.0) {
-            surface_missing |= MISS_TOWN;
-        } else {
-            town_i = i32(sel.x);
-            town_urban_v = sel.y;
-        }
-    }
-    var town_px: TownOut;
-    town_px.px.ok = false;
-    var town_cov = 0.0;
-    if (town_i >= 0) {
-        town_px = town_eval(towns[town_i], p, gsd, fw, town_slope, river_clear, detail, (*pf).f[PF_WARP2]);
-        if (town_px.px.ok) {
-            town_cov = town_px.px.cov;
-        }
-    }
-    let not_urban = (1.0 - smoothstep1(0.0, 0.08, town_urban_v)) * (1.0 - town_cov);
-
-    // ---- trees
-    if (cfg.tree_density > 0.0 && natural_ok * not_urban > 0.05) {
-        let base_cover = smoothstep1(0.3, 0.68, wet) * smoothstep1(-6.0, 2.0, temp) * cfg.tree_density;
-        let edge = 0.03;
-        let forest = smoothstep1(-edge, edge, base_cover - fpu);
-        let savanna = smoothstep1(0.18, 0.35, wet) * (1.0 - smoothstep1(0.55, 0.7, wet)) * smoothstep1(12.0, 20.0, temp) * 0.12;
-        let groves = 0.04 * smoothstep1(0.15, 0.3, wet);
-        let clear = 1.0 - 0.85 * smoothstep1(0.05, 0.4, t.agri) * (1.0 - smoothstep1(0.45, 0.7, slope)) * (1.0 - woodlot);
-        var dens = (forest * 0.9 * clear + savanna + groves) * natural_ok * (1.0 - field_cov) * cfg.tree_density;
-        dens = max(dens, 0.8 * riparian * cfg.tree_density);
-        let gully_scrub = 0.55 * smoothstep1(0.2, 0.9, -t.gully) * smoothstep1(0.2, 0.5, wet) * natural_ok * (1.0 - field_cov);
-        dens *= 1.0 - smoothstep1(0.9, 1.4, slope);
-        dens *= 1.0 - smoothstep1(0.0, 0.6, t.mountain * smoothstep1(-2.0, -6.0, temp));
-        dens *= 1.0 - smoothstep1(-1.2, -2.4, temp + 1.0 * snow_n);
-        dens *= not_urban;
-        let shrub_clim = smoothstep1(0.15, 0.3, wet) * (1.0 - smoothstep1(0.6, 0.8, wet)) * smoothstep1(2.0, 10.0, temp);
-        let shrub_patch = smoothstep1(-0.2, 0.5, patchv + 0.4 * land_n);
-        let shrub = clamp((0.45 * shrub_clim * shrub_patch * (1.0 - forest) * max(natural_ok, 0.4 * rock) * (1.0 - field_cov) + gully_scrub) * cfg.tree_density * not_urban, 0.0, 0.7);
-        // forest stands of their own age, tone and species mix
-        var stand = (*pf).stand;
-        if ((*pf).has_stand == 0u) {
-            stand = stand_id(p, vec3<f32>((*pf).f[13], (*pf).f[14], (*pf).f[15]));
-        }
-        let age = u01k(stand, 1lu);
-        let tone_u = u01k(stand, 2lu);
-        let stand_tone = mixc(vec3<f32>(0.86, 0.93, 0.92), vec3<f32>(1.12, 1.08, 0.88), tone_u) * (0.92 + 0.12 * age);
-        let gap_w = smoothstep1(0.3, 0.7, dens);
-        if (gap_w > 0.0) {
-            let gap = smoothstep1(0.3, 0.6, perlin3(0x6A9lu, p * (1.0lf / 30.0lf)) + 0.5 * perlin3(0x6AAlu, p * (1.0lf / 11.0lf))) * (0.2 + 0.8 * u01k(stand, 4lu));
-            dens *= 1.0 - 0.9 * gap * gap_w;
-        }
-        if (dens > 0.0 || shrub > 0.01) {
-            let stand_d = smoothstep1(0.3, 0.75, dens);
-            var conifer = (1.0 - smoothstep1(4.0, 13.0, temp)) * max(stand_d, 1.0 - smoothstep1(-5.0, 1.0, temp));
-            conifer = clamp(conifer + 0.9 * (u01k(stand, 3lu) - 0.5) * (1.0 - abs(2.0 * conifer - 1.0)), 0.0, 1.0);
-            let scale = 0.7 + 0.55 * age;
-            let tropic = smoothstep1(19.0, 25.0, temp) * smoothstep1(0.55, 0.75, wet);
-            let dry = 1.0 - smoothstep1(0.3, 0.5, wet);
-            let tall = 0.5 + 0.5 * st.w;
-            var layers: array<TreeLayer, 4>;
-            layers[0] = TreeLayer(pal3(PAL_CROWN_CONIFER), 5.5, stand_tone, dens * conifer, 0x7EE1lu, dens, 14.0 + 10.0 * tall, 1.0, scale);
-            layers[1] = TreeLayer(mixc(pal3(PAL_CROWN_DECID), pal3(PAL_CROWN_DRY), dry), 8.5, stand_tone, dens * (1.0 - conifer) * (1.0 - tropic), 0x7EE2lu, dens, (10.0 + 10.0 * tall) * (0.65 + 0.35 * stand_d), 0.0, scale);
-            layers[2] = TreeLayer(pal3(PAL_CROWN_TROPIC), 13.0, stand_tone, dens * tropic, 0x7EE3lu, dens, 22.0 + 14.0 * tall, 0.0, scale);
-            layers[3] = TreeLayer(pal3(PAL_SHRUB), 3.2, vec3<f32>(1.0), shrub, 0x7EE4lu, 0.0, 1.6, 0.0, 1.0);
-            // forest floor: shaded litter and understory between the crowns
-            let floor_ = smoothstep1(0.25, 0.8, dens);
-            col = mixc(col, mixc(pal3(PAL_CROWN_CONIFER), pal3(PAL_SOIL), 0.45) * 0.7, floor_ * 0.85);
-            let tr = trees(layers, 15u, q_loc, gsd, fw, p);
-            if (tr.cov > 0.0) {
-                let stv = pf_lazy(pf, PF_STAND);
-                let tc = tr.col * vec3<f32>(1.0 + 0.10 * stv, 1.0 + 0.14 * stv, 1.0 + 0.05 * stv);
-                col = mixc(col, tc, tr.cov);
-                if ((cfg.flags & CF_TREES_DSM) != 0u) {
-                    height = max(height, l.ground + tr.h);
-                }
-                if (tr.cov > 0.5) {
-                    cls = LC_FOREST;
-                }
-            }
-            // cast shadows from neighbouring trees
-            if ((cfg.flags & CF_SHADOWS) != 0u && tr.cov < 0.99) {
-                var shadow = 0.0;
-                for (var li = 0u; li < 4u; li++) {
-                    if (layers[li].density <= 0.0 || layers[li].cell < 2.0 * gsd) {
-                        continue;
-                    }
-                    let off = vec2<f32>(cfg.sun_hx, cfg.sun_hy) * (0.6 * layers[li].height / cfg.sun_tan);
-                    let sc = trees(layers, 1u << li, q_loc + off, gsd, fw, p).cov;
-                    shadow = max(shadow, sc);
-                }
-                lit = min(lit, 1.0 - 0.9 * shadow * (1.0 - tr.cov));
-            }
-            // dark understory under sparse prefiltered forest
-            if (tr.cov < 0.01 && dens > 0.0) {
-                col *= 1.0 - 0.15 * dens;
-            }
-        }
-    }
-
-    // ---- roads
-    var road_major_cov = 0.0;
-    if (cfg.roads > 0.0) {
-        let steep = smoothstep1(-0.02, 0.02, 0.5 - slope);
-        let habit = smoothstep1(-0.005, 0.005, t.habit - 0.03) * steep * (1.0 - snow) * (1.0 - t.sand * 0.7);
-        var road_cov = 0.0;
-        var road_col = pal3(PAL_ASPHALT);
-        if (habit > 0.0) {
-            let w_major = 12.0;
-            let c1 = band_cov(l.road_major, w_major * 0.5, max(fw, gsd * 0.5));
-            if (c1 > 0.0) {
-                road_cov = c1 * habit;
-                road_major_cov = road_cov;
-                let sh = band_cov(l.road_major, w_major * 0.5 + 1.5, fw) - band_cov(l.road_major, w_major * 0.5, fw);
-                road_col = mixc(pal3(PAL_ASPHALT), pal3(PAL_CONCRETE), max(sh, 0.0) * 0.6);
-            }
-            let w_minor = 6.0;
-            let c2 = band_cov(l.road_minor, w_minor * 0.5, max(fw, gsd * 0.5)) * habit;
-            if (c2 > road_cov) {
-                road_cov = c2;
-                road_col = mixc(pal3(PAL_ASPHALT), pal3(PAL_GRAVEL), smoothstep1(0.4, 0.7, st.x));
-            }
-        }
-        // farm tracks along land-use region borders
-        if (have_region && r.agri > 0.1 && t.agri > 0.05) {
-            let pair = t.region_id ^ t.region_id2;
-            if (u01k(pair, 3lu) < 0.7) {
-                let c3 = band_cov(t.region_edge, 3.0, max(fw, gsd * 0.5)) * steep;
-                if (c3 > road_cov) {
-                    road_cov = c3;
-                    road_col = select(pal3(PAL_ASPHALT), pal3(PAL_GRAVEL), u01k(pair, 4lu) < 0.5);
-                }
-            }
-        }
-        if (road_cov > 0.0) {
-            let rc = road_col * (1.0 + 0.05 * detail);
-            col = mixc(col, rc, road_cov);
-            height = lerp(height, l.ground, road_cov);
-            lit = lerp(lit, 1.0, road_cov * 0.5);
-            if (road_cov > 0.5) {
-                cls = LC_ROAD;
-            }
-        }
-    }
-
-    // ---- farmsteads
-    if (have_region && t.agri > 0.06 && flat_ok > 0.3 && natural_ok > 0.3 && cfg.towns > 0.0) {
-        let fs = farmstead(r, t, q_rot, gsd, fw);
-        if (fs.ok) {
-            col = mixc(col, fs.col, fs.cov);
-            if ((cfg.flags & CF_BUILDINGS_DSM) != 0u) {
-                height = lerp(height, l.ground + fs.h, fs.cov);
-            }
-            emission += fs.em;
-            if (fs.cov > 0.5) {
-                cls = fs.cls;
-            }
-        }
-    }
-
-    // ---- lit main roads near towns
-    if (road_major_cov > 0.0 && town_i >= 0) {
-        let town = towns[town_i];
-        let dist = dist64(p, town.center.xyz);
-        let near = 1.0 - smoothstep1(1.2 * town.radius, 2.2 * town.radius, dist);
-        let sp = 38.0;
-        let res = band(sp, gsd);
-        if (near > 0.0) {
-            let kq = round(q_loc / sp);
-            let dq = q_loc - kq * sp;
-            let d2 = dot(dq, dq);
-            let lh = hash2(town.seed ^ 0x40ADlu, i64(kq.x), i64(kq.y));
-            var lamp_col = vec3<f32>(0.86, 0.92, 1.0);
-            if (u01k(lh, 1lu) < 0.5) {
-                lamp_col = vec3<f32>(1.0, 0.48, 0.12);
-            }
-            let pool = (0.04 * exp(-d2 / (2.0 * 6.0 * 6.0)) + point_light(d2, 6.0, 0.4, fw)) * res + 0.04 * (1.0 - res);
-            emission += lamp_col * pool * near * road_major_cov;
-        }
-    }
-
-    // ---- towns: embankment lamps, then the town itself
-    if (town_urban_v > 0.25 && l.river_hw > 0.0 && t.river_wet > 0.5) {
-        let bank = 2.0 + 0.1 * l.river_hw;
-        let dl = abs(l.river_d) - (l.river_hw + 0.5 * bank);
-        let b4 = band(4.0, gsd);
-        var dots = 0.3 * (1.0 - b4);
-        if (b4 > 0.0) {
-            dots += smoothstep1(0.35, 0.6, perlin3(0xE3Blu, p * (1.0lf / 4.0lf))) * b4;
-        }
-        emission += vec3<f32>(1.0, 0.80, 0.55) * (4.0 * exp(-(dl * dl) / (2.0 * 0.5 * 0.5)) * dots * smoothstep1(0.25, 0.45, town_urban_v));
-    }
-    if (town_i >= 0 && town_px.px.ok) {
-        let tp = town_px.px;
-        emission += tp.em * tp.cov;
-        col = mixc(col, tp.col, tp.cov);
-        if ((cfg.flags & CF_BUILDINGS_DSM) != 0u) {
-            height = lerp(height, l.ground + tp.h, tp.cov);
-        }
-        lit = min(lit, 1.0 - town_px.shadow);
-        if (tp.cov > 0.5) {
-            cls = tp.cls;
-        }
-    }
-
-    // ---- rivers (on top)
-    if (l.river_hw > 0.0) {
-        let fwr = max(fw, gsd * 0.35);
-        let cov = band_cov(l.river_d, l.river_hw, fwr);
-        if (cov > 0.0) {
-            let wet_r = t.river_wet;
-            var wcol = mixc(pal3(PAL_RIVER), pal3(PAL_LAKE_DEEP), smoothstep1(30.0, 200.0, l.river_hw * 2.0));
-            // glacial flour in mountain rivers
-            wcol = mixc(wcol, srgb(96.0, 138.0, 140.0), 0.7 * t.mountain * smoothstep1(8.0, 0.0, temp));
-            // frozen and snowed on in the cold
-            let ice = smoothstep1(-1.5, -4.0, temp + 1.5 * snow_n);
-            wcol = mixc(wcol, mixc(pal3(PAL_SNOW) * 0.9, srgb(170.0, 190.0, 200.0), 0.35 * (0.5 + 0.5 * detail)), ice);
-            // dry beds: a subtle pale line
-            let dry_col = mixc(col, mixc(pal3(PAL_GRAVEL), pal3(PAL_SAND + 2u), 0.5) * (1.0 + 0.1 * detail), 0.55);
-            let rc = mixc(dry_col, wcol, wet_r);
-            col = mixc(col, rc, cov);
-            height = lerp(height, l.river_level, cov);
-            lit = lerp(lit, 1.0, cov);
-            if (cov > 0.5 && ice > 0.5 && wet_r > 0.5) {
-                cls = LC_SNOW;
-            } else if (cov > 0.5) {
-                if (wet_r > 0.5) {
-                    o.albedo = col;
-                    o.height = height;
-                    o.cls = LC_RIVER;
-                    o.lit = lit;
-                    o.emission = emission;
-                    return o;
-                }
-                cls = LC_SAND;
-            }
-        }
-    }
-
-    o.albedo = max(col, vec3<f32>(0.0));
-    o.height = height;
-    o.cls = cls;
-    o.lit = lit;
-    o.emission = emission;
-    return o;
-}

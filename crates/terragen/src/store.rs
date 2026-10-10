@@ -11,8 +11,9 @@ use tilestore::{Layer, StoreMeta, TileStore};
 /// 1: until 2026-10-08; 2: fast generation (grid-interpolated long octaves, adaptive
 /// supersampling); 3: the grid / exact choices depend on the zoom only (version 2 decided them
 /// per tile from its centre latitude: north-south seams at the switch latitudes; tiles centred
-/// between 35.2° and 49.1° are unchanged).
-pub const GENERATOR_VERSION: u32 = 3;
+/// between 35.2° and 49.1° are unchanged); 4: the composite stack over a biome registry,
+/// ecoregions and cultures (`docs/design/terrain-next.md`).
+pub const GENERATOR_VERSION: u32 = 4;
 
 impl Generator {
     /// Metadata of a new store for this world.

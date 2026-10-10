@@ -11,38 +11,65 @@ build the same world, see `docs/gpu.md`).
   average of fine ones. Large-scale fields are sampled on a 16-px grid aligned to tile corners.
   Whether a field comes from the grid or per pixel depends on the zoom only, so neighbouring
   tiles always take the same path.
+- **Architecture** (generator version 4; design: `docs/design/terrain-next.md`): pass B is a
+  fixed **composite stack** of layers (zonal ground, altitudinal zone, azonal overrides,
+  disturbance, agriculture, canopy, linear infrastructure, built, water, seasonal), each
+  returning coverage, albedo, height, class, emission and light. **Biomes are data**: YAML
+  entries (`crates/terragen/biomes/`) compiled at start-up into Rust structs and GPU tables,
+  with palettes, vegetation parameters, crown layers, zonations and up to 8 kernel layers over a
+  **kernel library** (scatter, rows, cells, stripes, contours, radial, crescent, lobes, patches,
+  linear, stamp, canopy, water, relief operators), each with a calibrated mean so coarse pixels
+  show exactly the mean of fine ones. **Kits** add biomes, kernels, layers, relief operators,
+  instance families and host-built features in their own files (`docs/design/kit-guide.md`).
+  The resolved registry is stored with the world, so stores stay self-describing.
+- **Ecoregions and cultures:** a warped lattice of ~100 km ecoregions (`world.ecoregions`); each
+  picks its biome from the climate at its site (Köppen class, temperature, precipitation, dry
+  months, regime, seasonality, lithology; weights) and draws a style: soil and rock colours by
+  lithology, grass and crown tints, tree density and species mix, season. Its culture (the
+  atlas' culture areas, 12 archetypes as parameter distributions) sets the field systems, field
+  size, hedges, roofs, building heights, blocks, lamps, agriculture and town density. Within
+  10 km of a border the two sides form a mosaic of ~220 m patches.
 - **Landforms:**
   - continents and shelves, home-region land bias
-  - mountain belts (ridged multifractal with domain warp) carved by dendritic erosion gullies
+  - mountain ranges along plate boundaries (the atlas' tectonic uplift: arcs, collision belts,
+    rift shoulders) and old orogens (noise belts), ridged multifractal with domain warp, carved
+    by dendritic erosion gullies; rift grabens
   - hills with varying roughness, plateaus, arid mesas, dunes in sand seas
+  - kits' landforms on instance lattices (volcanoes, karst, atolls …)
 - **Water:**
   - rivers as a downhill flow graph with 3 levels (rivers, tributaries, streams; see
     `world.hydro.levels`): dendritic, always draining downhill, meandering
   - valleys, floodplains and riparian woods; wet or dry beds
   - lakes filled to their spill level, oceans with shallows and surf, beaches
-- **Climate:** latitude, lapse rate, subtropical (Hadley-cell) dryness, coast and noise. It drives biomes: snow, rock,
-  tundra, boreal, temperate and tropical forests, steppe, savanna, desert, wetlands.
-- **Vegetation:** individual tree crowns in 3 layers plus shrubs, with explicit crowns and canopy
-  heights in the DSM. They are prefiltered when unresolved and cast shadows in the baked
-  imagery.
+- **Climate:** from the planetary atlas: the sea-level temperature (latitude, currents,
+  continentality) lowered by the lapse rate, and a moisture index from the aridity
+  of the annual precipitation (P / (20 T + 140), Köppen's dry threshold; the precipitation is
+  moisture advected along the winds: rain shadows, monsoons, coastal deserts).
+- **Vegetation:** individual tree crowns in the biome's crown layers (conifers, broadleaves,
+  tropical crowns, shrubs, kits' palms or acacias), with explicit crowns and canopy heights in
+  the DSM. They are prefiltered when unresolved and cast shadows in the baked imagery.
 - **Farmland:**
-  - per-region field systems: grid, irregular, strips, centre pivots
+  - per-region field systems drawn by the culture: grid, irregular, strips, centre pivots
   - seasonal crop palettes, crop rows, tramlines, headlands, wet/bare patches
   - hedges and tracks along field edges
 - **Farmsteads:** house, barn, gravel yard and yard lamp.
 - **Settlements:**
-  - towns and villages with street grids (organic in old centres)
+  - towns and villages with street grids (organic in old centres); density by population and
+    culture, roofs, heights and blocks by culture
   - lots, pitched or flat roofs, building heights in the DSM, parks and industry
-  - street lamps in the emission layer
-- **Roads:** curvy inter-town roads and region-border tracks.
+  - street lamps in the emission layer (brighter with development)
+- **Roads:** curvy inter-town roads (denser with development) and region-border tracks;
+  kits' host-built road and rail graphs.
 
 ### Planetary atlas
 
 World-scale fields that cannot be computed locally are precomputed once per world
-(`terragen::atlas`, design: `docs/design/terrain-next.md` §3.6). The generator does not use them
-yet: both backends can sample them (CPU `Atlas::sample`, WGSL `atlas_sample` in
-`gpu/wgsl/atlas.wgsl`, bound by the GPU generator), and the next generator will drive its
-climate, biomes, landforms and cultures from them.
+(`terragen::atlas`, design: `docs/design/terrain-next.md` §3.6). Both backends sample the same
+buffer (CPU `Atlas::sample`, WGSL `atlas_sample` in `gpu/wgsl/atlas.wgsl`): pass A once per
+16-pixel grid node (climate, uplift and the fields kits read: coast distance, wind,
+volcanism, glaciation, population, development, regime, seasonality), ecoregions at their
+sites. It drives the climate, the plate-boundary mountains, the ecoregions' biomes and
+cultures, town density, roads and lights.
 
 - **Geometry:** a cube map with a tangent warp (texels within ±30 % of a uniform size), 6 ×
   512² texels (`world.atlas.resolution`; ~20 km), a 2-texel apron per face. Continuous fields are
@@ -53,7 +80,7 @@ climate, biomes, landforms and cultures from them.
 
 | field | unit | how |
 |---|---|---|
-| smooth elevation | m | `World::smooth_relief`, band-limited at the texel size |
+| smooth elevation | m | `World::smooth_relief`, band-limited at the texel size: first without the tectonic ranges (the plates' crust), then with the uplift of the plates (everything else follows the final relief) |
 | coast distance | km, > 0 on land | jump flooding over the cube map from the texels next to the other class |
 | prevailing wind (east, north) | m/s | trades, westerlies and polar easterlies shifted with the seasons (more over land), a stream function of pressure perturbations (3000 km), monsoon flow towards heated continents in summer and away in winter; annual mean of the two seasons |
 | annual precipitation | mm/yr | moisture advected along the wind (semi-Lagrangian, half resolution, 100 steps per season, July and January): evaporation from the sea towards the saturation of the sea air, recycling over land, rain by a latitude rate (ITCZ, subtropical highs, storm tracks), summer convection over land, saturation of the air at the ground's elevation and orographic rain-out on ascent (on a ~100 km smoothed relief), less rain in descending air: **rain shadows** |

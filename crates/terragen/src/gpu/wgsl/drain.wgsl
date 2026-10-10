@@ -318,7 +318,7 @@ fn lat_heights(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workg
     let lat = atan2(f32(g.sl), f32(g.cl));
     let ctx = ctx_make(p0, f32(g.sl), f32(g.cl), f32(g.so), f32(g.co), lat, f32(cell / 4.0lf));
     let m = macro_at(ctx.p, ctx.gsd);
-    let rl = relief(ctx, m, pre_none());
+    let rl = relief(ctx, m, pre_none(), 0xffffffffu);
     lat_s[s] = vec4<f64>(p0, 0.0lf);
     lat_h[s] = rl.h;
     lat_flags[s] = LF_HEIGHT | LF_ACTIVE;

@@ -21,6 +21,8 @@ pub struct NearSegs<'a> {
     pub h_max: f64,
     /// `World::sink_lakes` of the full piece list
     pub sinks: &'a [(u64, DVec3, f64)],
+    /// the instances of the relief families that can reach the area
+    pub inst: &'a [Vec<crate::instances::Instance>],
 }
 
 /// What `terrain_impl` evaluates.
@@ -109,6 +111,19 @@ pub struct Terrain {
     pub region: Site,
     /// Nearest potential town site.
     pub town: Site,
+    /// Ecoregion (`crate::eco`): the two nearest sites of the warped lattice, the distance to
+    /// their border.
+    pub eco: Site,
+    /// Planetary atlas fields at the pixel (interpolated; see [`Macro`]).
+    pub uplift: f64,
+    pub coast_km: f64,
+    pub wind: [f64; 2],
+    pub volcanism: f64,
+    pub glaciation: f64,
+    pub population: f64,
+    pub development: f64,
+    pub temp_range: f64,
+    pub regime: f64,
 }
 
 /// A Worley site: id hash, centre (ECEF, on the surface), distance to its Voronoi border (m).
@@ -118,6 +133,8 @@ pub struct Site {
     /// id of the neighbouring site across the nearest border
     pub id2: u64,
     pub center: DVec3,
+    /// the neighbouring site's point
+    pub center2: DVec3,
     pub dist: f64,
     pub edge: f64,
 }
@@ -141,6 +158,19 @@ pub struct Macro {
     pub style: [f64; 4],
     pub river_width: f64,
     pub mtn_warp: [f64; 2],
+    /// From the planetary atlas (sampled at the grid nodes): tectonic uplift −1..1, signed coast
+    /// distance (km), annual wind (east, north m/s), volcanism, glaciation, population,
+    /// development (0..1), temperature range (°C), precipitation regime (−1..1).
+    pub uplift: f64,
+    pub coast_km: f64,
+    pub wind_e: f64,
+    pub wind_n: f64,
+    pub volcanism: f64,
+    pub glaciation: f64,
+    pub population: f64,
+    pub development: f64,
+    pub temp_range: f64,
+    pub regime: f64,
     /// Smooth per-pixel inputs interpolated from a coarse grid (tile generator), or None (exact).
     pub pre: Option<Pre>,
 }
@@ -160,19 +190,22 @@ pub struct Pre {
     /// meander warps of the drainage levels, the warp of the region lattice
     pub river_warp: [Option<[f64; 2]>; 4],
     pub region_warp: Option<[f64; 3]>,
+    /// the warp of the ecoregion lattice
+    pub eco_warp: Option<[f64; 3]>,
     /// the long gully octaves (state of `gullies_part`, split at `relief_cut[1]`)
     pub gully_oct: Option<[f64; 4]>,
     /// floodplain-edge noise per drainage level
     pub floodplain: [Option<f64>; 4],
-    /// the two nearest sites of the lake, region and town lattices where known (the same for a
-    /// whole block of the tile's coarse grid)
-    pub sites: [Option<[(u64, DVec3); 2]>; 3],
+    /// the two nearest sites of the lake, region, town and ecoregion lattices where known (the
+    /// same for a whole block of the tile's coarse grid)
+    pub sites: [Option<[(u64, DVec3); 2]>; 4],
 }
 
 /// Indices of [`Pre::sites`].
 pub const SITE_LAKE: usize = 0;
 pub const SITE_REGION: usize = 1;
 pub const SITE_TOWN: usize = 2;
+pub const SITE_ECO: usize = 3;
 
 impl Macro {
     /// Bilinear interpolation of four corner values (a b / c d).
@@ -199,6 +232,16 @@ impl Macro {
             style: [l4(&|m| m.style[0]), l4(&|m| m.style[1]), l4(&|m| m.style[2]), l4(&|m| m.style[3])],
             river_width: l4(&|m| m.river_width),
             mtn_warp: [l4(&|m| m.mtn_warp[0]), l4(&|m| m.mtn_warp[1])],
+            uplift: l4(&|m| m.uplift),
+            coast_km: l4(&|m| m.coast_km),
+            wind_e: l4(&|m| m.wind_e),
+            wind_n: l4(&|m| m.wind_n),
+            volcanism: l4(&|m| m.volcanism),
+            glaciation: l4(&|m| m.glaciation),
+            population: l4(&|m| m.population),
+            development: l4(&|m| m.development),
+            temp_range: l4(&|m| m.temp_range),
+            regime: l4(&|m| m.regime),
             pre: None,
         }
     }
@@ -235,6 +278,8 @@ pub struct World {
     /// Hash of the whole config: key of the thread-local caches, so generators with the same
     /// seed but different settings in one process do not share cached hydrology / lakes.
     pub(crate) cache_key: u64,
+    /// the planetary atlas, built (or loaded) on first use
+    atlas: std::sync::OnceLock<std::sync::Arc<crate::atlas::Atlas>>,
 }
 
 const KM: f64 = 1000.0;
@@ -256,6 +301,7 @@ impl World {
             serde_yaml::to_string(&cfg).unwrap_or_default().bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3));
         World {
             cache_key,
+            atlas: std::sync::OnceLock::new(),
             seed: s,
             cont: Fbm::new(k(1), cw, 7, 2.0, 0.52),
             cont_warp: [Fbm::new(k(2), cw * 0.8, 3, 2.0, 0.5), Fbm::new(k(3), cw * 0.8, 3, 2.0, 0.5), Fbm::new(k(4), cw * 0.8, 3, 2.0, 0.5)],
@@ -293,6 +339,19 @@ impl World {
 
     pub fn seed(&self) -> u64 {
         self.seed
+    }
+
+    /// The planetary atlas of this world (computed or loaded from the cache on first use).
+    pub fn atlas(&self) -> &crate::atlas::Atlas {
+        self.atlas.get_or_init(|| crate::atlas::Atlas::for_world(self))
+    }
+
+    /// The moisture index of an annual precipitation (mm) at a mean temperature (°C): from the
+    /// aridity r = P / (20 T + 140) (Köppen's dry threshold): 0.15 at r = ½ (deserts below),
+    /// 0.33 at r = 1 (steppe below), +0.18 per doubling (forests from r ≈ 2).
+    pub fn moisture_index(precip_mm: f64, temp_c: f64) -> f64 {
+        let r = precip_mm.max(1.0) / (20.0 * temp_c.max(0.0) + 140.0);
+        (0.33 + 0.18 * r.log2()).clamp(-0.3, 1.3)
     }
 
     /// Continent field (>0 land), smooth at ≥100 km scales.
@@ -539,11 +598,24 @@ impl World {
         }
     }
 
-    /// Evaluate all large-scale fields at a point.
+    /// Evaluate all large-scale fields at a point (the climate and tectonics from the atlas).
     pub fn macro_at(&self, p: DVec3, gsd: f64) -> Macro {
+        let a = self.atlas().sample(p.normalize_or(DVec3::X));
         Macro {
-            temp: 5.0 * self.temp_n.eval(p, 50.0 * KM),
-            moist: self.moist_n.eval(p, 20.0 * KM) * self.moist_n.norm() * 1.6,
+            // sea-level temperature and moisture from the atlas (rain shadows, currents,
+            // continentality), with a little local noise on the moisture
+            temp: a.temp_c,
+            moist: Self::moisture_index(a.precip_mm, a.temp_c) + 0.06 * self.moist_n.eval(p, 20.0 * KM) * self.moist_n.norm() * 1.6,
+            uplift: a.uplift,
+            coast_km: a.coast_km,
+            wind_e: a.wind_e,
+            wind_n: a.wind_n,
+            volcanism: a.volcanism,
+            glaciation: a.glaciation,
+            population: a.population,
+            development: a.development,
+            temp_range: a.temp_range_c,
+            regime: a.regime,
             mesa: self.mesa_n.eval(p, gsd) * self.mesa_n.norm() * 1.8,
             sand: self.sand_n.eval(p, gsd) * self.sand_n.norm() * 1.8,
             agri: self.agri_n.eval(p, gsd) * self.agri_n.norm() * 1.8,
@@ -611,6 +683,9 @@ impl World {
             if 1500.0f64.min(0.9 * region_cell) >= cut[1] {
                 pre.region_warp = Some(self.region_warp(ctx.p).to_array());
             }
+            if crate::eco::warp_min_wavelength(self) >= cut[1] {
+                pre.eco_warp = Some(crate::eco::warp(self, ctx.p).to_array());
+            }
         }
         if gully {
             let lam_e = self.cfg.relief.gully_wavelength_m;
@@ -638,6 +713,7 @@ impl World {
             let pw = ctx.p + self.region_warp(ctx.p);
             pre.sites[SITE_REGION] = Some(worley3_sites(self.seed ^ 0x5E61, pw, region_cell, 0.9));
             pre.sites[SITE_TOWN] = Some(worley3_sites(self.seed ^ 0x70E1, ctx.p, self.cfg.landuse.town_cell_km * KM, 0.8));
+            pre.sites[SITE_ECO] = Some(crate::eco::sites(self, ctx.p));
         }
         // the long gully octaves (they follow the low-passed relief gradient above)
         if let (Some(cut), Some([ge, gn])) = (relief_cut, pre.gully) {
@@ -651,12 +727,12 @@ impl World {
     /// Gradient (east, north, per meter) of the relief low-passed at half the gully wavelength,
     /// by finite differences.
     #[allow(clippy::too_many_arguments)]
-    fn low_relief_gradient(&self, ctx: &Ctx, m: &Macro, mountain: f64, amp_m: f64, hill_amp: f64, gain: f64, lam_e: f64) -> [f64; 2] {
+    fn low_relief_gradient(&self, ctx: &Ctx, m: &Macro, _mountain: f64, amp_m: f64, hill_amp: f64, gain: f64, lam_e: f64) -> [f64; 2] {
         let p = ctx.p;
         let gl = lam_e * 0.5;
         let low = |q: DVec3| -> f64 {
             let mut v = hill_amp * self.hills(q, gl, gain).0;
-            if mountain > 1e-3 {
+            if amp_m > 0.0 {
                 let wp = DVec2::new(m.mtn_warp[0], m.mtn_warp[1]) * 9.0 * KM;
                 v += amp_m * self.ridged(q + ctx.east * wp.x + ctx.north * wp.y, gl, 1.6 + 0.8 * m.style[2]).0;
             }
@@ -692,21 +768,13 @@ impl World {
         (n / gl, gl * f.wavelength)
     }
 
-    /// Climate (temperature °C, moisture 0..1) from macro fields at a given elevation.
-    pub fn climate(&self, m: &Macro, lat: f64, elev: f64) -> (f64, f64) {
+    /// Climate (temperature °C, moisture 0..1) from macro fields at a given elevation: the
+    /// atlas' sea-level temperature lowered by the lapse rate, its moisture index (rain shadows,
+    /// coasts, continentality and `climate.moisture_bias` are in the atlas' precipitation).
+    pub fn climate(&self, m: &Macro, _lat: f64, elev: f64) -> (f64, f64) {
         let c = &self.cfg.climate;
-        let la = lat.abs() / std::f64::consts::FRAC_PI_2;
-        let mut t = c.equator_temp_c - c.pole_drop_c * la.powf(1.6) + m.temp;
-        t -= c.lapse_rate_c_per_km * elev.max(0.0) / KM;
-        let latd = lat.abs().to_degrees();
-        let hadley = (-((latd - 24.0) / 9.0).powi(2)).exp();
-        let mut w = 0.56 + 0.62 * m.moist;
-        w -= 0.40 * hadley;
-        w += 0.12 * (1.0 - smoothstep(0.0, 0.25, m.cont)); // coastal
-        w -= 0.22 * smoothstep(0.15, 0.55, m.cont); // continental interiors
-        w -= 0.10 * smoothstep(1500.0, 3500.0, elev); // high plateaus drier
-        w += c.moisture_bias;
-        (t, w.clamp(0.0, 1.0))
+        let t = m.temp - c.lapse_rate_c_per_km * elev.max(0.0) / KM;
+        (t, m.moist.clamp(0.0, 1.0))
     }
 
     fn base_elevation(s: f64) -> f64 {
@@ -717,13 +785,33 @@ impl World {
         }
     }
 
+    /// Mountain mask 0..1 and the amplitude (m) of the ridged mountains: ranges along the plate
+    /// boundaries (the atlas' tectonic uplift: arcs, collision belts, rift shoulders) and the
+    /// noise belts as old orogens and uplands (`relief.belt_mountains` of their height).
     fn mountain_mask(&self, m: &Macro) -> (f64, f64) {
+        let r = &self.cfg.relief;
         let b1 = 1.0 - m.belt.abs();
         let b2 = 1.0 - m.belt2.abs();
         let belt = (b1 * 0.75 + b2 * 0.45 + 0.35 * m.belt_var).max(0.0);
-        let mountain = smoothstep(0.62, 0.92, belt) * smoothstep(-0.04, 0.08, m.cont);
-        let amp_m = self.cfg.relief.mountain_height_m * (0.55 + 0.45 * smoothstep(-0.4, 0.6, m.belt_var)) * mountain;
-        (mountain, amp_m)
+        let land = smoothstep(-0.04, 0.08, m.cont);
+        let mb = smoothstep(0.62, 0.92, belt) * land;
+        let amp_b = r.mountain_height_m * (0.55 + 0.45 * smoothstep(-0.4, 0.6, m.belt_var)) * mb * r.belt_mountains;
+        // (coastal ranges and arcs reach a little offshore: islands)
+        let u = m.uplift.max(0.0) * r.tectonic_mountains;
+        let mt = smoothstep(0.08, 0.5, u) * smoothstep(-0.2, 0.05, m.cont);
+        let amp_t = r.mountain_height_m * (0.35 + 0.85 * smoothstep(0.2, 1.0, u)) * mt;
+        // (the old belts count as mountains by their share: 0.55 at the default 0.45)
+        let wb = (r.belt_mountains / 0.45 * 0.55).clamp(0.0, 1.0);
+        let mountain = 1.0 - (1.0 - wb * mb) * (1.0 - mt);
+        // (amplitudes of a few metres fade out: the ridged octaves are skipped there)
+        let amp = amp_b + amp_t;
+        (mountain.clamp(0.0, 1.0), amp * smoothstep(4.0, 12.0, amp))
+    }
+
+    /// Lowering (m) of rift grabens and trenches (negative tectonic uplift) on land.
+    fn tect_base(&self, m: &Macro) -> f64 {
+        // (inland only: near the coasts a trench side's negative uplift drowned the plains)
+        350.0 * m.uplift.min(0.0) * self.cfg.relief.tectonic_mountains * smoothstep(0.12, 0.3, m.cont)
     }
 
     fn hill_amplitude(&self, m: &Macro) -> f64 {
@@ -740,12 +828,18 @@ impl World {
     /// texel size), and the mountain amplitude there (m: the height of the ridged mountains
     /// above the smooth elevation's uplift, 0 outside the mountain belts).
     pub fn smooth_relief(&self, p: DVec3, gsd: f64) -> (f64, f64) {
-        let m = self.macro_relief(p, gsd);
+        self.smooth_relief_u(p, gsd, self.atlas().sample(p.normalize_or(DVec3::X)).uplift)
+    }
+
+    /// [`World::smooth_relief`] with the tectonic uplift given (the atlas builds the elevation in
+    /// two steps: without uplift for the plates, with theirs for the rest).
+    pub fn smooth_relief_u(&self, p: DVec3, gsd: f64, uplift: f64) -> (f64, f64) {
+        let m = Macro { uplift, ..self.macro_relief(p, gsd) };
         let s = m.cont;
         let plateau = smoothstep(0.15, 0.55, m.plateau) * 900.0 * smoothstep(0.02, 0.15, s);
         let (_, amp_m) = self.mountain_mask(&m);
         let (_, hl_low) = self.hills(p, gsd, 0.47 + 0.08 * m.rough);
-        (Self::base_elevation(s) + plateau + 0.22 * amp_m + amp_m * 0.12 + self.hill_amplitude(&m) * hl_low, amp_m)
+        (Self::base_elevation(s) + self.tect_base(&m) + plateau + 0.22 * amp_m + amp_m * 0.12 + self.hill_amplitude(&m) * hl_low, amp_m)
     }
 
     /// Lake surface level: the spill height of the basin (lowest rim sample), or None when the
@@ -887,14 +981,14 @@ impl World {
         let land = smoothstep(-0.06, 0.05, s);
 
         // ---- base elevation from the continent field
-        let base = Self::base_elevation(s);
+        let base = Self::base_elevation(s) + self.tect_base(m);
 
         // ---- high plateaus
         let plateau = smoothstep(0.15, 0.55, m.plateau) * 900.0 * smoothstep(0.02, 0.15, s);
 
         // ---- mountain belts
         let (mountain, amp_m) = self.mountain_mask(m);
-        let (ridged, ridged_low) = if mountain > 1e-3 {
+        let (ridged, ridged_low) = if amp_m > 0.0 {
             let wp = DVec2::new(m.mtn_warp[0], m.mtn_warp[1]) * 9.0 * KM;
             let pw = p + ctx.east * wp.x + ctx.north * wp.y;
             let sharp = 1.6 + 0.8 * m.style[2];
@@ -989,6 +1083,12 @@ impl World {
             * smoothstep(0.01, 0.06, s);
         if sand > 1e-3 && r.dune_height_m > 0.0 {
             h += r.dune_height_m * sand * self.dunes(ctx, m, gsd);
+        }
+
+        // ---- the kits' relief operators (volcanoes, karst, dunes …)
+        if !crate::kits::KITS.is_empty() {
+            let rin = crate::kits::ReliefIn { ctx, m, temp: temp0, moist, mountain, sand, mesa, smooth, inst: near_segs.map(|n| n.inst) };
+            crate::kits::relief(self, &rin, &mut h);
         }
 
         // ---- rivers: major + minor networks carve valleys, set water level
@@ -1204,12 +1304,22 @@ impl World {
             };
             let pw = p + wq;
             let wc = self.site_cell(m, SITE_REGION, 0x5E61, pw, region_cell, 0.9);
-            t.region = Site { id: wc.id, id2: wc.id2, center: wc.point, dist: wc.f1, edge: worley_edge_dist(&wc, pw) };
+            t.region = Site { id: wc.id, id2: wc.id2, center: wc.point, center2: wc.point2, dist: wc.f1, edge: worley_edge_dist(&wc, pw) };
+        }
+        // the ecoregion (every zoom: the biomes' look)
+        if mode != Mode::Relief {
+            let wq = match m.pre.and_then(|p| p.eco_warp) {
+                Some(w) => DVec3::from_array(w),
+                None => crate::eco::warp(self, p),
+            };
+            let pw = p + wq;
+            let wc = self.site_cell(m, SITE_ECO, crate::eco::ECO_KEY, pw, self.cfg.ecoregions.cell_km * KM, 0.9);
+            t.eco = Site { id: wc.id, id2: wc.id2, center: wc.point, center2: wc.point2, dist: wc.f1, edge: worley_edge_dist(&wc, pw) };
         }
         let town_cell = self.cfg.landuse.town_cell_km * KM;
         if mode != Mode::Relief && gsd < town_cell * 0.25 && self.cfg.landuse.towns > 0.0 {
             let wc = self.site_cell(m, SITE_TOWN, 0x70E1, p, town_cell, 0.8);
-            t.town = Site { id: wc.id, id2: wc.id2, center: wc.point, dist: wc.f1, edge: worley_edge_dist(&wc, p) };
+            t.town = Site { id: wc.id, id2: wc.id2, center: wc.point, center2: wc.point2, dist: wc.f1, edge: worley_edge_dist(&wc, p) };
         }
 
         // ---- road networks (iso-lines of warped noise), only where people live
@@ -1250,6 +1360,15 @@ impl World {
         t.agri = agri;
         t.habit = habit;
         t.style = style;
+        t.uplift = m.uplift;
+        t.coast_km = m.coast_km;
+        t.wind = [m.wind_e, m.wind_n];
+        t.volcanism = m.volcanism;
+        t.glaciation = m.glaciation;
+        t.population = m.population;
+        t.development = m.development;
+        t.temp_range = m.temp_range;
+        t.regime = m.regime;
         t
     }
 }

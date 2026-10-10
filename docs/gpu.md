@@ -112,23 +112,39 @@ and builds the same world:
   gradient table are uploaded from the CPU's own tables, and noise lattice coordinates are f64
   (ECEF metres over wavelengths down to decimetres; only `+ − × floor` run in f64, everything
   inside a lattice cell in f32).
-* **Agreement:** tiles agree with the CPU's to f32 precision. On test tiles from z3 to z16, at
-  most 0.01% of the pixels differ by more than 2 DN or 5 cm (`cargo test -p terragen
-  gpu::tests`), so both write generator version 3 and can share a store.
-* **Split of the work:** everything per pixel and per point runs on the GPU: macro fields, the
-  coarse grid, relief, river carving, lakes, land use, the surface with its trees, fields, towns
-  and lights, the canopy opening and the output layers.
+* **Agreement:** tiles agree with the CPU's to f32 precision. On test tiles from z7 to z16, at
+  most 0.03% of the pixels differ by more than 2 DN or 5 cm (`cargo test -p terragen
+  gpu::tests`, asserted below 0.1%), so both write generator version 4 and can share a store.
+  Every kernel of the library is compared on 20,000 random inputs (`kernel_parity`: no sample
+  off); its parameters are rounded to f32 on both sides, and noise wavelengths derived from
+  them are computed in f64 (an f32 wavelength shifts an ECEF-domain noise by ~|p|/λ · 6e-8
+  cells).
+* **Same discrete decisions:** what is decided per site is computed by shared host Rust for
+  both backends: ecoregions (biome, style, culture: `eco::compute` from the exact lattice site,
+  which the host finds from the ids the GPU reports), land-use regions, towns, host-built
+  features (`features.rs`). Kernel instances, instance families and ecotone patches are integer
+  hashes of lattice coordinates.
+* **Split of the work:** everything per pixel and per point runs on the GPU: macro fields (with
+  the atlas sampled at the grid nodes), the coarse grid, relief (with the kits' relief
+  operators and instance families), river carving, lakes, land use, the surface — the
+  composite stack (`stack.wgsl`, the core layers, the biome registry's kernel layers from
+  `registry.wgsl` / `kernels.wgsl`, the kits' WGSL and the generated glue) — the canopy opening
+  and the output layers.
   * **Drainage network** (`drain.wgsl`): the jittered lattice points of every level live in a
     GPU hash table kept across batches (8M points, ~0.5 GB, emptied when 60% full). The table
     holds their heights, flow targets (steepest descent) and sources; each query's channel
     pieces are gathered from it in the CPU's lattice order.
   * **Host** (`gpu/host.rs`): only site lists remain: lake levels (minimum over the rim), sink
-    lakes, land-use regions, towns and their overlaps. Their inputs come from batched GPU point
-    evaluations, cached across batches. The GPU reports which lakes, regions and town cells a
-    batch needs.
-* **Batches:** 16 tiles per batch (~25 MB of GPU memory per tile). Kernels: grid nodes → relief
-  (and lake requests) → drainage pieces per 16-px bin → rest of pass A (and site requests) →
-  pass B (adaptive supersampling) → canopy opening → output layers.
+    lakes, land-use regions, towns and their overlaps, ecoregions, the kits' linear features
+    and stamps. Their inputs come from batched GPU point evaluations, cached across batches.
+    The GPU reports which lakes, regions, town cells and ecoregions a batch needs.
+  * **Tables** (world-constant, group 0): the atlas (binding 5) and the biome registry —
+    biomes, crown layers, zones, kernel layers with their calibrated means, per-GSD-band layer
+    lists (bindings 6–11). Per batch (group 1): ecoregions, features and their bins.
+* **Batches:** 16 tiles per batch (~26 MB of GPU memory per tile). Kernels: grid nodes →
+  instance lists per 16-px bin → relief (and lake requests) → drainage pieces per bin → rest of
+  pass A (and site requests: regions, town cells, ecoregions) → pass B (adaptive supersampling)
+  → canopy opening → output layers. `TERRAGEN_PROFILE=passes` times each kernel on its own.
 * **Startup:** the compiled pipelines are kept in `$XDG_CACHE_HOME/terrain/` (default
   `~/.cache/terrain/`; the driver's own shader cache is per executable); after the first run the
   generator is ready in ~0.1 s. The first compilation (new install, new driver, changed shaders)
@@ -150,6 +166,14 @@ and builds the same world:
 
 On the RTX 6000 Ada of a shared server, cold pipeline cache, globe snapshot from an empty store:
 first tiles 157 s → 0.7 s, the view's tiles 172 s → 29 s, all base levels 188 s → 45 s.
+
+Generator version 4 (the composite stack, registry, ecoregions, atlas-driven relief and
+climate) against version 3 on the RTX 6000 Ada of a shared server (`examples/zoom_bench`, 52
+tiles per zoom at 13 places, interleaved runs; see the table in `CHANGELOG.md`): pass B costs
+the same (the stack with its layers is as fast as the hand-written surface model); pass A
+costs more where the world now has more mountains (the plate-boundary ranges) and carries the
+atlas fields. Low zooms are dominated by pass A and the drainage, so the per-band layer lists
+do not make them faster yet.
 
 Low-zoom tiles are the most work per tile on both backends (`TERRAGEN_PROFILE=1`: a batch of
 four polar z3/z4 tiles takes 0.3–0.8 s on the GPU, ~0.6 s of it for 30,000–40,000 land-use

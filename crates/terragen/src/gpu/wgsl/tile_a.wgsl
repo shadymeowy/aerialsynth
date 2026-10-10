@@ -62,15 +62,18 @@ const TF_ROADS_GRID: u32 = 8u;
 const NA2: u32 = 260u;
 /// bins of 16 x 16 pass-A pixels
 const NBIN: u32 = 17u;
-/// floats per grid node: Macro (19), the interpolated `Pre` inputs (34), pixel fields (16)
-const NODE_F: u32 = 72u;
+/// floats per grid node: Macro (29), the interpolated `Pre` inputs (37), pixel fields (16),
+/// the `Pre` flags
+const NODE_F: u32 = 84u;
 const NODE_MAC: u32 = 0u;
-const NODE_PRE: u32 = 19u;
-const NODE_PF: u32 = 53u;
-/// floats per pass-A pixel: Macro (19), Relief (11)
-const PIX_F: u32 = 32u;
+const NODE_PRE: u32 = 29u;
+const NODE_NPRE: u32 = 37u;
+const NODE_PF: u32 = 66u;
+/// floats per pass-A pixel: Macro (29), Relief (11)
+const PIX_F: u32 = 40u;
+const PIX_REL: u32 = 29u;
 /// the `Pre` fields a node holds (P_* flags, as f32 bits)
-const NODE_FLAGS: u32 = 70u;
+const NODE_FLAGS: u32 = 82u;
 
 @group(2) @binding(0) var<storage, read> tiles: array<TileInfo>;
 @group(2) @binding(1) var<storage, read> rows: array<Row>;
@@ -112,9 +115,22 @@ fn macro_put(base: u32, m: Macro) {
     node_f[base + 16u] = m.river_width;
     node_f[base + 17u] = m.mtn_warp.x;
     node_f[base + 18u] = m.mtn_warp.y;
+    node_f[base + 19u] = m.uplift;
+    node_f[base + 20u] = m.coast_km;
+    node_f[base + 21u] = m.wind_e;
+    node_f[base + 22u] = m.wind_n;
+    node_f[base + 23u] = m.volcanism;
+    node_f[base + 24u] = m.glaciation;
+    node_f[base + 25u] = m.population;
+    node_f[base + 26u] = m.development;
+    node_f[base + 27u] = m.temp_range;
+    node_f[base + 28u] = m.regime;
 }
 
-fn macro_from(a: array<f32, 19>) -> Macro {
+/// floats of a `Macro`
+const NMAC: u32 = 29u;
+
+fn macro_from(a: array<f32, 29>) -> Macro {
     var m: Macro;
     m.cont = a[0];
     m.plateau = a[1];
@@ -131,6 +147,16 @@ fn macro_from(a: array<f32, 19>) -> Macro {
     m.style = vec4<f32>(a[12], a[13], a[14], a[15]);
     m.river_width = a[16];
     m.mtn_warp = vec2<f32>(a[17], a[18]);
+    m.uplift = a[19];
+    m.coast_km = a[20];
+    m.wind_e = a[21];
+    m.wind_n = a[22];
+    m.volcanism = a[23];
+    m.glaciation = a[24];
+    m.population = a[25];
+    m.development = a[26];
+    m.temp_range = a[27];
+    m.regime = a[28];
     return m;
 }
 
@@ -170,9 +196,12 @@ fn pre_put(base: u32, mtn_warp: vec2<f32>, p: Pre) {
     node_f[base + 31u] = p.floodplain.y;
     node_f[base + 32u] = p.floodplain.z;
     node_f[base + 33u] = p.floodplain.w;
+    node_f[base + 34u] = p.eco_warp.x;
+    node_f[base + 35u] = p.eco_warp.y;
+    node_f[base + 36u] = p.eco_warp.z;
 }
 
-fn pre_from(f: array<f32, 34>, flags: u32, cut: vec2<f32>) -> Pre {
+fn pre_from(f: array<f32, 37>, flags: u32, cut: vec2<f32>) -> Pre {
     var p = pre_none();
     p.flags = flags;
     p.gully = vec2<f32>(f[2], f[3]);
@@ -186,6 +215,7 @@ fn pre_from(f: array<f32, 34>, flags: u32, cut: vec2<f32>) -> Pre {
     p.region_warp = vec3<f32>(f[23], f[24], f[25]);
     p.gully_oct = vec4<f32>(f[26], f[27], f[28], f[29]);
     p.floodplain = vec4<f32>(f[30], f[31], f[32], f[33]);
+    p.eco_warp = vec3<f32>(f[34], f[35], f[36]);
     return p;
 }
 
@@ -205,8 +235,9 @@ fn sites_get(k: u32) -> Sites {
     return s;
 }
 
-/// Node ids per node: 3 sites x 2, the forest stand.
-const NODE_IDS: u32 = 8u;
+/// Node ids per node: the lake, region and town sites (2 each), the forest stand, -, the
+/// ecoregion sites (2).
+const NODE_IDS: u32 = 10u;
 
 /// Coarse grid nodes: macro fields and the smooth inputs (`tile.rs`, `nodes`).
 @compute @workgroup_size(64)
@@ -229,6 +260,7 @@ fn grid_nodes(@builtin(global_invocation_id) gid: vec3<u32>) {
     sites_put(ib + 0u, pre.site_lake);
     sites_put(ib + 2u, pre.site_region);
     sites_put(ib + 4u, pre.site_town);
+    sites_put(ib + 8u, pre.site_eco);
     grid_nodes_surface(ti, k, ctx, nb, ib);
 }
 
@@ -263,12 +295,12 @@ fn node_index(ti: TileInfo, i: u32, j: u32) -> u32 {
 /// The macro fields at a pixel: bilinear between the nodes (`Macro::bilerp`); the mountain
 /// warp from the Catmull-Rom interpolation when on the grid, else exact.
 fn grid_macro(ti: TileInfo, g: GridPos, ctx: Ctx) -> Macro {
-    var a: array<f32, 19>;
+    var a: array<f32, 29>;
     let n00 = node_index(ti, g.i0, g.j0) * NODE_F;
     let n10 = node_index(ti, g.i0 + 1u, g.j0) * NODE_F;
     let n01 = node_index(ti, g.i0, g.j0 + 1u) * NODE_F;
     let n11 = node_index(ti, g.i0 + 1u, g.j0 + 1u) * NODE_F;
-    for (var k = 0u; k < 19u; k++) {
+    for (var k = 0u; k < NMAC; k++) {
         let x = node_f[n00 + k];
         let y = node_f[n10 + k];
         let z = node_f[n01 + k];
@@ -288,15 +320,15 @@ fn grid_macro(ti: TileInfo, g: GridPos, ctx: Ctx) -> Macro {
 }
 
 /// The Catmull-Rom interpolated `Pre` inputs (flat) at a pixel.
-fn grid_pre_flat(ti: TileInfo, g: GridPos) -> array<f32, 34> {
+fn grid_pre_flat(ti: TileInfo, g: GridPos) -> array<f32, 37> {
     let wx = catmull_rom_weights(g.fx);
     let wy = catmull_rom_weights(g.fy);
-    var f: array<f32, 34>;
+    var f: array<f32, 37>;
     for (var b = 0u; b < 4u; b++) {
         for (var a = 0u; a < 4u; a++) {
             let w = wx[a] * wy[b];
             let nb = node_index(ti, g.i0 + a - 1u, g.j0 + b - 1u) * NODE_F + NODE_PRE;
-            for (var k = 0u; k < 34u; k++) {
+            for (var k = 0u; k < NODE_NPRE; k++) {
                 f[k] += w * node_f[nb + k];
             }
         }
@@ -313,14 +345,16 @@ fn same_pair(a: Sites, b: Sites) -> bool {
 fn grid_pre(ti: TileInfo, g: GridPos) -> Pre {
     // the fields every node holds (those of node (i0, j0))
     let flags = bitcast<u32>(node_f[node_index(ti, g.i0, g.j0) * NODE_F + NODE_FLAGS]);
-    var pre = pre_from(grid_pre_flat(ti, g), flags & ~(P_SITE_LAKE | P_SITE_REGION | P_SITE_TOWN), vec2<f32>(ti.relief_cut_r, ti.relief_cut_h));
+    var pre = pre_from(grid_pre_flat(ti, g), flags & ~(P_SITE_LAKE | P_SITE_REGION | P_SITE_TOWN | P_SITE_ECO), vec2<f32>(ti.relief_cut_r, ti.relief_cut_h));
     let i00 = node_index(ti, g.i0, g.j0) * NODE_IDS;
     let i10 = node_index(ti, g.i0 + 1u, g.j0) * NODE_IDS;
     let i01 = node_index(ti, g.i0, g.j0 + 1u) * NODE_IDS;
     let i11 = node_index(ti, g.i0 + 1u, g.j0 + 1u) * NODE_IDS;
-    for (var k = 0u; k < 3u; k++) {
-        let s0 = sites_get(i00 + 2u * k);
-        if (same_pair(sites_get(i10 + 2u * k), s0) && same_pair(sites_get(i01 + 2u * k), s0) && same_pair(sites_get(i11 + 2u * k), s0)) {
+    for (var k = 0u; k < 4u; k++) {
+        // (slot 3: the ecoregion sites at ids 8, 9)
+        let o = select(2u * k, 8u, k == 3u);
+        let s0 = sites_get(i00 + o);
+        if (same_pair(sites_get(i10 + o), s0) && same_pair(sites_get(i01 + o), s0) && same_pair(sites_get(i11 + o), s0)) {
             switch k {
                 case 0u: {
                     pre.site_lake = s0;
@@ -330,9 +364,13 @@ fn grid_pre(ti: TileInfo, g: GridPos) -> Pre {
                     pre.site_region = s0;
                     pre.flags |= P_SITE_REGION;
                 }
-                default: {
+                case 2u: {
                     pre.site_town = s0;
                     pre.flags |= P_SITE_TOWN;
+                }
+                default: {
+                    pre.site_eco = s0;
+                    pre.flags |= P_SITE_ECO;
                 }
             }
         }
@@ -387,38 +425,20 @@ fn pass_a1(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocat
         } else {
             m = macro_at(ctx.p, ctx.gsd);
         }
-        let rl = relief(ctx, m, pre);
+        let rl = relief(ctx, m, pre, ti.bin0 + wg.y * NBIN + wg.x);
         let b = (ti.pix0 + j * NA2 + i) * PIX_F;
-        pix_a[b + 0u] = m.cont;
-        pix_a[b + 1u] = m.plateau;
-        pix_a[b + 2u] = m.belt;
-        pix_a[b + 3u] = m.belt2;
-        pix_a[b + 4u] = m.belt_var;
-        pix_a[b + 5u] = m.hill_amp;
-        pix_a[b + 6u] = m.rough;
-        pix_a[b + 7u] = m.temp;
-        pix_a[b + 8u] = m.moist;
-        pix_a[b + 9u] = m.mesa;
-        pix_a[b + 10u] = m.sand;
-        pix_a[b + 11u] = m.agri;
-        pix_a[b + 12u] = m.style.x;
-        pix_a[b + 13u] = m.style.y;
-        pix_a[b + 14u] = m.style.z;
-        pix_a[b + 15u] = m.style.w;
-        pix_a[b + 16u] = m.river_width;
-        pix_a[b + 17u] = m.mtn_warp.x;
-        pix_a[b + 18u] = m.mtn_warp.y;
-        pix_a[b + 19u] = rl.h;
-        pix_a[b + 20u] = rl.smooth_h;
-        pix_a[b + 21u] = rl.temp0;
-        pix_a[b + 22u] = rl.moist;
-        pix_a[b + 23u] = rl.mountain;
-        pix_a[b + 24u] = rl.ridged;
-        pix_a[b + 25u] = rl.hill_amp;
-        pix_a[b + 26u] = rl.micro;
-        pix_a[b + 27u] = rl.mesa;
-        pix_a[b + 28u] = rl.sand;
-        pix_a[b + 29u] = rl.gully_n;
+        pix_put(b, m);
+        pix_a[b + PIX_REL + 0u] = rl.h;
+        pix_a[b + PIX_REL + 1u] = rl.smooth_h;
+        pix_a[b + PIX_REL + 2u] = rl.temp0;
+        pix_a[b + PIX_REL + 3u] = rl.moist;
+        pix_a[b + PIX_REL + 4u] = rl.mountain;
+        pix_a[b + PIX_REL + 5u] = rl.ridged;
+        pix_a[b + PIX_REL + 6u] = rl.hill_amp;
+        pix_a[b + PIX_REL + 7u] = rl.micro;
+        pix_a[b + PIX_REL + 8u] = rl.mesa;
+        pix_a[b + PIX_REL + 9u] = rl.sand;
+        pix_a[b + PIX_REL + 10u] = rl.gully_n;
         atomicMax(&wg_hmax, orderable(rl.h));
         lake_requests(ctx, m, pre, rl, li);
     } else {
@@ -518,26 +538,36 @@ fn flush_lake_requests() {
 }
 
 fn pix_macro(b: u32) -> Macro {
-    var a: array<f32, 19>;
-    for (var k = 0u; k < 19u; k++) {
+    var a: array<f32, 29>;
+    for (var k = 0u; k < NMAC; k++) {
         a[k] = pix_a[b + k];
     }
     return macro_from(a);
 }
 
+/// The macro fields into pass-A pixel record `b` (the order of `macro_put`).
+fn pix_put(b: u32, m: Macro) {
+    let v = array<f32, 29>(m.cont, m.plateau, m.belt, m.belt2, m.belt_var, m.hill_amp, m.rough, m.temp, m.moist, m.mesa, m.sand, m.agri,
+        m.style.x, m.style.y, m.style.z, m.style.w, m.river_width, m.mtn_warp.x, m.mtn_warp.y,
+        m.uplift, m.coast_km, m.wind_e, m.wind_n, m.volcanism, m.glaciation, m.population, m.development, m.temp_range, m.regime);
+    for (var k = 0u; k < NMAC; k++) {
+        pix_a[b + k] = v[k];
+    }
+}
+
 fn pix_relief(b: u32) -> Relief {
     var r: Relief;
-    r.h = pix_a[b + 19u];
-    r.smooth_h = pix_a[b + 20u];
-    r.temp0 = pix_a[b + 21u];
-    r.moist = pix_a[b + 22u];
-    r.mountain = pix_a[b + 23u];
-    r.ridged = pix_a[b + 24u];
-    r.hill_amp = pix_a[b + 25u];
-    r.micro = pix_a[b + 26u];
-    r.mesa = pix_a[b + 27u];
-    r.sand = pix_a[b + 28u];
-    r.gully_n = pix_a[b + 29u];
+    r.h = pix_a[b + PIX_REL + 0u];
+    r.smooth_h = pix_a[b + PIX_REL + 1u];
+    r.temp0 = pix_a[b + PIX_REL + 2u];
+    r.moist = pix_a[b + PIX_REL + 3u];
+    r.mountain = pix_a[b + PIX_REL + 4u];
+    r.ridged = pix_a[b + PIX_REL + 5u];
+    r.hill_amp = pix_a[b + PIX_REL + 6u];
+    r.micro = pix_a[b + PIX_REL + 7u];
+    r.mesa = pix_a[b + PIX_REL + 8u];
+    r.sand = pix_a[b + PIX_REL + 9u];
+    r.gully_n = pix_a[b + PIX_REL + 10u];
     return r;
 }
 
@@ -667,4 +697,96 @@ fn pass_a2(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id)
     dr.nsink = ti.nsink;
     dr.flags = 0u;
     terr[ti.pix0 + j * NA2 + i] = terrain_rest(ctx, m, pre, rl, MODE_FULL, dr);
+}
+
+// ---------------------------------------------------------------- instance lists per bin
+
+/// An instance in a bin's list (`GInst`).
+struct GInst {
+    center: vec4<f64>,
+    id: u64,
+    _p: u64,
+    v0: vec4<f32>,
+    v1: vec4<f32>,
+}
+
+/// per (bin, family): the number of instances; their records (INST_K per list)
+@group(2) @binding(20) var<storage, read_write> inst_n: array<u32>;
+@group(2) @binding(21) var<storage, read_write> inst_v: array<GInst>;
+
+/// The instances of family `f` near `p`: the list of block `blk` (a bin of the tile), else a
+/// scan.
+fn inst_list(f: u32, blk: u32, p: vec3<f64>) -> InstList {
+    if (blk == 0xffffffffu) {
+        return inst_scan(f, p, 0.0);
+    }
+    var l: InstList;
+    let b = blk * NFAM + f;
+    l.n = min(inst_n[b], INST_K);
+    for (var k = 0u; k < l.n; k++) {
+        let g = inst_v[b * INST_K + k];
+        l.items[k].id = g.id;
+        l.items[k].center = g.center.xyz;
+        l.items[k].v = array<f32, 8>(g.v0.x, g.v0.y, g.v0.z, g.v0.w, g.v1.x, g.v1.y, g.v1.z, g.v1.w);
+    }
+    return l;
+}
+
+/// Centre and radius of bin `bin` of a tile (the pass-A pixel centres it covers, + a pixel).
+struct BinDisc {
+    c: vec3<f64>,
+    r: f32,
+}
+
+fn bin_disc(ti: TileInfo, bin: u32) -> BinDisc {
+    let bx = bin % NBIN;
+    let by = bin / NBIN;
+    let i0 = bx * 16u;
+    let j0 = by * 16u;
+    let i1 = min(i0 + 15u, NA2 - 1u);
+    let j1 = min(j0 + 15u, NA2 - 1u);
+    let rm = rows[ti.row_a + (j0 + j1) / 2u];
+    var o: BinDisc;
+    o.c = row_col_ctx(rm, cols[ti.col_a + (i0 + i1) / 2u], rm.gsd).p;
+    var radius = 0.0;
+    for (var k = 0u; k < 4u; k++) {
+        let ii = select(i0, i1, (k & 1u) != 0u);
+        let jj = select(j0, j1, (k & 2u) != 0u);
+        let rr = rows[ti.row_a + jj];
+        radius = max(radius, dist64(row_col_ctx(rr, cols[ti.col_a + ii], rr.gsd).p, o.c));
+    }
+    o.r = radius + max(rows[ti.row_a + j0].gsd, rows[ti.row_a + j1].gsd);
+    return o;
+}
+
+/// The instances of every family that can reach each bin (`instances::lists`).
+@compute @workgroup_size(64)
+fn instance_lists(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let ti = tiles[gid.z];
+    let k = gid.x;
+    if (NFAM == 0u || k >= NBIN * NBIN * NFAM) {
+        return;
+    }
+    // (NFAM is a constant; 0 without families: no division by it)
+    let nf = max(NFAM, 1u);
+    let bin = k / nf;
+    let f = k % nf;
+    let d = bin_disc(ti, bin);
+    var over = false;
+    let l = inst_scan_n(f, d.c, d.r, &over);
+    if (over) {
+        atomicAdd(&counters[7], 1u);
+    }
+    let b = (ti.bin0 + bin) * NFAM + f;
+    inst_n[b] = l.n;
+    for (var q = 0u; q < l.n; q++) {
+        let it = l.items[q];
+        var g: GInst;
+        g.center = vec4<f64>(it.center, 0.0lf);
+        g.id = it.id;
+        g._p = 0lu;
+        g.v0 = vec4<f32>(it.v[0], it.v[1], it.v[2], it.v[3]);
+        g.v1 = vec4<f32>(it.v[4], it.v[5], it.v[6], it.v[7]);
+        inst_v[b * INST_K + q] = g;
+    }
 }
