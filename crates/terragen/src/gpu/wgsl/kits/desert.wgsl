@@ -184,9 +184,15 @@ fn desert_slot_azonal(s: ptr<function, Stack>) {
         let sh = desert_ins_shape(ins.items[i].id, desert_offset(p, ins.items[i].center, c.east, c.north));
         let cov = clamp((0.9 - sh.x) * sh.y / max(fw, 1e-3) + 0.5, 0.0, 1.0);
         if (cov > 0.0) {
-            let rock = spal(s, BP_ROCK + 1u) * vec3<f32>(1.18, 1.12, 1.08);
+            let r0 = spal(s, BP_ROCK + 1u);
+            let rock = mixc(r0, vec3<f32>(dot(r0, vec3<f32>(0.2126, 0.7152, 0.0722))), 0.45) * 1.15;
             let sn = perlin3(cfg.seed ^ DS_INSROCK, p / 60.0lf) * band(60.0, gsd) + 0.5 * perlin3(cfg.seed ^ DS_INSROCK ^ 1lu, p / 15.0lf) * band(15.0, gsd);
-            let col = mixc(rock, rock * vec3<f32>(0.5, 0.46, 0.44), 0.3 + 0.3 * sn);
+            var col = mixc(rock, rock * vec3<f32>(0.45, 0.42, 0.40), clamp(0.25 + 0.5 * sn, 0.0, 1.0));
+            let je = smoothstep1(1.2 * gsd, 3.0 * gsd, 45.0);
+            if (je > 0.0) {
+                let jc = worley3(cfg.seed ^ DS_INSROCK ^ 2lu, p, 45.0lf, 0.9);
+                col *= 1.0 - 0.45 * je * band_cov(worley_edge_dist(jc, p), 0.8, fw);
+            }
             var ly = layer_paint(cov, col, 6u);
             ly.clear = 0.9;
             composite(s, ly);
@@ -227,11 +233,12 @@ fn desert_slot_azonal(s: ptr<function, Stack>) {
     }
     if (erg > 0.0) {
         var col = sc * (1.0 + 0.05 * perlin3(cfg.seed ^ DS_SANDTEX, p / 35.0lf) * band(35.0, gsd) + 0.03 * perlin3(cfg.seed ^ DS_SANDTEX ^ 1lu, p / 9.0lf) * band(9.0, gsd));
-        let rb = band(3.0, gsd);
+        let rb = band(5.0, gsd);
         if (rb > 0.0) {
-            let rp = gully_octave(cfg.seed ^ DS_RIPPLE, p / 3.0lf, c.east * wd.d.x + c.north * wd.d.y).x;
-            col *= 1.0 + 0.07 * rp * rb;
+            let rp = gully_octave(cfg.seed ^ DS_RIPPLE, p / 5.0lf, c.east * wd.d.x + c.north * wd.d.y).x;
+            col *= 1.0 + 0.09 * rp * rb;
         }
+        col *= 1.0 + 0.07 * smoothstep1(0.15, 0.5, (*s).l.slope) * (1.0 - smoothstep1(10.0, 40.0, gsd));
         if (wl > 0.0) {
             let res = 1.0 - smoothstep1(10.0, 80.0, gsd);
             let flat = 1.0 - smoothstep1(0.02, 0.08, (*s).l.slope);

@@ -735,9 +735,16 @@ pub fn azonal(s: &mut Stack) {
         let (x, r, _) = ins_shape(i.id, offset(p, i.center, c.east, c.north));
         let cov = ((0.9 - x) * r / fw.max(1e-3) + 0.5).clamp(0.0, 1.0);
         if cov > 0.0 {
-            let rock = s.pal(pal::ROCK + 1) * DVec3::new(1.18, 1.12, 1.08);
+            // granite: the rock palette towards grey, darker varnish streaks and joints
+            let r0 = s.pal(pal::ROCK + 1);
+            let rock = mixc(r0, DVec3::splat(r0.dot(DVec3::new(0.2126, 0.7152, 0.0722))), 0.45) * 1.15;
             let sn = perlin3(seed ^ S_INSROCK, p / 60.0) * band(60.0, gsd) + 0.5 * perlin3(seed ^ S_INSROCK ^ 1, p / 15.0) * band(15.0, gsd);
-            let col = mixc(rock, rock * DVec3::new(0.5, 0.46, 0.44), 0.3 + 0.3 * sn);
+            let mut col = mixc(rock, rock * DVec3::new(0.45, 0.42, 0.40), (0.25 + 0.5 * sn).clamp(0.0, 1.0));
+            let je = smoothstep(1.2 * gsd, 3.0 * gsd, 45.0);
+            if je > 0.0 {
+                let jc = worley3(seed ^ S_INSROCK ^ 2, p, 45.0, 0.9);
+                col *= 1.0 - 0.45 * je * crate::kernels::band_cov(worley_edge_dist(&jc, p), 0.8, fw);
+            }
             s.composite(Layer { cov, albedo: col, cls: LC_ROCK, clear: 0.9, ..Default::default() });
         }
     }
@@ -775,11 +782,13 @@ pub fn azonal(s: &mut Stack) {
         let mut col =
             sc * (1.0 + 0.05 * perlin3(seed ^ S_SANDTEX, p / 35.0) * band(35.0, gsd) + 0.03 * perlin3(seed ^ S_SANDTEX ^ 1, p / 9.0) * band(9.0, gsd));
         // wind ripples across the wind (seen from a few hundred metres)
-        let rb = band(3.0, gsd);
+        let rb = band(5.0, gsd);
         if rb > 0.0 {
-            let (rp, _) = World::gully_octave(seed ^ S_RIPPLE, p / 3.0, c.east * wd.x + c.north * wd.y);
-            col *= 1.0 + 0.07 * rp * rb;
+            let (rp, _) = World::gully_octave(seed ^ S_RIPPLE, p / 5.0, c.east * wd.x + c.north * wd.y);
+            col *= 1.0 + 0.09 * rp * rb;
         }
+        // slip faces: finer, paler sand
+        col *= 1.0 + 0.07 * smoothstep(0.15, 0.5, s.l.slope) * (1.0 - smoothstep(10.0, 40.0, gsd));
         if wl > 0.0 {
             // the corridors between linear dunes: coarser, darker lag and sparse plants
             let res = 1.0 - smoothstep(10.0, 80.0, gsd);
