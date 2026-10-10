@@ -42,8 +42,9 @@ build the same world, see `docs/gpu.md`).
   - valleys, floodplains and riparian woods; wet or dry beds
   - lakes filled to their spill level, oceans with shallows and surf, beaches
 - **Climate:** from the planetary atlas: the sea-level temperature (latitude, currents,
-  continentality) lowered by the lapse rate, and the moisture index of the annual
-  precipitation (moisture advected along the winds: rain shadows, monsoons, coastal deserts).
+  continentality) lowered by the lapse rate, and a moisture index from the aridity
+  of the annual precipitation (P / (20 T + 140), Köppen's dry threshold; the precipitation is
+  moisture advected along the winds: rain shadows, monsoons, coastal deserts).
 - **Vegetation:** individual tree crowns in the biome's crown layers (conifers, broadleaves,
   tropical crowns, shrubs, kits' palms or acacias), with explicit crowns and canopy heights in
   the DSM. They are prefiltered when unresolved and cast shadows in the baked imagery.

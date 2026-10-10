@@ -346,9 +346,12 @@ impl World {
         self.atlas.get_or_init(|| crate::atlas::Atlas::for_world(self))
     }
 
-    /// The moisture index 0..1 of an annual precipitation (mm): ln(P / 150) / ln 30.
-    pub fn moisture_index(precip_mm: f64) -> f64 {
-        ((precip_mm.max(1.0) / 150.0).ln() / 30f64.ln()).clamp(-0.3, 1.3)
+    /// The moisture index of an annual precipitation (mm) at a mean temperature (°C): from the
+    /// aridity r = P / (20 T + 140) (Köppen's dry threshold): 0.15 at r = ½ (deserts below),
+    /// 0.33 at r = 1 (steppe below), +0.18 per doubling (forests from r ≈ 2).
+    pub fn moisture_index(precip_mm: f64, temp_c: f64) -> f64 {
+        let r = precip_mm.max(1.0) / (20.0 * temp_c.max(0.0) + 140.0);
+        (0.33 + 0.18 * r.log2()).clamp(-0.3, 1.3)
     }
 
     /// Continent field (>0 land), smooth at ≥100 km scales.
@@ -602,7 +605,7 @@ impl World {
             // sea-level temperature and moisture from the atlas (rain shadows, currents,
             // continentality), with a little local noise on the moisture
             temp: a.temp_c,
-            moist: Self::moisture_index(a.precip_mm) + 0.06 * self.moist_n.eval(p, 20.0 * KM) * self.moist_n.norm() * 1.6,
+            moist: Self::moisture_index(a.precip_mm, a.temp_c) + 0.06 * self.moist_n.eval(p, 20.0 * KM) * self.moist_n.norm() * 1.6,
             uplift: a.uplift,
             coast_km: a.coast_km,
             wind_e: a.wind_e,
@@ -807,7 +810,8 @@ impl World {
 
     /// Lowering (m) of rift grabens and trenches (negative tectonic uplift) on land.
     fn tect_base(&self, m: &Macro) -> f64 {
-        900.0 * m.uplift.min(0.0) * self.cfg.relief.tectonic_mountains * smoothstep(0.02, 0.15, m.cont)
+        // (inland only: near the coasts a trench side's negative uplift drowned the plains)
+        350.0 * m.uplift.min(0.0) * self.cfg.relief.tectonic_mountains * smoothstep(0.12, 0.3, m.cont)
     }
 
     fn hill_amplitude(&self, m: &Macro) -> f64 {

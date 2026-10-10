@@ -384,7 +384,7 @@ fn macro_at(p: vec3<f64>, gsd: f32) -> Macro {
     // climate and tectonics from the atlas (`World::macro_at`)
     let a = atlas_sample(vec3<f32>(p / sqrt(dot(p, p))));
     m.temp = a.temp_c;
-    m.moist = moisture_index(a.precip_mm) + 0.06 * fbm(FBM_MOIST, p, 20.0 * KM) * fbm_norm(FBM_MOIST) * 1.6;
+    m.moist = moisture_index(a.precip_mm, a.temp_c) + 0.06 * fbm(FBM_MOIST, p, 20.0 * KM) * fbm_norm(FBM_MOIST) * 1.6;
     m.uplift = a.uplift;
     m.coast_km = a.coast_km;
     m.wind_e = a.wind.x;
@@ -464,9 +464,10 @@ fn base_elevation(s: f32) -> f32 {
 }
 
 /// (mountain mask, mountain amplitude)
-/// The moisture index of an annual precipitation (`World::moisture_index`).
-fn moisture_index(p_mm: f32) -> f32 {
-    return clamp(log(max(p_mm, 1.0) / 150.0) / log(30.0), -0.3, 1.3);
+/// The moisture index of an annual precipitation at a temperature (`World::moisture_index`).
+fn moisture_index(p_mm: f32, t_c: f32) -> f32 {
+    let r = max(p_mm, 1.0) / (20.0 * max(t_c, 0.0) + 140.0);
+    return clamp(0.33 + 0.18 * log2(r), -0.3, 1.3);
 }
 
 /// Mountain mask and amplitude (`World::mountain_mask`): plate-boundary ranges and old belts.
@@ -487,7 +488,7 @@ fn mountain_mask(m: Macro) -> vec2<f32> {
 
 /// Lowering of rift grabens and trenches on land (`World::tect_base`).
 fn tect_base(m: Macro) -> f32 {
-    return 900.0 * min(m.uplift, 0.0) * cfg.tect_mtn * smoothstep1(0.02, 0.15, m.cont);
+    return 350.0 * min(m.uplift, 0.0) * cfg.tect_mtn * smoothstep1(0.12, 0.3, m.cont);
 }
 
 fn hill_amplitude(m: Macro) -> f32 {

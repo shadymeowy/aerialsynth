@@ -534,8 +534,8 @@ cultures, development and population. The core uses it for:
 * **relief** — mountain ranges along plate boundaries (arcs, collision belts, rift shoulders:
   amplitude from `max(uplift, 0)`, `relief.tectonic_mountains`), the noise belts kept as old
   orogens (`relief.belt_mountains`), grabens from negative uplift;
-* **climate** — temperature = atlas sea-level temperature − lapse × height; moisture =
-  ln(P / 150 mm) / ln 30 plus a little noise;
+* **climate** — temperature = atlas sea-level temperature − lapse × height; moisture from the
+  aridity P / (20 T + 140) (Köppen's dry threshold) plus a little noise;
 * **ecoregions** — biome by the site's Köppen class, envelope, lithology; culture and archetype
   from the atlas' culture areas;
 * **land use** — town density by population, roads and lights by development.
