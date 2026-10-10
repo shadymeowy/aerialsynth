@@ -1035,10 +1035,33 @@ impl GpuGenerator {
                 ],
             )
         };
+        // (TERRAGEN_PROFILE=passes: each pass on its own, timed)
+        let time_passes = std::env::var("TERRAGEN_PROFILE").is_ok_and(|v| v == "passes");
         let run_passes = |g1: &wgpu::BindGroup, g2: &wgpu::BindGroup, passes: &[(&wgpu::ComputePipeline, [u32; 3])], clear: bool| {
             let mut enc = d.create_command_encoder(&Default::default());
             if clear {
                 enc.clear_buffer(&b_counters, 0, None);
+            }
+            if time_passes {
+                self.gpu.queue.submit([enc.finish()]);
+                let mut times = String::new();
+                for (p, n) in passes {
+                    let t = std::time::Instant::now();
+                    let mut enc = d.create_command_encoder(&Default::default());
+                    {
+                        let mut cp = enc.begin_compute_pass(&Default::default());
+                        cp.set_bind_group(0, &self.globals, &[]);
+                        cp.set_bind_group(1, g1, &[]);
+                        cp.set_bind_group(2, g2, &[]);
+                        cp.set_pipeline(p);
+                        cp.dispatch_workgroups(n[0], n[1], n[2]);
+                    }
+                    self.gpu.queue.submit([enc.finish()]);
+                    let _ = d.poll(wgpu::PollType::wait_indefinitely());
+                    times += &format!(" {:.4}", t.elapsed().as_secs_f64());
+                }
+                eprintln!("    passes:{times}");
+                return;
             }
             {
                 let mut cp = enc.begin_compute_pass(&Default::default());

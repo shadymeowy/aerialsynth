@@ -151,3 +151,17 @@ fn lod_consistency_of_colour_and_classes() {
         }
     }
 }
+
+/// Performance smoke test: one tile per zoom on the CPU, within generous bounds (a regression
+/// of several times shows; the per-zoom budgets are measured with `examples/zoom_bench`).
+#[test]
+fn tiles_are_reasonably_fast_on_the_cpu() {
+    let g = Generator::with_backend(Config { tile_supersample: 1, ..Config::default() }, terragen::Backend::Cpu);
+    for (z, limit_s) in [(14u8, 30.0), (10, 30.0), (6, 60.0)] {
+        let id = tile_for_latlon(39.9f64.to_radians(), 32.8f64.to_radians(), z);
+        let t = std::time::Instant::now();
+        let _ = g.tile(id);
+        let dt = t.elapsed().as_secs_f64();
+        assert!(dt < limit_s, "z{z}: {dt:.1} s for one tile on the CPU");
+    }
+}

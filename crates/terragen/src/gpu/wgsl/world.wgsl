@@ -481,7 +481,8 @@ fn mountain_mask(m: Macro) -> vec2<f32> {
     let amp_t = cfg.mtn_height * (0.35 + 0.85 * smoothstep1(0.2, 1.0, u)) * mt;
     let wb = clamp(cfg.belt_mtn / 0.45 * 0.55, 0.0, 1.0);
     let mountain = 1.0 - (1.0 - wb * mb) * (1.0 - mt);
-    return vec2<f32>(clamp(mountain, 0.0, 1.0), amp_b + amp_t);
+    let amp = amp_b + amp_t;
+    return vec2<f32>(clamp(mountain, 0.0, 1.0), amp * smoothstep1(4.0, 12.0, amp));
 }
 
 /// Lowering of rift grabens and trenches on land (`World::tect_base`).
@@ -505,7 +506,7 @@ fn climate(m: Macro, lat: f32, elev: f32) -> vec2<f32> {
 /// Low-passed relief at `q` (for the gully gradient).
 fn low_relief(c: Ctx, m: Macro, q: vec3<f64>, mountain: f32, amp_m: f32, hill_amp: f32, gain: f32, gl: f32) -> f32 {
     var v = hill_amp * hills(q, gl, gain).x;
-    if (mountain > 1e-3) {
+    if (amp_m > 0.0) {
         let wp = m.mtn_warp * 9.0 * KM;
         v += amp_m * ridged(q + vec3<f64>(c.east * wp.x + c.north * wp.y), gl, 1.6 + 0.8 * m.style.z).x;
     }
@@ -651,7 +652,7 @@ fn relief(c: Ctx, m: Macro, pre: Pre, blk: u32) -> Relief {
     let mountain = mm.x;
     let amp_m = mm.y;
     var rg = vec2<f32>(0.0);
-    if (mountain > 1e-3) {
+    if (amp_m > 0.0) {
         let wp = m.mtn_warp * 9.0 * KM;
         let pw = p + vec3<f64>(c.east * wp.x + c.north * wp.y);
         let sharp = 1.6 + 0.8 * m.style.z;
