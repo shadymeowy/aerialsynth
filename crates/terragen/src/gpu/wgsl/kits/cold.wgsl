@@ -285,7 +285,26 @@ fn cold_lake_mean_albedo(lat: ColdLakeLat, frozen: bool) -> vec3<f32> {
     return mixc(basin, lake, lat.p_lake);
 }
 
+fn cold_drumlin_look(s: ptr<function, Stack>) {
+    let l = inst_list(FAM_COLD_DRUMLINS, (*s).l.blk, (*s).c.p);
+    if (l.n == 0u) {
+        return;
+    }
+    let f = cold_drumlin_field(l, (*s).c.p, (*s).c.gsd);
+    let crest = f.y;
+    let esk = f.z;
+    if (crest > 0.05) {
+        let c = (*s).col * vec3<f32>(1.12, 1.08, 0.94);
+        composite(s, layer_paint(0.6 * smoothstep1(0.05, 0.6, crest), c, 0u));
+    }
+    if (esk > 0.0) {
+        let g = mixc(spal(s, BP_SAND), srgb(150.0, 142.0, 124.0), 0.5);
+        composite(s, layer_paint(smoothstep1(0.1, 0.4, esk), g, LC_GRAVEL));
+    }
+}
+
 fn cold_slot_azonal(s: ptr<function, Stack>) {
+    cold_drumlin_look(s);
     let c = cold_climate(s);
     let lm = cold_lake_mask(s, c);
     if (lm < 0.03) {

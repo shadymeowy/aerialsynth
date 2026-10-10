@@ -20,7 +20,8 @@
 //! date for a share of the ecoregions (from their site climate).
 
 use crate::kernels::{band_cov, KIn, KOut, KParams, KernelSpec, C, P};
-use crate::kits::Kit;
+use crate::instances::{Family, InstSite, Instance};
+use crate::kits::{Kit, ReliefIn};
 use crate::noise::*;
 use crate::stack::{hmode, slot, Layer, Stack};
 use crate::surface::{mixc, srgb};
@@ -42,6 +43,9 @@ pub static KIT: Kit = Kit {
         eval: polygons,
         wgsl: "cold_polygons",
     }],
+    relief: Some(relief),
+    relief_wgsl: include_str!("../gpu/wgsl/kits/cold_relief.wgsl"),
+    families: &[Family { name: "cold_drumlins", cell: 45_000.0, jitter: 0.8, reach: 14_000.0, relief: true, exists: drumlins_exist }],
     ..Kit::EMPTY
 };
 
@@ -53,6 +57,7 @@ mod cls {
     pub const SEA_ICE: u8 = 26;
     pub const GLACIER: u8 = 27;
     pub const FROZEN_WATER: u8 = 28;
+    pub const GRAVEL: u8 = 33;
     pub const MORAINE: u8 = 36;
     pub const MARSH: u8 = 59;
     pub const SEASONAL_SNOW: u8 = 110;
@@ -346,6 +351,7 @@ fn lake_mean_albedo(lat: &LakeLat, frozen: bool) -> DVec3 {
 
 /// Slot 3: the lakes of permafrost and glaciated lowlands, drained basins and pingos.
 pub fn azonal(s: &mut Stack) {
+    drumlin_look(s);
     let c = climate(s);
     let lm = lake_mask(s, &c);
     if lm < 0.03 {
@@ -437,6 +443,126 @@ fn lakes(s: &mut Stack, lat: &LakeLat, sc: f64, frozen: bool) {
     // an open lake ends the stack (no vegetation, rivers or snow on it)
     if water {
         s.done = true;
+    }
+}
+
+// ============================================================================= drumlins
+
+/// The index of the drumlin-field family (`FAM_COLD_DRUMLINS`).
+fn fam_drumlins() -> usize {
+    static F: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *F.get_or_init(|| crate::instances::families().position(|f| f.name == "cold_drumlins").unwrap())
+}
+
+/// A drumlin field on 70 % of the sites in glaciated lowlands (the atlas' last-glacial ice):
+/// radius 9–14 km, ice-flow azimuth, drumlin height 8–22 m, spacing scale, esker phase.
+fn drumlins_exist(w: &crate::world::World, s: &InstSite) -> Option<[f32; 8]> {
+    if u01k(s.id, 1) >= 0.7 {
+        return None;
+    }
+    let a = w.atlas().sample(s.center.normalize());
+    if a.glaciation < 0.5 || a.coast_km < 5.0 || a.elevation_m > 700.0 {
+        return None;
+    }
+    let f = |x: f64| x as f32;
+    Some([f(9000.0 + 5000.0 * u01k(s.id, 2)), f(std::f64::consts::TAU * u01k(s.id, 3)), f(8.0 + 14.0 * u01k(s.id, 4)), f(0.7 + 0.6 * u01k(s.id, 5)), f(u01k(s.id, 6)), 0.0, 0.0, 0.0])
+}
+
+/// Mean height of unresolved drumlins per unit height: density × mean area share × mean of the
+/// profile (1 − r²)² (1/3), the stoss side shortened.
+const DRUMLIN_MEAN: f64 = 0.109;
+
+/// Height (m), drumlin crest (0..1) and esker (0..1) of the drumlin fields at `p`: streamlined
+/// hills on a jittered lattice in the field's ice-flow frame (steep stoss side up-ice), a
+/// sinuous, broken esker ridge along the flow; band-limited (unresolved drumlins: their mean).
+pub(crate) fn drumlin_field(inst: &[Instance], p: DVec3, gsd: f64) -> (f64, f64, f64) {
+    let (mut z, mut crest, mut esk) = (0.0, 0.0f64, 0.0f64);
+    for it in inst {
+        let v = it.v.map(|x| x as f64);
+        let r = v[0];
+        let rel = p - it.center;
+        let d2 = rel.length_squared();
+        if d2 >= r * r {
+            continue;
+        }
+        let up = it.center.normalize();
+        let e = if up.z.abs() > 0.999 { DVec3::X } else { DVec3::Z.cross(up).normalize() };
+        let n = up.cross(e);
+        let (sn, cs) = v[1].sin_cos();
+        let u = rel.dot(e * cs + n * sn);
+        let wq = rel.dot(n * cs - e * sn);
+        let fade = smoothstep(r, 0.6 * r, d2.sqrt());
+        let (cu, cw) = (900.0 * v[3], 320.0 * v[3]);
+        let bnd = band(0.35 * cw, gsd);
+        let mut zd: f64 = 0.0;
+        if bnd > 0.0 {
+            let (iu, iw) = ((u / cu).floor() as i64, (wq / cw).floor() as i64);
+            for du in -1..=1i64 {
+                for dw in -1..=1i64 {
+                    let (gu, gw) = (iu + du, iw + dw);
+                    let h = hash2(it.id, gu, gw);
+                    if u01k(h, 1) >= 0.85 {
+                        continue;
+                    }
+                    let c0 = (gu as f64 + 0.5 + 0.6 * (u01k(h, 2) - 0.5)) * cu;
+                    let c1 = (gw as f64 + 0.5 + 0.6 * (u01k(h, 3) - 0.5)) * cw;
+                    let a = cu * (0.33 + 0.12 * u01k(h, 4));
+                    let b = cw * (0.3 + 0.1 * u01k(h, 5));
+                    let mut x = (u - c0) / a;
+                    if x < 0.0 {
+                        x *= 1.25;
+                    }
+                    let y = (wq - c1) / b;
+                    let r2 = x * x + y * y;
+                    if r2 < 1.0 {
+                        zd = zd.max((1.0 - r2) * (1.0 - r2) * (0.7 + 0.6 * u01k(h, 6)));
+                    }
+                }
+            }
+        }
+        z += v[2] * (zd * bnd + DRUMLIN_MEAN * (1.0 - bnd)) * fade;
+        crest = crest.max(zd * bnd * fade);
+        let we = 40.0;
+        let be = band(2.0 * we, gsd);
+        if be > 0.0 {
+            let ph = v[4];
+            let cl = 0.5 * r * (ph - 0.5) + 600.0 * (u / 2300.0 + ph * 6.3).sin() + 250.0 * (u / 700.0 + ph * 17.0).sin();
+            let dd = (wq - cl).abs();
+            if dd < we {
+                let on = smoothstep(-0.2, 0.0, (u / 3100.0 + ph * 11.0).sin());
+                let x = dd / we;
+                let ze = (1.0 - x * x) * on * be * fade;
+                z += 12.0 * ze;
+                esk = esk.max(ze);
+            }
+        }
+    }
+    (z, crest, esk)
+}
+
+/// Pass A: the drumlin fields (the drainage follows them).
+fn relief(w: &crate::world::World, r: &ReliefIn, h: &mut f64) {
+    let inst = r.instances(w, fam_drumlins());
+    if inst.is_empty() {
+        return;
+    }
+    *h += drumlin_field(&inst, r.ctx.p, r.ctx.gsd).0;
+}
+
+/// Pass B on drumlin fields: drier, paler crests; eskers of pale gravel.
+fn drumlin_look(s: &mut Stack) {
+    let inst = s.instances(fam_drumlins());
+    if inst.is_empty() {
+        return;
+    }
+    let (_, crest, esk) = drumlin_field(&inst, s.ctx.p, s.ctx.gsd);
+    if crest > 0.05 {
+        let c = s.col * DVec3::new(1.12, 1.08, 0.94);
+        s.composite(Layer::paint(0.6 * smoothstep(0.05, 0.6, crest), c));
+    }
+    if esk > 0.0 {
+        let g = mixc(s.pal(crate::registry::pal::SAND), srgb(150.0, 142.0, 124.0), 0.5);
+        s.composite(Layer { cov: smoothstep(0.1, 0.4, esk), albedo: g, cls: cls::GRAVEL, ..Default::default() });
     }
 }
 
@@ -774,6 +900,7 @@ mod tests {
         assert_eq!(cls::SEA_ICE, id("sea_ice"));
         assert_eq!(cls::GLACIER, id("glacier"));
         assert_eq!(cls::FROZEN_WATER, id("frozen_water"));
+        assert_eq!(cls::GRAVEL, id("gravel"));
         assert_eq!(cls::MORAINE, id("moraine"));
         assert_eq!(cls::MARSH, id("marsh"));
         assert_eq!(cls::SEASONAL_SNOW, id("seasonal_snow"));
@@ -868,16 +995,31 @@ mod tests {
             let mm = moist.iter().sum::<f64>() / moist.len().max(1) as f64;
             eprintln!("{name} ({count}, mean moisture {mm:.2}): {}", hits.join("; "));
         }
+        // drumlin fields (instances of the family) near glaciated lowland points
+        let fields: Vec<String> = pts
+            .iter()
+            .filter(|(_, _, t)| land(t) && t.glaciation > 0.5 && t.ground < 400.0)
+            .filter_map(|(la, lo, t)| {
+                let p = geodesy::geodetic2ecef(geodesy::Geodetic::new(la.to_radians(), lo.to_radians(), t.ground), &w.ell);
+                let i = crate::instances::near(&w, fam_drumlins(), p, 0.0);
+                (!i.is_empty()).then(|| format!("({la:.3}, {lo:.3})"))
+            })
+            .take(10)
+            .collect();
+        eprintln!("drumlin fields: {}", fields.join("; "));
     }
 
     /// Places of the default world where the kit draws: (name, lat, lon).
     pub(crate) const PLACES: &[(&str, f64, f64)] = &[
-        ("valley_glaciers", 61.032, 178.195),
-        ("ice_field", 62.305, -125.431),
-        ("polygon_lakes", -71.317, -95.151),
-        ("kettle_lakes", -66.241, 15.112),
-        ("forest_tundra", -65.788, -76.369),
-        ("sea_ice", -76.305, -75.558),
+        ("valley_glaciers", -66.095, 123.288),
+        ("tropical_glaciers", -8.298, -124.179),
+        ("ice_field", -72.199, -89.333),
+        ("polygon_lakes", -72.339, -102.499),
+        ("kettle_lakes", 58.609, -92.893),
+        ("forest_tundra", -71.075, -168.603),
+        ("polar_desert", -78.591, -52.657),
+        ("sea_ice", -71.842, -70.019),
+        ("drumlins", 57.314, -26.177),
     ];
 
     fn tile_at(name: &str, z: u8) -> geodesy::tiles::TileId {
