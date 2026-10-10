@@ -148,6 +148,8 @@ lib/libaerialsynth.so, libaerialsynth.a                      Linux
     native-static-libs.txt     system libraries to link with the static library
 include/aerialsynth.h
 examples/tile.c, examples/render.c
+configs/, docs/, bindings/README.md, bindings/python/README.md
+README.md, LICENSE, NOTICE, CHANGELOG.md
 ```
 
 From the archive's top directory:
