@@ -26,6 +26,8 @@ use wgpu::util::DeviceExt;
 
 /// WGSL sources, in dependency order.
 pub(crate) const NOISE_WGSL: &str = include_str!("wgsl/noise.wgsl");
+/// The planetary atlas' sampler (`atlas_sample`, the buffer at group 0, binding 5).
+pub(crate) const ATLAS_WGSL: &str = include_str!("wgsl/atlas.wgsl");
 const WORLD_WGSL: &str = include_str!("wgsl/world.wgsl");
 const POINTS_WGSL: &str = include_str!("wgsl/points.wgsl");
 const TILE_A_WGSL: &str = include_str!("wgsl/tile_a.wgsl");
@@ -234,10 +236,10 @@ pub(crate) fn sources() -> (String, String, String) {
     let scan = "fn inst_list(f: u32, blk: u32, p: vec3<f64>) -> InstList {\n    return inst_scan(f, p, 0.0);\n}\n";
     let reg = crate::registry::gpu::wgsl_consts();
     let kits = crate::kits::wgsl();
-    let points = format!("{consts}{NOISE_WGSL}{WORLD_WGSL}{relief}{scan}{POINTS_WGSL}");
+    let points = format!("{consts}{NOISE_WGSL}{ATLAS_WGSL}{WORLD_WGSL}{relief}{scan}{POINTS_WGSL}");
     let classes = crate::landcover::WGSL;
-    let tile = format!("{consts}{reg}{pal}{classes}{NOISE_WGSL}{WORLD_WGSL}{relief}{TILE_A_WGSL}{REGISTRY_WGSL}{FEATURES_WGSL}{KERNELS_WGSL}{SURFACE_WGSL}{STACK_WGSL}{kits}{TILE_B_WGSL}");
-    let drain = format!("{consts}{NOISE_WGSL}{WORLD_WGSL}{relief}{scan}{DRAIN_WGSL}");
+    let tile = format!("{consts}{reg}{pal}{classes}{NOISE_WGSL}{ATLAS_WGSL}{WORLD_WGSL}{relief}{TILE_A_WGSL}{REGISTRY_WGSL}{FEATURES_WGSL}{KERNELS_WGSL}{SURFACE_WGSL}{STACK_WGSL}{kits}{TILE_B_WGSL}");
+    let drain = format!("{consts}{NOISE_WGSL}{ATLAS_WGSL}{WORLD_WGSL}{relief}{scan}{DRAIN_WGSL}");
     (points, tile, drain)
 }
 
@@ -251,6 +253,20 @@ impl GpuGenerator {
         let world = World::new(cfg);
         let surface = SurfaceModel::new(&world);
         let d = &gpu.device;
+        // the planetary atlas (world-constant; `atlas_sample` in the kernels)
+        let atlas = crate::atlas::Atlas::for_world(&world);
+        let atlas_bytes = std::mem::size_of_val(atlas.words()) as u64;
+        let lim = d.limits();
+        if atlas_bytes > lim.max_storage_buffer_binding_size.min(lim.max_buffer_size) {
+            bail!(
+                "the GPU ({}) binds at most {} MiB per storage buffer; the planetary atlas (world.atlas.resolution {}) needs {} MiB",
+                gpu.info.name,
+                lim.max_storage_buffer_binding_size.min(lim.max_buffer_size) >> 20,
+                atlas.resolution(),
+                atlas_bytes >> 20
+            );
+        }
+        let g_atlas = storage(d, "atlas", atlas.words());
         let (octs, fbms) = tables::build(&world, &surface);
         let g_cfg = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("cfg"),
@@ -271,14 +287,14 @@ impl GpuGenerator {
         let g_layers = storage(d, "kernel layers", &rt.layers);
         let g_band_ranges = storage(d, "band ranges", &rt.band_ranges);
         let g_band_idx = storage(d, "band lists", &rt.band_idx);
-        let l_globals = layout(d, "globals", &[Uniform, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro]);
+        let l_globals = layout(d, "globals", &[Uniform, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro]);
         let l_drain = layout(d, "drain", &[Ro, Ro, Ro, Ro, Ro]);
         let l_tables = layout(d, "tables", &[Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro]);
         let l_points = layout(d, "points", &[Ro, Rw, Rw, Rw]);
         let l_lat = layout(d, "drainage", &[Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw]);
         let l_tile = layout(d, "tile", &[Ro, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw]);
-        let globals = bind(d, &l_globals, &[&g_cfg, &g_grads, &g_octs, &g_fbms, &g_pal, &g_biomes, &g_crowns, &g_zones, &g_layers, &g_band_ranges, &g_band_idx]);
-        let globals_bufs = vec![g_cfg, g_grads, g_octs, g_fbms, g_pal, g_biomes, g_crowns, g_zones, g_layers, g_band_ranges, g_band_idx];
+        let globals = bind(d, &l_globals, &[&g_cfg, &g_grads, &g_octs, &g_fbms, &g_pal, &g_atlas, &g_biomes, &g_crowns, &g_zones, &g_layers, &g_band_ranges, &g_band_idx]);
+        let globals_bufs = vec![g_cfg, g_grads, g_octs, g_fbms, g_pal, g_atlas, g_biomes, g_crowns, g_zones, g_layers, g_band_ranges, g_band_idx];
         let (src_points, src_tile, src_drain) = sources();
         let t_compile = std::time::Instant::now();
         let cache = PipelineCache::open(&gpu);

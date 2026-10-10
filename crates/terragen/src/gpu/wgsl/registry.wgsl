@@ -84,12 +84,12 @@ struct Eco {
     clim: vec4<f32>,
 }
 
-@group(0) @binding(5) var<storage, read> biomes: array<Biome>;
-@group(0) @binding(6) var<storage, read> crowns: array<Crown>;
-@group(0) @binding(7) var<storage, read> zones: array<Zone>;
-@group(0) @binding(8) var<storage, read> klayers: array<KLayer>;
-@group(0) @binding(9) var<storage, read> band_ranges: array<vec2<u32>>;
-@group(0) @binding(10) var<storage, read> band_idx: array<u32>;
+@group(0) @binding(6) var<storage, read> biomes: array<Biome>;
+@group(0) @binding(7) var<storage, read> crowns: array<Crown>;
+@group(0) @binding(8) var<storage, read> zones: array<Zone>;
+@group(0) @binding(9) var<storage, read> klayers: array<KLayer>;
+@group(0) @binding(10) var<storage, read> band_ranges: array<vec2<u32>>;
+@group(0) @binding(11) var<storage, read> band_idx: array<u32>;
 /// ecoregions by id (open addressing, key 0 = empty)
 @group(1) @binding(12) var<storage, read> eco_keys: array<u64>;
 @group(1) @binding(13) var<storage, read> eco_vals: array<Eco>;

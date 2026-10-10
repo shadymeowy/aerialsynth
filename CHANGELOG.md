@@ -54,6 +54,19 @@
   `docs/design/survey_places.csv` and `survey_places_seed2.csv` hold 24 places of worlds 1
   and 2 (the redesign's "before" baselines). ~20 s per place with two views on an RTX 6000 Ada.
 
+- **Planetary atlas** (`terragen::atlas`, groundwork of the next generator; the generated world is
+  unchanged): a deterministic cube map (6 × 512², ~20 km texels, 58 MB) of world-scale fields
+  computed once per world: smooth elevation, signed coast distance, prevailing wind, annual
+  precipitation from seasonal moisture advection with rain shadows and coastal deserts, sea-level
+  temperature with ocean currents, seasonality, precipitation regime, tectonic plates (boundary
+  kind, distance, closing speed, uplift, volcanism, hotspot tracks), lithology, glaciation,
+  culture areas with archetypes, development and population potential. `Atlas::sample(dir)` and
+  WGSL `atlas_sample(dir)` (bound to the GPU generator's kernels) read the same data; a Köppen
+  classifier (`atlas::koppen`). Built in ~3–4 s on 8 threads, cached in the process and in
+  `~/.cache/terrain/atlas-<key>.bin` (`TERRAGEN_ATLAS_CACHE`). New `world.atlas` settings
+  (resolution, plates, hotspots, culture cell, rain shadow, currents, monsoon, precipitation,
+  advection steps). Preview: `cargo run --release -p terragen --example atlas_preview -- OUT_DIR`.
+  See `docs/simulation.md`.
 - **Bindings** (`bindings/`): tile access from C and Python. Open a world's tile store (the
   world given like `terrain -c FILE --seed N`) and get a layer of tile z/x/y; missing tiles are
   generated (GPU if available, else CPU) and stored first.
