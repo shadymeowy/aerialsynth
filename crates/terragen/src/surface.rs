@@ -63,6 +63,8 @@ pub struct Local<'a> {
     pub fw: f64,
     /// the instance lists of the pixel's block (per family; empty: not known)
     pub inst: &'a [Vec<crate::instances::Instance>],
+    /// the tile's binned features and the pixel's bin
+    pub feat: Option<(&'a crate::features::Binned, usize)>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]

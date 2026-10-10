@@ -507,9 +507,9 @@ pub(crate) fn kernel_parity(cases: &[(&str, &str)]) -> Option<Vec<(String, f64, 
     let b_layers = storage(d, "test layers", &layers);
     let gb = &gen.globals_bufs;
     let g0 = bind(d, &gen.k.l_globals, &[&gb[0], &gb[1], &gb[2], &gb[3], &gb[4], &gb[5], &gb[6], &gb[7], &b_layers, &gb[9], &gb[10]]);
-    let dummies: Vec<wgpu::Buffer> = (0..36).map(|_| output(d, "-", 256)).collect();
-    let g1 = bind(d, &gen.k.l_tables, &dummies[..14].iter().collect::<Vec<_>>());
-    let g2 = bind(d, &gen.k.l_tile, &dummies[14..36].iter().collect::<Vec<_>>());
+    let dummies: Vec<wgpu::Buffer> = (0..40).map(|_| output(d, "-", 256)).collect();
+    let g1 = bind(d, &gen.k.l_tables, &dummies[..18].iter().collect::<Vec<_>>());
+    let g2 = bind(d, &gen.k.l_tile, &dummies[18..40].iter().collect::<Vec<_>>());
     let b_in = storage(d, "test inputs", &ins);
     let b_out = output(d, "test outputs", (ins.len() * 32) as u64);
     let g3 = bind(d, &l_test, &[&b_in, &b_out]);

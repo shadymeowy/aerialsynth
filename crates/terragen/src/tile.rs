@@ -350,6 +350,7 @@ impl Generator {
             river_level: t.river_level,
             eco_edge: t.eco.edge,
             inst: &[],
+            feat: None,
             road_major: t.road_major.min(1e7),
             road_minor: t.road_minor.min(1e7),
             slope: 0.0,
@@ -595,6 +596,16 @@ impl Generator {
             Vec::new()
         };
 
+        // ---------------- the kits' host-built features of the tile, binned (as the GPU's)
+        let feats: Option<crate::features::Binned> = crate::features::any().then(|| {
+            let bins = crate::features::tile_bins(&self.world, id);
+            let (lat_c, lon_c) = pixel_to_latlon(DVec2::new(ox + 128.0, oy + 128.0), z, n as u32);
+            let c = Ctx::new(lat_c, lon_c, 1.0, &ell).p;
+            let radius = bins.iter().map(|(b, r)| (*b - c).length() + r).fold(0.0, f64::max);
+            let area = crate::features::Area { center: c, radius, gsd: gsd_ew(lat_c, z, n as u32, &ell) };
+            crate::features::bin(crate::features::build(&self.world, &mut crate::features::CpuPoints(&self.world), &area), &bins)
+        });
+
         // ---------------- slope of the bare ground at pixel scale
         let slope: Vec<f64> = (0..na * na)
             .map(|k| {
@@ -707,6 +718,7 @@ impl Generator {
                                 river_level: rl,
                                 eco_edge,
                                 inst: inst_bins.get(((j + 1) / 16) * 17 + (i + 1) / 16).map_or(&[][..], |v| &v[..]),
+                                feat: feats.as_ref().map(|f| (f, ((j + 1) / 16) * 17 + (i + 1) / 16)),
                                 road_major,
                                 road_minor,
                                 slope: slope[j * na + i],

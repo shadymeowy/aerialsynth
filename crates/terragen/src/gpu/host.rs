@@ -507,3 +507,18 @@ pub(crate) fn site_ctx(w: &World, pt: DVec3, gsd: f64) -> Ctx {
     let g = geodesy::ecef2geodetic(pt, &w.ell);
     Ctx::new(g.lat, g.lon, gsd, &w.ell)
 }
+
+/// Point evaluations for host-built features (`features::PointSource`): pending until the GPU
+/// evaluated them in a settle round.
+pub(crate) struct PrepPoints<'p, 'a>(pub &'p mut Prep<'a>);
+
+impl crate::features::PointSource for PrepPoints<'_, '_> {
+    fn terrain(&mut self, ctx: &Ctx) -> Option<crate::tile::PointTerrain> {
+        let t = self.0.point(MODE_FULL, ctx)?;
+        Some(crate::tile::PointTerrain {
+            ground: t.ground as f64,
+            water: if t.water_kind != 0 { t.water as f64 } else { f64::NEG_INFINITY },
+            water_kind: t.water_kind as u8,
+        })
+    }
+}

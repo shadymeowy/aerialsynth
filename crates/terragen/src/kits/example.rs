@@ -14,7 +14,7 @@ pub static KIT: Kit = Kit {
     name: "example",
     biomes_yaml: include_str!("../../biomes/example.yaml"),
     wgsl: include_str!("../gpu/wgsl/kits/example.wgsl"),
-    layers: &[(slot::AZONAL, azonal)],
+    layers: &[(slot::AZONAL, azonal), (slot::LINEAR, linear)],
     kernels: &[KernelSpec {
         name: "example_rings",
         kind: 240,
@@ -29,8 +29,60 @@ pub static KIT: Kit = Kit {
     relief: Some(relief),
     relief_wgsl: include_str!("../gpu/wgsl/kits/example_relief.wgsl"),
     families: &[Family { name: "example_cones", cell: 40_000.0, jitter: 0.8, reach: 6_000.0, relief: true, exists: cone_exists }],
-    host: None,
+    host: Some(host),
 };
+
+/// A track from every cone's summit 2 km east (heights from point evaluations of the terrain),
+/// and a pad on the summit.
+fn host(ctx: &mut crate::features::HostCtx, area: &crate::features::Area) -> crate::features::Features {
+    let mut f = crate::features::Features::default();
+    let w = ctx.world;
+    for i in crate::instances::near(w, fam(), area.center, area.radius) {
+        let g = geodesy::ecef2geodetic(i.center, &w.ell);
+        let east = glam::DVec3::new(-g.lon.sin(), g.lon.cos(), 0.0);
+        let b0 = i.center + east * 2000.0;
+        let gb = geodesy::ecef2geodetic(b0, &w.ell);
+        let b = geodesy::geodetic2ecef(geodesy::Geodetic::new(gb.lat, gb.lon, 0.0), &w.ell);
+        let (Some(ta), Some(tb)) = (ctx.terrain(g.lat, g.lon, 20.0), ctx.terrain(gb.lat, gb.lon, 20.0)) else { continue };
+        f.segs.push(crate::features::FSeg {
+            a: i.center,
+            b,
+            ha: ta.ground as f32,
+            hb: tb.ground as f32,
+            kind: 240,
+            class: crate::landcover::TRACK,
+            hw: 4.0,
+            ..Default::default()
+        });
+        let north = east.cross(i.center.normalize());
+        f.stamps.push(crate::features::FStamp { center: i.center, ex: east, ey: -north, half: [30.0, 20.0], template: 240, ..Default::default() });
+    }
+    f
+}
+
+/// The tracks and pads.
+fn linear(s: &mut Stack) {
+    let p = s.ctx.p;
+    let fw = s.l.fw.max(0.5 * s.ctx.gsd);
+    let mut cov: f64 = 0.0;
+    for seg in s.segments() {
+        if seg.kind == 240 {
+            let (d, _, _) = crate::features::seg_frame(seg, p);
+            cov = cov.max(crate::kernels::band_cov(d, seg.hw as f64, fw));
+        }
+    }
+    for st in s.stamps() {
+        if st.template == 240 {
+            let d = p - st.center;
+            let (u, v) = (d.dot(st.ex), d.dot(st.ey));
+            cov = cov.max((((st.half[0] as f64 - u.abs()).min(st.half[1] as f64 - v.abs())) / fw + 0.5).clamp(0.0, 1.0));
+        }
+    }
+    if cov > 0.0 {
+        let gravel = crate::surface::srgb(162.0, 146.0, 120.0);
+        s.composite(Layer { cov, albedo: gravel, cls: crate::landcover::TRACK, hmode: crate::stack::hmode::BLEND, relit: 0.5, ..Default::default() });
+    }
+}
 
 /// The family's index (`FAM_EXAMPLE_CONES` in WGSL).
 fn fam() -> usize {

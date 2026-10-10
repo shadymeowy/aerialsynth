@@ -24,3 +24,29 @@ fn example_rings(li: u32, i: KIn) -> KOut {
     o.albedo = k.col[0];
     return o;
 }
+
+fn example_slot_linear(s: ptr<function, Stack>) {
+    let p = (*s).c.p;
+    let blk = (*s).l.blk;
+    let fw = max((*s).l.fw, 0.5 * (*s).c.gsd);
+    var cov = 0.0;
+    for (var k = 0u; k < feat_seg_n(blk); k++) {
+        let seg = feat_seg(blk, k);
+        if (seg.kind == 240u) {
+            cov = max(cov, kband_cov(seg_frame(seg, p).x, seg.hw, fw));
+        }
+    }
+    for (var k = 0u; k < feat_stamp_n(blk); k++) {
+        let st = feat_stamp(blk, k);
+        if (st.tmpl == 240u) {
+            let uv = stamp_uv(st, p);
+            cov = max(cov, clamp(min(st.half.x - abs(uv.x), st.half.y - abs(uv.y)) / fw + 0.5, 0.0, 1.0));
+        }
+    }
+    if (cov > 0.0) {
+        var ly = layer_paint(cov, srgb(162.0, 146.0, 120.0), LC_TRACK);
+        ly.hmode = HM_BLEND;
+        ly.relit = 0.5;
+        composite(s, ly);
+    }
+}

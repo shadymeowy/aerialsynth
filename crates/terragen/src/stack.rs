@@ -319,6 +319,19 @@ impl<'a> Stack<'a> {
         }
     }
 
+    /// The linear features (segments) that can reach the sample's block (WGSL `feat_seg_n`,
+    /// `feat_seg` with `(*s).l.blk`).
+    pub fn segments(&self) -> impl Iterator<Item = &crate::features::FSeg> {
+        let (b, i) = self.l.feat.map_or((None, 0), |(b, i)| (Some(b), i));
+        b.into_iter().flat_map(move |b| b.segs[i].iter().map(move |&k| &b.f.segs[k as usize]))
+    }
+
+    /// The stamps that can reach the sample's block (WGSL `feat_stamp_n`, `feat_stamp`).
+    pub fn stamps(&self) -> impl Iterator<Item = &crate::features::FStamp> {
+        let (b, i) = self.l.feat.map_or((None, 0), |(b, i)| (Some(b), i));
+        b.into_iter().flat_map(move |b| b.stamps[i].iter().map(move |&k| &b.f.stamps[k as usize]))
+    }
+
     pub fn p(&self) -> DVec3 {
         self.ctx.p
     }

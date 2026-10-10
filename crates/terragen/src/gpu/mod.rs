@@ -34,6 +34,7 @@ const REGISTRY_WGSL: &str = include_str!("wgsl/registry.wgsl");
 const KERNELS_WGSL: &str = include_str!("wgsl/kernels.wgsl");
 const STACK_WGSL: &str = include_str!("wgsl/stack.wgsl");
 const INSTANCES_WGSL: &str = include_str!("wgsl/instances.wgsl");
+const FEATURES_WGSL: &str = include_str!("wgsl/features.wgsl");
 const TILE_B_WGSL: &str = include_str!("wgsl/tile_b.wgsl");
 const DRAIN_WGSL: &str = include_str!("wgsl/drain.wgsl");
 
@@ -235,7 +236,7 @@ pub(crate) fn sources() -> (String, String, String) {
     let kits = crate::kits::wgsl();
     let points = format!("{consts}{NOISE_WGSL}{WORLD_WGSL}{relief}{scan}{POINTS_WGSL}");
     let classes = crate::landcover::WGSL;
-    let tile = format!("{consts}{reg}{pal}{classes}{NOISE_WGSL}{WORLD_WGSL}{relief}{TILE_A_WGSL}{REGISTRY_WGSL}{KERNELS_WGSL}{SURFACE_WGSL}{STACK_WGSL}{kits}{TILE_B_WGSL}");
+    let tile = format!("{consts}{reg}{pal}{classes}{NOISE_WGSL}{WORLD_WGSL}{relief}{TILE_A_WGSL}{REGISTRY_WGSL}{FEATURES_WGSL}{KERNELS_WGSL}{SURFACE_WGSL}{STACK_WGSL}{kits}{TILE_B_WGSL}");
     let drain = format!("{consts}{NOISE_WGSL}{WORLD_WGSL}{relief}{scan}{DRAIN_WGSL}");
     (points, tile, drain)
 }
@@ -272,7 +273,7 @@ impl GpuGenerator {
         let g_band_idx = storage(d, "band lists", &rt.band_idx);
         let l_globals = layout(d, "globals", &[Uniform, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro]);
         let l_drain = layout(d, "drain", &[Ro, Ro, Ro, Ro, Ro]);
-        let l_tables = layout(d, "tables", &[Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro]);
+        let l_tables = layout(d, "tables", &[Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro]);
         let l_points = layout(d, "points", &[Ro, Rw, Rw, Rw]);
         let l_lat = layout(d, "drainage", &[Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw]);
         let l_tile = layout(d, "tile", &[Ro, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw]);
@@ -1043,7 +1044,7 @@ impl GpuGenerator {
             let b_keys = storage(d, "lake keys", &keys);
             let b_vals = storage(d, "lake levels", &vals);
             let b_list = output(d, "bin list", (bin_cap * 4) as u64);
-            let g1 = bind(d, &self.k.l_tables, &[b_segs, &empty, &b_sinks, &b_keys, &b_vals, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty]);
+            let g1 = bind(d, &self.k.l_tables, &[b_segs, &empty, &b_sinks, &b_keys, &b_vals, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty]);
             let g2 = group2(&b_list);
             run_passes(
                 &g1,
@@ -1077,7 +1078,7 @@ impl GpuGenerator {
         };
         stamp("relief, lakes, bins");
         // ---- the rest of pass A (the bins' pieces as the piece list), the sites pass B needs
-        let g1 = bind(d, &self.k.l_tables, &[b_segs, &b_list, &b_sinks, &b_keys, &b_vals, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty]);
+        let g1 = bind(d, &self.k.l_tables, &[b_segs, &b_list, &b_sinks, &b_keys, &b_vals, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty]);
         let g2 = group2(&unused);
         let mut passes = vec![(&self.k.a2, [wg(NA2), wg(NA2), nt as u32])];
         if full {
@@ -1120,6 +1121,25 @@ impl GpuGenerator {
         let b_ek = storage(d, "ecoregion keys", &ek);
         let b_ev = storage(d, "ecoregions", &ev);
         stamp(&format!("{} ecoregions", ecos.len()));
+        // the kits' host-built features per tile (shared Rust with the CPU; point evaluations
+        // through the settle rounds), binned like the pass-A pixels
+        let (fs, fst, fb, fi) = if crate::features::any() {
+            let feats: Vec<crate::features::Features> = self.settle(&mut cache, |prep| {
+                tq.iter()
+                    .map(|q| {
+                        let area = crate::features::Area { center: q.center, radius: q.radius, gsd: q.gsd };
+                        crate::features::build(&self.world, &mut host::PrepPoints(prep), &area)
+                    })
+                    .collect()
+            })?;
+            feature_tables(&self.world, ids, feats)
+        } else {
+            (vec![], vec![], vec![[0u32; 4]], vec![0u32])
+        };
+        let b_fs = storage(d, "feature segments", &fs);
+        let b_fst = storage(d, "stamps", &fst);
+        let b_fb = storage(d, "feature bins", &fb);
+        let b_fi = storage(d, "feature lists", &fi);
         let (rk, ri, rv) = region_table(&regions);
         let (tk, tc, tl, tv) = town_table(&town_cells);
         let b_rk = storage(d, "region keys", &rk);
@@ -1130,7 +1150,7 @@ impl GpuGenerator {
         let b_tl = storage(d, "town list", &tl);
         let b_tv = storage(d, "towns", &tv);
         // ---- pass B, canopy opening, outputs
-        let g1 = bind(d, &self.k.l_tables, &[b_segs, &b_list, &b_sinks, &b_keys, &b_vals, &b_rk, &b_ri, &b_rv, &b_tk, &b_tc, &b_tl, &b_tv, &b_ek, &b_ev]);
+        let g1 = bind(d, &self.k.l_tables, &[b_segs, &b_list, &b_sinks, &b_keys, &b_vals, &b_rk, &b_ri, &b_rv, &b_tk, &b_tc, &b_tl, &b_tv, &b_ek, &b_ev, &b_fs, &b_fst, &b_fb, &b_fi]);
         let g2 = group2(&unused);
         let grid = [wg(NA), wg(NA), nt as u32];
         run_passes(
@@ -1207,6 +1227,30 @@ fn from_orderable(u: u32) -> f32 {
     } else {
         f32::from_bits(!u)
     }
+}
+
+/// The features of the tiles as GPU tables: segments, stamps, per bin (first segment, count,
+/// first stamp, count) into the index list.
+#[allow(clippy::type_complexity)]
+fn feature_tables(w: &World, ids: &[TileId], feats: Vec<crate::features::Features>) -> (Vec<crate::features::gpu::GFSeg>, Vec<crate::features::gpu::GFStamp>, Vec<[u32; 4]>, Vec<u32>) {
+    let (mut segs, mut stamps, mut bins, mut idx) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for (id, f) in ids.iter().zip(feats) {
+        let b = crate::features::bin(f, &crate::features::tile_bins(w, *id));
+        let (s0, t0) = (segs.len() as u32, stamps.len() as u32);
+        segs.extend(b.f.segs.iter().map(crate::features::gpu::seg));
+        stamps.extend(b.f.stamps.iter().map(crate::features::gpu::stamp));
+        for (ls, lt) in b.segs.iter().zip(&b.stamps) {
+            let i0 = idx.len() as u32;
+            idx.extend(ls.iter().map(|k| k + s0));
+            let i1 = idx.len() as u32;
+            idx.extend(lt.iter().map(|k| k + t0));
+            bins.push([i0, ls.len() as u32, i1, lt.len() as u32]);
+        }
+    }
+    if idx.is_empty() {
+        idx.push(0);
+    }
+    (segs, stamps, bins, idx)
 }
 
 /// Ecoregions as an open-addressing table: keys (the slot is the index of the value).

@@ -327,7 +327,7 @@ fn desert_slot_azonal(s: ptr<function, Stack>) {
 
 **WGSL pitfalls** (naga → SPIR-V, NVIDIA): never pass a pointer to a member of the stack
 (`&(*s).pf`) to a function — copy it to a local `var` and back (naga's SPIR-V backend panics:
-"Expression is not cached"); `target`, `filter`, `sample`, `mod`, … are reserved words; no
+"Expression is not cached"); `target`, `class`, `template`, `filter`, `sample`, `mod`, … are reserved words; no
 recursion; every call site of a big function is inlined (keep one call site per heavy
 function); 64-bit types (`u64`, `i64`, `f64`) are available; positions are `vec3<f64>`, local
 coordinates `f32`. `cargo test -p terragen wgsl_compiles` parses, validates and compiles every
@@ -405,7 +405,7 @@ pub struct FSeg {   // a segment: ECEF ends, heights, kind (kit-defined), class,
 }
 pub struct FStamp { // an oriented box: centre, axes, half sizes, template (kit-defined), parameters
     pub center: DVec3, pub ex: DVec3, pub ey: DVec3, pub half: [f32; 2],
-    pub template: u32, pub h: f32, pub v: [f32; 8],
+    pub template: u32, pub h: f32, pub v: [f32; 8],   // (WGSL: `tmpl`, `cls`: reserved words)
 }
 pub host: Option<fn(&mut HostCtx, &Area) -> Features>   // in `Kit`
 ```
