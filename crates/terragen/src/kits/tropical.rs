@@ -141,13 +141,83 @@ const GRASS_P: &[P] = &[
 ];
 
 static KERNELS: &[KernelSpec] = &[
-    KernelSpec { name: "tropical_crowns", kind: kind::CROWNS, params: CROWNS_P, size_slot: 0, dyn_size: None, reach: Some((4, 0, 1.0)), default_hmode: "max", eval: crowns, wgsl: "tropical_crowns" },
-    KernelSpec { name: "tropical_fire", kind: kind::FIRE, params: FIRE_P, size_slot: 0, dyn_size: None, reach: None, default_hmode: "none", eval: fire, wgsl: "tropical_fire" },
-    KernelSpec { name: "tropical_swidden", kind: kind::SWIDDEN, params: SWIDDEN_P, size_slot: 0, dyn_size: None, reach: None, default_hmode: "add", eval: swidden, wgsl: "tropical_swidden" },
-    KernelSpec { name: "tropical_waterhole", kind: kind::WATERHOLE, params: WATERHOLE_P, size_slot: 15, dyn_size: None, reach: Some((6, 0, SITE_REACH)), default_hmode: "none", eval: waterhole, wgsl: "tropical_waterhole" },
-    KernelSpec { name: "tropical_meander", kind: kind::MEANDER, params: MEANDER_P, size_slot: 15, dyn_size: None, reach: None, default_hmode: "none", eval: meander, wgsl: "tropical_meander" },
-    KernelSpec { name: "tropical_mangrove", kind: kind::MANGROVE, params: MANGROVE_P, size_slot: 0, dyn_size: None, reach: None, default_hmode: "max", eval: mangrove, wgsl: "tropical_mangrove" },
-    KernelSpec { name: "tropical_grass", kind: kind::GRASS, params: GRASS_P, size_slot: 0, dyn_size: None, reach: None, default_hmode: "none", eval: grass, wgsl: "tropical_grass" },
+    KernelSpec {
+        name: "tropical_crowns",
+        kind: kind::CROWNS,
+        params: CROWNS_P,
+        size_slot: 0,
+        dyn_size: None,
+        reach: Some((4, 0, 1.0)),
+        default_hmode: "max",
+        eval: crowns,
+        wgsl: "tropical_crowns",
+    },
+    KernelSpec {
+        name: "tropical_fire",
+        kind: kind::FIRE,
+        params: FIRE_P,
+        size_slot: 0,
+        dyn_size: None,
+        reach: None,
+        default_hmode: "none",
+        eval: fire,
+        wgsl: "tropical_fire",
+    },
+    KernelSpec {
+        name: "tropical_swidden",
+        kind: kind::SWIDDEN,
+        params: SWIDDEN_P,
+        size_slot: 0,
+        dyn_size: None,
+        reach: None,
+        default_hmode: "add",
+        eval: swidden,
+        wgsl: "tropical_swidden",
+    },
+    KernelSpec {
+        name: "tropical_waterhole",
+        kind: kind::WATERHOLE,
+        params: WATERHOLE_P,
+        size_slot: 15,
+        dyn_size: None,
+        reach: Some((6, 0, SITE_REACH)),
+        default_hmode: "none",
+        eval: waterhole,
+        wgsl: "tropical_waterhole",
+    },
+    KernelSpec {
+        name: "tropical_meander",
+        kind: kind::MEANDER,
+        params: MEANDER_P,
+        size_slot: 15,
+        dyn_size: None,
+        reach: None,
+        default_hmode: "none",
+        eval: meander,
+        wgsl: "tropical_meander",
+    },
+    KernelSpec {
+        name: "tropical_mangrove",
+        kind: kind::MANGROVE,
+        params: MANGROVE_P,
+        size_slot: 0,
+        dyn_size: None,
+        reach: None,
+        default_hmode: "max",
+        eval: mangrove,
+        wgsl: "tropical_mangrove",
+    },
+    KernelSpec {
+        name: "tropical_grass",
+        kind: kind::GRASS,
+        params: GRASS_P,
+        size_slot: 0,
+        dyn_size: None,
+        reach: None,
+        default_hmode: "none",
+        eval: grass,
+        wgsl: "tropical_grass",
+    },
 ];
 
 // ============================================================================= helpers
@@ -448,7 +518,8 @@ fn waterhole(k: &KParams, i: &KIn) -> KOut {
                         if d > lk + i.fw {
                             continue;
                         }
-                        let a = j * sector + 0.35 * sector * (u01k(ht, 2) - 0.5) + 0.25 * (d / (0.2 * len.max(1.0)) + 6.3 * u01k(ht, 3)).sin() * (d / len.max(1.0));
+                        let a =
+                            j * sector + 0.35 * sector * (u01k(ht, 2) - 0.5) + 0.25 * (d / (0.2 * len.max(1.0)) + 6.3 * u01k(ht, 3)).sin() * (d / len.max(1.0));
                         let dp = d * wrap(th - a).abs().min(1.5);
                         let hw = 0.5 * v[7] * (1.0 - smoothstep(0.5 * lk, lk, d)).sqrt();
                         tc = tc.max(band_cov(dp, hw, i.fw));
@@ -680,7 +751,19 @@ mod tests {
     #[test]
     fn registry_compiles_with_the_kit() {
         let r = crate::registry::Registry::builtin().unwrap();
-        for b in ["tropical_moist", "tropical_dry", "savanna_acacia", "savanna_baobab", "palm_savanna", "miombo_woodland", "tropical_dry_forest", "monsoon_forest", "flooded_forest", "tropical_cloud_forest", "tropical_paramo"] {
+        for b in [
+            "tropical_moist",
+            "tropical_dry",
+            "savanna_acacia",
+            "savanna_baobab",
+            "palm_savanna",
+            "miombo_woodland",
+            "tropical_dry_forest",
+            "monsoon_forest",
+            "flooded_forest",
+            "tropical_cloud_forest",
+            "tropical_paramo",
+        ] {
             assert!(r.index(b).is_some(), "biome {b}");
         }
     }
@@ -703,7 +786,8 @@ mod tests {
             let base = DVec3::new(6_371_000.0, 0.0, 0.0);
             for j in 0..n {
                 let q = DVec2::new(kernels::halton(j + 7, 5) * span + 1e4, kernels::halton(j + 7, 7) * span - 3e3);
-                let i = KIn { q, p: base + DVec3::new(0.0, q.x, q.y), east: DVec3::Y, north: DVec3::Z, gsd: sz / 50.0, fw: sz / 50.0, amount: 1.0, aux: [0.0; 4] };
+                let i =
+                    KIn { q, p: base + DVec3::new(0.0, q.x, q.y), east: DVec3::Y, north: DVec3::Z, gsd: sz / 50.0, fw: sz / 50.0, amount: 1.0, aux: [0.0; 4] };
                 let o = kernels::explicit(&k, &i);
                 c += o.cov;
                 a += o.albedo * o.cov;
@@ -774,13 +858,13 @@ mod tests {
     /// Places of the default world where the kit draws (rainforest with a floodplain river,
     /// savanna, burn scars, slash-and-burn, cloud forest, baobabs, mangrove coast).
     pub(crate) const PLACES: &[(&str, f64, f64)] = &[
-        ("rainforest_river", 3.3011, -16.0396),
-        ("savanna_acacia", -15.4848, 32.3650),
-        ("burn_scars", 7.4436, -125.4733),
-        ("swidden", -0.4554, -40.5656),
-        ("cloud_forest", -12.2078, -28.3089),
-        ("savanna_baobab", -14.0997, -145.1467),
-        ("mangrove", 17.4666, 138.0190),
+        ("savanna_gallery_burns", 22.5041, -27.7881),
+        ("rainforest_river_edge", 12.1997, -28.5894),
+        ("meander_scars", 6.3939, 150.9967),
+        ("monsoon_mosaic", -17.9542, -128.5902),
+        ("mangrove_coast", 7.1584, -41.9711),
+        ("savanna_river", 3.3011, -16.0396),
+        ("baobab_savanna", 8.0571, 144.8028),
     ];
 
     /// Tiles where the kit draws agree between the backends (at most 0.5 % of the pixels off).
@@ -808,6 +892,25 @@ mod tests {
             }
         }
         assert!(worst <= 0.005, "{:.2}% of the pixels differ", worst * 100.0);
+    }
+
+    /// The GPU generates the kit's places at every zoom without falling back to the CPU (an
+    /// instance family overflowing a block, a shader error): `Backend::Gpu` returns the error.
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn places_stay_on_the_gpu() {
+        let Ok(g) = crate::gpu::shared() else { return };
+        if g.check_generator().is_err() {
+            return;
+        }
+        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        for &(name, lat, lon) in PLACES {
+            let ids: Vec<_> = [6u8, 8, 10, 12, 14, 16].iter().map(|&z| geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)).collect();
+            if let Err(e) = gen.tiles(&ids) {
+                panic!("{name}: GPU generation failed: {e:#}");
+            }
+        }
+        assert!(gen.backend_name().starts_with("GPU"), "{}", gen.backend_name());
     }
 
     /// Places of the default world where the kit's biomes and features are (to choose stills):
@@ -850,11 +953,26 @@ mod tests {
             let [(id, site), _] = crate::eco::sites(&w, p);
             let e = crate::eco::compute(&w, &reg, id, site);
             let name = reg.biomes[e.biome as usize].name.clone();
-            if !(name.starts_with("tropical") || name.contains("savanna") || name.contains("forest") && !name.starts_with("temperate") || name.starts_with("miombo")) {
+            if !(name.starts_with("tropical")
+                || name.contains("savanna")
+                || name.contains("forest") && !name.starts_with("temperate")
+                || name.starts_with("miombo"))
+            {
                 continue;
             }
             let (t, _, cls) = gen.probe(lat, lon, 2.0);
-            let s = format!("{:.4},{:.4} {name} T {:.1} moist {:.2} h {:.0} coast {:.1} fp {:.2} river {:.0} cls {}", lat.to_degrees(), lon.to_degrees(), t.temp, t.moist, t.ground, t.coast_km, t.floodplain, if t.river_hw > 0.0 { t.river_d.abs() - t.river_hw } else { -1.0 }, crate::registry::classes::name(cls));
+            let s = format!(
+                "{:.4},{:.4} {name} T {:.1} moist {:.2} h {:.0} coast {:.1} fp {:.2} river {:.0} cls {}",
+                lat.to_degrees(),
+                lon.to_degrees(),
+                t.temp,
+                t.moist,
+                t.ground,
+                t.coast_km,
+                t.floodplain,
+                if t.river_hw > 0.0 { t.river_d.abs() - t.river_hw } else { -1.0 },
+                crate::registry::classes::name(cls)
+            );
             if t.water_kind != crate::world::water::NONE && t.water > t.ground {
                 continue;
             }

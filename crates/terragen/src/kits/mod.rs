@@ -42,8 +42,11 @@ mod tropical;
 /// `kernels::KIT_BASE` (64) on, by its line here: desert 64, volcanic 80, mountains 96,
 /// cold 112, coast 128, tropical 144, temperate 160, agriculture 176, settlements 192,
 /// transport 208.
+// (the blank lines between the entries keep parallel kit merges conflict-free: not formatted)
+#[rustfmt::skip]
 pub static KITS: &[&Kit] = &[
     &desert::KIT,
+
     // &volcanic::KIT,
 
     // &mountains::KIT,

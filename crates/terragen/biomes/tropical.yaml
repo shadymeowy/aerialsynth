@@ -7,7 +7,7 @@
 # Schema: docs/design/kit-guide.md ("Biomes"). The kernels `tropical_*` are the kit's.
 # Mangrove masks: near the coast (`coast_km`: the atlas' ~20 km texels place the coast within
 # ~15 km), near sea level (the intertidal and estuary flats: they replace the beaches there),
-# not on arid coasts, not in fields.
+# not on arid coasts; they take the coastal flats from the fields.
 
 # ---------------------------------------------------------------- rainforest (core, patched)
 
@@ -24,7 +24,7 @@
   canopy:
     # the closed canopy: broad cauliflower crowns of a stand, flat-topped where they close
     - { share: tropical, shape: umbrella, cell: 15, height: [22, 8], colour: crown_tropic }
-    - { share: tropical, shape: dome, cell: 9, height: [20, 6], colour: [40, 74, 36], density: 0.6, seed: 0x7E01 }
+    - { share: tropical, shape: umbrella, cell: 10, height: [18, 6], colour: [40, 74, 36], density: 0.6, seed: 0x7E01 }
     - { share: broadleaf, shape: dome, cell: 8.5, height: [10, 10], open_height: 0.65, colour: crown_decid, colour_dry: crown_dry }
     - { share: shrub, shape: dome, cell: 3.2, height: [1.6, 0], colour: shrub, closure: false, stand: false }
   zonation:
@@ -49,15 +49,15 @@
       kernel: tropical_meander
       seed: 0x7E10
       mask: { floodplain: [0.15, 0.35, null, null], river_dist: [null, null, 1500, 3500], slope: [null, null, 0.06, 0.12] }
-      params: { cell: 1700, density: 0.85, part: lake, radius: [180, 420], width: 28, open: 0.7, size: 200, colour: [40, 46, 34], colour2: [70, 72, 50] }
+      params: { cell: 1700, density: 0.85, part: lake, radius: [180, 420], width: 28, open: 0.7, size: 200, colour: [34, 46, 50], colour2: [84, 88, 72] }
       class: lake
       clear: 1.0
       height: blend
     - slot: canopy
       kernel: tropical_meander
       seed: 0x7E10
-      mask: { floodplain: [0.15, 0.35, null, null], river_dist: [null, null, 1500, 3500], slope: [null, null, 0.06, 0.12] }
-      params: { cell: 1700, density: 0.85, part: scroll, radius: [180, 420], width: 28, open: 0.7, bars: 42, height: 20, size: 200, colour: [88, 122, 52], colour2: [44, 74, 38], silt_colour: [112, 136, 62] }
+      mask: { floodplain: [0.15, 0.35, null, null], river_dist: [null, null, 1500, 3500], slope: [null, null, 0.06, 0.12], moist: [0.55, 0.7, null, null] }
+      params: { cell: 1700, density: 0.85, part: scroll, radius: [180, 420], width: 28, open: 0.7, bars: 42, height: 20, size: 200, colour: [62, 96, 44], colour2: [44, 74, 38], silt_colour: [96, 122, 56] }
       class: tropical_rainforest
       height: blend
     # emergent giants above the canopy: pale crowns, some flowering yellow or pink-red
@@ -65,13 +65,13 @@
       slot: canopy
       kernel: tropical_crowns
       mask: { veg: [0.5, 0.8, null, null], natural: [0.5, 0.8, null, null], field: [null, null, 0.05, 0.2], moist: [0.5, 0.65, null, null] }
-      params: { cell: 34, density: 0.4, radius: [6, 11], height: [36, 48], colour: [70, 98, 50], colour2: [182, 160, 58], second: 0.1, flowering: 0.08, flower_colour: [172, 92, 100], colour_var: 0.3 }
+      params: { cell: 34, density: 0.4, shape: umbrella, radius: [8, 13], height: [33, 42], colour: [70, 98, 50], colour2: [182, 160, 58], second: 0.1, flowering: 0.08, flower_colour: [172, 92, 100], colour_var: 0.3 }
       class: tropical_rainforest
     # river-edge forest: a lower band of pale pioneer crowns (Cecropia) along the banks
     - slot: canopy
       kernel: tropical_crowns
-      mask: { river_dist: [null, null, 25, 70], natural: [0.4, 0.7, null, null], field: [null, null, 0.05, 0.2] }
-      params: { cell: 7, density: 0.95, radius: [3, 5], height: [14, 22], colour: [104, 122, 86], colour2: [58, 92, 44], second: 0.45, colour_var: 0.3 }
+      mask: { river_dist: [null, null, 15, 45], natural: [0.4, 0.7, null, null], field: [null, null, 0.05, 0.2] }
+      params: { cell: 7, density: 0.95, radius: [3, 5], height: [14, 22], colour: [88, 110, 74], colour2: [56, 90, 44], second: 0.5, colour_var: 0.3 }
       class: tropical_rainforest
       height: blend
     # mangroves on low coasts and estuaries
@@ -79,14 +79,14 @@
       slot: canopy
       kernel: tropical_mangrove
       seed: 0x7E20
-      mask: { coast_km: [null, null, 15, 30], height: [null, null, 3.0, 6.0], moist: [0.4, 0.55, null, null], field: [null, null, 0.05, 0.2] }
+      mask: { coast_km: [null, null, 15, 30], height: [null, null, 3.0, 6.0], moist: [0.4, 0.55, null, null], slope: [null, null, 0.03, 0.08] }
       params: { scale: 420, width: 9, height: 12, crown: 4.5 }
       class: mangrove
     - &mangrove_channels
       slot: canopy
       kernel: tropical_mangrove
       seed: 0x7E20
-      mask: { coast_km: [null, null, 15, 30], height: [null, null, 3.0, 6.0], moist: [0.4, 0.55, null, null], field: [null, null, 0.05, 0.2] }
+      mask: { coast_km: [null, null, 15, 30], height: [null, null, 3.0, 6.0], moist: [0.4, 0.55, null, null], slope: [null, null, 0.03, 0.08] }
       params: { scale: 420, part: channels, width: 9 }
       class: river
       height: blend
@@ -126,16 +126,16 @@
     - slot: disturbance
       kernel: tropical_meander
       seed: 0x7E11
-      mask: { slope: [null, null, 0.06, 0.12], river_dist: [null, null, 2500, 5000] }
-      params: { cell: 1300, density: 0.9, part: lake, radius: [160, 380], width: 26, open: 0.8, size: 200, colour: [34, 38, 30], colour2: [62, 64, 46] }
+      mask: { slope: [null, null, 0.06, 0.12], river_dist: [null, null, 1200, 2500] }
+      params: { cell: 2200, density: 0.6, part: lake, radius: [160, 380], width: 26, open: 0.8, size: 200, colour: [26, 30, 28], colour2: [70, 70, 54] }
       class: lake
       clear: 1.0
       height: blend
     - slot: canopy
       kernel: tropical_meander
       seed: 0x7E11
-      mask: { slope: [null, null, 0.06, 0.12], river_dist: [null, null, 2500, 5000] }
-      params: { cell: 1300, density: 0.9, part: scroll, radius: [160, 380], width: 26, open: 0.8, bars: 38, height: 17, size: 200, colour: [92, 124, 56], colour2: [42, 70, 38], silt_colour: [116, 138, 64] }
+      mask: { slope: [null, null, 0.06, 0.12], river_dist: [null, null, 1200, 2500] }
+      params: { cell: 2200, density: 0.6, part: scroll, radius: [160, 380], width: 26, open: 0.8, bars: 38, height: 17, size: 200, colour: [64, 98, 46], colour2: [42, 70, 38], silt_colour: [100, 124, 58] }
       class: tropical_rainforest
       height: blend
     - *emergents
@@ -195,7 +195,7 @@
     - slot: canopy
       kernel: tropical_crowns
       mask: { veg: [0.5, 0.8, null, null], natural: [0.5, 0.8, null, null], field: [null, null, 0.05, 0.2], moist: [0.5, 0.65, null, null] }
-      params: { cell: 36, density: 0.35, radius: [6, 10], height: [30, 40], colour: [74, 96, 48], colour2: [138, 120, 92], second: 0.25, flowering: 0.12, flower_colour: [200, 102, 46], colour_var: 0.3 }
+      params: { cell: 36, density: 0.35, shape: umbrella, radius: [7, 12], height: [28, 36], colour: [74, 96, 48], colour2: [138, 120, 92], second: 0.25, flowering: 0.12, flower_colour: [200, 102, 46], colour_var: 0.3 }
       class: tropical_rainforest
     - slot: canopy
       kernel: tropical_crowns
@@ -283,7 +283,7 @@
       slot: disturbance
       kernel: tropical_fire
       mask: { natural: [0.5, 0.8, null, null], field: [null, null, 0.05, 0.2], moist: [null, null, 0.55, 0.7] }
-      params: { scale: 1500, fraction: 0.26, ages: 3, ash: 0.6, colour: [28, 26, 25], colour2: [94, 76, 58], regrowth_colour: [126, 128, 70] }
+      params: { scale: 1500, fraction: 0.26, ages: 3, ash: 0.35, colour: [28, 26, 25], colour2: [94, 76, 58], regrowth_colour: [126, 128, 70] }
       class: burn_scar
       clear: 0.3
     - &termite_mounds
@@ -348,7 +348,8 @@
       clear: 1.0
       height: blend
     - *gallery_gully
-    - *gallery_river
+    - *mangrove
+    - *mangrove_channels
 
 - id: savanna_baobab
   group: vegetation
@@ -415,7 +416,7 @@
       kernel: tropical_meander
       seed: 0x7E12
       mask: { floodplain: [0.15, 0.35, null, null], river_dist: [null, null, 1500, 3500], slope: [null, null, 0.06, 0.12] }
-      params: { cell: 1700, density: 0.85, part: lake, radius: [160, 380], width: 22, open: 0.6, size: 200, colour: [52, 62, 52], colour2: [84, 90, 66] }
+      params: { cell: 1700, density: 0.85, part: lake, radius: [160, 380], width: 22, open: 0.6, size: 200, colour: [44, 62, 68], colour2: [96, 98, 78] }
       class: lake
       clear: 1.0
       height: blend
@@ -423,7 +424,7 @@
       kernel: tropical_meander
       seed: 0x7E12
       mask: { floodplain: [0.15, 0.35, null, null], river_dist: [null, null, 1500, 3500], slope: [null, null, 0.06, 0.12] }
-      params: { cell: 1700, density: 0.85, part: scroll, radius: [160, 380], width: 22, open: 0.6, bars: 36, height: 0.5, size: 200, colour: [150, 146, 84], colour2: [96, 116, 58], silt_colour: [92, 120, 58] }
+      params: { cell: 1700, density: 0.85, part: scroll, radius: [160, 380], width: 22, open: 0.6, bars: 36, height: 0.5, size: 200, colour: [170, 156, 96], colour2: [138, 144, 82], silt_colour: [104, 128, 62] }
       class: marsh
       height: blend
 
