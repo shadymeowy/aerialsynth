@@ -21,6 +21,7 @@
 //! on the sphere, decided from integer hashes and values at the site only. Until the core's
 //! instance families (milestone 2) land they are enumerated per sample (≤ 27 cells).
 
+use crate::instances::Family;
 use crate::kits::{Kit, ReliefIn};
 use crate::noise::*;
 use crate::registry::pal;
@@ -34,16 +35,19 @@ pub static KIT: Kit = Kit {
     name: "desert",
     biomes_yaml: include_str!("../../biomes/desert.yaml"),
     wgsl: include_str!("../gpu/wgsl/kits/desert.wgsl"),
-    layers: &[(slot::AZONAL, azonal), (slot::WATER, washes)],
+    layers: &[(slot::AZONAL, azonal), (slot::DISTURBANCE, barchan_field), (slot::WATER, washes)],
     relief: Some(relief),
     relief_wgsl: include_str!("../gpu/wgsl/kits/desert_relief.wgsl"),
+    families: &[
+        Family { name: "desert_playas", cell: PLAYA_CELL, jitter: 0.8, reach: PLAYA_REACH, relief: true, exists: playa_exists },
+        Family { name: "desert_inselbergs", cell: INS_CELL, jitter: 0.8, reach: INS_REACH, relief: true, exists: inselberg_exists },
+    ],
     ..Kit::EMPTY
 };
 
 // ============================================================================= constants
 
 // lattice / noise keys (xor the world seed)
-const S_WIND1: u64 = 0xDE5E_0001;
 const S_WIND2: u64 = 0xDE5E_0002;
 const S_REG1: u64 = 0xDE5E_0003;
 const S_REG2: u64 = 0xDE5E_0004;
@@ -53,20 +57,20 @@ const S_SMALL: u64 = 0xDE5E_0012;
 const S_YARD: u64 = 0xDE5E_0013;
 const S_YZONE: u64 = 0xDE5E_0014;
 const S_STAR: u64 = 0xDE5E_0020;
-const S_INS: u64 = 0xDE5E_0021;
-const S_PLAYA: u64 = 0xDE5E_0022;
 const S_BAR: u64 = 0xDE5E_0023;
 const S_CRACK: u64 = 0xDE5E_0030;
 const S_BRINE: u64 = 0xDE5E_0031;
 const S_VARN: u64 = 0xDE5E_0032;
 const S_STREAK: u64 = 0xDE5E_0033;
 const S_SANDTEX: u64 = 0xDE5E_0034;
+const S_INSROCK: u64 = 0xDE5E_0035;
 const S_WASH: u64 = 0xDE5E_0040;
 const S_BRAID: u64 = 0xDE5E_0041;
 const S_BRAID2: u64 = 0xDE5E_0042;
 
 // land-cover classes (v2 ids; `tests::class_ids` checks them against the registry)
 const LC_SAND: u8 = 5;
+const LC_ROCK: u8 = 6;
 const LC_DRY_RIVERBED: u8 = 29;
 const LC_SALT_FLAT: u8 = 30;
 const LC_VOLCANIC_ASH: u8 = 32;
@@ -77,28 +81,29 @@ const TRANS_LAM: f64 = 600.0;
 const SEIF_LAM: f64 = 1700.0;
 const SMALL_LAM: f64 = 240.0;
 const YARD_LAM: f64 = 180.0;
-const TRANS_EXT: [f64; 3] = [1.2, 0.7, 0.7];
-const SEIF_EXT: [f64; 3] = [1.5, 0.55, 0.55];
-const YARD_EXT: [f64; 3] = [1.5, 0.45, 0.45];
+const TRANS_EXT: [f64; 3] = [1.3, 0.9, 0.9];
+const SEIF_EXT: [f64; 3] = [1.5, 0.8, 0.8];
+const YARD_EXT: [f64; 3] = [1.5, 0.6, 0.6];
 // the means of the ridge fields (`tests::ridge_means`): what a pixel shows where unresolved
-const TRANS_MEAN: f64 = 0.3711;
-const SEIF_MEAN: f64 = 0.1685;
-const YARD_MEAN: f64 = 0.1409;
+const TRANS_MEAN: f64 = 0.4821;
+const SEIF_MEAN: f64 = 0.2633;
+const YARD_MEAN: f64 = 0.2272;
 
 // star dunes: cell (m), density, radius range (m), the mean volume per instance / (H R²)
-const STAR_CELL: f64 = 2200.0;
-const STAR_DENS: f64 = 0.8;
-const STAR_R: [f64; 2] = [500.0, 950.0];
-const STAR_CV: f64 = 0.2383;
-const ARM_MEAN: f64 = 0.3125;
+const STAR_CELL: f64 = 2600.0;
+const STAR_DENS: f64 = 1.0;
+const STAR_R: [f64; 2] = [750.0, 1150.0];
+const STAR_CV: f64 = 0.3239;
+const ARM_MEAN: f64 = 0.375;
 // inselbergs: cell (m), density, the volume of the profile / (H R²)
 const INS_CELL: f64 = 16000.0;
-const INS_DENS: f64 = 0.35;
-const INS_CV: f64 = 2.4046;
+const INS_REACH: f64 = 7200.0;
+const INS_DENS: f64 = 0.45;
+const INS_CV: f64 = 1.4049;
 // playas: cell (m), density, the largest hill amplitude (macro field) at the site
 const PLAYA_CELL: f64 = 36000.0;
-const PLAYA_DENS: f64 = 0.6;
-const PLAYA_FLAT: f64 = -0.25;
+const PLAYA_REACH: f64 = 16000.0;
+const PLAYA_DENS: f64 = 0.55;
 // barchans: cell (m), density, radius range (m), area and volume of the shape / R², (H R²)
 const BAR_CELL: f64 = 380.0;
 const BAR_DENS: f64 = 0.8;
@@ -116,17 +121,28 @@ pub fn aridity(moist: f64) -> f64 {
 }
 
 /// The prevailing wind: the unit direction it blows to (east, north) and its directional
-/// variability 0 (one direction) .. 1 (many). A proxy of the atlas wind channels: trade winds
-/// (to the south-west in the north, the north-west in the south) and westerlies, turned by
-/// continental-scale noise.
-pub fn wind(seed: u64, p: DVec3, lat: f64) -> (DVec2, f64) {
+/// variability 0 (one direction) .. 1 (many). The direction is the atlas' annual wind `wa`
+/// (m/s), with a latitude-belt proxy (trades, westerlies) where it is calm, turned a little by
+/// regional noise; the variability grows where the annual wind is weak (it blows from changing
+/// directions), with continental-scale noise (the atlas keeps no seasonal winds).
+pub fn wind(seed: u64, p: DVec3, lat: f64, wa: DVec2) -> (DVec2, f64) {
     let latd = lat.abs().to_degrees();
     let ns = if lat >= 0.0 { 1.0 } else { -1.0 };
     let trade = 1.0 - smoothstep(25.0, 35.0, latd);
-    let base = DVec2::new(-0.7071, -0.7071 * ns) * trade + DVec2::new(0.966, 0.259 * ns) * (1.0 - trade);
-    let th = base.y.atan2(base.x) + 1.1 * perlin3(seed ^ S_WIND1, p / 900_000.0) + 0.45 * perlin3(seed ^ S_WIND2, p / 260_000.0);
-    let rho = saturate(0.5 + 0.9 * perlin3(seed ^ S_REG1, p / 800_000.0) + 0.3 * perlin3(seed ^ S_REG2, p / 230_000.0));
+    let belt = DVec2::new(-0.7071, -0.7071 * ns) * trade + DVec2::new(0.966, 0.259 * ns) * (1.0 - trade);
+    let v = wa + belt * 0.6;
+    let th = v.y.atan2(v.x) + 0.3 * perlin3(seed ^ S_WIND2, p / 260_000.0);
+    let speed = wa.length();
+    let rho = saturate(0.9 - 0.11 * speed + 0.6 * perlin3(seed ^ S_REG1, p / 800_000.0) + 0.25 * perlin3(seed ^ S_REG2, p / 230_000.0));
     (DVec2::new(th.cos(), th.sin()), rho)
+}
+
+/// The atlas' annual wind (m/s, east and north) sampled at `p` itself: its cubic B-spline is
+/// smooth, while the tile's grid-interpolated value (`Macro`) kinks along the grid lines, which
+/// ridge phases a few cells from their lattice point turn into creases.
+pub fn atlas_wind(w: &World, p: DVec3) -> DVec2 {
+    let a = w.atlas().sample(p.normalize());
+    DVec2::new(a.wind_e, a.wind_n)
 }
 
 /// Weights of the dune types by the wind variability: transverse, linear, star.
@@ -186,7 +202,9 @@ fn profile(kind: u32, x: f64, lee: f64) -> f64 {
 /// other phases fork and end the crests (Y-junctions); gaps between points are flat. No
 /// wavelength or direction is modulated at ECEF coordinates (R-wave): phases are per point.
 #[allow(clippy::too_many_arguments)]
-pub fn ridges(seed: u64, q: DVec3, ew: DVec3, ec: DVec3, up: DVec3, k: f64, ext: [f64; 3], kind: u32, lee: f64) -> f64 {
+pub fn ridges(seed: u64, q: DVec3, ew: DVec3, ec: DVec3, up: DVec3, k: f64, ext: [f64; 3], kind: u32, lee: f64, warp: f64) -> f64 {
+    // sinuous crests: a smooth phase shift (a domain warp at a constant wavelength)
+    let x0 = warp * perlin3(seed ^ 0x3A9, q * 1.3);
     let qf = q.floor();
     let (ix, iy, iz) = (qf.x as i64, qf.y as i64, qf.z as i64);
     let f = q - qf;
@@ -221,7 +239,7 @@ pub fn ridges(seed: u64, q: DVec3, ew: DVec3, ec: DVec3, up: DVec3, k: f64, ext:
                     continue;
                 }
                 let w = (1.0 - d2) * (1.0 - d2) * (1.0 - d2);
-                let x = k * b + u01k(h, 4);
+                let x = k * b + u01k(h, 4) + x0;
                 let x = x - x.floor();
                 v += w * profile(kind, x, lee);
                 wt += w;
@@ -307,7 +325,7 @@ fn wind_axes(c: &Ctx, wd: DVec2) -> (DVec3, DVec3) {
 fn stars(w: &World, seed: u64, c: &Ctx, amount: f64) -> f64 {
     let gsd = c.gsd;
     let er3 = (STAR_R[0] + STAR_R[1]) * (STAR_R[0] * STAR_R[0] + STAR_R[1] * STAR_R[1]) / 4.0;
-    let mean = amount * STAR_DENS * STAR_CV * 0.185 * er3 / (STAR_CELL * STAR_CELL);
+    let mean = amount * STAR_DENS * STAR_CV * 0.2 * er3 / (STAR_CELL * STAR_CELL);
     let e = smoothstep(1.2 * gsd, 3.0 * gsd, STAR_R[0]);
     if e <= 0.0 {
         return mean;
@@ -320,7 +338,7 @@ fn stars(w: &World, seed: u64, c: &Ctx, amount: f64) -> f64 {
             continue;
         }
         let r = STAR_R[0] + (STAR_R[1] - STAR_R[0]) * u01k(h, 6);
-        let hh = r * (0.12 + 0.13 * u01k(h, 7));
+        let hh = r * (0.14 + 0.12 * u01k(h, 7));
         let v = -st.rel[i];
         let d = v.length();
         if d >= r {
@@ -329,8 +347,8 @@ fn stars(w: &World, seed: u64, c: &Ctx, amount: f64) -> f64 {
         let n = 3.0 + (3.0 * u01k(h, 8)).floor();
         let th = v.y.atan2(v.x);
         let arm = 0.5 + 0.5 * (n * (th - TAU * u01k(h, 9)) + 0.7 * (th + TAU * u01k(h, 10)).sin()).cos();
-        let a3 = ARM_MEAN + (arm * arm * arm - ARM_MEAN) * band(TAU * d / (3.0 * n), gsd);
-        let x = d / (r * (0.3 + 0.7 * a3));
+        let a2 = ARM_MEAN + (arm * arm - ARM_MEAN) * band(TAU * d / (3.0 * n), gsd);
+        let x = d / (r * (0.42 + 0.58 * a2));
         if x < 1.0 {
             best = best.max(hh * (1.0 - x).powf(1.5));
         }
@@ -338,40 +356,119 @@ fn stars(w: &World, seed: u64, c: &Ctx, amount: f64) -> f64 {
     e * best + (1.0 - e) * mean
 }
 
-/// Inselbergs (m): steep granite domes with a pediment, sized by the mask `m`; widened with
-/// their volume kept where below the pixel.
-fn inselbergs(w: &World, seed: u64, c: &Ctx, m: f64) -> f64 {
+/// The macro fields at a family site that the existence tests read: moisture, mountain mask,
+/// hill amplitude (m), sand-sea and mesa masks, continent value.
+struct SiteFields {
+    moist: f64,
+    temp: f64,
+    mountain: f64,
+    hills: f64,
+    sand: f64,
+    mesa: f64,
+    cont: f64,
+}
+
+fn site_fields(w: &World, c: DVec3) -> SiteFields {
+    let m = w.macro_at(c, 20_000.0);
+    let r = &w.cfg.relief;
+    // `World::mountain_mask` and `World::hill_amplitude` (private in the core: the same formulas)
+    let b1 = 1.0 - m.belt.abs();
+    let b2 = 1.0 - m.belt2.abs();
+    let belt = (b1 * 0.75 + b2 * 0.45 + 0.35 * m.belt_var).max(0.0);
+    let mb = smoothstep(0.62, 0.92, belt) * smoothstep(-0.04, 0.08, m.cont);
+    let u = m.uplift.max(0.0) * r.tectonic_mountains;
+    let mt = smoothstep(0.08, 0.5, u) * smoothstep(-0.2, 0.05, m.cont);
+    let wb = (r.belt_mountains / 0.45 * 0.55).clamp(0.0, 1.0);
+    let mountain = (1.0 - (1.0 - wb * mb) * (1.0 - mt)).clamp(0.0, 1.0);
+    let hills = r.hill_height_m * (0.15 + 0.85 * smoothstep(-0.5, 0.6, m.hill_amp)) * (0.25 + 0.75 * smoothstep(-0.06, 0.05, m.cont));
+    let moist = m.moist.clamp(0.0, 1.0);
+    let sand = (1.0 - smoothstep(0.1, 0.28, moist)) * smoothstep(-0.25, 0.15, m.sand);
+    SiteFields { moist, temp: m.temp, mountain, hills, sand, mesa: smoothstep(0.1, 0.45, m.mesa), cont: m.cont }
+}
+
+/// Family indices (`FAM_DESERT_*` in WGSL).
+fn fam(name: &str) -> usize {
+    crate::instances::families().position(|f| f.name == name).expect("a desert family")
+}
+fn fam_playas() -> usize {
+    static F: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *F.get_or_init(|| fam("desert_playas"))
+}
+fn fam_inselbergs() -> usize {
+    static F: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *F.get_or_init(|| fam("desert_inselbergs"))
+}
+
+/// Playas exist at arid, flat sites (no mountains, low hills, outside sand seas and mesas).
+fn playa_exists(w: &World, s: &crate::instances::InstSite) -> Option<[f32; 8]> {
+    if u01k(s.id, 5) >= PLAYA_DENS {
+        return None;
+    }
+    let f = site_fields(w, s.center);
+    if aridity(f.moist) < 0.5 || f.temp < 4.0 || f.cont < 0.05 || f.mountain > 0.1 || f.hills > 130.0 || f.sand > 0.4 || f.mesa > 0.3 {
+        return None;
+    }
+    Some([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+}
+
+/// Inselbergs exist at dry sites off the mountains and sand seas, mostly on crystalline rock
+/// (the atlas' lithology at the site).
+fn inselberg_exists(w: &World, s: &crate::instances::InstSite) -> Option<[f32; 8]> {
+    if u01k(s.id, 5) >= INS_DENS {
+        return None;
+    }
+    let f = site_fields(w, s.center);
+    if f.moist > 0.42 || f.cont < 0.05 || f.mountain > 0.15 || f.sand > 0.6 || f.mesa > 0.3 {
+        return None;
+    }
+    let a = w.atlas().sample(s.center.normalize());
+    if a.litho as u8 != 2 && u01k(s.id, 13) >= 0.3 {
+        return None;
+    }
+    Some([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+}
+
+/// The offset (east, north; m) of `p` from an instance centre.
+#[inline]
+fn offset(p: DVec3, center: DVec3, east: DVec3, north: DVec3) -> DVec2 {
+    let d = p - center;
+    DVec2::new(d.dot(east), d.dot(north))
+}
+
+/// The shape of inselberg `id` at the offset `v` (m) from its centre: the normalized distance
+/// (elongated, with a lobed outline), its radius and height (m).
+fn ins_shape(id: u64, v: DVec2) -> (f64, f64, f64) {
+    let u6 = u01k(id, 6);
+    let r = 500.0 + 2100.0 * u6 * u6;
+    let hh = (r * (0.18 + 0.22 * u01k(id, 7))).min(600.0);
+    let ex = 1.0 + 0.7 * u01k(id, 8);
+    let (sa, ca) = (TAU * u01k(id, 9)).sin_cos();
+    let (vx, vy) = (v.x * ca + v.y * sa, -v.x * sa + v.y * ca);
+    let dn = (vx * vx / ex + vy * vy * ex).sqrt();
+    let th = vy.atan2(vx);
+    let edge =
+        1.0 + 0.10 * (3.0 * th + TAU * u01k(id, 10)).sin() + 0.06 * (5.0 * th + TAU * u01k(id, 11)).sin() + 0.035 * (9.0 * th + TAU * u01k(id, 12)).sin();
+    (dn / (r * edge), r, hh)
+}
+
+/// The profile of an inselberg (× its height): a dome with steep flanks and a pediment.
+#[inline]
+fn ins_profile(x: f64) -> f64 {
+    let dome = if x < 1.0 { (1.0 - x.powf(1.5)).max(0.0).powf(1.2) } else { 0.0 };
+    dome + 0.04 * (1.0 - smoothstep(0.9, 1.6, x))
+}
+
+/// Inselbergs (m): granite domes with a pediment; widened with their volume kept where below
+/// the pixel.
+fn inselbergs(inst: &[crate::instances::Instance], c: &Ctx) -> f64 {
     let gsd = c.gsd;
-    let reach = 0.45 * INS_CELL;
-    let st = slab_sites(w, seed ^ S_INS, c.p, c.east, c.north, INS_CELL, reach);
     let mut best: f64 = 0.0;
-    for i in 0..st.n {
-        let h = st.id[i];
-        if u01k(h, 5) >= INS_DENS {
-            continue;
-        }
-        let u6 = u01k(h, 6);
-        let r = (500.0 + 2100.0 * u6 * u6) * m;
-        if r < 1.0 {
-            continue;
-        }
-        let hh = (r * (0.12 + 0.22 * u01k(h, 7))).min(450.0);
-        let ex = 1.0 + 0.7 * u01k(h, 8);
-        let (sa, ca) = (TAU * u01k(h, 9)).sin_cos();
-        let v = -st.rel[i];
-        let (vx, vy) = (v.x * ca + v.y * sa, -v.x * sa + v.y * ca);
-        let dn = (vx * vx / ex + vy * vy * ex).sqrt();
-        let th = vy.atan2(vx);
-        let edge = 1.0 + 0.10 * (3.0 * th + TAU * u01k(h, 10)).sin() + 0.06 * (5.0 * th + TAU * u01k(h, 11)).sin() + 0.035 * (9.0 * th + TAU * u01k(h, 12)).sin();
-        let x = dn / (r * edge);
+    for i in inst {
+        let v = offset(c.p, i.center, c.east, c.north);
+        let (x, r, hh) = ins_shape(i.id, v);
         let e = smoothstep(1.2 * gsd, 3.0 * gsd, r);
-        let mut hx = 0.0;
-        if e > 0.0 && x < 1.6 {
-            let dome = if x < 1.0 { (1.0 - x.powf(2.4)).max(0.0).powf(0.55) } else { 0.0 };
-            let ped = 0.05 * (1.0 - smoothstep(0.9, 1.6, x));
-            hx = hh * (dome + ped);
-        }
-        let rb = (0.95 * reach).min((1.6 * r).max(3.0 * gsd));
+        let hx = if e > 0.0 && x < 1.6 { hh * ins_profile(x) } else { 0.0 };
+        let rb = (0.95 * INS_REACH).min((1.6 * r).max(3.0 * gsd));
         let hp = 2.0 * hh * r * r * INS_CV / (PI * rb * rb);
         let db = v.length() / rb;
         let blob = if db < 1.0 { hp * (1.0 - db * db) } else { 0.0 };
@@ -380,45 +477,26 @@ fn inselbergs(w: &World, seed: u64, c: &Ctx, m: f64) -> f64 {
     best
 }
 
-/// The size mask of playas (0..1) from pass-A values both passes know: arid, not in sand
-/// seas, mountains or mesas.
-#[inline]
-fn playa_mask(moist: f64, sand: f64, mountain: f64, mesa: f64) -> f64 {
-    aridity(moist) * (1.0 - 0.85 * sand) * (1.0 - mountain) * (1.0 - smoothstep(0.2, 0.5, mesa))
+/// The shape of playa `id` at the offset `v` (m) from its centre: the normalized distance with
+/// a ragged shore, and its radius (m).
+fn playa_shape(id: u64, v: DVec2) -> (f64, f64) {
+    let r = 2000.0 + 4500.0 * u01k(id, 6);
+    let ex = 1.0 + 0.8 * u01k(id, 7);
+    let (sa, ca) = (TAU * u01k(id, 8)).sin_cos();
+    let (vx, vy) = (v.x * ca + v.y * sa, -v.x * sa + v.y * ca);
+    let dn = (vx * vx / ex + vy * vy * ex).sqrt();
+    let th = vy.atan2(vx);
+    let edge = 1.0 + 0.14 * (2.0 * th + TAU * u01k(id, 9)).sin() + 0.08 * (3.0 * th + TAU * u01k(id, 10)).sin() + 0.04 * (7.0 * th + TAU * u01k(id, 11)).sin();
+    (dn / (r * edge), r)
 }
 
-/// The playa at `p`, if any: (normalized distance from its centre with a ragged shore, its
-/// radius (m), its hash). Playas exist at flat sites of their lattice (the macro hill amplitude
-/// at the site) and shrink with the mask `m` (the shore moves, it never fades).
-fn playa(w: &World, seed: u64, p: DVec3, east: DVec3, north: DVec3, m: f64) -> Option<(f64, f64, u64)> {
-    if m <= 0.0 {
-        return None;
-    }
-    let st = slab_sites(w, seed ^ S_PLAYA, p, east, north, PLAYA_CELL, 0.45 * PLAYA_CELL);
+/// The playa nearest (in normalized distance) to `p`: (x, radius, hash).
+fn playa(inst: &[crate::instances::Instance], p: DVec3, east: DVec3, north: DVec3) -> Option<(f64, f64, u64)> {
     let mut best: Option<(f64, f64, u64)> = None;
-    for i in 0..st.n {
-        let h = st.id[i];
-        if u01k(h, 5) >= PLAYA_DENS {
-            continue;
-        }
-        let r = (2000.0 + 5500.0 * u01k(h, 6)) * m;
-        let ex = 1.0 + 0.8 * u01k(h, 7);
-        let (sa, ca) = (TAU * u01k(h, 8)).sin_cos();
-        let v = -st.rel[i];
-        let (vx, vy) = (v.x * ca + v.y * sa, -v.x * sa + v.y * ca);
-        let dn = (vx * vx / ex + vy * vy * ex).sqrt();
-        if dn > 1.4 * 1.27 * r {
-            continue;
-        }
-        let ha = w.hill_amp.eval(st.c[i], 20_000.0) * w.hill_amp.norm() * 1.6;
-        if ha > PLAYA_FLAT {
-            continue;
-        }
-        let th = vy.atan2(vx);
-        let edge = 1.0 + 0.14 * (2.0 * th + TAU * u01k(h, 9)).sin() + 0.08 * (3.0 * th + TAU * u01k(h, 10)).sin() + 0.04 * (7.0 * th + TAU * u01k(h, 11)).sin();
-        let x = dn / (r * edge).max(1e-3);
+    for i in inst {
+        let (x, r) = playa_shape(i.id, offset(p, i.center, east, north));
         if best.is_none_or(|b| x < b.0) {
-            best = Some((x, r, h));
+            best = Some((x, r, i.id));
         }
     }
     best
@@ -430,34 +508,32 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
     let c = r.ctx;
     let gsd = c.gsd;
     let seed = w.seed;
-    let semi = 1.0 - smoothstep(0.30, 0.45, r.moist);
-    if semi <= 0.0 && r.sand <= 0.0 {
-        return;
-    }
     let dh = w.cfg.relief.dune_height_m;
     // ---- dunes: the core's transverse ridges out, the types of the wind regime in
     if r.sand > 1e-3 && dh > 0.0 {
         let core = dh * r.sand * w.dunes(c, r.m, gsd);
-        let (wd, rho) = wind(seed, c.p, c.lat);
+        let (wd, rho) = wind(seed, c.p, c.lat, atlas_wind(w, c.p));
         let (wt, wl, ws) = regime(rho);
         let env = smoothstep(0.35, 0.75, r.sand);
         let (ew, ec) = wind_axes(c, wd);
         let mut sum = 0.0;
         if env > 0.0 {
-            if wt > 0.0 {
+            // (star dunes rise from a network of transverse ridges)
+            let wtr = wt + 0.5 * ws;
+            if wtr > 0.0 {
                 let b = band(TRANS_LAM, gsd);
                 let mut v = TRANS_MEAN;
                 if b > 0.0 {
                     let lee = (2.5 * gsd / TRANS_LAM).clamp(0.14, 0.5);
-                    v += (ridges(seed ^ S_TRANS, c.p / (2.0 * TRANS_LAM), ew, ec, c.up, 2.0, TRANS_EXT, 0, lee) - TRANS_MEAN) * b;
+                    v += (ridges(seed ^ S_TRANS, c.p / (2.0 * TRANS_LAM), ew, ec, c.up, 2.0, TRANS_EXT, 0, lee, 0.18) - TRANS_MEAN) * b;
                 }
-                sum += wt * v;
+                sum += wtr * v;
             }
             if wl > 0.0 {
                 let b = band(SEIF_LAM, gsd);
                 let mut v = SEIF_MEAN;
                 if b > 0.0 {
-                    v += (ridges(seed ^ S_SEIF, c.p / (3.0 * SEIF_LAM), ec, ew, c.up, 3.0, SEIF_EXT, 1, 0.5) - SEIF_MEAN) * b;
+                    v += (ridges(seed ^ S_SEIF, c.p / (3.0 * SEIF_LAM), ec, ew, c.up, 3.0, SEIF_EXT, 1, 0.5, 0.22) - SEIF_MEAN) * b;
                 }
                 sum += wl * 1.9 * v;
             }
@@ -466,7 +542,7 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
                 let mut v = TRANS_MEAN;
                 if b > 0.0 {
                     let lee = (2.5 * gsd / SMALL_LAM).clamp(0.14, 0.5);
-                    v += (ridges(seed ^ S_SMALL, c.p / (2.0 * SMALL_LAM), ew, ec, c.up, 2.0, TRANS_EXT, 0, lee) - TRANS_MEAN) * b;
+                    v += (ridges(seed ^ S_SMALL, c.p / (2.0 * SMALL_LAM), ew, ec, c.up, 2.0, TRANS_EXT, 0, lee, 0.15) - TRANS_MEAN) * b;
                 }
                 sum += (wl + ws) * 0.14 * v;
             }
@@ -477,33 +553,29 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
         }
         *h += dh * r.sand * env * sum + star - core;
     }
-    if semi <= 0.0 {
-        return;
-    }
     // ---- inselbergs
-    let mi = semi * (1.0 - r.mountain) * (1.0 - 0.6 * r.sand) * (1.0 - smoothstep(0.2, 0.5, r.mesa));
-    if mi > 0.0 {
-        *h += inselbergs(w, seed, c, mi);
+    let ins = r.instances(w, fam_inselbergs());
+    if !ins.is_empty() {
+        *h += inselbergs(&ins, c);
     }
     // ---- playa floors: flattened towards the smooth relief, a little below it
-    let mp = playa_mask(r.moist, r.sand, r.mountain, r.mesa);
-    if let Some((x, _, _)) = playa(w, seed, c.p, c.east, c.north, mp) {
+    if let Some((x, _, _)) = playa(&r.instances(w, fam_playas()), c.p, c.east, c.north) {
         if x < 1.0 {
             let k = 1.0 - smoothstep(0.8, 1.0, x);
             *h += (r.smooth - 2.0 - *h) * k;
         }
     }
     // ---- yardangs: streamlined ridges along the wind on the hyper-arid plains
-    let hyper = 1.0 - smoothstep(0.05, 0.12, r.moist);
+    let hyper = (1.0 - smoothstep(0.05, 0.12, r.moist)) * smoothstep(-2.0, 2.0, r.temp);
     if hyper > 0.0 && r.sand < 0.2 {
         let zone = hyper * smoothstep(0.1, 0.3, perlin3(seed ^ S_YZONE, c.p / 120_000.0)) * (1.0 - smoothstep(0.02, 0.2, r.sand)) * (1.0 - r.mountain);
         if zone > 0.0 {
             let b = band(YARD_LAM, gsd);
             let mut v = YARD_MEAN;
             if b > 0.0 {
-                let (wd, _) = wind(seed, c.p, c.lat);
+                let (wd, _) = wind(seed, c.p, c.lat, atlas_wind(w, c.p));
                 let (ew, ec) = wind_axes(c, wd);
-                v += (ridges(seed ^ S_YARD, c.p / (2.0 * YARD_LAM), ec, ew, c.up, 2.0, YARD_EXT, 2, 0.5) - YARD_MEAN) * b;
+                v += (ridges(seed ^ S_YARD, c.p / (2.0 * YARD_LAM), ec, ew, c.up, 2.0, YARD_EXT, 2, 0.5, 0.1) - YARD_MEAN) * b;
             }
             *h += 12.0 * zone * v;
         }
@@ -576,13 +648,49 @@ fn sand_colour(s: &Stack) -> DVec3 {
     }
 }
 
+/// The instances of family `f` at a sample (`Stack::instances` without borrowing the stack).
+fn insts<'a>(l: &'a crate::surface::Local, w: &World, p: DVec3, f: usize) -> std::borrow::Cow<'a, [crate::instances::Instance]> {
+    match l.inst.get(f) {
+        Some(v) => std::borrow::Cow::Borrowed(&v[..]),
+        None => std::borrow::Cow::Owned(crate::instances::near(w, f, p, 0.0)),
+    }
+}
+
+/// Salt crust: white to beige (`tone`, `shade` 0..1) plates 8–20 m between dark cracks, a
+/// darker, wetter floor where `mid` → 1, and pink or green (`pink`) brine pools where `pools`
+/// < 0.5.
+fn crust(s: &Stack, tone: f64, shade: f64, mid: f64, pools: f64, pink: f64) -> DVec3 {
+    let seed = s.world.seed;
+    let p = s.ctx.p;
+    let gsd = s.ctx.gsd;
+    let fw = s.l.fw;
+    let crust_w = DVec3::new(0.80, 0.78, 0.72) * (0.92 + 0.08 * shade);
+    let tint = [DVec3::new(1.0, 1.0, 1.0), DVec3::new(1.0, 0.95, 0.86), DVec3::new(1.0, 0.93, 0.92)][(3.0 * tone) as usize % 3];
+    let mut col = crust_w * tint;
+    let ce = smoothstep(1.2 * gsd, 3.0 * gsd, 12.0);
+    let mut crack = 0.06;
+    let mut plate = 1.0;
+    if ce > 0.0 {
+        // (a 3D partition: seamless, and the same on standing water, which has no local frame)
+        let cl = worley3(seed ^ S_CRACK, p, 12.0, 0.85);
+        let ed = worley_edge_dist(&cl, p);
+        crack = ce * crate::kernels::band_cov(ed, 0.35, fw) + (1.0 - ce) * 0.06;
+        plate = 1.0 + ce * 0.06 * (u01k(cl.id, 1) - 0.5);
+    }
+    col = col * plate * (1.0 - 0.35 * crack);
+    col = mixc(col, col * DVec3::new(0.78, 0.76, 0.72), 0.5 * mid);
+    if pools < 0.5 {
+        let pn = perlin3(seed ^ S_BRINE ^ 7, p / 400.0) + 0.5 * perlin3(seed ^ S_BRINE ^ 9, p / 130.0) * band(130.0, gsd);
+        let pool = smoothstep(0.25, 0.32, pn + 0.6 * mid - 0.4) * mid;
+        let brine = if pink < 0.5 { srgb(214.0, 150.0, 156.0) } else { srgb(120.0, 156.0, 120.0) };
+        col = mixc(col, brine, 0.85 * pool);
+    }
+    col
+}
+
 /// Slot 3: playas, the sand seas' surface, their stony fringe and its barchans.
 pub fn azonal(s: &mut Stack) {
     let t = *s.t;
-    let ar = aridity(t.moist);
-    if t.sand <= 0.0 && ar <= 0.0 {
-        return;
-    }
     let w = s.world;
     let seed = w.seed;
     let c = *s.ctx;
@@ -590,35 +698,14 @@ pub fn azonal(s: &mut Stack) {
     let gsd = c.gsd;
     let fw = s.l.fw;
     // ---- playas: salt crust with polygonal cracks, brine pools, paleo-shorelines
-    let mp = playa_mask(t.moist, t.sand, t.mountain, t.mesa);
-    if let Some((x, r, id)) = playa(w, seed, p, c.east, c.north, mp) {
+    if let Some((x, r, id)) = playa(&insts(s.l, w, p, fam_playas()), p, c.east, c.north) {
         if x < 1.4 {
-            let crust_w = DVec3::new(0.80, 0.78, 0.72) * (0.92 + 0.08 * u01k(id, 12));
-            let tone = [DVec3::new(1.0, 1.0, 1.0), DVec3::new(1.0, 0.95, 0.86), DVec3::new(1.0, 0.93, 0.92)][(3.0 * u01k(id, 13)) as usize % 3];
-            let mut col = crust_w * tone;
             let dm = (1.0 - x) * r;
             let cov = (dm / fw.max(1e-3) + 0.5).clamp(0.0, 1.0);
             if cov > 0.0 {
-                // polygons 8–20 m: dark cracks, slightly different plates
-                let ce = smoothstep(1.2 * gsd, 3.0 * gsd, 12.0);
-                let mut crack = 0.06;
-                let mut plate = 1.0;
-                if ce > 0.0 {
-                    let cl = crate::noise::worley2(seed ^ S_CRACK, s.q_loc, 12.0, 0.85);
-                    let ed = worley2_edge_dist(&cl, s.q_loc);
-                    crack = ce * crate::kernels::band_cov(ed, 0.35, fw) + (1.0 - ce) * 0.06;
-                    plate = 1.0 + ce * 0.06 * (u01k(cl.id, 1) - 0.5);
-                }
-                col = col * plate * (1.0 - 0.35 * crack);
-                // the wetter, darker floor in the middle, brine pools in some playas
+                // the wetter, darker floor in the middle
                 let mid = 1.0 - smoothstep(0.2, 0.6, x + 0.15 * perlin3(seed ^ S_BRINE, p / 900.0));
-                col = mixc(col, col * DVec3::new(0.78, 0.76, 0.72), 0.5 * mid);
-                if u01k(id, 14) < 0.5 {
-                    let pn = perlin3(seed ^ S_BRINE ^ 7, p / 400.0) + 0.5 * perlin3(seed ^ S_BRINE ^ 9, p / 130.0) * band(130.0, gsd);
-                    let pool = smoothstep(0.25, 0.32, pn + 0.6 * mid - 0.4) * mid;
-                    let brine = if u01k(id, 15) < 0.5 { srgb(214.0, 150.0, 156.0) } else { srgb(120.0, 156.0, 120.0) };
-                    col = mixc(col, brine, 0.85 * pool);
-                }
+                let col = crust(s, u01k(id, 13), u01k(id, 12), mid, u01k(id, 14), u01k(id, 15));
                 s.composite(Layer { cov, albedo: col, cls: LC_SALT_FLAT, clear: 1.0, ..Default::default() });
             }
             // paleo-shorelines: pale rings on the slopes around the floor
@@ -629,16 +716,29 @@ pub fn azonal(s: &mut Stack) {
                 }
                 let ring = ring.min(1.0) * band(0.03 * r, gsd);
                 if ring > 0.0 {
+                    let crust_w = DVec3::new(0.80, 0.78, 0.72) * (0.92 + 0.08 * u01k(id, 12));
                     s.composite(Layer::paint(0.45 * ring, mixc(s.col, crust_w, 0.7)));
                 }
             }
+        }
+    }
+    // ---- inselbergs: bare granite, streaked dark by varnish down the flanks
+    let l = s.l;
+    for i in insts(l, w, p, fam_inselbergs()).iter() {
+        let (x, r, _) = ins_shape(i.id, offset(p, i.center, c.east, c.north));
+        let cov = ((0.9 - x) * r / fw.max(1e-3) + 0.5).clamp(0.0, 1.0);
+        if cov > 0.0 {
+            let rock = s.pal(pal::ROCK + 1) * DVec3::new(1.18, 1.12, 1.08);
+            let sn = perlin3(seed ^ S_INSROCK, p / 60.0) * band(60.0, gsd) + 0.5 * perlin3(seed ^ S_INSROCK ^ 1, p / 15.0) * band(15.0, gsd);
+            let col = mixc(rock, rock * DVec3::new(0.5, 0.46, 0.44), 0.3 + 0.3 * sn);
+            s.composite(Layer { cov, albedo: col, cls: LC_ROCK, clear: 0.9, ..Default::default() });
         }
     }
     if t.sand <= 0.0 {
         return;
     }
     // ---- sand seas
-    let (wd, rho) = wind(seed, p, c.lat);
+    let (wd, rho) = wind(seed, p, c.lat, DVec2::from_array(t.wind));
     let (_, wl, _) = regime(rho);
     let sc = sand_colour(s);
     let black = s.bio.style.litho == 3;
@@ -654,18 +754,19 @@ pub fn azonal(s: &mut Stack) {
         let ve = smoothstep(1.2 * gsd, 3.0 * gsd, 130.0);
         let varn = ve * smoothstep(0.2, 0.3, vn) + (1.0 - ve) * 0.3;
         pav = mixc(pav, pav * DVec3::new(0.55, 0.5, 0.48), 0.8 * varn);
-        let sb = band(90.0, gsd);
-        let mut streak = 0.35;
+        let sb = band(45.0, gsd);
+        let mut streak = 0.2;
         if sb > 0.0 {
             let ec = c.up.cross(c.east * wd.x + c.north * wd.y);
-            let (g, _) = World::gully_octave(seed ^ S_STREAK, p / 90.0, ec);
-            streak = 0.35 + (smoothstep(0.1, 0.7, g) - 0.35) * sb;
+            let (g, _) = World::gully_octave(seed ^ S_STREAK, p / 45.0, ec);
+            streak = 0.2 + (smoothstep(0.2, 0.9, g) - 0.2) * sb;
         }
-        pav = mixc(pav, sc, streak * (2.0 * t.sand).min(1.0));
+        pav = mixc(pav, sc, 0.35 * streak * (2.0 * t.sand).min(1.0));
         s.composite(Layer { cov: fringe, albedo: pav, cls: LC_GRAVEL, clear: 0.6, ..Default::default() });
     }
     if erg > 0.0 {
-        let mut col = sc * (1.0 + 0.05 * perlin3(seed ^ S_SANDTEX, p / 35.0) * band(35.0, gsd) + 0.03 * perlin3(seed ^ S_SANDTEX ^ 1, p / 9.0) * band(9.0, gsd));
+        let mut col =
+            sc * (1.0 + 0.05 * perlin3(seed ^ S_SANDTEX, p / 35.0) * band(35.0, gsd) + 0.03 * perlin3(seed ^ S_SANDTEX ^ 1, p / 9.0) * band(9.0, gsd));
         if wl > 0.0 {
             // the corridors between linear dunes: coarser, darker lag and sparse plants
             let res = 1.0 - smoothstep(10.0, 80.0, gsd);
@@ -676,14 +777,25 @@ pub fn azonal(s: &mut Stack) {
         let cls = if black { LC_VOLCANIC_ASH } else { LC_SAND };
         s.composite(Layer { cov: erg, albedo: col, cls, clear: 1.0, ..Default::default() });
     }
-    // ---- barchans: on the sand-poor fringe, most where the wind is steady
-    let zb = smoothstep(0.02, 0.1, t.sand) * (1.0 - smoothstep(0.42, 0.58, t.sand)) * (0.35 + 0.65 * (1.0 - smoothstep(0.35, 0.6, rho)));
-    if zb > 0.0 {
-        let (cov, dh) = barchans(w, seed, p, c.east, c.north, wd, zb, gsd, fw);
-        if cov > 0.0 {
-            let cls = if black { LC_VOLCANIC_ASH } else { LC_SAND };
-            s.composite(Layer { cov, albedo: sc * 1.06, dh, hmode: hmode::ADD, cls, clear: 1.0, ..Default::default() });
-        }
+}
+
+/// Slot 4 (after the core's micro-relief resets the height): barchans on the sand-poor fringe
+/// of the sand seas, most where the wind is steady.
+pub fn barchan_field(s: &mut Stack) {
+    let t = *s.t;
+    let z0 = smoothstep(0.02, 0.1, t.sand) * (1.0 - smoothstep(0.42, 0.58, t.sand));
+    if z0 <= 0.0 {
+        return;
+    }
+    let w = s.world;
+    let c = *s.ctx;
+    let (wd, rho) = wind(w.seed, c.p, c.lat, DVec2::from_array(t.wind));
+    let zb = z0 * (0.35 + 0.65 * (1.0 - smoothstep(0.35, 0.6, rho)));
+    let (cov, dh) = barchans(w, w.seed, c.p, c.east, c.north, wd, zb, c.gsd, s.l.fw);
+    if cov > 0.0 {
+        let cls = if s.bio.style.litho == 3 { LC_VOLCANIC_ASH } else { LC_SAND };
+        let sc = sand_colour(s) * 1.06;
+        s.composite(Layer { cov, albedo: sc, dh, hmode: hmode::ADD, cls, clear: 1.0, ..Default::default() });
     }
 }
 
@@ -691,14 +803,15 @@ pub fn azonal(s: &mut Stack) {
 /// bars parallel to the banks that merge and split.
 pub fn washes(s: &mut Stack) {
     if s.is_water {
+        dry_lake(s);
         return;
     }
     let l = s.l;
     let t = s.t;
-    if l.river_hw <= 0.0 || t.river_wet >= 0.5 {
+    if l.river_hw <= 0.0 || t.river_wet >= 0.5 || t.sand > 0.45 {
         return;
     }
-    let ar = 1.0 - smoothstep(0.25, 0.42, t.moist);
+    let ar = (1.0 - smoothstep(0.25, 0.42, t.moist)) * smoothstep(-4.0, 0.0, t.temp) * (1.0 - smoothstep(0.3, 0.45, t.sand));
     if ar <= 0.0 {
         return;
     }
@@ -712,14 +825,38 @@ pub fn washes(s: &mut Stack) {
     if cov <= 0.0 {
         return;
     }
-    let lam = (0.45 * half).max(4.0);
+    let lam = (0.25 * half).max(3.0);
     let ph = l.river_d / lam + 0.9 * perlin3(seed ^ S_BRAID, p / 90.0) + 0.4 * perlin3(seed ^ S_BRAID2, p / 31.0) * band(31.0, gsd);
     let th = 0.5 + 0.5 * (TAU * ph).cos();
     let bw = band(lam, gsd);
-    let bar = s.pal(pal::SAND + 2) * 1.05;
-    let chan = mixc(s.pal(pal::SOIL + 1), s.pal(pal::ROCK), 0.4) * 0.85;
-    let col = mixc(bar, chan, smoothstep(0.55, 0.8, th) * bw + (1.0 - bw) * 0.3);
+    let bar = mixc(s.pal(pal::SAND + 2), s.pal(pal::SOIL + 1), 0.25) * 1.02;
+    let chan = mixc(bar, s.pal(pal::ROCK), 0.25) * 0.9;
+    let col = mixc(bar, chan, smoothstep(0.7, 0.9, th) * bw + (1.0 - bw) * 0.15);
     s.composite(Layer { cov, albedo: col, cls: LC_DRY_RIVERBED, clear: 0.8, ..Default::default() });
+}
+
+/// Slot 8 on lakes: arid lakes are dry salt pans, from their shallow margins inwards (the
+/// deeper the lake, the more arid it must be to dry out completely): a crisp shore that moves
+/// with the aridity, the crust at the lake's level (solid: the sample is land again).
+fn dry_lake(s: &mut Stack) {
+    let l = s.l;
+    if l.water_kind != crate::world::water::LAKE {
+        return;
+    }
+    let ar = aridity(s.t.moist) * smoothstep(0.0, 4.0, s.t.temp);
+    if ar <= 0.0 {
+        return;
+    }
+    let depth = l.water - l.ground;
+    let dmax = 40.0 * smoothstep(0.4, 0.9, ar).powi(2);
+    let cov = ((dmax - depth) / 0.4 + 0.5).clamp(0.0, 1.0);
+    if cov <= 0.0 {
+        return;
+    }
+    let st = s.t.style;
+    let mid = smoothstep(0.3, 1.0, depth / dmax.max(1e-3));
+    let col = crust(s, st[3], st[0], mid, st[2], st[1]);
+    s.composite(Layer { cov, albedo: col, cls: LC_SALT_FLAT, solid: true, ..Default::default() });
 }
 
 #[cfg(test)]
@@ -730,6 +867,7 @@ mod tests {
     fn class_ids() {
         use crate::registry::classes::id;
         assert_eq!(id("sand"), Some(LC_SAND));
+        assert_eq!(id("rock"), Some(LC_ROCK));
         assert_eq!(id("dry_riverbed"), Some(LC_DRY_RIVERBED));
         assert_eq!(id("salt_flat"), Some(LC_SALT_FLAT));
         assert_eq!(id("volcanic_ash"), Some(LC_VOLCANIC_ASH));
@@ -763,7 +901,7 @@ mod tests {
                 let h = mix64(0x3EA2 ^ i as u64);
                 let (up, ew, ec) = frame(h);
                 let q = DVec3::new(u01k(h, 7), u01k(h, 8), u01k(h, 9)) * 1000.0 - 500.0;
-                sum += ridges(0x51, q, ew, ec, up, 2.0, ext, kind, lee);
+                sum += ridges(0x51, q, ew, ec, up, 2.0, ext, kind, lee, 0.2);
             }
             let m = sum / n as f64;
             eprintln!("{name}: mean {m:.4} (constant {mean})");
@@ -777,7 +915,7 @@ mod tests {
     /// The shape constants of the instances: star dune, inselberg and barchan volumes and areas.
     #[test]
     fn shape_constants() {
-        // star dunes: ∫ (1 − x)^1.5 dA / (H R²) = B(2, 2.5) ∫ (0.3 + 0.7 arm³)² dθ
+        // star dunes: ∫ (1 − x)^1.5 dA / (H R²) = B(2, 2.5) ∫ (0.42 + 0.58 arm²)² dθ
         let (mut acc, mut cnt) = (0.0, 0.0);
         for i in 0..400 {
             let h = mix64(0x57A ^ i);
@@ -788,7 +926,7 @@ mod tests {
             for j in 0..m {
                 let th = -PI + TAU * (j as f64 + 0.5) / m as f64;
                 let arm = 0.5 + 0.5 * (n * (th - p1) + 0.7 * (th + p2).sin()).cos();
-                let f = 0.3 + 0.7 * arm * arm * arm;
+                let f = 0.42 + 0.58 * arm * arm;
                 s += f * f * TAU / m as f64;
             }
             acc += s * 0.114_286;
@@ -800,9 +938,7 @@ mod tests {
         let m = 16_000;
         for j in 0..m {
             let x = 1.6 * (j as f64 + 0.5) / m as f64;
-            let dome = if x < 1.0 { (1.0 - x.powf(2.4)).max(0.0).powf(0.55) } else { 0.0 };
-            let ped = 0.05 * (1.0 - smoothstep(0.9, 1.6, x));
-            radial += (dome + ped) * x * 1.6 / m as f64;
+            radial += ins_profile(x) * x * 1.6 / m as f64;
         }
         let ins = radial * TAU * (1.0 + 0.5 * (0.10f64.powi(2) + 0.06f64.powi(2) + 0.035f64.powi(2)));
         // barchans: area / R² and volume / (H R²) of the crescent
@@ -836,74 +972,88 @@ mod tests {
     #[test]
     #[ignore]
     fn desert_places() {
+        use rayon::prelude::*;
         let w = World::new(crate::Config::default());
         let seed = w.seed;
-        let mut found: Vec<(&str, Vec<String>)> = ["transverse", "linear", "star", "barchans", "playa", "inselberg", "yardangs", "wash"].iter().map(|n| (*n, Vec::new())).collect();
-        for i in 0..60_000u64 {
-            let h = mix64(0xD1CE ^ i);
-            let lat = (2.0 * u01k(h, 1) - 1.0).asin();
-            let lon = TAU * u01k(h, 2) - PI;
-            let c = Ctx::new(lat, lon, 30.0, &w.ell);
-            let t = w.terrain(&c);
-            if t.water_kind != 0 || t.ground < 1.0 || t.moist > 0.4 {
-                continue;
-            }
-            let (_, rho) = wind(seed, c.p, c.lat);
-            let (wt, wl, ws) = regime(rho);
-            let at = format!("{:.4},{:.4} (h {:.0} m, moist {:.2}, sand {:.2}, litho?)", lat.to_degrees(), lon.to_degrees(), t.ground, t.moist, t.sand);
-            let mut add = |k: usize| {
-                if found[k].1.len() < 6 {
-                    found[k].1.push(at.clone());
+        let names = ["transverse", "linear", "star", "barchans", "playa", "inselberg", "yardangs", "wash", "dry lake"];
+        let hits: Vec<(usize, String)> = (0..60_000u64)
+            .into_par_iter()
+            .flat_map_iter(|i| {
+                let h = mix64(0xD1CE ^ i);
+                let lat = (2.0 * u01k(h, 1) - 1.0).asin();
+                let lon = TAU * u01k(h, 2) - PI;
+                let c = Ctx::new(lat, lon, 30.0, &w.ell);
+                let t = w.terrain(&c);
+                let mut out = Vec::new();
+                if t.moist > 0.45 {
+                    return out;
                 }
-            };
-            if t.sand > 0.7 {
-                if wt > 0.9 {
-                    add(0);
-                } else if wl > 0.9 {
-                    add(1);
-                } else if ws > 0.9 {
-                    add(2);
+                let (_, rho) = wind(seed, c.p, c.lat, DVec2::from_array(t.wind));
+                let (wt, wl, ws) = regime(rho);
+                let at = format!(
+                    "{:.4},{:.4} (h {:.0} m, T {:.0}, moist {:.2}, sand {:.2}, wind {:.1} m/s, rho {rho:.2})",
+                    lat.to_degrees(),
+                    lon.to_degrees(),
+                    t.ground,
+                    t.temp,
+                    t.moist,
+                    t.sand,
+                    DVec2::from_array(t.wind).length()
+                );
+                if t.water_kind == crate::world::water::LAKE && aridity(t.moist) > 0.5 {
+                    out.push((8, at.clone()));
                 }
-            }
-            if (0.12..0.4).contains(&t.sand) && rho < 0.35 {
-                add(3);
-            }
-            let mp = playa_mask(t.moist, t.sand, t.mountain, t.mesa);
-            if playa(&w, seed, c.p, c.east, c.north, mp).is_some_and(|p| p.0 < 0.7) {
-                add(4);
-            }
-            let semi = 1.0 - smoothstep(0.30, 0.45, t.moist);
-            let mi = semi * (1.0 - t.mountain) * (1.0 - 0.6 * t.sand) * (1.0 - smoothstep(0.2, 0.5, t.mesa));
-            if mi > 0.0 && inselbergs(&w, seed, &c, mi) > 120.0 {
-                add(5);
-            }
-            let hyper = 1.0 - smoothstep(0.05, 0.12, t.moist);
-            if hyper > 0.5 && t.sand < 0.02 && perlin3(seed ^ S_YZONE, c.p / 120_000.0) > 0.35 {
-                add(6);
-            }
-            if t.river_hw > 20.0 && t.river_wet < 0.5 && t.river_d.abs() < t.river_hw {
-                add(7);
-            }
-        }
-        for (k, v) in &found {
-            eprintln!("{k}:");
-            for s in v {
+                if t.water_kind != 0 || t.ground < 1.0 {
+                    return out;
+                }
+                if t.sand > 0.7 {
+                    if wt > 0.9 {
+                        out.push((0, at.clone()));
+                    } else if wl > 0.9 {
+                        out.push((1, at.clone()));
+                    } else if ws > 0.9 {
+                        out.push((2, at.clone()));
+                    }
+                }
+                if (0.12..0.4).contains(&t.sand) && rho < 0.35 {
+                    out.push((3, at.clone()));
+                }
+                if playa(&crate::instances::near(&w, fam_playas(), c.p, 0.0), c.p, c.east, c.north).is_some_and(|p| p.0 < 0.7) {
+                    out.push((4, at.clone()));
+                }
+                if inselbergs(&crate::instances::near(&w, fam_inselbergs(), c.p, 0.0), &c) > 120.0 {
+                    out.push((5, at.clone()));
+                }
+                let hyper = (1.0 - smoothstep(0.05, 0.12, t.moist)) * smoothstep(-2.0, 2.0, t.temp);
+                if hyper > 0.5 && t.sand < 0.02 && perlin3(seed ^ S_YZONE, c.p / 120_000.0) > 0.35 {
+                    out.push((6, at.clone()));
+                }
+                if t.river_hw > 20.0 && t.river_wet < 0.5 && t.river_d.abs() < t.river_hw {
+                    out.push((7, at.clone()));
+                }
+                out
+            })
+            .collect();
+        for (k, name) in names.iter().enumerate() {
+            let v: Vec<&String> = hits.iter().filter(|h| h.0 == k).map(|h| &h.1).collect();
+            eprintln!("{name}: {} hits", v.len());
+            for s in v.iter().take(6) {
                 eprintln!("    {s}");
             }
         }
     }
 
     /// Places of the default world where the kit draws (from `desert_places`): transverse,
-    /// linear and star dunes, barchans, a playa, an inselberg, yardangs, a wash.
+    /// linear and star dunes, barchans, a playa, an inselberg, a dry lake, a wash.
     const PLACES: [(f64, f64); 8] = [
-        (-21.1554, 40.3422),
-        (-20.9146, 69.8689),
-        (27.8934, 57.6206),
-        (-21.9659, 25.3739),
-        (-22.9031, -2.4896),
-        (17.2528, 44.8051),
-        (-18.7955, 112.7949),
-        (21.4580, -101.3636),
+        (-19.9225, 40.0243),
+        (23.5356, 43.2255),
+        (-31.1491, -166.3463),
+        (20.8406, -50.0567),
+        (-11.8581, -162.1509),
+        (22.2101, 127.5214),
+        (-12.4109, -155.0993),
+        (-16.1256, 53.6542),
     ];
 
     fn tile_at(i: usize, z: u8) -> geodesy::tiles::TileId {
@@ -1015,5 +1165,80 @@ mod tests {
             worst = worst.max(e).max(r).max(l);
         }
         assert!(worst <= 0.005, "worst share of pixels off: {:.3}%", worst * 100.0);
+    }
+
+    /// Nadir previews of the kit's places (rgb and a hillshade of the DSM) at z11, z13, z15 on
+    /// the default backend: `DESERT_PNG=dir cargo test --release -p terragen desert_previews --
+    /// --ignored` (`DESERT_AT="lat,lon;lat,lon"` for other places).
+    #[test]
+    #[ignore]
+    fn desert_previews() {
+        let Ok(dir) = std::env::var("DESERT_PNG") else { return };
+        std::fs::create_dir_all(&dir).unwrap();
+        let places: Vec<(f64, f64)> = match std::env::var("DESERT_AT") {
+            Ok(v) => v
+                .split(';')
+                .map(|p| {
+                    let x: Vec<f64> = p.split(',').map(|c| c.trim().parse().unwrap()).collect();
+                    (x[0], x[1])
+                })
+                .collect(),
+            Err(_) => PLACES.to_vec(),
+        };
+        let zooms: Vec<u8> = std::env::var("DESERT_Z").map(|v| v.split(',').map(|z| z.parse().unwrap()).collect()).unwrap_or(vec![11, 13, 15]);
+        let be = if std::env::var("DESERT_CPU").is_ok() { crate::Backend::Cpu } else { crate::Backend::Auto };
+        let g = crate::Generator::try_with_backend(crate::Config::default(), be).unwrap();
+        let n = crate::TILE_SIZE;
+        for (k, &(lat, lon)) in places.iter().enumerate() {
+            let ids: Vec<_> = zooms.iter().map(|&z| geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)).collect();
+            let tiles = g.tiles(&ids).unwrap();
+            let mut img = image::RgbImage::new((n * ids.len()) as u32, (2 * n) as u32);
+            for (j, (id, t)) in ids.iter().zip(&tiles).enumerate() {
+                let gsd = geodesy::tiles::gsd_ew(lat.to_radians(), id.z, n as u32, &g.world.ell);
+                for y in 0..n {
+                    for x in 0..n {
+                        let o = y * n + x;
+                        img.put_pixel((j * n + x) as u32, y as u32, image::Rgb([t.rgb[3 * o], t.rgb[3 * o + 1], t.rgb[3 * o + 2]]));
+                        let h = |xx: usize, yy: usize| t.elevation[yy.min(n - 1) * n + xx.min(n - 1)] as f64;
+                        let dx = (h(x + 1, y) - h(x.saturating_sub(1), y)) / (2.0 * gsd);
+                        let dy = (h(x, y + 1) - h(x, y.saturating_sub(1))) / (2.0 * gsd);
+                        let nv = DVec3::new(-dx, dy, 1.0).normalize();
+                        let sh = (nv.dot(DVec3::new(-0.5, 0.5, 0.7).normalize()) * 230.0).clamp(0.0, 255.0) as u8;
+                        img.put_pixel((j * n + x) as u32, (n + y) as u32, image::Rgb([sh, sh, sh]));
+                    }
+                }
+            }
+            img.save(format!("{dir}/p{k}_{lat:.3}_{lon:.3}.png")).unwrap();
+        }
+    }
+
+    /// Debug: the inselbergs and playas near `DESERT_AT` and the ground along a transect.
+    #[test]
+    #[ignore]
+    fn desert_probe() {
+        let Ok(at) = std::env::var("DESERT_AT") else { return };
+        let x: Vec<f64> = at.split(',').map(|c| c.trim().parse().unwrap()).collect();
+        let w = World::new(crate::Config::default());
+        let c = Ctx::new(x[0].to_radians(), x[1].to_radians(), 30.0, &w.ell);
+        for (name, f) in [("inselberg", fam_inselbergs()), ("playa", fam_playas())] {
+            for i in crate::instances::near(&w, f, c.p, 5000.0) {
+                let g = geodesy::ecef2geodetic(i.center, &w.ell);
+                let v = offset(c.p, i.center, c.east, c.north);
+                let sh = if name == "inselberg" {
+                    ins_shape(i.id, v)
+                } else {
+                    let (x, r) = playa_shape(i.id, v);
+                    (x, r, 0.0)
+                };
+                eprintln!("{name} at {:.4},{:.4}: x {:.2} r {:.0} h {:.0}", g.lat.to_degrees(), g.lon.to_degrees(), sh.0, sh.1, sh.2);
+                for k in -10..=10 {
+                    let p = i.center + c.east * (k as f64 * 0.15 * sh.1);
+                    let g = geodesy::ecef2geodetic(p, &w.ell);
+                    let t = w.terrain(&Ctx::new(g.lat, g.lon, 30.0, &w.ell));
+                    eprint!("{:.0} ", t.ground);
+                }
+                eprintln!();
+            }
+        }
     }
 }

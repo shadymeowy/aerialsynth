@@ -16,7 +16,7 @@
     - slot: azonal
       kernel: patches
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.3, 0.45], moist: [null, null, 0.26, 0.36] }
-      params: { scale: 380, fraction: 0.32, octaves: 3, roughness: 0.55, colour: [104, 78, 58], colour2: [82, 64, 52], colour_var: 0.2 }
+      params: { scale: 520, fraction: 0.24, octaves: 3, roughness: 0.55, colour: [126, 98, 74], colour2: [112, 88, 68], colour_var: 0.2 }
       class: gravel
     # pale gravel and silt mottling of the pavement
     - slot: azonal
@@ -26,25 +26,25 @@
     # sparse scrub on the plains
     - slot: canopy
       kernel: scatter
-      mask: { sand: [null, null, 0.2, 0.4], moist: [0.03, 0.2, 2, 3] }
+      mask: { sand: [null, null, 0.2, 0.4], moist: [0.03, 0.2, 2, 3], veg: [0.4, 0.7, 2, 3] }
       params: { cell: 9, density: 0.14, shape: dome, radius: [0.7, 1.5], height: [0.5, 1.3], colour: [96, 92, 64], colour2: [120, 108, 72], second: 0.4, colour_var: 0.3 }
       class: desert_scrub
     # acacia and tamarisk along the washes
     - slot: canopy
       kernel: scatter
-      mask: { river_dist: [-15, 0, 20, 50], moist: [0.0, 0.08, 2, 3] }
+      mask: { river_dist: [-15, 0, 20, 50], moist: [0.0, 0.08, 2, 3], veg: [0.4, 0.7, 2, 3] }
       params: { cell: 13, density: 0.45, shape: umbrella, radius: [1.8, 3.6], height: [2.5, 6], colour: [82, 90, 56], colour_var: 0.3 }
       class: desert_scrub
     # oases: date palm groves along some stretches of the washes, gardens under them
     - slot: agriculture
       kernel: cells
-      mask: { river_dist: [null, null, 120, 220], patch: [0.3, 0.45, 2, 3], temp: [17, 21, 60, 70] }
+      mask: { river_dist: [null, null, 120, 220], patch: [0.3, 0.45, 2, 3], temp: [17, 21, 60, 70], veg: [0.4, 0.7, 2, 3] }
       params: { cell: 24, fill: 0.85, edge: 1.2, edge_height: 0.6, colour: [96, 118, 52], colour2: [138, 128, 82], edge_colour: [164, 140, 104], colour_var: 0.3 }
       class: crop
       clear: 1.0
     - slot: canopy
       kernel: scatter
-      mask: { river_dist: [null, null, 110, 200], patch: [0.3, 0.45, 2, 3], temp: [17, 21, 60, 70] }
+      mask: { river_dist: [null, null, 110, 200], patch: [0.3, 0.45, 2, 3], temp: [17, 21, 60, 70], sand: [null, null, 0.4, 0.6] }
       params: { cell: 8, density: 0.8, shape: star, radius: [2.8, 4.2], height: [9, 16], colour: [56, 78, 42], colour2: [70, 88, 46], second: 0.3, colour_var: 0.25 }
       class: orchard
 
@@ -54,7 +54,7 @@
     - slot: azonal
       kernel: patches
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.3, 0.45], moist: [null, null, 0.26, 0.36] }
-      params: { scale: 420, fraction: 0.38, octaves: 3, roughness: 0.55, colour: [92, 52, 38], colour2: [70, 44, 36], colour_var: 0.2 }
+      params: { scale: 560, fraction: 0.26, octaves: 3, roughness: 0.55, colour: [118, 70, 50], colour2: [104, 64, 48], colour_var: 0.2 }
       class: gravel
     - slot: azonal
       kernel: patches
@@ -62,12 +62,12 @@
       params: { scale: 30, fraction: 0.3, octaves: 2, roughness: 0.5, colour: [196, 132, 92], colour2: [176, 118, 84], colour_var: 0.15 }
     - slot: canopy
       kernel: scatter
-      mask: { sand: [null, null, 0.3, 0.55], moist: [0.03, 0.2, 2, 3] }
+      mask: { sand: [null, null, 0.3, 0.55], moist: [0.03, 0.2, 2, 3], veg: [0.4, 0.7, 2, 3] }
       params: { cell: 10, density: 0.2, shape: dome, radius: [0.8, 1.8], height: [0.5, 1.2], colour: [118, 116, 70], colour2: [140, 132, 84], second: 0.5, colour_var: 0.3 }
       class: desert_scrub
     - slot: canopy
       kernel: scatter
-      mask: { river_dist: [-15, 0, 25, 60], moist: [0.0, 0.08, 2, 3] }
+      mask: { river_dist: [-15, 0, 25, 60], moist: [0.0, 0.08, 2, 3], veg: [0.4, 0.7, 2, 3] }
       params: { cell: 14, density: 0.5, shape: umbrella, radius: [2, 4], height: [3, 7], colour: [86, 96, 60], colour_var: 0.3 }
       class: desert_scrub
 
@@ -89,7 +89,7 @@
     - slot: azonal
       kernel: patches
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.3, 0.45], moist: [null, null, 0.26, 0.36] }
-      params: { scale: 520, fraction: 0.3, octaves: 3, roughness: 0.55, colour: [116, 84, 60], colour2: [92, 70, 54], colour_var: 0.2 }
+      params: { scale: 640, fraction: 0.22, octaves: 3, roughness: 0.55, colour: [140, 106, 78], colour2: [124, 96, 72], colour_var: 0.2 }
       class: gravel
     - slot: azonal
       kernel: patches
@@ -97,23 +97,23 @@
       params: { scale: 26, fraction: 0.4, octaves: 2, roughness: 0.5, colour: [214, 190, 150], colour2: [198, 176, 140], colour_var: 0.15 }
     - slot: canopy
       kernel: scatter
-      mask: { sand: [null, null, 0.2, 0.4], moist: [0.04, 0.2, 2, 3] }
+      mask: { sand: [null, null, 0.2, 0.4], moist: [0.04, 0.2, 2, 3], veg: [0.4, 0.7, 2, 3] }
       params: { cell: 11, density: 0.1, shape: dome, radius: [0.7, 1.4], height: [0.5, 1.2], colour: [100, 96, 62], colour_var: 0.3 }
       class: desert_scrub
     - slot: canopy
       kernel: scatter
-      mask: { river_dist: [-15, 0, 20, 50], moist: [0.0, 0.08, 2, 3] }
+      mask: { river_dist: [-15, 0, 20, 50], moist: [0.0, 0.08, 2, 3], veg: [0.4, 0.7, 2, 3] }
       params: { cell: 14, density: 0.4, shape: umbrella, radius: [1.8, 3.6], height: [2.5, 6], colour: [84, 92, 56], colour_var: 0.3 }
       class: desert_scrub
     - slot: agriculture
       kernel: cells
-      mask: { river_dist: [null, null, 120, 220], patch: [0.3, 0.45, 2, 3], temp: [17, 21, 60, 70] }
+      mask: { river_dist: [null, null, 120, 220], patch: [0.3, 0.45, 2, 3], temp: [17, 21, 60, 70], veg: [0.4, 0.7, 2, 3] }
       params: { cell: 22, fill: 0.85, edge: 1.2, edge_height: 0.6, colour: [98, 120, 52], colour2: [142, 130, 84], edge_colour: [170, 146, 108], colour_var: 0.3 }
       class: crop
       clear: 1.0
     - slot: canopy
       kernel: scatter
-      mask: { river_dist: [null, null, 110, 200], patch: [0.3, 0.45, 2, 3], temp: [17, 21, 60, 70] }
+      mask: { river_dist: [null, null, 110, 200], patch: [0.3, 0.45, 2, 3], temp: [17, 21, 60, 70], sand: [null, null, 0.4, 0.6] }
       params: { cell: 8, density: 0.8, shape: star, radius: [2.8, 4.2], height: [9, 16], colour: [56, 78, 42], colour2: [70, 88, 46], second: 0.3, colour_var: 0.25 }
       class: orchard
 
@@ -149,7 +149,7 @@
       class: bare
     - slot: canopy
       kernel: scatter
-      mask: { river_dist: [-15, 0, 20, 50], moist: [0.0, 0.08, 2, 3] }
+      mask: { river_dist: [-15, 0, 20, 50], moist: [0.0, 0.08, 2, 3], veg: [0.4, 0.7, 2, 3] }
       params: { cell: 15, density: 0.35, shape: umbrella, radius: [1.8, 3.4], height: [2.5, 5], colour: [84, 90, 56], colour_var: 0.3 }
       class: desert_scrub
 
@@ -183,7 +183,7 @@
       clear: 1.0
     - slot: canopy
       kernel: scatter
-      mask: { river_dist: [-15, 0, 20, 50] }
+      mask: { river_dist: [-15, 0, 20, 50], veg: [0.4, 0.7, 2, 3] }
       params: { cell: 14, density: 0.4, shape: dome, radius: [1.5, 3], height: [1.5, 4], colour: [84, 92, 58], colour_var: 0.3 }
       class: desert_scrub
 
@@ -202,7 +202,7 @@
   layers:
     - slot: canopy
       kernel: scatter
-      mask: { sand: [null, null, 0.6, 0.9], moist: [0.0, 0.15, 2, 3] }
+      mask: { sand: [null, null, 0.6, 0.9], moist: [0.0, 0.15, 2, 3], veg: [0.4, 0.7, 2, 3] }
       params: { cell: 12, density: 0.18, shape: dome, radius: [0.8, 1.6], height: [0.6, 1.5], colour: [98, 104, 70], colour_var: 0.3 }
       class: desert_scrub
 
@@ -223,21 +223,21 @@
     - slot: azonal
       kernel: patches
       mask: { sand: [null, null, 0.1, 0.25], slope: [null, null, 0.3, 0.45] }
-      params: { scale: 300, fraction: 0.25, octaves: 3, roughness: 0.55, colour: [128, 98, 72], colour2: [110, 86, 66], colour_var: 0.2 }
+      params: { scale: 300, fraction: 0.25, octaves: 3, roughness: 0.55, colour: [146, 114, 86], colour2: [132, 104, 80], colour_var: 0.2 }
       class: gravel
     - slot: canopy
       kernel: scatter
-      mask: { sand: [null, null, 0.4, 0.7] }
+      mask: { sand: [null, null, 0.4, 0.7], veg: [0.4, 0.7, 2, 3] }
       params: { cell: 6, density: 0.45, shape: dome, radius: [0.8, 1.7], height: [0.7, 1.8], colour: [84, 90, 56], colour2: [110, 106, 66], second: 0.35, colour_var: 0.35 }
       class: desert_scrub
     - slot: canopy
       kernel: scatter
-      mask: { sand: [null, null, 0.4, 0.7] }
+      mask: { sand: [null, null, 0.4, 0.7], veg: [0.4, 0.7, 2, 3] }
       params: { cell: 22, density: 0.3, shape: umbrella, radius: [2, 3.5], height: [3, 6], colour: [80, 88, 52], colour_var: 0.3 }
       class: desert_scrub
     - slot: canopy
       kernel: scatter
-      mask: { river_dist: [-15, 0, 30, 70] }
+      mask: { river_dist: [-15, 0, 30, 70], veg: [0.4, 0.7, 2, 3] }
       params: { cell: 12, density: 0.6, shape: umbrella, radius: [2, 4.2], height: [3, 8], colour: [74, 88, 50], colour_var: 0.3 }
       class: desert_scrub
 
@@ -267,11 +267,11 @@
       params: { scale: 22, fraction: 0.4, octaves: 2, roughness: 0.5, colour: [192, 182, 160], colour2: [176, 168, 150], colour_var: 0.15 }
     - slot: canopy
       kernel: scatter
-      mask: { sand: [null, null, 0.5, 0.8], moist: [0.02, 0.15, 2, 3] }
+      mask: { sand: [null, null, 0.5, 0.8], moist: [0.02, 0.15, 2, 3], veg: [0.4, 0.7, 2, 3] }
       params: { cell: 10, density: 0.22, shape: dome, radius: [0.9, 2.0], height: [0.8, 2.2], colour: [92, 96, 70], colour2: [118, 116, 82], second: 0.4, colour_var: 0.3 }
       class: desert_scrub
     - slot: canopy
       kernel: scatter
-      mask: { river_dist: [-15, 0, 25, 60] }
+      mask: { river_dist: [-15, 0, 25, 60], veg: [0.4, 0.7, 2, 3] }
       params: { cell: 12, density: 0.45, shape: dome, radius: [1.5, 3.2], height: [2, 5], colour: [90, 100, 64], colour_var: 0.3 }
       class: desert_scrub
