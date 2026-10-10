@@ -5,14 +5,15 @@
 # forests; cloud forest and páramo as altitudinal zones; mangroves on low tropical coasts.
 #
 # Schema: docs/design/kit-guide.md ("Biomes"). The kernels `tropical_*` are the kit's.
-# Mangrove masks: `height` near sea level on gentle ground stands in for the coast distance
-# (the atlas will give it); the regional `style1` channel leaves some coasts to beaches.
+# Mangrove masks: near the coast (`coast_km`: the atlas' ~20 km texels place the coast within
+# ~15 km), near sea level (the intertidal and estuary flats: they replace the beaches there),
+# not on arid coasts, not in fields.
 
 # ---------------------------------------------------------------- rainforest (core, patched)
 
 - id: tropical_moist
   patch: true
-  landuse: { agriculture: 0.5 }
+  landuse: { agriculture: 0.2 }
   palette:
     crown_tropic: [30, 66, 30]
     crown_decid: [46, 78, 36]
@@ -21,13 +22,9 @@
     floor: [40, 50, 30]
   vegetation: { trees: 1.25, tropic: 0.3, laterite: 1.4, tall: 0.25 }
   canopy:
-    # the closed canopy: cauliflower crowns of a stand
-    - { share: tropical, shape: dome, cell: 11, height: [24, 12], colour: crown_tropic }
-    # emergent giants, paler, on their own lattice
-    - { share: tropical, shape: dome, cell: 38, height: [40, 14], colour: [70, 98, 50], density: 0.32, closure: false, stand: false, seed: 0x7E01 }
-    # flowering crowns: yellow (Tabebuia, Cassia), pink-red (Erythrina, Spathodea)
-    - { share: tropical, shape: dome, cell: 52, height: [32, 10], colour: [182, 160, 56], density: 0.09, closure: false, stand: false, seed: 0x7E02 }
-    - { share: tropical, shape: dome, cell: 64, height: [31, 10], colour: [172, 92, 100], density: 0.08, closure: false, stand: false, seed: 0x7E03 }
+    # the closed canopy: broad cauliflower crowns of a stand, flat-topped where they close
+    - { share: tropical, shape: umbrella, cell: 15, height: [22, 8], colour: crown_tropic }
+    - { share: tropical, shape: dome, cell: 9, height: [20, 6], colour: [40, 74, 36], density: 0.6, seed: 0x7E01 }
     - { share: broadleaf, shape: dome, cell: 8.5, height: [10, 10], open_height: 0.65, colour: crown_decid, colour_dry: crown_dry }
     - { share: shrub, shape: dome, cell: 3.2, height: [1.6, 0], colour: shrub, closure: false, stand: false }
   zonation:
@@ -43,15 +40,15 @@
     # slash-and-burn frontier: where farming begins, away from the fields
     - slot: disturbance
       kernel: tropical_swidden
-      mask: { agri: [0.08, 0.22, 0.6, 0.85], field: [null, null, 0.03, 0.15], natural: [0.5, 0.8, null, null], patch: [-0.15, 0.15, null, null] }
-      params: { cell: 170, fill: 0.55, margin: 0.14, roughness: 0.2, height: 4, colour: [56, 48, 44], colour2: [158, 104, 70], fallow_colour: [104, 138, 54] }
+      mask: { agri: [0.08, 0.22, 0.6, 0.85], field: [null, null, 0.03, 0.15], natural: [0.5, 0.8, null, null], patch: [0.1, 0.35, null, null] }
+      params: { cell: 170, fill: 0.45, margin: 0.14, roughness: 0.2, height: 4, colour: [56, 48, 44], colour2: [152, 128, 90], fallow_colour: [104, 138, 54] }
       class: clear_cut
       clear: 1.0
     # meander scars of the floodplains: oxbow lakes, silted arcs, scroll bars
     - slot: disturbance
       kernel: tropical_meander
       seed: 0x7E10
-      mask: { floodplain: [0.2, 0.45, null, null], river_dist: [null, null, 1500, 3500], slope: [null, null, 0.03, 0.07] }
+      mask: { floodplain: [0.15, 0.35, null, null], river_dist: [null, null, 1500, 3500], slope: [null, null, 0.06, 0.12] }
       params: { cell: 1700, density: 0.85, part: lake, radius: [180, 420], width: 28, open: 0.7, size: 200, colour: [40, 46, 34], colour2: [70, 72, 50] }
       class: lake
       clear: 1.0
@@ -59,10 +56,17 @@
     - slot: canopy
       kernel: tropical_meander
       seed: 0x7E10
-      mask: { floodplain: [0.2, 0.45, null, null], river_dist: [null, null, 1500, 3500], slope: [null, null, 0.03, 0.07] }
+      mask: { floodplain: [0.15, 0.35, null, null], river_dist: [null, null, 1500, 3500], slope: [null, null, 0.06, 0.12] }
       params: { cell: 1700, density: 0.85, part: scroll, radius: [180, 420], width: 28, open: 0.7, bars: 42, height: 20, size: 200, colour: [88, 122, 52], colour2: [44, 74, 38], silt_colour: [112, 136, 62] }
       class: tropical_rainforest
       height: blend
+    # emergent giants above the canopy: pale crowns, some flowering yellow or pink-red
+    - &emergents
+      slot: canopy
+      kernel: tropical_crowns
+      mask: { veg: [0.5, 0.8, null, null], natural: [0.5, 0.8, null, null], field: [null, null, 0.05, 0.2], moist: [0.5, 0.65, null, null] }
+      params: { cell: 34, density: 0.4, radius: [6, 11], height: [36, 48], colour: [70, 98, 50], colour2: [182, 160, 58], second: 0.1, flowering: 0.08, flower_colour: [172, 92, 100], colour_var: 0.3 }
+      class: tropical_rainforest
     # river-edge forest: a lower band of pale pioneer crowns (Cecropia) along the banks
     - slot: canopy
       kernel: tropical_crowns
@@ -75,14 +79,14 @@
       slot: canopy
       kernel: tropical_mangrove
       seed: 0x7E20
-      mask: { height: [null, null, 1.0, 3.0], slope: [null, null, 0.02, 0.06], style1: [0.3, 0.45, null, null], field: [null, null, 0.05, 0.2] }
+      mask: { coast_km: [null, null, 15, 30], height: [null, null, 3.0, 6.0], moist: [0.4, 0.55, null, null], field: [null, null, 0.05, 0.2] }
       params: { scale: 420, width: 9, height: 12, crown: 4.5 }
       class: mangrove
     - &mangrove_channels
       slot: canopy
       kernel: tropical_mangrove
       seed: 0x7E20
-      mask: { height: [null, null, 1.0, 3.0], slope: [null, null, 0.02, 0.06], style1: [0.3, 0.45, null, null], field: [null, null, 0.05, 0.2] }
+      mask: { coast_km: [null, null, 15, 30], height: [null, null, 3.0, 6.0], moist: [0.4, 0.55, null, null], field: [null, null, 0.05, 0.2] }
       params: { scale: 420, part: channels, width: 9 }
       class: river
       height: blend
@@ -94,7 +98,7 @@
   koppen: [Af, Am]
   envelope: { precip_mm: [1800, 100000] }
   weight: 0.35
-  landuse: { agriculture: 0.3, towns: 0.6 }
+  landuse: { agriculture: 0.15, towns: 0.5 }
   palette:
     crown_tropic: [36, 72, 38]
     grass_wet: [70, 100, 46]
@@ -106,7 +110,6 @@
     - { share: tropical, shape: dome, cell: 10, height: [20, 8], colour: crown_tropic }
     # palms of the swamps (Mauritia, Euterpe)
     - { share: tropical, shape: star, cell: 11, height: [16, 4], colour: [78, 106, 50], density: 0.4, closure: false, stand: false, seed: 0x7E31 }
-    - { share: tropical, shape: dome, cell: 44, height: [32, 10], colour: [74, 100, 56], density: 0.25, closure: false, stand: false, seed: 0x7E32 }
     - { share: broadleaf, shape: dome, cell: 8.5, height: [10, 10], open_height: 0.65, colour: crown_decid, colour_dry: crown_dry }
     - { share: shrub, shape: dome, cell: 3.2, height: [1.6, 0], colour: shrub, closure: false, stand: false }
   zonation:
@@ -123,7 +126,7 @@
     - slot: disturbance
       kernel: tropical_meander
       seed: 0x7E11
-      mask: { slope: [null, null, 0.03, 0.07], river_dist: [null, null, 2500, 5000] }
+      mask: { slope: [null, null, 0.06, 0.12], river_dist: [null, null, 2500, 5000] }
       params: { cell: 1300, density: 0.9, part: lake, radius: [160, 380], width: 26, open: 0.8, size: 200, colour: [34, 38, 30], colour2: [62, 64, 46] }
       class: lake
       clear: 1.0
@@ -131,10 +134,11 @@
     - slot: canopy
       kernel: tropical_meander
       seed: 0x7E11
-      mask: { slope: [null, null, 0.03, 0.07], river_dist: [null, null, 2500, 5000] }
+      mask: { slope: [null, null, 0.06, 0.12], river_dist: [null, null, 2500, 5000] }
       params: { cell: 1300, density: 0.9, part: scroll, radius: [160, 380], width: 26, open: 0.8, bars: 38, height: 17, size: 200, colour: [92, 124, 56], colour2: [42, 70, 38], silt_colour: [116, 138, 64] }
       class: tropical_rainforest
       height: blend
+    - *emergents
     - slot: canopy
       kernel: tropical_crowns
       mask: { river_dist: [null, null, 25, 70], natural: [0.4, 0.7, null, null] }
@@ -151,7 +155,7 @@
   koppen: [Am, Aw]
   envelope: { precip_mm: [1300, 100000], dry_months: [2, 7] }
   weight: 0.5
-  landuse: { agriculture: 0.7 }
+  landuse: { agriculture: 0.5 }
   palette:
     crown_tropic: [48, 80, 38]
     crown_decid: [62, 86, 42]
@@ -164,9 +168,6 @@
     - { share: tropical, shape: dome, cell: 11, height: [22, 10], colour: crown_tropic }
     # leafless crowns of the dry season (teak, sal)
     - { share: tropical, shape: dome, cell: 13, height: [21, 8], colour: [134, 118, 94], density: 0.35, closure: false, seed: 0x7E41 }
-    # flame of the forest (Butea, Delonix)
-    - { share: tropical, shape: dome, cell: 48, height: [24, 6], colour: [196, 104, 48], density: 0.1, closure: false, stand: false, seed: 0x7E42 }
-    - { share: tropical, shape: dome, cell: 40, height: [34, 10], colour: [70, 96, 48], density: 0.2, closure: false, stand: false, seed: 0x7E43 }
     - { share: broadleaf, shape: dome, cell: 8.5, height: [10, 10], open_height: 0.65, colour: crown_decid, colour_dry: crown_dry }
     - { share: shrub, shape: dome, cell: 3.2, height: [1.6, 0], colour: shrub, closure: false, stand: false }
   zonation:
@@ -181,8 +182,8 @@
       clear: 0.2
     - slot: disturbance
       kernel: tropical_swidden
-      mask: { agri: [0.08, 0.22, 0.6, 0.85], field: [null, null, 0.03, 0.15], natural: [0.5, 0.8, null, null], patch: [-0.2, 0.1, null, null] }
-      params: { cell: 150, fill: 0.6, margin: 0.12, roughness: 0.2, height: 3, colour: [60, 52, 46], colour2: [160, 110, 72], fallow_colour: [118, 140, 60] }
+      mask: { agri: [0.08, 0.22, 0.6, 0.85], field: [null, null, 0.03, 0.15], natural: [0.5, 0.8, null, null], patch: [0.15, 0.4, null, null] }
+      params: { cell: 150, fill: 0.6, margin: 0.12, roughness: 0.2, height: 3, colour: [60, 52, 46], colour2: [146, 126, 92], fallow_colour: [118, 140, 60] }
       class: clear_cut
       clear: 1.0
     - slot: disturbance
@@ -190,6 +191,12 @@
       mask: { natural: [0.4, 0.7, null, null], field: [null, null, 0.05, 0.2] }
       params: { cell: 140, density: 0.22, shape: dome, radius: [5, 12], height: [2, 6], colour: [110, 130, 56], colour2: [140, 132, 74], second: 0.4, colour_var: 0.3 }
       clear: 1.0
+    # emergents; flame of the forest (Butea, Delonix) flowering orange-red
+    - slot: canopy
+      kernel: tropical_crowns
+      mask: { veg: [0.5, 0.8, null, null], natural: [0.5, 0.8, null, null], field: [null, null, 0.05, 0.2], moist: [0.5, 0.65, null, null] }
+      params: { cell: 36, density: 0.35, radius: [6, 10], height: [30, 40], colour: [74, 96, 48], colour2: [138, 120, 92], second: 0.25, flowering: 0.12, flower_colour: [200, 102, 46], colour_var: 0.3 }
+      class: tropical_rainforest
     - slot: canopy
       kernel: tropical_crowns
       mask: { river_dist: [null, null, 25, 70], natural: [0.4, 0.7, null, null], field: [null, null, 0.05, 0.2] }
@@ -206,6 +213,7 @@
   koppen: [Aw]
   envelope: { precip_mm: [800, 1900], dry_months: [4, 9] }
   weight: 0.6
+  landuse: { agriculture: 0.6 }
   palette:
     crown_decid: [70, 90, 46]
     crown_dry: [128, 114, 96]
@@ -235,8 +243,8 @@
       clear: 0.25
     - slot: disturbance
       kernel: tropical_swidden
-      mask: { agri: [0.08, 0.22, 0.6, 0.85], field: [null, null, 0.03, 0.15], natural: [0.5, 0.8, null, null], patch: [-0.2, 0.1, null, null] }
-      params: { cell: 140, fill: 0.5, margin: 0.12, roughness: 0.2, height: 2.5, colour: [70, 60, 52], colour2: [170, 118, 76], fallow_colour: [130, 136, 70] }
+      mask: { agri: [0.08, 0.22, 0.6, 0.85], field: [null, null, 0.03, 0.15], natural: [0.5, 0.8, null, null], patch: [0.15, 0.4, null, null] }
+      params: { cell: 140, fill: 0.5, margin: 0.12, roughness: 0.2, height: 2.5, colour: [70, 60, 52], colour2: [146, 126, 92], fallow_colour: [130, 136, 70] }
       class: clear_cut
       clear: 1.0
     - slot: canopy
@@ -251,6 +259,7 @@
 
 - id: tropical_dry
   patch: true
+  landuse: { agriculture: 0.45 }
   palette:
     grass_dry: [190, 160, 98]
     grass_wet: [128, 128, 64]
@@ -268,13 +277,13 @@
       slot: zonal
       kernel: tropical_grass
       mask: { moist: [null, null, 0.5, 0.68], temp: [16, 20, null, null] }
-      params: { scale: 70, bare: 0.1, tussock: 0.6, colour: [194, 162, 98], colour2: [158, 146, 106], bare_colour: [156, 92, 60] }
+      params: { scale: 70, bare: 0.08, tussock: 0.6, colour: [214, 186, 116], colour2: [190, 174, 122], bare_colour: [176, 126, 88] }
       class: savanna
     - &savanna_fire
       slot: disturbance
       kernel: tropical_fire
       mask: { natural: [0.5, 0.8, null, null], field: [null, null, 0.05, 0.2], moist: [null, null, 0.55, 0.7] }
-      params: { scale: 1500, fraction: 0.26, ages: 3, ash: 0.6 }
+      params: { scale: 1500, fraction: 0.26, ages: 3, ash: 0.6, colour: [28, 26, 25], colour2: [94, 76, 58], regrowth_colour: [126, 128, 70] }
       class: burn_scar
       clear: 0.3
     - &termite_mounds
@@ -303,6 +312,7 @@
   envelope: { temp: [18, 35], precip_mm: [300, 1100] }
   weight: 1.0
   min_share: 0.005
+  landuse: { agriculture: 0.3 }
   palette:
     grass_dry: [200, 170, 104]
     grass_wet: [140, 136, 70]
@@ -345,6 +355,7 @@
   koppen: [Aw, BSh]
   envelope: { temp: [20, 35], precip_mm: [350, 1000] }
   weight: 0.5
+  landuse: { agriculture: 0.3 }
   palette:
     grass_dry: [196, 168, 112]
     grass_wet: [146, 138, 76]
@@ -374,7 +385,7 @@
   koppen: [Aw, Am]
   envelope: { temp: [20, 35], precip_mm: [900, 2400] }
   weight: 0.4
-  landuse: { agriculture: 0.5 }
+  landuse: { agriculture: 0.35 }
   palette:
     grass_dry: [180, 160, 96]
     grass_wet: [116, 130, 60]
@@ -403,7 +414,7 @@
     - slot: disturbance
       kernel: tropical_meander
       seed: 0x7E12
-      mask: { floodplain: [0.2, 0.45, null, null], river_dist: [null, null, 1500, 3500], slope: [null, null, 0.03, 0.07] }
+      mask: { floodplain: [0.15, 0.35, null, null], river_dist: [null, null, 1500, 3500], slope: [null, null, 0.06, 0.12] }
       params: { cell: 1700, density: 0.85, part: lake, radius: [160, 380], width: 22, open: 0.6, size: 200, colour: [52, 62, 52], colour2: [84, 90, 66] }
       class: lake
       clear: 1.0
@@ -411,7 +422,7 @@
     - slot: canopy
       kernel: tropical_meander
       seed: 0x7E12
-      mask: { floodplain: [0.2, 0.45, null, null], river_dist: [null, null, 1500, 3500], slope: [null, null, 0.03, 0.07] }
+      mask: { floodplain: [0.15, 0.35, null, null], river_dist: [null, null, 1500, 3500], slope: [null, null, 0.06, 0.12] }
       params: { cell: 1700, density: 0.85, part: scroll, radius: [160, 380], width: 22, open: 0.6, bars: 36, height: 0.5, size: 200, colour: [150, 146, 84], colour2: [96, 116, 58], silt_colour: [92, 120, 58] }
       class: marsh
       height: blend
@@ -421,7 +432,7 @@
   koppen: [Aw, Cwa]
   envelope: { temp: [17, 28], precip_mm: [650, 1500] }
   weight: 0.6
-  landuse: { agriculture: 0.6 }
+  landuse: { agriculture: 0.4 }
   palette:
     crown_decid: [84, 96, 50]
     crown_dry: [138, 112, 80]
@@ -455,7 +466,7 @@
       params: { cell: 60, density: 0.35, shape: dome, radius: [5, 10], height: [2, 4], jitter: 0.9, colour: [168, 128, 90], colour2: [92, 104, 54], second: 0.5, colour_var: 0.2, shade: 0.4 }
     - slot: disturbance
       kernel: tropical_swidden
-      mask: { agri: [0.08, 0.22, 0.6, 0.85], field: [null, null, 0.03, 0.15], natural: [0.5, 0.8, null, null], patch: [-0.2, 0.1, null, null] }
+      mask: { agri: [0.08, 0.22, 0.6, 0.85], field: [null, null, 0.03, 0.15], natural: [0.5, 0.8, null, null], patch: [0.15, 0.4, null, null] }
       params: { cell: 150, fill: 0.45, margin: 0.1, roughness: 0.2, height: 2, colour: [70, 60, 52], colour2: [172, 122, 80], fallow_colour: [132, 136, 72] }
       class: clear_cut
       clear: 1.0

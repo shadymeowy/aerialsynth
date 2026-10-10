@@ -828,6 +828,7 @@ mod tests {
             }
         };
         let n: u64 = std::env::var("TROPICAL_FIND").ok().and_then(|s| s.parse().ok()).unwrap_or(30_000);
+        let coast_only = std::env::var("TROPICAL_FIND_COAST").is_ok();
         for i in 0..n {
             let h = mix64(0x7F0 ^ i);
             let lat = (2.0 * u01k(h, 1) - 1.0).asin();
@@ -839,6 +840,13 @@ mod tests {
             if w.macro_at(p, 20_000.0).cont < 0.02 {
                 continue;
             }
+            if coast_only {
+                // low tropical coasts only (mangrove places): pass A first, cheap
+                let t = w.terrain(&crate::world::Ctx::new(lat, lon, 30.0, &w.ell));
+                if !(t.coast_km < 25.0 && t.ground > 0.0 && t.ground < 3.0 && t.temp > 20.0 && t.water_kind == crate::world::water::NONE) {
+                    continue;
+                }
+            }
             let [(id, site), _] = crate::eco::sites(&w, p);
             let e = crate::eco::compute(&w, &reg, id, site);
             let name = reg.biomes[e.biome as usize].name.clone();
@@ -846,7 +854,7 @@ mod tests {
                 continue;
             }
             let (t, _, cls) = gen.probe(lat, lon, 2.0);
-            let s = format!("{:.4},{:.4} {name} T {:.1} moist {:.2} h {:.0} fp {:.2} river {:.0} cls {}", lat.to_degrees(), lon.to_degrees(), t.temp, t.moist, t.ground, t.floodplain, if t.river_hw > 0.0 { t.river_d.abs() - t.river_hw } else { -1.0 }, crate::registry::classes::name(cls));
+            let s = format!("{:.4},{:.4} {name} T {:.1} moist {:.2} h {:.0} coast {:.1} fp {:.2} river {:.0} cls {}", lat.to_degrees(), lon.to_degrees(), t.temp, t.moist, t.ground, t.coast_km, t.floodplain, if t.river_hw > 0.0 { t.river_d.abs() - t.river_hw } else { -1.0 }, crate::registry::classes::name(cls));
             if t.water_kind != crate::world::water::NONE && t.water > t.ground {
                 continue;
             }
@@ -855,7 +863,7 @@ mod tests {
             if t.floodplain > 0.35 && t.river_hw > 0.0 && t.river_d.abs() < 2500.0 {
                 add(format!("floodplain {name}"), s.clone());
             }
-            if t.ground < 2.5 && t.style[1] > 0.45 {
+            if t.coast_km < 25.0 && t.ground < 3.0 {
                 add(format!("mangrove coast {name}"), s.clone());
             }
             if t.temp < 17.5 && t.temp > 10.0 {
