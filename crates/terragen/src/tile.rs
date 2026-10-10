@@ -363,6 +363,12 @@ impl Generator {
         (t, s.height, s.class)
     }
 
+    /// The biome of the ecoregion at pass-A point `t` (index into the registry, its name).
+    pub fn biome(&self, t: &Terrain) -> (u16, &str) {
+        let e = self.surface.eco.params(&self.world, &self.surface.registry, &mut Caches::default(), t.eco.id, t.eco.center);
+        (e.biome, self.surface.registry.biomes[e.biome as usize].name.as_str())
+    }
+
     /// Pass A of a tile: the terrain at the pixel centres of the tile and a 2-pixel apron
     /// (260 x 260, row-major).
     pub fn pass_a(&self, id: TileId) -> Vec<Terrain> {
