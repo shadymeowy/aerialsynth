@@ -8,6 +8,77 @@
   paleo-shorelines, arid lakes dried into salt pans, braided dry washes, yardangs, inselbergs;
   sand colours by palette and lithology; six desert biomes (erg, hamada, basalt harrat,
   gypsum, scrubland, Gobi) and the kit's textures on the two core deserts.
+- **Lazy tile generation** (the bindings' cameras, `terrain run --lazy`):
+  - The level of detail no longer over-refines a new place: tiles of unknown elevation range
+    were refined on a default range (-100..6000 m), which put the camera inside their bounding
+    spheres, so the first render generated the finest zoom around it (the C example: 2,900
+    tiles to z18 for a 160 × 120 image whose pixels are ~14 m on the ground; > 6 GB, 13 min on
+    4 CPU cores). The selection now generates the tiles whose range it needs, one zoom level
+    per pass, and selects again until it knows them all (`lod::Selection::unknown`): 220 tiles
+    to z15, 1 GB, ~3 min (the Python example: 1,900 tiles, 3.4 GB, 8.5 min before; 500
+    tiles, 1.3 GB, 4.6 min now).
+  - The same call gives the same image: the selection is the one a store holding every tile
+    gives, so a render that generates its tiles and one that reads them select the same tiles
+    (the first render differed by up to 1 DN before).
+  - Missing tiles are generated in batches (`tiles.cache_tiles` bounds what the cache holds;
+    before, one render's missing tiles were generated in a single batch).
+  - Progress: `terrain run` prints the tiles a render generates; the bindings report
+    generation on stderr with `as_set_verbose(w, 1)` (C) / `World(..., verbose=True)`,
+    `World.verbose` (Python).
+- **Planning:** the dry runs of `terrain run` / `terrain tiles` no longer add margin rings around
+  tiles of unknown range (only around the tiles the renderer keeps), and the plan includes the
+  tiles its selection refines: the previous `configs/quick.yaml` needed 357 + 280 tiles, now 357 + 2.
+  A new cull drops tiles above the top of a downward view cone (the coarse tiles beside a low
+  nadir camera, whose bounding spheres contain it).
+- `configs/quick.yaml` is quick: 3 s at 5 fps, a 320 × 256 camera, zoom 15, margin 1 (~75 tiles).
+- `terrain view` checks for a display and a GPU first ("terrain view needs a GPU (see
+  docs/viewer.md): …") and creates no tile store when it cannot start.
+- `terrain tiles --bbox` refuses lat_min >= lat_max (swapped bounds selected nothing) and
+  out-of-range values; lon_min > lon_max stays a box across the antimeridian.
+- A directory or a file that is not HDF5 given as a tile store fails with "… is a directory" /
+  "… is not an HDF5 file" instead of an HDF5 error stack (CLI and bindings).
+- Python: tile coordinates, zooms, seeds and sizes must be integers (`operator.index`: Python or
+  numpy integers); `w.tile(3.5, 0, 0)` raises `TypeError` instead of truncating. The type stub
+  `_native.pyi` covers the whole extension module.
+- **Terrain generator version 4** (`docs/design/terrain-next.md`; stores of version 3 are
+  refused for writing, as for any generator change):
+  - **Composite stack:** pass B is a fixed stack of layers (zonal ground, altitudinal zone,
+    azonal overrides, disturbance, agriculture, canopy, linear, built, water, seasonal), each a
+    `Layer { cov, albedo, dh, cls, emit, lit, mat }`; the previous look is ported into it
+    (`stack.rs`, `layers/`, `gpu/wgsl/stack.wgsl`).
+  - **Biome registry:** biomes are YAML data (`crates/terragen/biomes/`): Köppen classes,
+    climate envelopes, lithology, weights, palettes, vegetation parameters, crown layers,
+    zonations and up to 8 kernel layers with masks over named fields. Compiled at start-up,
+    validated with keyed errors, per-GSD-band layer lists; the resolved registry is stored in
+    the world config (`biomes.resolved`), `world.biomes.overrides` changes weights.
+  - **Kernel library** (`kernels.rs`, `gpu/wgsl/kernels.wgsl`): scatter, rows, cells, stripes,
+    contours, radial, crescent, lobes, patches, linear, stamp, canopy, water and relief
+    operators, each with a calibrated mean (coarse pixels show the mean of fine ones); a CPU /
+    GPU parity harness for every kernel.
+  - **Ecoregions and cultures** (`eco.rs`, `world.ecoregions`): ~100 km ecoregions pick their
+    biome by the climate at their site and draw a style (lithology soils and rocks, tints, tree
+    density and species mix, season); 12 culture archetypes set field systems, field size,
+    hedges, roofs, building heights, blocks, lamps, agriculture and town density. Dithered
+    ecotones (10 km).
+  - **Planetary atlas wired in:** mountain ranges along plate boundaries
+    (`relief.tectonic_mountains`; the noise belts become old orogens, `relief.belt_mountains`),
+    climate from the atlas (rain shadows, currents, monsoons), biomes by Köppen class, cultures
+    from the atlas' culture areas, town density by population, roads and lights by development.
+    The atlas builds its elevation in two steps (pre-tectonic for the plates, then with their
+    uplift); `ATLAS_VERSION` 3.
+  - **Kits** (`src/kits/`, `docs/design/kit-guide.md`): biomes, kernels, layer functions,
+    relief operators, **instance families** (sparse lattices listed per 16-pixel block on both
+    backends) and **host-built linear features and stamps** (binned per tile), each kit in its
+    own files and registered by one line.
+  - Land cover: forest types (tropical, broadleaf, needleleaf, mixed), shrubs, hedgerows and
+    tracks of the v2 classes.
+  - Performance (RTX 6000 Ada, shared server, `examples/zoom_bench`, ms per tile, version 3 →
+    4): z4 ~51 → ~63, z8 ~77 → ~87, z12 ~7 → ~9, z14 ~6 → ~8, z16 ~6 → ~7; pass B alone within
+    +7 %, the rest pass A over more mountains and the atlas fields. CPU (6 threads): 0.86–0.98×
+    of version 3's time. `TERRAGEN_PROFILE=passes` times each tile kernel.
+  - Tests: tile parity asserted (< 0.1 % of pixels), kernel parity, LOD of albedo and
+    land-cover groups, variety budget (`tests/variety.rs`), a CPU speed smoke test, and
+    `wgsl_compiles` (every entry point to SPIR-V with naga, no GPU needed).
 
 ## 0.2.0 — 2026-10-10
 

@@ -85,6 +85,7 @@ impl GpuEventSensor {
         let gpu = device::shared()?;
         let d = &gpu.device;
         let n = cpu.px.len() as u32;
+        let compiling = gpu.compiling();
         let module = d
             .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("events"), source: wgpu::ShaderSource::Wgsl(include_str!("events.wgsl").into()) });
         let pipe = d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -95,6 +96,7 @@ impl GpuEventSensor {
             compilation_options: Default::default(),
             cache: None,
         });
+        drop(compiling);
         use wgpu::BufferUsages as U;
         let st = U::STORAGE | U::COPY_SRC | U::COPY_DST;
         let state = buffer(d, "ev state", n as u64 * 16, st);

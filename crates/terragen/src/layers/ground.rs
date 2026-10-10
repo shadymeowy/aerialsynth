@@ -51,7 +51,9 @@ pub fn zonal(s: &mut Stack) {
         let dry_p = smoothstep(0.05, 0.55, perlin3(0x3EAD, p / 60.0) + 0.5 * perlin3(0x3EAE, p / 22.0)) * band(30.0, gsd) * cover;
         col = mixc(col, col * DVec3::new(1.16, 1.06, 0.80), 0.45 * dry_p * meadow);
         col *= 1.0
-            + (0.10 * perlin3(0x3EB1, p / 12.0) * band(12.0, gsd) + 0.08 * perlin3(0x3EB2, p / 4.0) * band(4.0, gsd) + 0.06 * perlin3(0x3EB3, p / 1.3) * band(1.3, gsd))
+            + (0.10 * perlin3(0x3EB1, p / 12.0) * band(12.0, gsd)
+                + 0.08 * perlin3(0x3EB2, p / 4.0) * band(4.0, gsd)
+                + 0.06 * perlin3(0x3EB3, p / 1.3) * band(1.3, gsd))
                 * cover
                 * meadow;
     }

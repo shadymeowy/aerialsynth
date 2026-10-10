@@ -1,14 +1,20 @@
 /*
  * aerialsynth C API example: render a camera image of a world and write it as a PPM.
  *
- *   cc -std=c99 render.c -I../include -L../../../target/release -laerialsynth \
- *      -Wl,-rpath,$PWD/../../../target/release -o render
+ * In the source tree (after `cargo build --release -p aerialsynth-capi`), from the repository root:
+ *   cc -std=c99 bindings/c/examples/render.c -I bindings/c/include -L target/release -laerialsynth \
+ *      -Wl,-rpath,$PWD/target/release -o render
+ * In a release archive (terrain-<version>-<target>), from its top directory:
+ *   cc -std=c99 examples/render.c -I include -L lib -laerialsynth -Wl,-rpath,$PWD/lib -o render
+ *
  *   ./render TILES.h5 [CONFIG.yaml|- [LAT LON HEIGHT_ABOVE_GROUND [OUT.ppm]]]
  *
  * CONFIG.yaml is a scenario (its `world:` section) or a world config; "-" or nothing = the default
  * world. A 160 x 120 pinhole camera (70 degree field of view) looks north-east, 30 degrees down,
  * from HEIGHT_ABOVE_GROUND metres (default 1500) above the surface at LAT, LON (default 45, 10),
- * on 2026-06-21 at 07:30 UTC. Tiles the view needs are generated into the store on first use.
+ * on 2026-06-21 at 07:30 UTC. Tiles the view needs are generated into the store on first use:
+ * a few hundred tiles, minutes on a CPU (seconds on a GPU); the progress is printed on stderr
+ * (as_set_verbose). A second run reads them from the store.
  */
 #include "aerialsynth.h"
 
@@ -39,6 +45,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "as_open: %s\n", as_last_error());
         return 1;
     }
+    /* report tile generation on stderr: the first render at a new place generates its tiles */
+    as_set_verbose(w, 1);
     int status = 1;
     as_camera *cam = NULL;
     uint8_t *rgb = NULL;

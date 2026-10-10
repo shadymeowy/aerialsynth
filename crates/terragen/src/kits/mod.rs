@@ -62,7 +62,6 @@ pub static KITS: &[&Kit] = &[
     // &settlements::KIT,
 
     // &transport::KIT,
-
     #[cfg(test)]
     &example::KIT,
 ];
@@ -96,6 +95,9 @@ impl ReliefIn<'_> {
     }
 }
 
+/// A kit's layer function for one stack slot.
+pub type LayerFn = fn(&mut Stack);
+
 /// A kit.
 pub struct Kit {
     /// lower_snake_case; prefixes its WGSL functions
@@ -106,7 +108,7 @@ pub struct Kit {
     pub wgsl: &'static str,
     /// layer functions by stack slot (`stack::slot`); the WGSL file defines
     /// `fn <name>_slot_<slot name>(s: ptr<function, Stack>)` for each
-    pub layers: &'static [(usize, fn(&mut Stack))],
+    pub layers: &'static [(usize, LayerFn)],
     /// its kernels (kinds in its range; WGSL: `fn <wgsl>(li: u32, k: KIn) -> KOut`)
     pub kernels: &'static [KernelSpec],
     /// a pass-A relief operator: changes the height `h` (m) before the drainage carves it.

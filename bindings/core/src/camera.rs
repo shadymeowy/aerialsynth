@@ -307,6 +307,7 @@ impl Camera {
         scn.tiles.lazy = true;
         let ell = world.store.meta().ellipsoid();
         let cache = render::pipeline::tile_cache(&scn, world.store.clone(), Some(world.gen.clone()));
+        cache.set_log(Some(world.log()));
         let renderer = render::pipeline::renderer(&scn, model.clone(), supersample, ell, cache);
         let mut sensor = rgb.sensor;
         sensor.noise.seed ^= spec.seed_mix(); // as `terrain run`
@@ -625,6 +626,44 @@ mod tests {
         assert!(matches!(missing, Err(Error::Io { .. })));
         std::fs::write(&scn, "render: { no_such_setting: 1 }\n").unwrap();
         assert!(open(None).err().unwrap().to_string().contains("no_such_setting"));
+    }
+
+    /// The same call gives the same image whether its tiles are generated (the first render) or
+    /// read from the store (later ones), and whatever else the store holds; the first render
+    /// generates the zooms the view needs, not the world's max zoom (with unknown elevation
+    /// ranges the camera, 3 km up, used to be inside the tiles' assumed volumes: refined to the
+    /// max zoom around it).
+    #[test]
+    fn renders_do_not_depend_on_what_the_store_held() {
+        let d = TempDir::new("same");
+        let small = |w: &Arc<World>| Camera::new(w.clone(), None, CameraDef::Pinhole(Pinhole::new(48, 32, 70.0)), Some(Backend::Cpu)).unwrap();
+        let what = Outputs { rgb: true, depth: true, landcover: true };
+        let a = world(&d, "a", 16);
+        let p = pose(&a); // 3 km up, 60° down
+        let first = small(&a).render(&p, Some(T), what).unwrap();
+        // (z14 right below the camera: the level of detail measures from the tiles' bounding
+        // spheres)
+        let zmax = a.store.zooms().into_iter().max().unwrap();
+        assert!(zmax <= 14, "zoom {zmax} generated");
+        let n = a.store.len();
+        let again = small(&a).render(&p, Some(T), what).unwrap();
+        assert_eq!(a.store.len(), n, "the second render generated tiles");
+        let same = |f: &Frame, g: &Frame| {
+            assert_eq!(f.rgb, g.rgb);
+            assert_eq!(
+                f.depth.as_ref().map(|d| d.iter().map(|v| v.to_bits()).collect::<Vec<_>>()),
+                g.depth.as_ref().map(|d| d.iter().map(|v| v.to_bits()).collect())
+            );
+            assert_eq!(f.landcover, g.landcover);
+            assert_eq!(f.exposure.map(|e| e.time.to_bits()), g.exposure.map(|e| e.time.to_bits()));
+        };
+        same(&first, &again);
+        // a store that also holds other tiles around the view (finer ones too): the same image
+        drop(a); // (closes the store)
+        std::fs::copy(d.0.join("a.h5"), d.0.join("b.h5")).unwrap();
+        let b = Arc::new(World::open(&d.0.join("b.h5"), Some(&d.0.join("a.yaml")), Some(3)).unwrap());
+        assert!(b.prefetch([LAT - 0.015, LON - 0.015, LAT + 0.015, LON + 0.015], 12, 15).unwrap() > 0);
+        same(&first, &small(&b).render(&p, Some(T), what).unwrap());
     }
 
     #[test]

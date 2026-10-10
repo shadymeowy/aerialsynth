@@ -384,7 +384,7 @@ fn macro_at(p: vec3<f64>, gsd: f32) -> Macro {
     // climate and tectonics from the atlas (`World::macro_at`)
     let a = atlas_sample(vec3<f32>(p / sqrt(dot(p, p))));
     m.temp = a.temp_c;
-    m.moist = moisture_index(a.precip_mm) + 0.06 * fbm(FBM_MOIST, p, 20.0 * KM) * fbm_norm(FBM_MOIST) * 1.6;
+    m.moist = moisture_index(a.precip_mm, a.temp_c) + 0.06 * fbm(FBM_MOIST, p, 20.0 * KM) * fbm_norm(FBM_MOIST) * 1.6;
     m.uplift = a.uplift;
     m.coast_km = a.coast_km;
     m.wind_e = a.wind.x;
@@ -464,9 +464,10 @@ fn base_elevation(s: f32) -> f32 {
 }
 
 /// (mountain mask, mountain amplitude)
-/// The moisture index of an annual precipitation (`World::moisture_index`).
-fn moisture_index(p_mm: f32) -> f32 {
-    return clamp(log(max(p_mm, 1.0) / 150.0) / log(30.0), -0.3, 1.3);
+/// The moisture index of an annual precipitation at a temperature (`World::moisture_index`).
+fn moisture_index(p_mm: f32, t_c: f32) -> f32 {
+    let r = max(p_mm, 1.0) / (20.0 * max(t_c, 0.0) + 140.0);
+    return clamp(0.33 + 0.18 * log2(r), -0.3, 1.3);
 }
 
 /// Mountain mask and amplitude (`World::mountain_mask`): plate-boundary ranges and old belts.
@@ -481,12 +482,13 @@ fn mountain_mask(m: Macro) -> vec2<f32> {
     let amp_t = cfg.mtn_height * (0.35 + 0.85 * smoothstep1(0.2, 1.0, u)) * mt;
     let wb = clamp(cfg.belt_mtn / 0.45 * 0.55, 0.0, 1.0);
     let mountain = 1.0 - (1.0 - wb * mb) * (1.0 - mt);
-    return vec2<f32>(clamp(mountain, 0.0, 1.0), amp_b + amp_t);
+    let amp = amp_b + amp_t;
+    return vec2<f32>(clamp(mountain, 0.0, 1.0), amp * smoothstep1(4.0, 12.0, amp));
 }
 
 /// Lowering of rift grabens and trenches on land (`World::tect_base`).
 fn tect_base(m: Macro) -> f32 {
-    return 900.0 * min(m.uplift, 0.0) * cfg.tect_mtn * smoothstep1(0.02, 0.15, m.cont);
+    return 350.0 * min(m.uplift, 0.0) * cfg.tect_mtn * smoothstep1(0.12, 0.3, m.cont);
 }
 
 fn hill_amplitude(m: Macro) -> f32 {
@@ -505,7 +507,7 @@ fn climate(m: Macro, lat: f32, elev: f32) -> vec2<f32> {
 /// Low-passed relief at `q` (for the gully gradient).
 fn low_relief(c: Ctx, m: Macro, q: vec3<f64>, mountain: f32, amp_m: f32, hill_amp: f32, gain: f32, gl: f32) -> f32 {
     var v = hill_amp * hills(q, gl, gain).x;
-    if (mountain > 1e-3) {
+    if (amp_m > 0.0) {
         let wp = m.mtn_warp * 9.0 * KM;
         v += amp_m * ridged(q + vec3<f64>(c.east * wp.x + c.north * wp.y), gl, 1.6 + 0.8 * m.style.z).x;
     }
@@ -651,7 +653,7 @@ fn relief(c: Ctx, m: Macro, pre: Pre, blk: u32) -> Relief {
     let mountain = mm.x;
     let amp_m = mm.y;
     var rg = vec2<f32>(0.0);
-    if (mountain > 1e-3) {
+    if (amp_m > 0.0) {
         let wp = m.mtn_warp * 9.0 * KM;
         let pw = p + vec3<f64>(c.east * wp.x + c.north * wp.y);
         let sharp = 1.6 + 0.8 * m.style.z;

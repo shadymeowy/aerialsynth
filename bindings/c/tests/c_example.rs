@@ -21,7 +21,15 @@ const LINK_FILE: &str = if cfg!(windows) {
 fn lib_dir() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
     let deps = exe.parent().unwrap();
-    let dir = [deps.parent().unwrap(), deps].into_iter().find(|d| d.join(LINK_FILE).exists()).unwrap_or_else(|| panic!("{LINK_FILE} not built")).to_path_buf();
+    // the newer of the two: a copy in target/<profile> from an earlier `cargo build` can be
+    // older than the one this `cargo test` just built in deps/
+    let modified = |d: &std::path::Path| std::fs::metadata(d.join(LINK_FILE)).and_then(|m| m.modified()).ok();
+    let dir = [deps.parent().unwrap(), deps]
+        .into_iter()
+        .filter_map(|d| modified(d).map(|t| (t, d)))
+        .max_by_key(|(t, _)| *t)
+        .map(|(_, d)| d.to_path_buf())
+        .unwrap_or_else(|| panic!("{LINK_FILE} not built"));
     dir
 }
 
