@@ -276,7 +276,7 @@ fn desert_playas_exists(s: InstSite) -> InstOut {
         return o;
     }
     let a = atlas_sample(vec3<f32>(normalize(s.center)));
-    if (moisture_index(a.precip_mm) > 0.29 || a.temp_c < 2.0 || a.coast_km < 0.0) {
+    if (moisture_index(a.precip_mm, a.temp_c) > 0.33 || a.temp_c < 2.0 || a.coast_km < 0.0) {
         return o;
     }
     let f = desert_site_fields(s.center);
@@ -296,7 +296,7 @@ fn desert_inselbergs_exists(s: InstSite) -> InstOut {
         return o;
     }
     let a = atlas_sample(vec3<f32>(normalize(s.center)));
-    if ((atlas_litho(a) != 2u && u01k(s.id, 13lu) >= 0.3) || moisture_index(a.precip_mm) > 0.52 || a.coast_km < 0.0) {
+    if ((atlas_litho(a) != 2u && u01k(s.id, 13lu) >= 0.3) || moisture_index(a.precip_mm, a.temp_c) > 0.52 || a.coast_km < 0.0) {
         return o;
     }
     let f = desert_site_fields(s.center);

@@ -44,7 +44,6 @@ mod desert;
 /// transport 208.
 pub static KITS: &[&Kit] = &[
     &desert::KIT,
-
     // &volcanic::KIT,
 
     // &mountains::KIT,

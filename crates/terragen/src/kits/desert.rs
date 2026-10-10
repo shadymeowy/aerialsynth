@@ -408,7 +408,7 @@ fn playa_exists(w: &World, s: &crate::instances::InstSite) -> Option<[f32; 8]> {
     }
     // cheap tests on the atlas first (the macro fields cost ~60 noise octaves)
     let a = w.atlas().sample(s.center.normalize());
-    if World::moisture_index(a.precip_mm) > 0.29 || a.temp_c < 2.0 || a.coast_km < 0.0 {
+    if World::moisture_index(a.precip_mm, a.temp_c) > 0.33 || a.temp_c < 2.0 || a.coast_km < 0.0 {
         return None;
     }
     let f = site_fields(w, s.center);
@@ -425,7 +425,7 @@ fn inselberg_exists(w: &World, s: &crate::instances::InstSite) -> Option<[f32; 8
         return None;
     }
     let a = w.atlas().sample(s.center.normalize());
-    if (a.litho as u8 != 2 && u01k(s.id, 13) >= 0.3) || World::moisture_index(a.precip_mm) > 0.52 || a.coast_km < 0.0 {
+    if (a.litho as u8 != 2 && u01k(s.id, 13) >= 0.3) || World::moisture_index(a.precip_mm, a.temp_c) > 0.52 || a.coast_km < 0.0 {
         return None;
     }
     let f = site_fields(w, s.center);

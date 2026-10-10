@@ -11,6 +11,9 @@
 # ---- the core deserts: the kit's ground textures
 - id: desert
   patch: true
+  # (the kit's deserts share the BWh / BWk sites with it: the variety budget of the desert
+  # biomes together is ~6 % of the land)
+  min_share: 0.012
   layers:
     # desert varnish: dark brown patches on old, stable surfaces of the stony desert (reg)
     - slot: azonal
@@ -78,6 +81,7 @@
   koppen: [BWh]
   lithology: [sedimentary, unconsolidated, carbonate]
   weight: 0.8
+  min_share: 0.004
   palette:
     soil: [[190, 160, 118], [176, 146, 108], [160, 140, 116], [204, 178, 136]]
     sand: [[226, 186, 128], [214, 164, 104], [232, 204, 154]]
