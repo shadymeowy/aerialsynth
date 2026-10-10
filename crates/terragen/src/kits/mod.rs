@@ -14,7 +14,7 @@ use crate::world::{Ctx, Macro};
 
 // ---- kit modules: replace your line (keep the blank lines between them: merges stay clean)
 
-// mod desert;
+mod desert;
 
 // mod volcanic;
 
@@ -39,7 +39,7 @@ use crate::world::{Ctx, Macro};
 /// cold 112, coast 128, tropical 144, temperate 160, agriculture 176, settlements 192,
 /// transport 208.
 pub static KITS: &[&Kit] = &[
-    // &desert::KIT,
+    &desert::KIT,
 
     // &volcanic::KIT,
 
