@@ -82,7 +82,31 @@ is, and their calibrated mean where unresolved (`tests::shape_constants`).
 
 ## Stills
 
-<!-- stills: docs/kits/images/ -->
+GPU renders of the default world (`terrain survey`, 10:30 local solar time, equinox).
+
+| | |
+|---|---|
+| ![transverse dunes, 1.5 km](images/desert_transverse_1500m.jpg) transverse dunes, 1.5 km (−19.92, 40.02) | ![transverse dunes, 10 km](images/desert_transverse_10km.jpg) the same erg from 10 km |
+| ![linear dunes, 10 km](images/desert_linear_10km.jpg) linear (seif) dunes and dark corridors, 10 km (23.54, 43.23) | ![star dunes, 1.5 km](images/desert_star_1500m.jpg) star dunes, 1.5 km (−31.15, −166.35) |
+| ![barchans, 1.5 km](images/desert_barchans_1500m.jpg) barchans on the stony fringe of an erg, 1.5 km (20.84, −50.06) | ![barchans, 300 m](images/desert_barchans_300m.jpg) a barchan, varnish and sand streaks, 300 m |
+| ![playa, 300 m](images/desert_playa_300m.jpg) salt crust and cracks of a playa, 300 m (−11.86, −162.15) | ![dry lake, 1.5 km](images/desert_drylake_1500m.jpg) a lake dried into a salt pan with brine pools, 1.5 km (−12.41, −155.10) |
+
+## Performance
+
+`zoom_bench`-style GPU timing (RTX 6000 Ada, 4 × 4 tiles per place, best of 5 batches, best
+of 2 runs; kit registered vs not), tiles/s:
+
+| zoom | default places, without | with | the kit's places, without | with |
+|---|---|---|---|---|
+| z4 | 128 | 128 | 114 | 115 |
+| z8 | 121 | 115 | 85 | 97 |
+| z12 | 146 | 145 | 158 | 157 |
+| z14 | 156 | 136 | 147 | 144 |
+| z16 | 147 | 145 | 149 | 148 |
+
+Differences are within the run-to-run noise of the shared machine (z8 and z14 vary by ±10 %
+between identical runs); the families' existence tests read the atlas before the macro fields,
+so they cost little outside deserts.
 
 ## Tests
 
