@@ -220,7 +220,7 @@
   layers:
     - slot: zonal
       kernel: patches
-      params: { scale: 32, fraction: 0.66, octaves: 3, roughness: 0.55, colour: [198, 192, 158], colour2: [158, 148, 104], colour_var: 0.14 }
+      params: { scale: 32, fraction: 0.82, octaves: 3, roughness: 0.55, colour: [198, 192, 158], colour2: [170, 160, 116], colour_var: 0.14 }
       class: steppe
     - slot: zonal
       kernel: patches
@@ -264,7 +264,7 @@
   koppen: [Cfc, Cfb, Dfc]
   envelope: { temp: [-1, 9], precip_mm: [800, 4000] }
   weight: 0.35
-  min_share: 0.002
+  min_share: 0.0
   palette:
     soil: [[70, 56, 44], [84, 66, 50], [62, 52, 44], [98, 82, 64]]
     grass_wet: [124, 116, 72]

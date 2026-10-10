@@ -63,12 +63,12 @@ fn temperate_site_boreal(s: ptr<function, Stack>) -> f32 {
 
 fn temperate_site_oceanic(s: ptr<function, Stack>) -> f32 {
     let c = (*s).bio.site;
-    return smoothstep1(700.0, 1100.0, c.y) * smoothstep1(0.0, 4.0, c.x) * (1.0 - smoothstep1(12.0, 16.0, c.x));
+    return smoothstep1(700.0, 1100.0, c.y) * (1.0 - smoothstep1(13.0, 20.0, (*s).t.temp_range)) * smoothstep1(0.0, 4.0, c.x) * (1.0 - smoothstep1(12.0, 16.0, c.x));
 }
 
 fn temperate_site_dry_summer(s: ptr<function, Stack>) -> f32 {
     let c = (*s).bio.site;
-    return smoothstep1(2.5, 4.5, c.w) * smoothstep1(9.0, 13.0, c.x) * (1.0 - smoothstep1(1100.0, 1600.0, c.y));
+    return (1.0 - smoothstep1(-0.45, -0.15, (*s).t.regime)) * smoothstep1(9.0, 13.0, c.x) * (1.0 - smoothstep1(1100.0, 1600.0, c.y));
 }
 
 fn temperate_forestry(s: ptr<function, Stack>) -> f32 {
@@ -82,7 +82,7 @@ fn temperate_forestry(s: ptr<function, Stack>) -> f32 {
         case 4u, 5u, 10u: { a = 0.2; }
         default: {}
     }
-    return a * (0.35 + 0.9 * temperate_eco_u1(s)) * (0.6 + 0.6 * st.misc.y);
+    return a * (0.35 + 0.9 * temperate_eco_u1(s)) * (0.6 + 0.6 * st.misc.y) * (1.0 - smoothstep1(14.0, 19.0, (*s).bio.site.x));
 }
 
 fn temperate_forest_est(s: ptr<function, Stack>) -> f32 {
@@ -260,7 +260,7 @@ fn temperate_marsh(s: ptr<function, Stack>) {
     let fw = (*s).l.fw;
     let near = (1.0 - smoothstep1(30.0, 120.0, rd)) * 0.6;
     let flat = 1.0 - smoothstep1(0.02, 0.06, (*s).l.slope);
-    let amount = 0.5 * max(smoothstep1(0.25, 0.6, t.floodplain), near) * smoothstep1(0.45, 0.7, t.moist) * smoothstep1(3.0, 7.0, t.temp) * flat;
+    let amount = 0.5 * max(smoothstep1(0.25, 0.6, t.floodplain), near) * smoothstep1(0.45, 0.7, t.moist) * smoothstep1(3.0, 7.0, t.temp) * (1.0 - smoothstep1(16.0, 21.0, t.temp)) * flat;
     if (amount <= 0.01) {
         return;
     }
