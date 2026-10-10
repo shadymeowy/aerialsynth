@@ -430,7 +430,7 @@ fn desert_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
                     let lee = clamp(2.5 * gsd / DS_TRANS_LAM, 0.14, 0.5);
                     v += (desert_ridges(cfg.seed ^ DS_TRANS, c.p / f64(2.0 * DS_TRANS_LAM), ew, ec, c.up, 2.0, DS_TRANS_EXT, 0u, lee, 0.18) - DS_TRANS_MEAN) * b;
                 }
-                sum += wtr * v;
+                sum += wtr * 1.4 * v;
             }
             if (wr.y > 0.0) {
                 let b = band(DS_SEIF_LAM, gsd);

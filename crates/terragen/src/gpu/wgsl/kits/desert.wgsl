@@ -7,6 +7,7 @@ const DS_VARN: u64 = 0xDE5E0032lu;
 const DS_STREAK: u64 = 0xDE5E0033lu;
 const DS_SANDTEX: u64 = 0xDE5E0034lu;
 const DS_INSROCK: u64 = 0xDE5E0035lu;
+const DS_RIPPLE: u64 = 0xDE5E0036lu;
 const DS_WASH: u64 = 0xDE5E0040lu;
 const DS_BRAID: u64 = 0xDE5E0041lu;
 const DS_BRAID2: u64 = 0xDE5E0042lu;
@@ -226,6 +227,11 @@ fn desert_slot_azonal(s: ptr<function, Stack>) {
     }
     if (erg > 0.0) {
         var col = sc * (1.0 + 0.05 * perlin3(cfg.seed ^ DS_SANDTEX, p / 35.0lf) * band(35.0, gsd) + 0.03 * perlin3(cfg.seed ^ DS_SANDTEX ^ 1lu, p / 9.0lf) * band(9.0, gsd));
+        let rb = band(3.0, gsd);
+        if (rb > 0.0) {
+            let rp = gully_octave(cfg.seed ^ DS_RIPPLE, p / 3.0lf, c.east * wd.d.x + c.north * wd.d.y).x;
+            col *= 1.0 + 0.07 * rp * rb;
+        }
         if (wl > 0.0) {
             let res = 1.0 - smoothstep1(10.0, 80.0, gsd);
             let flat = 1.0 - smoothstep1(0.02, 0.08, (*s).l.slope);

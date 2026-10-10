@@ -64,6 +64,7 @@ const S_VARN: u64 = 0xDE5E_0032;
 const S_STREAK: u64 = 0xDE5E_0033;
 const S_SANDTEX: u64 = 0xDE5E_0034;
 const S_INSROCK: u64 = 0xDE5E_0035;
+const S_RIPPLE: u64 = 0xDE5E_0036;
 const S_WASH: u64 = 0xDE5E_0040;
 const S_BRAID: u64 = 0xDE5E_0041;
 const S_BRAID2: u64 = 0xDE5E_0042;
@@ -533,7 +534,7 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
                     let lee = (2.5 * gsd / TRANS_LAM).clamp(0.14, 0.5);
                     v += (ridges(seed ^ S_TRANS, c.p / (2.0 * TRANS_LAM), ew, ec, c.up, 2.0, TRANS_EXT, 0, lee, 0.18) - TRANS_MEAN) * b;
                 }
-                sum += wtr * v;
+                sum += wtr * 1.4 * v;
             }
             if wl > 0.0 {
                 let b = band(SEIF_LAM, gsd);
@@ -773,6 +774,12 @@ pub fn azonal(s: &mut Stack) {
     if erg > 0.0 {
         let mut col =
             sc * (1.0 + 0.05 * perlin3(seed ^ S_SANDTEX, p / 35.0) * band(35.0, gsd) + 0.03 * perlin3(seed ^ S_SANDTEX ^ 1, p / 9.0) * band(9.0, gsd));
+        // wind ripples across the wind (seen from a few hundred metres)
+        let rb = band(3.0, gsd);
+        if rb > 0.0 {
+            let (rp, _) = World::gully_octave(seed ^ S_RIPPLE, p / 3.0, c.east * wd.x + c.north * wd.y);
+            col *= 1.0 + 0.07 * rp * rb;
+        }
         if wl > 0.0 {
             // the corridors between linear dunes: coarser, darker lag and sparse plants
             let res = 1.0 - smoothstep(10.0, 80.0, gsd);
