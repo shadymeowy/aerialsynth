@@ -205,6 +205,9 @@ regions, each needing a point evaluation with the finest drainage network), for 
   needs 64-bit float and integer shaders and 256 MiB storage buffers; adapters without them
   (many integrated GPUs, software Vulkan, Metal on macOS) use the CPU generator, while
   rendering may still run on the GPU.
+- **Silent CPU fallback:** with `backend: auto`, a failed GPU batch is generated on the CPU
+  from then on, with a one-line warning. Set `AERIALSYNTH_GPU_STRICT=1` (development, CI) to
+  make such a failure an error instead.
 - **A GPU process hangs at start over SSH:** with X forwarding (`DISPLAY` set to a remote
   display), some NVIDIA Vulkan drivers block while creating the device. Run headless work with
   `env -u DISPLAY terrain …` (the same for Python and C programs).

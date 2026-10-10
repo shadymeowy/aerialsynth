@@ -1111,11 +1111,18 @@ impl GpuGenerator {
             );
             let counters: Vec<u32> = read_back(&self.gpu, &b_counters, 8)?;
             if counters[7] != 0 {
-                bail!(
-                    "GPU generator: more than {} instances of a family reach a 16-pixel block ({} blocks): a family's cell or density is too fine",
-                    crate::instances::K,
-                    counters[7]
-                );
+                // both backends keep the first K instances by id (`instances::near`, `inst_scan_n`),
+                // so a crowded block stays deterministic and the same on the CPU: a warning (once)
+                // for the kit author, not a reason to give up the GPU
+                static WARNED: std::sync::Once = std::sync::Once::new();
+                WARNED.call_once(|| {
+                    eprintln!(
+                        "warning: more than {} instances of a family reach a 16-pixel block ({} blocks in this batch); the first {} by id are kept: a family's cell or density is too fine for an instance family (use a scatter kernel for dense objects)",
+                        crate::instances::K,
+                        counters[7],
+                        crate::instances::K
+                    );
+                });
             }
             if counters[1] != 0 {
                 bin_cap = counters[0] as usize + 1024;
