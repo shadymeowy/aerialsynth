@@ -722,7 +722,21 @@ impl GpuGenerator {
         let missing: Vec<u64> = ids.iter().copied().filter(|id| !cache.eco.contains_key(id)).collect();
         if !missing.is_empty() {
             use rayon::prelude::*;
-            let sites = crate::eco::find_sites(w, &missing, areas);
+            let mut sites = crate::eco::find_sites(w, &missing, areas);
+            // (robustness: ids the tiles' areas did not explain are searched wider, then over
+            // the whole lattice shell — the result is the same exact site either way)
+            let rest: Vec<u64> = missing.iter().copied().filter(|id| !sites.contains_key(id)).collect();
+            if !rest.is_empty() {
+                let cell = w.cfg.ecoregions.cell_km * 1000.0;
+                let wide: Vec<(DVec3, f64)> = areas.iter().map(|&(c, r)| (c, r + 3.0 * cell)).collect();
+                sites.extend(crate::eco::find_sites(w, &rest, &wide));
+                let rest: Vec<u64> = rest.into_iter().filter(|id| !sites.contains_key(id)).collect();
+                if !rest.is_empty() {
+                    static WARNED: std::sync::Once = std::sync::Once::new();
+                    WARNED.call_once(|| eprintln!("warning: ecoregion sites found only by a global search ({} ids); please report", rest.len()));
+                    sites.extend(crate::eco::find_sites(w, &rest, &[(DVec3::ZERO, w.ell.a + 20_000.0)]));
+                }
+            }
             let computed: Vec<(u64, Option<crate::eco::EcoParams>)> =
                 missing.par_iter().map(|&id| (id, sites.get(&id).map(|&site| crate::eco::compute(w, reg, id, site)))).collect();
             for (id, e) in computed {
