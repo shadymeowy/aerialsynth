@@ -892,4 +892,128 @@ mod tests {
             }
         }
     }
+
+    /// Places of the default world where the kit draws (from `desert_places`): transverse,
+    /// linear and star dunes, barchans, a playa, an inselberg, yardangs, a wash.
+    const PLACES: [(f64, f64); 8] = [
+        (-21.1554, 40.3422),
+        (-20.9146, 69.8689),
+        (27.8934, 57.6206),
+        (-21.9659, 25.3739),
+        (-22.9031, -2.4896),
+        (17.2528, 44.8051),
+        (-18.7955, 112.7949),
+        (21.4580, -101.3636),
+    ];
+
+    fn tile_at(i: usize, z: u8) -> geodesy::tiles::TileId {
+        let (lat, lon) = PLACES[i];
+        geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)
+    }
+
+    fn gen1() -> crate::Generator {
+        crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() })
+    }
+
+    /// Parent ≈ mean of children where the kit draws: elevation, albedo and the share of the
+    /// kit's classes.
+    #[test]
+    fn lod_consistency() {
+        use rayon::prelude::*;
+        let g = gen1();
+        let n = crate::TILE_SIZE;
+        let res: Vec<(usize, f64, f64, f64)> = (0..PLACES.len())
+            .into_par_iter()
+            .map(|i| {
+                let parent = tile_at(i, 12);
+                let p = g.tile(parent);
+                let kids = parent.children().map(|c| g.tile(c));
+                let (mut eh, mut ea, mut cnt) = (0.0, 0.0, 0.0);
+                let (mut cp, mut ck) = (0.0, 0.0);
+                let kit = |c: u8| [LC_SAND, LC_GRAVEL, LC_SALT_FLAT, LC_DRY_RIVERBED, LC_VOLCANIC_ASH].contains(&c) as u8 as f64;
+                for (k, kid) in kids.iter().enumerate() {
+                    let (ox, oy) = ((k % 2) * n / 2, (k / 2) * n / 2);
+                    for j in (0..n).step_by(2) {
+                        for i in (0..n).step_by(2) {
+                            let ix = [j * n + i, j * n + i + 1, (j + 1) * n + i, (j + 1) * n + i + 1];
+                            let m = ix.iter().map(|&o| kid.elevation[o] as f64).sum::<f64>() / 4.0;
+                            let pi = (oy + j / 2) * n + ox + i / 2;
+                            eh += (m - p.elevation[pi] as f64).abs();
+                            for c in 0..3 {
+                                let ma = ix.iter().map(|&o| kid.albedo[3 * o + c] as f64).sum::<f64>() / 4.0;
+                                ea += (ma - p.albedo[3 * pi + c] as f64).abs() / 3.0;
+                            }
+                            ck += ix.iter().map(|&o| kit(kid.landcover[o])).sum::<f64>() / 4.0;
+                            cp += kit(p.landcover[pi]);
+                            cnt += 1.0;
+                        }
+                    }
+                }
+                (i, eh / cnt, ea / cnt, (cp - ck).abs() / cnt)
+            })
+            .collect();
+        for (i, eh, ea, dc) in res {
+            eprintln!("place {i}: |parent - mean(children)| elevation {eh:.2} m, albedo {ea:.2} DN, kit classes {:.2}%", dc * 100.0);
+            assert!(eh < 6.0, "place {i}: elevation {eh}");
+            assert!(ea < 6.0, "place {i}: albedo {ea}");
+            assert!(dc < 0.05, "place {i}: class share {dc}");
+        }
+    }
+
+    /// No steps along tile borders where the kit draws, and the same tile twice.
+    #[test]
+    fn seamless_and_deterministic() {
+        use rayon::prelude::*;
+        let g = gen1();
+        let n = crate::TILE_SIZE;
+        (0..PLACES.len()).into_par_iter().for_each(|i| {
+            for z in [11u8, 15] {
+                let id = tile_at(i, z);
+                let a = g.tile(id);
+                let b = g.tile(geodesy::tiles::TileId::new(z, id.x + 1, id.y));
+                let (mut across, mut inside) = (0.0, 0.0);
+                for j in 0..n {
+                    across += (a.elevation[j * n + n - 1] - b.elevation[j * n]).abs() as f64;
+                    inside += (a.elevation[j * n + n - 2] - a.elevation[j * n + n - 1]).abs() as f64;
+                }
+                assert!(across < 3.0 * inside + 1.0 * n as f64, "place {i} z{z}: across {across} inside {inside}");
+                if z == 15 {
+                    let a2 = gen1().tile(id);
+                    assert_eq!(a.elevation, a2.elevation, "place {i}");
+                    assert_eq!(a.rgb, a2.rgb, "place {i}");
+                }
+            }
+        });
+    }
+
+    /// GPU tiles agree with the CPU's where the kit draws (≤ 0.5 % of the pixels off: rgb by
+    /// more than 2 DN, elevation by more than 5 cm, land cover).
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn tiles_match_the_cpu() {
+        let cfg = crate::Config::default();
+        let Ok(gpu) = crate::gpu::GpuGenerator::new(cfg.clone()) else {
+            eprintln!("no GPU: skipped");
+            return;
+        };
+        let cpu = crate::Generator::new(cfg);
+        let mut ids = Vec::new();
+        for i in 0..PLACES.len() {
+            for z in [10u8, 13, 16] {
+                ids.push(tile_at(i, z));
+            }
+        }
+        let gt = gpu.tiles(&ids).unwrap();
+        use rayon::prelude::*;
+        let ct: Vec<_> = ids.par_iter().map(|&id| cpu.tile_cpu(id)).collect();
+        let mut worst: f64 = 0.0;
+        for ((id, g), c) in ids.iter().zip(&gt).zip(&ct) {
+            let off = |a: &[u8], b: &[u8], tol: i32| a.iter().zip(b).filter(|(x, y)| (**x as i32 - **y as i32).abs() > tol).count() as f64 / a.len() as f64;
+            let e = g.elevation.iter().zip(&c.elevation).filter(|(x, y)| (**x - **y).abs() > 0.05).count() as f64 / g.elevation.len() as f64;
+            let (r, l) = (off(&g.rgb, &c.rgb, 2), off(&g.landcover, &c.landcover, 0));
+            eprintln!("{id}: off elevation {:.3}% rgb {:.3}% landcover {:.3}%", e * 100.0, r * 100.0, l * 100.0);
+            worst = worst.max(e).max(r).max(l);
+        }
+        assert!(worst <= 0.005, "worst share of pixels off: {:.3}%", worst * 100.0);
+    }
 }
