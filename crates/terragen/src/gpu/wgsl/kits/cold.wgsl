@@ -25,18 +25,10 @@ fn cold_year_date(site_t: f32, site_p: f32, site_r: f32, season: f32) -> f32 {
     return 0.17 + 0.66 * season;
 }
 
-fn cold_half_range(lat_deg: f32, cont: f32) -> f32 {
-    return 0.5 * (3.0 + 26.0 * smoothstep1(5.0, 65.0, lat_deg) * (0.45 + 0.55 * smoothstep1(0.02, 0.45, cont)));
-}
-
-fn cold_lat_deg(s: ptr<function, Stack>) -> f32 {
-    return abs((*s).c.lat) * (180.0 / PI);
-}
-
 fn cold_climate(s: ptr<function, Stack>) -> ColdClimate {
     let t = (*s).t;
     let ts = t.temp - cfg.lapse * (max((*s).l.ground, 0.0) - max(t.ground, 0.0)) * 0.001;
-    let half = cold_half_range(cold_lat_deg(s), t.cont);
+    let half = 0.5 * t.temp_range;
     let site = (*s).bio.site;
     let d = cold_year_date(site.x, site.y, site.z, (*s).bio.st.land.x);
     var c: ColdClimate;
@@ -47,12 +39,11 @@ fn cold_climate(s: ptr<function, Stack>) -> ColdClimate {
 }
 
 fn cold_glaciation(s: ptr<function, Stack>) -> f32 {
-    return smoothstep1(48.0, 66.0, cold_lat_deg(s)) * smoothstep1(0.0, 0.2, (*s).t.cont);
+    return (*s).t.glaciation;
 }
 
-/// The downslope direction (east, north): not known to pass B yet (`l.grad` when it is).
-fn cold_downslope(s: ptr<function, Stack>) -> vec2<f32> {
-    return vec2<f32>(0.0);
+fn cold_sunny(s: ptr<function, Stack>) -> f32 {
+    return (*s).l.grad.y * sign((*s).c.lat);
 }
 
 // ---------------------------------------------------------------- snow and ice
@@ -76,7 +67,7 @@ fn cold_ice(s: ptr<function, Stack>, c: ColdClimate) -> ColdIce {
     o.ice = 0.0;
     o.snow = 0.0;
     o.n = 0.0;
-    if (base > 7.0) {
+    if (base > 8.5) {
         return o;
     }
     let p = (*s).c.p;
@@ -92,7 +83,7 @@ fn cold_ice(s: ptr<function, Stack>, c: ColdClimate) -> ColdIce {
             n += 0.25 * perlin3(COLD_SEED_SNOW + 1lu, p * (1.0lf / 18.0lf)) * b18;
         }
     }
-    let pi = base - 2.0 * hollow + 0.8 * spur + 1.2 * n;
+    let pi = base - 2.0 * hollow + 0.8 * spur + 1.2 * n + 1.5 * clamp(cold_sunny(s), -1.0, 1.0);
     var rv = 0.0;
     if (l.river_hw > 0.0) {
         rv = 1.0 - smoothstep1(l.river_hw + 80.0, l.river_hw + 500.0, abs(l.river_d));
@@ -262,7 +253,7 @@ fn cold_lake_mask(s: ptr<function, Stack>, c: ColdClimate) -> f32 {
     return m * (1.0 - smoothstep1(0.03, 0.07, l.slope))
         * (1.0 - smoothstep1(350.0, 700.0, l.ground))
         * (1.0 - smoothstep1(0.2, 0.5, t.mountain))
-        * smoothstep1(0.25, 0.45, t.moist)
+        * smoothstep1(0.02, 0.12, t.moist)
         * (1.0 - smoothstep1(0.1, 0.3, t.sand))
         * (0.3 + 0.7 * smoothstep1(0.25, 0.65, t.style.x));
 }
@@ -385,7 +376,11 @@ fn cold_lakes(s: ptr<function, Stack>, lat: ColdLakeLat, sc: f32, frozen: bool) 
         }
     }
     ly.clear = 1.0;
+    let water = ly.water;
     composite(s, ly);
+    if (water) {
+        (*s).done = true;
+    }
 }
 
 // ---------------------------------------------------------------- water
@@ -393,6 +388,7 @@ fn cold_lakes(s: ptr<function, Stack>, lat: ColdLakeLat, sc: f32, frozen: bool) 
 fn cold_slot_water(s: ptr<function, Stack>) {
     let l = (*s).l;
     if (!(l.water > l.ground)) {
+        cold_rivers(s);
         return;
     }
     let c = cold_climate(s);
@@ -469,7 +465,7 @@ fn cold_slot_water(s: ptr<function, Stack>) {
         ly.relit = 1.0;
         if (cov > 0.5) {
             ly.cls = LC_SEA_ICE;
-            (*s).is_water = false;
+            ly.solid = true;
         }
         composite(s, ly);
     } else if (c.date < -1.5) {
@@ -482,12 +478,50 @@ fn cold_slot_water(s: ptr<function, Stack>) {
             let cr = kband_cov(worley_edge_dist(ck, p), 0.35, fw) * e * (0.4 + 0.6 * sw);
             col = mixc(col, srgb(120.0, 138.0, 150.0), cr);
         }
-        (*s).is_water = false;
         var ly = layer_paint(1.0, col, LC_FROZEN_WATER);
         ly.dh = l.water + 0.2;
         ly.hmode = HM_ABS;
         ly.relit = 1.0;
+        ly.solid = true;
         composite(s, ly);
+    }
+}
+
+fn cold_rivers(s: ptr<function, Stack>) {
+    let l = (*s).l;
+    let t = (*s).t;
+    if (l.river_hw <= 0.0 || t.river_wet <= 0.5) {
+        return;
+    }
+    let gsd = (*s).c.gsd;
+    let cov = band_cov(l.river_d, l.river_hw, max(l.fw, gsd * 0.35));
+    if (cov <= 0.0) {
+        return;
+    }
+    let c = cold_climate(s);
+    let detail = (*s).pf.f[PF_DETAIL];
+    let core_ice = smoothstep1(-1.5, -4.0, t.temp + 1.5 * (*s).pf.f[PF_SNOW]) > 0.5;
+    if (c.date < -1.5) {
+        let col = mixc(pal3(PAL_SNOW) * 0.92, srgb(150.0, 172.0, 186.0), 0.3 + 0.25 * detail);
+        (*s).m.river_cov = 0.4 * cov;
+        var ly = layer_paint(cov, col, LC_FROZEN_WATER);
+        ly.dh = l.river_level;
+        ly.hmode = HM_ABS;
+        ly.relit = 1.0;
+        ly.solid = true;
+        composite(s, ly);
+    } else if (core_ice && c.date > 0.5) {
+        if ((*s).m.snow < 0.3) {
+            var wcol = mixc(pal3(PAL_RIVER), pal3(PAL_LAKE_DEEP), smoothstep1(30.0, 200.0, l.river_hw * 2.0));
+            wcol = mixc(wcol, srgb(96.0, 138.0, 140.0), 0.7 * t.mountain * smoothstep1(8.0, 0.0, t.temp));
+            (*s).m.river_cov = cov;
+            var ly = layer_paint(cov, wcol, LC_RIVER);
+            ly.dh = l.river_level;
+            ly.hmode = HM_ABS;
+            ly.relit = 1.0;
+            ly.water = true;
+            composite(s, ly);
+        }
     }
 }
 
@@ -532,25 +566,25 @@ fn cold_glacier(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
     if (cs > 0.0) {
         let spacing = 6.0 / sl;
         let e = smoothstep1(1.2 * gsd, 3.0 * gsd, spacing);
-        let on = smoothstep1(-0.08, 0.08, perlin3(COLD_SEED_ICE + 9lu, p * (1.0lf / 35.0lf)) + 1.2 * cs - 0.5);
+        let on = smoothstep1(-0.05, 0.05, perlin3(COLD_SEED_ICE + 9lu, p * (1.0lf / 20.0lf)) + 0.55 * cs - 0.35);
         var cr = 0.0;
         if (e > 0.0) {
-            let x = l.ground / 6.0 + 0.35 * perlin3(COLD_SEED_ICE + 10lu, p * (1.0lf / 45.0lf));
+            let x = l.ground / 6.0 + 0.6 * perlin3(COLD_SEED_ICE + 10lu, p * (1.0lf / 45.0lf));
             let f = x - floor(x);
             let d = min(f, 1.0 - f) * spacing;
-            cr = kband_cov(d, 1.6, fw) * on * e;
+            cr = kband_cov(d, 1.2, fw) * on * e;
         }
-        cr += (1.0 - e) * on * min(3.2 / spacing, 1.0);
+        cr += (1.0 - e) * on * min(2.4 / spacing, 1.0);
         cr = cr * cs;
         col = mixc(col, srgb(34.0, 62.0, 88.0), cr);
         dh -= 4.0 * cr;
     }
     if (abl > 0.2 && l.river_hw > 0.0) {
         let ad = abs(l.river_d);
-        let w = 6.0 + 4.0 * perlin3(COLD_SEED_ICE + 11lu, p * (1.0lf / 80.0lf));
-        let off = 90.0 + 0.6 * l.river_hw;
-        let mm = max(kband_cov(ad, w, fw), 0.7 * kband_cov(ad - off, 0.7 * w, fw)) * smoothstep1(0.2, 0.6, abl) * max(band(2.0 * w, gsd), 0.3);
-        col = mixc(col, srgb(84.0, 80.0, 76.0), mm);
+        let w = 12.0 + 8.0 * perlin3(COLD_SEED_ICE + 11lu, p * (1.0lf / 80.0lf)) + 3.0 * perlin3(COLD_SEED_ICE + 14lu, p * (1.0lf / 9.0lf)) * band(9.0, gsd);
+        let off = 110.0 + 0.6 * l.river_hw;
+        let mm = max(kband_cov(ad, w, max(fw, 0.6 * w)), 0.7 * kband_cov(ad - off, 0.7 * w, max(fw, 0.4 * w))) * smoothstep1(0.2, 0.6, abl);
+        col = mixc(col, srgb(104.0, 98.0, 92.0), 0.85 * mm);
         dh += 1.5 * mm;
     }
     var ly = layer_paint(g.ice, col, LC_GLACIER);
@@ -598,9 +632,7 @@ fn cold_snow(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
             n += 0.25 * perlin3(COLD_SEED_SNOW + 3lu, p * (1.0lf / 12.0lf)) * b12;
         }
     }
-    let ds = cold_downslope(s);
-    let sunny = -ds.y * sign((*s).c.lat) + 0.0 * ds.x;
-    var cov = smoothstep1(-0.8, -1.2, c.date + n + 1.5 * sunny) * (1.0 - smoothstep1(0.75, 1.3, (*s).l.slope));
+    var cov = smoothstep1(-0.8, -1.2, c.date + n + 2.5 * clamp(cold_sunny(s), -1.0, 1.0)) * (1.0 - smoothstep1(0.75, 1.3, (*s).l.slope));
     if (cov <= 0.0) {
         return;
     }

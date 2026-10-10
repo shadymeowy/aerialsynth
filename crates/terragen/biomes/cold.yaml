@@ -24,7 +24,7 @@
       height: none
     - slot: azonal
       kernel: cold_polygons
-      mask: { slope: [null, null, 0.04, 0.08], moist: [0.2, 0.35, null, null] }
+      mask: { slope: [null, null, 0.04, 0.08], moist: [0.0, 0.08, null, null] }
       params: { cell: 16, trough: 1.8, trough_depth: 0.6, rim: 1.4, rim_height: 0.35, pond: 0.14, high: 0.3, colour: [118, 114, 80], trough_colour: [62, 74, 48], pond_colour: [26, 40, 50] }
       class: polygon_tundra
   landuse: { agriculture: 0.0, towns: 0.3 }
@@ -102,7 +102,7 @@
       height: none
     - slot: azonal
       kernel: patches
-      mask: { slope: [null, null, 0.03, 0.05], moist: [0.35, 0.5, null, null] }
+      mask: { slope: [null, null, 0.03, 0.05], moist: [0.15, 0.3, null, null] }
       params: { scale: 60, fraction: 0.12, octaves: 2, colour: [40, 50, 46], colour2: [56, 66, 52] }
       class: bog
       clear: 1.0

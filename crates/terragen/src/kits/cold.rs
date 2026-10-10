@@ -48,6 +48,7 @@ pub static KIT: Kit = Kit {
 /// Land-cover v2 class ids (`registry::classes`; checked by a test).
 mod cls {
     pub const LAKE: u8 = 2;
+    pub const RIVER: u8 = 3;
     pub const TUNDRA: u8 = 15;
     pub const SEA_ICE: u8 = 26;
     pub const GLACIER: u8 = 27;
@@ -86,18 +87,14 @@ pub(crate) fn year_date(site_t: f64, site_p: f64, site_r: f64, season: f64) -> f
     }
 }
 
-/// Half the annual temperature range at a latitude (degrees) and continent value (as the
-/// atlas stand-in, without its noise: continuous everywhere).
-pub(crate) fn half_range(lat_deg: f64, cont: f64) -> f64 {
-    0.5 * (3.0 + 26.0 * smoothstep(5.0, 65.0, lat_deg) * (0.45 + 0.55 * smoothstep(0.02, 0.45, cont)))
-}
 
 /// The climate at a sample.
 pub(crate) fn climate(s: &Stack) -> ColdClimate {
     let t = s.t;
     let lapse = s.world.cfg.climate.lapse_rate_c_per_km;
     let ts = t.temp - lapse * (s.l.ground.max(0.0) - t.ground.max(0.0)) * 0.001;
-    let half = half_range(s.ctx.lat.abs().to_degrees(), t.cont);
+    // (the atlas' warmest − coldest month, interpolated: continuous)
+    let half = 0.5 * t.temp_range;
     let site = &s.bio.site;
     let f = |x: f64| x as f32 as f64;
     let d = year_date(f(site.temp_c), f(site.precip_mm), f(site.temp_range_c), s.bio.style.season);
@@ -107,16 +104,17 @@ pub(crate) fn climate(s: &Stack) -> ColdClimate {
     ColdClimate { t: ts, summer: ts + 0.95 * half, date }
 }
 
-/// Glaciation of the land around (0..1: lowlands shaped by ice sheets): the atlas stand-in's
-/// proxy (latitude, continentality) until the atlas' glaciation index is read here.
+/// Glaciation of the land around (0..1: lowlands shaped by the last-glacial ice sheets; the
+/// atlas).
 pub(crate) fn glaciation(s: &Stack) -> f64 {
-    smoothstep(48.0, 66.0, s.ctx.lat.abs().to_degrees()) * smoothstep(0.0, 0.2, s.t.cont)
+    s.t.glaciation
 }
 
-/// The ground's downslope direction (east, north) and steepness: not known to pass B yet
-/// (zero: no aspect terms). Switch to `s.l.grad` when the core provides it.
-pub(crate) fn downslope(_s: &Stack) -> (f64, f64) {
-    (0.0, 0.0)
+/// How much the ground faces the equator (m/m: the slope's component towards the equator;
+/// negative on shady slopes).
+pub(crate) fn sunny(s: &Stack) -> f64 {
+    // (the gradient points uphill: a slope facing south has a positive north component)
+    s.l.grad[1] * s.ctx.lat.signum()
 }
 
 // ============================================================================= snow and ice
@@ -148,8 +146,8 @@ pub(crate) fn ice(s: &Stack, c: &ColdClimate) -> Ice {
     let l = s.l;
     let tela = -2.0 + 5.0 * smoothstep(0.15, 0.85, t.moist);
     let base = c.summer - tela;
-    // (the terms below lower the index by at most 2 + 2.6 + 1.2 · 1.75)
-    if base > 7.0 {
+    // (the terms below lower the index by at most 2 + 2.6 + 1.2 · 1.75 + the aspect's)
+    if base > 8.5 {
         return Ice { p: base, g: base, ..Default::default() };
     }
     let p = s.ctx.p;
@@ -165,7 +163,8 @@ pub(crate) fn ice(s: &Stack, c: &ColdClimate) -> Ice {
             n += 0.25 * perlin3(SEED_SNOW + 1, p / 18.0) * b18;
         }
     }
-    let pi = base - 2.0 * hollow + 0.8 * spur + 1.2 * n;
+    // (shady slopes keep their snow: cirques face the pole)
+    let pi = base - 2.0 * hollow + 0.8 * spur + 1.2 * n + 1.5 * sunny(s).clamp(-1.0, 1.0);
     let rv = if l.river_hw > 0.0 { 1.0 - smoothstep(l.river_hw + 80.0, l.river_hw + 500.0, l.river_d.abs()) } else { 0.0 };
     let valley = rv.max(0.6 * hollow);
     let g = pi - 2.6 * valley;
@@ -313,7 +312,7 @@ pub(crate) fn lake_mask(s: &Stack, c: &ColdClimate) -> f64 {
     m * (1.0 - smoothstep(0.03, 0.07, l.slope))
         * (1.0 - smoothstep(350.0, 700.0, l.ground))
         * (1.0 - smoothstep(0.2, 0.5, t.mountain))
-        * smoothstep(0.25, 0.45, t.moist)
+        * smoothstep(0.02, 0.12, t.moist)
         * (1.0 - smoothstep(0.1, 0.3, t.sand))
         * (0.3 + 0.7 * smoothstep(0.25, 0.65, t.style[0]))
 }
@@ -433,7 +432,12 @@ fn lakes(s: &mut Stack, lat: &LakeLat, sc: f64, frozen: bool) {
         }
     }
     ly.clear = 1.0;
+    let water = ly.water;
     s.composite(ly);
+    // an open lake ends the stack (no vegetation, rivers or snow on it)
+    if water {
+        s.done = true;
+    }
 }
 
 // ============================================================================= water
@@ -445,6 +449,7 @@ const SEED_FLOE: u64 = 0xC01D_F10E;
 pub fn water(s: &mut Stack) {
     let l = s.l;
     if !(l.water > l.ground) {
+        rivers(s);
         return;
     }
     let c = climate(s);
@@ -514,7 +519,7 @@ pub fn water(s: &mut Stack) {
         let mut ly = Layer { cov, albedo, dh: l.water + dh, hmode: hmode::ABS, relit: 1.0, ..Default::default() };
         if cov > 0.5 {
             ly.cls = cls::SEA_ICE;
-            s.is_water = false;
+            ly.solid = true;
         }
         s.composite(ly);
     } else if c.date < -1.5 {
@@ -528,8 +533,38 @@ pub fn water(s: &mut Stack) {
             let cr = band_cov(worley_edge_dist(&ck, p), 0.35, fw) * e * (0.4 + 0.6 * sw);
             col = mixc(col, srgb(120.0, 138.0, 150.0), cr);
         }
-        s.is_water = false;
-        s.composite(Layer { cov: 1.0, albedo: col, dh: l.water + 0.2, hmode: hmode::ABS, cls: cls::FROZEN_WATER, relit: 1.0, ..Default::default() });
+        s.composite(Layer { cov: 1.0, albedo: col, dh: l.water + 0.2, hmode: hmode::ABS, cls: cls::FROZEN_WATER, relit: 1.0, solid: true, ..Default::default() });
+    }
+}
+
+/// Rivers by the season rather than the annual mean (the core freezes them below about
+/// −2.5 °C): ice at a winter date (frozen water, snow on it later), open water in summer.
+fn rivers(s: &mut Stack) {
+    let l = s.l;
+    let t = s.t;
+    if l.river_hw <= 0.0 || t.river_wet <= 0.5 {
+        return;
+    }
+    let gsd = s.ctx.gsd;
+    let cov = band_cov(l.river_d, l.river_hw, l.fw.max(gsd * 0.35));
+    if cov <= 0.0 {
+        return;
+    }
+    let c = climate(s);
+    let detail = s.pf.detail;
+    let core_ice = smoothstep(-1.5, -4.0, t.temp + 1.5 * s.pf.snow) > 0.5;
+    if c.date < -1.5 {
+        // snow-covered river ice with darker, wind-swept clear ice
+        let col = mixc(s.sm.pal.snow * 0.92, srgb(150.0, 172.0, 186.0), 0.3 + 0.25 * detail);
+        s.m.river_cov = 0.4 * cov;
+        s.composite(Layer { cov, albedo: col, dh: l.river_level, hmode: hmode::ABS, cls: cls::FROZEN_WATER, relit: 1.0, solid: true, ..Default::default() });
+    } else if core_ice && c.date > 0.5 && s.m.snow < 0.3 {
+        // the summer thaw: open water (the core's colours without the ice)
+        let pal = &s.sm.pal;
+        let mut wcol = mixc(pal.river, pal.lake_deep, smoothstep(30.0, 200.0, l.river_hw * 2.0));
+        wcol = mixc(wcol, srgb(96.0, 138.0, 140.0), 0.7 * t.mountain * smoothstep(8.0, 0.0, t.temp));
+        s.m.river_cov = cov;
+        s.composite(Layer { cov, albedo: wcol, dh: l.river_level, hmode: hmode::ABS, cls: cls::RIVER, relit: 1.0, water: true, ..Default::default() });
     }
 }
 
@@ -585,16 +620,16 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     if cs > 0.0 {
         let spacing = 6.0 / sl;
         let e = smoothstep(1.2 * gsd, 3.0 * gsd, spacing);
-        let on = smoothstep(-0.08, 0.08, perlin3(SEED_ICE + 9, p / 35.0) + 1.2 * cs - 0.5);
+        let on = smoothstep(-0.05, 0.05, perlin3(SEED_ICE + 9, p / 20.0) + 0.55 * cs - 0.35);
         let mut cr = 0.0;
         if e > 0.0 {
-            let x = l.ground / 6.0 + 0.35 * perlin3(SEED_ICE + 10, p / 45.0);
+            let x = l.ground / 6.0 + 0.6 * perlin3(SEED_ICE + 10, p / 45.0);
             let f = x - x.floor();
             let d = f.min(1.0 - f) * spacing;
-            cr = band_cov(d, 1.6, fw) * on * e;
+            cr = band_cov(d, 1.2, fw) * on * e;
         }
         // the mean of unresolved crevasses: their area share
-        cr += (1.0 - e) * on * (3.2 / spacing).min(1.0);
+        cr += (1.0 - e) * on * (2.4 / spacing).min(1.0);
         let cr = cr * cs;
         col = mixc(col, srgb(34.0, 62.0, 88.0), cr);
         dh -= 4.0 * cr;
@@ -602,10 +637,10 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     // medial moraines along the valley's axis (the drainage line under the ice) and beside it
     if abl > 0.2 && l.river_hw > 0.0 {
         let ad = l.river_d.abs();
-        let w = 6.0 + 4.0 * perlin3(SEED_ICE + 11, p / 80.0);
-        let off = 90.0 + 0.6 * l.river_hw;
-        let mm = band_cov(ad, w, fw).max(0.7 * band_cov(ad - off, 0.7 * w, fw)) * smoothstep(0.2, 0.6, abl) * band(2.0 * w, gsd).max(0.3);
-        col = mixc(col, srgb(84.0, 80.0, 76.0), mm);
+        let w = 12.0 + 8.0 * perlin3(SEED_ICE + 11, p / 80.0) + 3.0 * perlin3(SEED_ICE + 14, p / 9.0) * band(9.0, gsd);
+        let off = 110.0 + 0.6 * l.river_hw;
+        let mm = band_cov(ad, w, fw.max(0.6 * w)).max(0.7 * band_cov(ad - off, 0.7 * w, fw.max(0.4 * w))) * smoothstep(0.2, 0.6, abl);
+        col = mixc(col, srgb(104.0, 98.0, 92.0), 0.85 * mm);
         dh += 1.5 * mm;
     }
     let ly = Layer { cov: g.ice, albedo: col, dh: s.m.micro + dh, hmode: hmode::BLEND, cls: cls::GLACIER, relit: 1.0, clear: 1.0, ..Default::default() };
@@ -649,10 +684,8 @@ fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
             n += 0.25 * perlin3(SEED_SNOW + 3, p / 12.0) * b12;
         }
     }
-    let (dse, dsn) = downslope(s);
-    // (aspect: slopes facing the equator lose their snow first)
-    let sunny = -dsn * s.ctx.lat.signum() + 0.0 * dse;
-    let mut cov = smoothstep(-0.8, -1.2, c.date + n + 1.5 * sunny) * (1.0 - smoothstep(0.75, 1.3, s.l.slope));
+    // (slopes facing the equator lose their snow first)
+    let mut cov = smoothstep(-0.8, -1.2, c.date + n + 2.5 * sunny(s).clamp(-1.0, 1.0)) * (1.0 - smoothstep(0.75, 1.3, s.l.slope));
     if cov <= 0.0 {
         return;
     }
@@ -736,6 +769,7 @@ mod tests {
     fn class_ids_are_the_v2_table() {
         let id = |n: &str| crate::registry::classes::id(n).unwrap();
         assert_eq!(cls::LAKE, id("lake"));
+        assert_eq!(cls::RIVER, id("river"));
         assert_eq!(cls::TUNDRA, id("tundra"));
         assert_eq!(cls::SEA_ICE, id("sea_ice"));
         assert_eq!(cls::GLACIER, id("glacier"));
@@ -804,7 +838,7 @@ mod tests {
     fn find_cold_places() {
         use rayon::prelude::*;
         let w = crate::world::World::new(crate::Config::default());
-        let n = 400_000;
+        let n = 150_000;
         let pts: Vec<(f64, f64, crate::world::Terrain)> = (0..n)
             .into_par_iter()
             .map(|i| {
@@ -814,23 +848,25 @@ mod tests {
                 (lat, lon, w.terrain(&crate::world::Ctx::new(lat.to_radians(), lon.to_radians(), 100.0, &w.ell)))
             })
             .collect();
-        let summer = |lat: f64, t: &crate::world::Terrain| t.temp + 0.95 * half_range(lat.abs(), t.cont);
+        let summer = |_lat: f64, t: &crate::world::Terrain| t.temp + 0.95 * 0.5 * t.temp_range;
         let tela = |t: &crate::world::Terrain| -2.0 + 5.0 * smoothstep(0.15, 0.85, t.moist);
         let land = |t: &crate::world::Terrain| t.water_kind == 0 && t.ground > 2.0;
         #[allow(clippy::type_complexity)]
         let kinds: [(&str, Box<dyn Fn(f64, &crate::world::Terrain) -> bool + Sync>); 7] = [
             ("valley_glacier", Box::new(|la, t| land(t) && t.mountain > 0.5 && (-2.5..0.0).contains(&(summer(la, t) - tela(t))))),
             ("ice_cap", Box::new(|la, t| land(t) && summer(la, t) - tela(t) < -4.0)),
-            ("polygon_lakes", Box::new(|_, t| land(t) && t.temp < -5.0 && t.ground < 250.0 && t.mountain < 0.1 && t.moist > 0.45 && t.style[0] > 0.6)),
-            ("kettle_lakes", Box::new(|la, t| land(t) && la.abs() > 60.0 && t.cont > 0.25 && (-1.0..5.0).contains(&t.temp) && t.ground < 250.0 && t.mountain < 0.1 && t.moist > 0.45 && t.style[0] > 0.6)),
-            ("forest_tundra", Box::new(|_, t| land(t) && (-6.0..-2.0).contains(&t.temp) && t.mountain < 0.2 && t.moist > 0.45)),
+            ("polygon_lakes", Box::new(|_, t| land(t) && t.temp < -4.0 && t.ground < 250.0 && t.mountain < 0.1 && t.moist > 0.05)),
+            ("kettle_lakes", Box::new(|_, t| land(t) && t.glaciation > 0.5 && (-2.0..6.0).contains(&t.temp) && t.ground < 300.0 && t.mountain < 0.1)),
+            ("forest_tundra", Box::new(|_, t| land(t) && (-8.0..-2.0).contains(&t.temp) && t.ground < 600.0 && t.mountain < 0.2)),
             ("polar_desert", Box::new(|_, t| land(t) && t.temp < -10.0 && t.moist < 0.3)),
             ("sea_ice", Box::new(|la, t| t.water_kind == 1 && t.water - t.ground < 40.0 && summer(la, t) < 2.0)),
         ];
         for (name, f) in &kinds {
             let hits: Vec<String> = pts.iter().filter(|(la, _, t)| f(*la, t)).take(8).map(|(la, lo, t)| format!("({la:.3}, {lo:.3}) t {:.1} h {:.0}", t.temp, t.ground)).collect();
             let count = pts.iter().filter(|(la, _, t)| f(*la, t)).count();
-            eprintln!("{name} ({count}): {}", hits.join("; "));
+            let moist: Vec<f64> = pts.iter().filter(|(la, _, t)| f(*la, t)).map(|p| p.2.moist).collect();
+            let mm = moist.iter().sum::<f64>() / moist.len().max(1) as f64;
+            eprintln!("{name} ({count}, mean moisture {mm:.2}): {}", hits.join("; "));
         }
     }
 
@@ -966,7 +1002,7 @@ mod tests {
         }
     }
 
-    #[cfg(all(feature = "gpu", any()))] // (enabled with next-core's `pub(crate) mod gpu::tests`)
+    #[cfg(feature = "gpu")]
     #[test]
     fn kernels_match_the_cpu() {
         let Some(r) = crate::gpu::tests::kernel_parity(&[("cold_polygons", "{cell: 16}"), ("cold_polygons", "{cell: 4, trough: 0.8, rim: 0.5, pond: 0.3, high: 0.2}")]) else { return };
