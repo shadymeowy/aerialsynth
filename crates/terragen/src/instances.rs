@@ -137,10 +137,33 @@ fn cached_site(w: &World, fi: usize, f: &Family, c: (i64, i64, i64)) -> Option<(
     v
 }
 
+/// Whether family `f` is left out of the lists of a block whose finest pixel is `gsd` (m): its
+/// instances reach at most one pixel there (planet-scale tiles, zooms ~0 to 5). Their relief is
+/// below the pixel (a few metres of mean height) and their colour a few isolated pixels, while
+/// the block's scan visits millions of lattice cells at zoom 0 (half a minute per tile) and
+/// thousands of instances reach the block, of which [`K`] arbitrary ones would be kept. The
+/// same `f32` comparison as the GPU's `instance_lists`.
+pub fn sub_pixel(f: &Family, gsd: f32) -> bool {
+    f.reach as f32 <= gsd
+}
+
+/// The finest pixel (m) of the 16-pixel block row `by` of a tile's pass-A grid (rows `oy - 2 +
+/// j`, `j` < `na2`, of the global pixel grid at zoom `z`; as the GPU's `bin_gsd`, from the
+/// tile's row table).
+pub fn block_gsd(ell: &geodesy::Ellipsoid, z: u8, oy: f64, na2: usize, by: usize) -> f32 {
+    let gsd = |j: usize| {
+        let (lat, _) = geodesy::tiles::pixel_to_latlon(glam::DVec2::new(0.0, oy + j as f64 - 2.0 + 0.5), z, crate::TILE_SIZE as u32);
+        geodesy::tiles::gsd_ew(lat, z, crate::TILE_SIZE as u32, ell) as f32
+    };
+    let j0 = by * 16;
+    gsd(j0).min(gsd((j0 + 15).min(na2 - 1)))
+}
+
 /// The instances of every family that can reach the disc of radius `r` around `p` (only the
-/// relief families with `relief_only`).
-pub fn lists(w: &World, p: DVec3, r: f64, relief_only: bool) -> Vec<Vec<Instance>> {
-    families().enumerate().map(|(i, f)| if relief_only && !f.relief { Vec::new() } else { near(w, i, p, r) }).collect()
+/// relief families with `relief_only`), in a block whose finest pixel is `gsd` (0: any; see
+/// [`sub_pixel`]).
+pub fn lists(w: &World, p: DVec3, r: f64, relief_only: bool, gsd: f32) -> Vec<Vec<Instance>> {
+    families().enumerate().map(|(i, f)| if (relief_only && !f.relief) || sub_pixel(f, gsd) { Vec::new() } else { near(w, i, p, r) }).collect()
 }
 
 /// The WGSL of the families (in every module): constants `FAM_<NAME>`, their lattice

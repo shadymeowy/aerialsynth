@@ -36,6 +36,11 @@ pub static KIT: Kit = Kit {
 /// and a pad on the summit.
 fn host(ctx: &mut crate::features::HostCtx, area: &crate::features::Area) -> crate::features::Features {
     let mut f = crate::features::Features::default();
+    // (planet-scale areas: the tracks are far below the pixel, and the scan of a zoom-0 area
+    // visits hundreds of millions of lattice cells)
+    if area.gsd > 2000.0 {
+        return f;
+    }
     let w = ctx.world;
     for i in crate::instances::near(w, fam(), area.center, area.radius) {
         let g = geodesy::ecef2geodetic(i.center, &w.ell);

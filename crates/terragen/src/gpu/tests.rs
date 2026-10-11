@@ -278,6 +278,40 @@ fn tiles_match_the_cpu() {
     }
 }
 
+/// Planet-scale tiles (zooms 0 to 2 in one batch) take seconds, not minutes: the instance
+/// families below the pixel are not scanned (`instances::sub_pixel`) and the batch's site
+/// requests (a distinct ecoregion per pixel) grow their buffers instead of halving the batch.
+/// A z4 tile whose block rows cross the inselbergs' cut (43° N, the Gobi) matches the CPU.
+#[test]
+fn planet_tiles() {
+    if gpu().is_none() {
+        return;
+    }
+    let cfg = crate::Config::default();
+    let gen = GpuGenerator::new(cfg.clone()).unwrap();
+    let ids = [geodesy::tiles::TileId::new(0, 0, 0), geodesy::tiles::TileId::new(1, 1, 0), geodesy::tiles::TileId::new(2, 2, 1)];
+    let t0 = std::time::Instant::now();
+    let out = gen.tiles(&ids).unwrap();
+    let tg = t0.elapsed().as_secs_f64();
+    eprintln!("z0..2, {} tiles: GPU {tg:.2} s", out.len());
+    assert_eq!(out.len(), 3);
+    // (was 73 s on an RTX 6000 Ada; generous for slow GPUs)
+    assert!(tg < 60.0, "planet-scale tiles took {tg:.1} s");
+    let cpu = crate::Generator::new(cfg);
+    let id = geodesy::tiles::TileId::new(4, 12, 5);
+    let g = gen.tiles(&[id]).unwrap().remove(0);
+    let t0 = std::time::Instant::now();
+    let c = cpu.tile_cpu(id);
+    eprintln!("tile {id}: CPU {:.2} s", t0.elapsed().as_secs_f64());
+    for (name, mean, bad, mx) in compare_tiles(&g, &c) {
+        eprintln!("  {name:10} mean {mean:8.4} off {:7.3}% max {mx:8.2}", bad * 100.0);
+        // (the elevation of z4 tiles differs by up to ~2 m at a few pixels per thousand, with
+        // or without the cut: 0.24 % here, 0.67 % at 4/8/5; the colours as at high zooms)
+        let tol = if name == "elevation" { 0.01 } else { 0.001 };
+        assert!(bad < tol, "tile {id}: {name} differs at {:.3}% of the pixels", bad * 100.0);
+    }
+}
+
 /// Timing of one low-zoom tile (cold caches): `TERRAGEN_PROFILE=1 cargo test ... -- --ignored`.
 #[test]
 #[ignore]

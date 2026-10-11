@@ -497,6 +497,7 @@ impl Generator {
                 let py = oy + j as f64 - 2.0 + 0.5;
                 let (lat, _) = pixel_to_latlon(DVec2::new(ox, py), z, n as u32);
                 let gsd = gsd_ew(lat, z, n as u32, &ell);
+                let blk_gsd = crate::instances::block_gsd(&ell, z, oy, na2, j / 16);
                 // channel pieces prefiltered per chunk of the row (coarse tiles hold tens of
                 // thousands of pieces, most of them far from any given pixel); exact, see
                 // `World::local_segments`
@@ -530,7 +531,8 @@ impl Generator {
                 for &(i0, i1, center, radius, h_max) in &chunks {
                     let local = self.world.local_segments(&row_segs, center, radius, h_max);
                     // the relief families' instances that can reach the chunk
-                    let inst = if relief_fams { crate::instances::lists(&self.world, center, radius, true) } else { Vec::new() };
+                    // (as the GPU's bins: none of a family below the pixel of the block row)
+                    let inst = if relief_fams { crate::instances::lists(&self.world, center, radius, true, blk_gsd) } else { Vec::new() };
                     for i in i0..i1 {
                         let (ctx, m) = pt(i as f64);
                         let near = NearSegs { local: &local, h_max, sinks: &sinks, inst: &inst };
@@ -598,7 +600,7 @@ impl Generator {
                         r = r.max((at_px(i, j).0 - c).length());
                     }
                     r += at_px(i0, j0).1.max(at_px(i0, j1).1);
-                    crate::instances::lists(&self.world, c, r, false)
+                    crate::instances::lists(&self.world, c, r, false, crate::instances::block_gsd(&ell, z, oy, na2, by))
                 })
                 .collect()
         } else {

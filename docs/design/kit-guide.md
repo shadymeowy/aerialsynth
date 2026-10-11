@@ -410,10 +410,16 @@ c.p)` (CPU `r.instances(w, i)`; `p` must be the operator's `c.p`: the point and 
 modules scan the relief families once per point). Never call `inst_list` from a layer: its
 scan fallback puts every family's existence test into the layer. An instance's
 decision must not depend on per-pixel values (R-site). At most 8 instances of a family reach one
-block: where more would, both backends keep the first 8 by id (deterministic, identical) and the
-generator warns once. Treat the warning as a bug in the kit: choose a larger cell or a lower
-density, or draw dense objects (mounds, small trees) with a `scatter` kernel; families are for
-sparse landmarks (the density test in `tests/invariants.rs` checks the default world).
+block: where more would, both backends keep the first 8 by id (deterministic, identical). The
+generator warns once when that happens in a block no wider than the family's cell (16 pixels ≤
+`cell`: zoom ~8 and up for a 16 km cell), where a sparse family holds a handful; larger blocks at
+low zooms hold many instances by design and do not warn. Treat the warning as a bug in the kit:
+choose a larger cell or a lower density, or draw dense objects (mounds, small trees) with a
+`scatter` kernel; families are for sparse landmarks (the density test in `tests/invariants.rs`
+checks the default world). A family is not listed at all in blocks whose finest pixel is at
+least its `reach` (planet-scale tiles, zooms ~0–5): its instances cover at most a pixel there,
+and scanning the block's lattice cells took half a minute per zoom-0 tile
+(`instances::sub_pixel`, both backends).
 
 ---
 
@@ -439,7 +445,10 @@ pub host: Option<fn(&mut HostCtx, &Area) -> Features>   // in `Kit`
 `HostCtx` gives the world and point evaluations of the terrain (`ctx.terrain(lat, lon, gsd)`:
 `None` while the GPU evaluates it — return what you have; the host re-runs you), identical on
 both backends. Lists are cached per area; a feature must be a pure function of the world and
-its own neighbourhood (never of the tile). Per sample, `s.segments()` / `s.stamps()` (WGSL
+its own neighbourhood (never of the tile). The area of a low-zoom tile spans thousands of
+kilometres (`area.radius`): return nothing where your features are far below its pixel
+(`area.gsd`), as the example kit does above 2 km (an `instances::near` over a zoom-0 area
+visits hundreds of millions of lattice cells: minutes per tile). Per sample, `s.segments()` / `s.stamps()` (WGSL
 `feat_seg_*`, `feat_stamp_*`) give the bin's features, and `features::seg_frame(seg, p)` the
 signed distance, along-distance and fraction — the `aux` of the `linear` and `stamp` kernels.
 

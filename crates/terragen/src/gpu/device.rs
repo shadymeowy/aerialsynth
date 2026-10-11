@@ -12,7 +12,7 @@ pub struct Gpu {
     /// Held by the one thread at a time that blocks in `poll` waiting for the GPU (see
     /// [`Gpu::map_read`]); no callback that `poll` runs takes it.
     waiter: std::sync::Mutex<()>,
-    /// Read-backs completed (by any thread): the GPU's progress, for [`STALL`].
+    /// Read-backs completed (by any thread): the GPU's progress, for [`stall_secs`].
     done: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// Held while pipelines are created (see [`Gpu::compiling`]).
     compile: std::sync::Mutex<()>,
@@ -22,9 +22,31 @@ pub struct Gpu {
 const WAIT_SLICE: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// A read-back fails, and the device is marked failed, when no read-back of any thread has
-/// completed for this long: the GPU stopped executing the queue (it never recovers), and
-/// waiting longer would hang the caller instead of letting it fall back to the CPU.
-const STALL: std::time::Duration = std::time::Duration::from_secs(120);
+/// completed for this long (seconds; `AERIALSYNTH_GPU_STALL_S`, default 120): the GPU stopped
+/// executing the queue (it never recovers), and waiting longer would hang the caller instead of
+/// letting it fall back to the CPU. A GPU shared with heavy jobs can also be this slow.
+fn stall_secs() -> f64 {
+    static S: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *S.get_or_init(|| parse_stall(std::env::var("AERIALSYNTH_GPU_STALL_S").ok().as_deref()))
+}
+
+fn parse_stall(v: Option<&str>) -> f64 {
+    match v.map(|v| (v, v.trim().parse::<f64>())) {
+        None => 120.0,
+        Some((_, Ok(s))) if s.is_finite() && s > 0.0 => s,
+        Some((v, _)) => {
+            eprintln!("warning: AERIALSYNTH_GPU_STALL_S={v:?} is not a positive number of seconds; using 120");
+            120.0
+        }
+    }
+}
+
+/// The stall error: what to do about it.
+fn stall_message(secs: f64) -> String {
+    format!(
+        "the GPU stalled (no read-back completed in {secs} s). Another process may be using this GPU heavily: pick another adapter with AERIALSYNTH_GPU (AERIALSYNTH_GPU=list shows them), or wait longer with AERIALSYNTH_GPU_STALL_S=<seconds> (docs/gpu.md)"
+    )
+}
 
 /// Record `e` as the device's failure unless one is recorded already.
 fn record(slot: &std::sync::Mutex<Option<String>>, e: String) {
@@ -231,8 +253,8 @@ impl Gpu {
             let n = self.done.load(Relaxed);
             if n != progress.0 {
                 progress = (n, std::time::Instant::now());
-            } else if progress.1.elapsed() > STALL {
-                let e = format!("the GPU stalled (no read-back completed in {} s)", STALL.as_secs());
+            } else if progress.1.elapsed().as_secs_f64() > stall_secs() {
+                let e = stall_message(stall_secs());
                 record(&self.failed, e.clone());
                 bail!("{e}");
             }
@@ -375,6 +397,17 @@ mod tests {
         drop(slices);
         rbs.iter().for_each(|rb| rb.unmap());
         Ok(out)
+    }
+
+    #[test]
+    fn stall_bound_and_message() {
+        assert_eq!(parse_stall(None), 120.0);
+        assert_eq!(parse_stall(Some("600")), 600.0);
+        assert_eq!(parse_stall(Some(" 2.5 ")), 2.5);
+        assert_eq!(parse_stall(Some("0")), 120.0);
+        assert_eq!(parse_stall(Some("soon")), 120.0);
+        let m = stall_message(120.0);
+        assert!(m.contains("in 120 s") && m.contains("another adapter with AERIALSYNTH_GPU") && m.contains("AERIALSYNTH_GPU_STALL_S"), "{m}");
     }
 
     /// Many threads reading back from the shared device at once (the generator, renderer and

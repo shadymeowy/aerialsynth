@@ -399,8 +399,10 @@ impl GpuGenerator {
         let (src_points, src_tile, src_drain) = sources();
         let hash = sources_hash(&[&src_points, &src_tile, &src_drain]);
         let cache = PipelineCache::open(&gpu, hash);
-        // (no pipeline cache, or no file for these shaders: the compile may be cold)
-        let cold = !cache.as_ref().is_some_and(|c| c.warm);
+        let marker = if cache.is_none() { CompileMarker::open(&gpu, hash) } else { None };
+        // (no file for these shaders in the pipeline cache, or without one no marker that this
+        // adapter compiled them before: the compile may be cold)
+        let cold = !(cache.as_ref().is_some_and(|c| c.warm) || marker.as_ref().is_some_and(|m| m.path.exists()));
         notice::emit(CompileEvent::Started { gpu_name: gpu.info.name.clone(), cold });
         let t_compile = std::time::Instant::now();
         let compiling = gpu.compiling();
@@ -483,6 +485,9 @@ impl GpuGenerator {
         };
         if let Some(c) = &cache {
             c.save();
+        }
+        if let Some(m) = &marker {
+            m.save();
         }
         drop(compiling);
         let secs = t_compile.elapsed().as_secs_f64();
@@ -826,8 +831,10 @@ impl GpuGenerator {
     }
 
     /// The parameters of ecoregions by id (cached): their sites are found from the ids' lattice
-    /// cells around the tiles, so both backends compute them from the same exact site.
-    fn eco_params(&self, cache: &mut Cache, ids: &[u64], areas: &[(DVec3, f64)]) -> Result<Vec<crate::eco::EcoParams>> {
+    /// cells around the tiles, so both backends compute them from the same exact site. `planet`:
+    /// some tiles span a quarter of the globe or more (zoom ≤ 2), whose discs around the corners
+    /// do not bound them, so a global search is expected.
+    fn eco_params(&self, cache: &mut Cache, ids: &[u64], areas: &[(DVec3, f64)], planet: bool) -> Result<Vec<crate::eco::EcoParams>> {
         let w = &self.world;
         let reg = &self.surface.registry;
         let mut out = Vec::with_capacity(ids.len());
@@ -847,7 +854,9 @@ impl GpuGenerator {
                 let rest: Vec<u64> = rest.into_iter().filter(|id| !sites.contains_key(id)).collect();
                 if !rest.is_empty() {
                     static WARNED: std::sync::Once = std::sync::Once::new();
-                    WARNED.call_once(|| eprintln!("warning: ecoregion sites found only by a global search ({} ids); please report", rest.len()));
+                    if !planet {
+                        WARNED.call_once(|| eprintln!("warning: ecoregion sites found only by a global search ({} ids); please report", rest.len()));
+                    }
                     sites.extend(crate::eco::find_sites(w, &rest, &[(DVec3::ZERO, w.ell.a + 20_000.0)]));
                 }
             }
@@ -934,8 +943,8 @@ impl GpuGenerator {
         Ok(self.gpu.scoped(|| self.run(ids, false))?.0)
     }
 
-    /// Generate tiles (one batch on the GPU; halved while its land-use sites overflow the
-    /// request buffers).
+    /// Generate tiles (one batch on the GPU; its land-use site request buffers grow with the
+    /// batch, and it is halved only when they would exceed the device's storage limit).
     pub fn tiles(&self, ids: &[TileId]) -> Result<Vec<TileData>> {
         self.gpu.scoped(|| self.tiles_split(ids))
     }
@@ -1126,11 +1135,13 @@ impl GpuGenerator {
         let empty = output(d, "empty", 256);
         let unused = output(d, "unused", 256);
         let lake_cap = 1usize << 16;
-        let site_cap = 1 << 18;
+        // (the site requests: grown when a batch has more, see below)
+        let mut site_cap = 1usize << 18;
+        let site_bufs = |cap: usize| {
+            (output(d, "region requests", (cap * 64) as u64), output(d, "town requests", (cap * 16) as u64), output(d, "ecoregion requests", (cap * 64) as u64))
+        };
         let b_lake_req = output(d, "lake requests", (lake_cap * 64) as u64);
-        let b_region_req = output(d, "region requests", (site_cap * 64) as u64);
-        let b_town_req = output(d, "town requests", (site_cap * 16) as u64);
-        let b_eco_req = output(d, "ecoregion requests", (site_cap * 64) as u64);
+        let site_req = std::cell::RefCell::new(site_bufs(site_cap));
         let nfam = crate::instances::families().count();
         let b_inst_n = output(d, "instance counts", (nt * NBIN * NBIN * nfam.max(1) * 4) as u64);
         let b_inst_v = output(d, "instances", (nt * NBIN * NBIN * nfam.max(1) * crate::instances::K * 96) as u64);
@@ -1164,6 +1175,7 @@ impl GpuGenerator {
         };
         let wg = |n: usize| n.div_ceil(16) as u32;
         let group2 = |list: &wgpu::Buffer| {
+            let req = site_req.borrow();
             bind(
                 d,
                 &self.k.l_tile,
@@ -1185,9 +1197,9 @@ impl GpuGenerator {
                     &b_scr_b,
                     &b_out,
                     &b_ranges,
-                    &b_region_req,
-                    &b_town_req,
-                    &b_eco_req,
+                    &req.0,
+                    &req.1,
+                    &req.2,
                     &b_inst_n,
                     &b_inst_v,
                     &b_pbw,
@@ -1270,7 +1282,7 @@ impl GpuGenerator {
                 static WARNED: std::sync::Once = std::sync::Once::new();
                 WARNED.call_once(|| {
                     eprintln!(
-                        "warning: more than {} instances of a family reach a 16-pixel block ({} blocks in this batch); the first {} by id are kept: a family's cell or density is too fine for an instance family (use a scatter kernel for dense objects)",
+                        "warning: more than {} instances of a family reach a 16-pixel block no wider than its lattice cell ({} blocks in this batch); the first {} by id are kept: the family's density is too high for an instance family (use a scatter kernel for dense objects)",
                         crate::instances::K,
                         counters[7],
                         crate::instances::K
@@ -1303,22 +1315,38 @@ impl GpuGenerator {
             ],
         );
         let g2 = group2(&unused);
+        let req_passes = [(&self.k.region_req, [wg(NA), wg(NA), nt as u32]), (&self.k.town_req, [wg(NA), wg(NA), nt as u32])];
         let mut passes = vec![(&self.k.a2, [wg(NA2), wg(NA2), nt as u32])];
         if full {
-            passes.push((&self.k.region_req, [wg(NA), wg(NA), nt as u32]));
-            passes.push((&self.k.town_req, [wg(NA), wg(NA), nt as u32]));
+            passes.extend(req_passes);
         }
         run_passes(&g1, &g2, &passes, true);
         if !full {
             let all: Vec<GTerrain> = read_back(&self.gpu, &b_terr, nt * NA2 * NA2)?;
             return Ok((all.chunks(NA2 * NA2).map(|c| c.to_vec()).collect(), vec![]));
         }
-        let counters: Vec<u32> = read_back(&self.gpu, &b_counters, 8)?;
+        let mut counters: Vec<u32> = read_back(&self.gpu, &b_counters, 8)?;
         stamp("pass a");
+        let need = counters[3].max(counters[4]).max(counters[6]) as usize;
+        if need > site_cap {
+            // more site requests than the buffers hold (planet-scale tiles: a distinct ecoregion
+            // per pixel): larger buffers and the request passes again (functions of pass A; the
+            // host sorts and dedups the requests, so the result does not depend on the order)
+            let cap = need + need / 8 + 1024;
+            if (cap * 64) as u64 > lim_storage(d) {
+                return Err(Overflow(format!("{} regions, {} town cells, {} ecoregions", counters[3], counters[4], counters[6])).into());
+            }
+            site_cap = cap;
+            *site_req.borrow_mut() = site_bufs(site_cap);
+            run_passes(&g1, &group2(&unused), &req_passes, true);
+            counters = read_back(&self.gpu, &b_counters, 8)?;
+            stamp(&format!("site requests again ({need} > buffers)"));
+        }
         let (nreg, ntown, neco) = (counters[3] as usize, counters[4] as usize, counters[6] as usize);
         if nreg > site_cap || ntown > site_cap || neco > site_cap {
             return Err(Overflow(format!("{nreg} regions, {ntown} town cells, {neco} ecoregions")).into());
         }
+        let (b_region_req, b_town_req, b_eco_req) = site_req.borrow().clone();
         let reg_reqs: Vec<GSiteReq> = read_back(&self.gpu, &b_region_req, nreg)?;
         let town_reqs: Vec<[i32; 4]> = read_back(&self.gpu, &b_town_req, ntown)?;
         let mut reg_ids: Vec<(u64, DVec3)> = reg_reqs.iter().map(|r| (r.id, DVec3::new(r.pt[0], r.pt[1], r.pt[2]))).collect();
@@ -1339,7 +1367,7 @@ impl GpuGenerator {
         eco_ids.sort_unstable();
         eco_ids.dedup();
         let areas: Vec<(DVec3, f64)> = tq.iter().map(|q| (q.center, q.radius)).collect();
-        let ecos = self.eco_params(&mut cache, &eco_ids, &areas)?;
+        let ecos = self.eco_params(&mut cache, &eco_ids, &areas, ids.iter().any(|t| t.z <= 2))?;
         let (ek, ev) = eco_table(&ecos);
         let b_ek = storage(d, "ecoregion keys", &ek);
         let b_ev = storage(d, "ecoregions", &ev);
@@ -1650,15 +1678,62 @@ fn cache_file(dir: &std::path::Path, key: &str, hash: u64) -> std::path::PathBuf
 /// Delete the cache files of `key` other than `keep`: other shader versions and the old
 /// unhashed `pipelines-<key>.bin`.
 fn prune_cache(dir: &std::path::Path, key: &str, keep: &std::path::Path) {
+    prune_files(dir, &format!("pipelines-{key}-"), ".bin", Some(&format!("pipelines-{key}.bin")), keep);
+}
+
+/// Delete the files `<prefix><16 hex digits><suffix>` (and `legacy`) of `dir` other than `keep`.
+fn prune_files(dir: &std::path::Path, prefix: &str, suffix: &str, legacy: Option<&str>, keep: &std::path::Path) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
-    let prefix = format!("pipelines-{key}-");
     for e in rd.flatten() {
         let name = e.file_name();
         let Some(name) = name.to_str() else { continue };
-        let stale = name == format!("pipelines-{key}.bin")
-            || name.strip_prefix(&prefix).and_then(|r| r.strip_suffix(".bin")).is_some_and(|h| h.len() == 16 && h.bytes().all(|b| b.is_ascii_hexdigit()));
+        let stale = Some(name) == legacy
+            || name.strip_prefix(prefix).and_then(|r| r.strip_suffix(suffix)).is_some_and(|h| h.len() == 16 && h.bytes().all(|b| b.is_ascii_hexdigit()));
         if stale && e.path() != keep {
             let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
+/// The generator's cache directory: `$XDG_CACHE_HOME/terrain` (`~/.cache/terrain`).
+fn cache_dir() -> Option<std::path::PathBuf> {
+    Some(
+        std::env::var_os("XDG_CACHE_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".cache")))?
+            .join("terrain"),
+    )
+}
+
+/// Devices without a pipeline cache (Metal, DX12: their drivers cache compiled shaders
+/// themselves): an empty marker file per adapter and shader version, written after the
+/// compile, says that this adapter compiled these shaders before (the compile is announced as
+/// warm; the driver's cache may still be gone, then the observer reports the time it took).
+struct CompileMarker {
+    path: std::path::PathBuf,
+    prefix: String,
+}
+
+impl CompileMarker {
+    fn open(gpu: &Gpu, hash: u64) -> Option<CompileMarker> {
+        let i = &gpu.info;
+        let adapter = sources_hash(&[&format!("{:?}", i.backend), &i.name, &format!("{:x}:{:x}", i.vendor, i.device), &i.driver, &i.driver_info]);
+        Some(Self::at(&cache_dir()?, adapter, hash))
+    }
+
+    fn at(dir: &std::path::Path, adapter: u64, hash: u64) -> CompileMarker {
+        let prefix = format!("compiled-{adapter:016x}-");
+        CompileMarker { path: dir.join(format!("{prefix}{hash:016x}")), prefix }
+    }
+
+    fn save(&self) {
+        let Some(dir) = self.path.parent() else { return };
+        if !self.path.exists() {
+            let _ = std::fs::create_dir_all(dir);
+            let _ = std::fs::write(&self.path, b"");
+        }
+        if self.path.exists() {
+            prune_files(dir, &self.prefix, "", None, &self.path);
         }
     }
 }
@@ -1669,10 +1744,7 @@ impl PipelineCache {
             return None;
         }
         let key = wgpu::util::pipeline_cache_key(&gpu.info)?;
-        let dir = std::env::var_os("XDG_CACHE_HOME")
-            .map(std::path::PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".cache")))?
-            .join("terrain");
+        let dir = cache_dir()?;
         let path = cache_file(&dir, &key, hash);
         let data = std::fs::read(&path).ok();
         // SAFETY: the data is what `get_data` returned for this adapter key (or nothing); wgpu and
@@ -1725,6 +1797,17 @@ mod cache_tests {
         let mut left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
         left.sort();
         assert_eq!(left, ["other.bin", "pipelines-gpu-a-0000000000000001.bin", "pipelines-gpu-a-b-0000000000000001.bin", "pipelines-gpu-b.bin"]);
+        // markers (devices without a pipeline cache): one per adapter, the current shaders'
+        let old = CompileMarker::at(&dir, 7, 1);
+        old.save();
+        assert!(old.path.exists());
+        let other = CompileMarker::at(&dir, 8, 1);
+        other.save();
+        let m = CompileMarker::at(&dir, 7, 2);
+        assert!(!m.path.exists());
+        m.save();
+        assert!(m.path.exists() && !old.path.exists() && other.path.exists());
+        assert!(m.path.file_name().unwrap().to_str().unwrap() == "compiled-0000000000000007-0000000000000002");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -27,8 +27,9 @@ fast desktop GPU, longer on laptops and integrated GPUs. `terrain` says so on st
 its status bar, and Python / C report it with `verbose` on. The result is cached per GPU, driver
 and aerialsynth version in `$XDG_CACHE_HOME/terrain/` (`~/.cache/terrain/`), where later runs
 start in about a second; files of older versions are deleted automatically. To clear the cache,
-delete that directory. (Metal and DX12 keep their own driver caches; the notice can appear on
-every run there.)
+delete that directory. (Metal and DX12 keep their own driver caches: a marker file in that
+directory records that this GPU compiled these shaders, and later runs say nothing unless the
+compile takes more than 5 s.)
 
 The cache file is `pipelines-<adapter key>-<hash>.bin`; the hash covers the generated WGSL and
 the wgpu version, so a new shader version never reuses a stale file, and saving deletes the
@@ -203,6 +204,14 @@ regions, each needing a point evaluation with the finest drainage network), for 
 * **Lake levels:** every lake's level takes 11 terrain evaluations with the finest drainage
   network around it.
 
+Two costs that grew with the planet-scale tiles are bounded: instance families are not listed
+in 16-pixel blocks whose pixel is at least the family's reach (`instances::sub_pixel`; at zoom
+0 the scan visited millions of lattice cells per block and took 37 s per batch), and a batch
+whose site requests outgrow their buffers (a distinct ecoregion per pixel at zoom 0) grows
+them and runs only the request passes again, instead of halving the batch and redoing it.
+`configs/quick.yaml` (70 tiles, z0–z15): 187 s → 2.7 s on the RTX 6000 Ada (8 s on a Tesla P4), 437 s → 33 s on
+the CPU (6 threads).
+
 ## Troubleshooting
 
 - **Several GPUs:** `AERIALSYNTH_GPU` picks the one to use, for the CLI, the viewer and the C /
@@ -228,6 +237,12 @@ regions, each needing a point evaluation with the finest drainage network), for 
 - **Silent CPU fallback:** with `backend: auto`, a failed GPU batch is generated on the CPU
   from then on, with a one-line warning. Set `AERIALSYNTH_GPU_STRICT=1` (development, CI) to
   make such a failure an error instead.
+- **"the GPU stalled (no read-back completed in 120 s)":** the GPU finished no work for two
+  minutes. Usually another process (a training job at 100 %) is using it heavily; pick another
+  adapter with `AERIALSYNTH_GPU` (see *Several GPUs*), or let the generator wait longer with
+  `AERIALSYNTH_GPU_STALL_S=<seconds>` (default 120). The bound stays because a driver that
+  stopped executing the queue never recovers: without it the run would hang instead of failing
+  (or, with `backend: auto`, continuing on the CPU).
 - **A GPU process hangs at start over SSH:** with X forwarding (`DISPLAY` set to a remote
   display), some NVIDIA Vulkan drivers block while creating the device. Run headless work with
   `env -u DISPLAY terrain …` (the same for Python and C programs).

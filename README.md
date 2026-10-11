@@ -90,8 +90,9 @@ fast desktop GPU, longer on laptops and integrated GPUs. `terrain` says so on st
 its status bar, and Python / C report it with `verbose` on. The result is cached per GPU, driver
 and aerialsynth version in `$XDG_CACHE_HOME/terrain/` (`~/.cache/terrain/`), where later runs
 start in about a second; files of older versions are deleted automatically. To clear the cache,
-delete that directory. (Metal and DX12 keep their own driver caches; the notice can appear on
-every run there.)
+delete that directory. (Metal and DX12 keep their own driver caches: a marker file in that
+directory records that this GPU compiled these shaders, and later runs say nothing unless the
+compile takes more than 5 s.)
 
 ```sh
 cargo build --release                       # the binary: target/release/terrain

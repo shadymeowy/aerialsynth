@@ -796,6 +796,13 @@ fn bin_disc(ti: TileInfo, bin: u32) -> BinDisc {
     return o;
 }
 
+/// The finest pixel of bin `bin` of a tile (`instances::block_gsd`).
+fn bin_gsd(ti: TileInfo, bin: u32) -> f32 {
+    let j0 = (bin / NBIN) * 16u;
+    let j1 = min(j0 + 15u, NA2 - 1u);
+    return min(rows[ti.row_a + j0].gsd, rows[ti.row_a + j1].gsd);
+}
+
 /// The instances of every family that can reach each bin (`instances::lists`).
 @compute @workgroup_size(64)
 fn instance_lists(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -810,8 +817,16 @@ fn instance_lists(@builtin(global_invocation_id) gid: vec3<u32>) {
     let f = k % nf;
     let d = bin_disc(ti, bin);
     var over = false;
-    let l = inst_scan_n(f, d.c, d.r, &over);
-    if (over) {
+    var l: InstList;
+    l.n = 0u;
+    // (a family that reaches at most a pixel of the block lists nothing: `instances::sub_pixel`)
+    let g = bin_gsd(ti, bin);
+    if (fam_reach(f) > g) {
+        l = inst_scan_n(f, d.c, d.r, &over);
+    }
+    // (a crowded block is a kit's problem only where the block spans at most one lattice cell;
+    // larger blocks at low zooms hold many instances by design)
+    if (over && 16.0 * g <= f32(fam_cell(f))) {
         atomicAdd(&counters[7], 1u);
     }
     let b = (ti.bin0 + bin) * NFAM + f;
