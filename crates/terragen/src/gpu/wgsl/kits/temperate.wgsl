@@ -226,8 +226,8 @@ fn temperate_mires(s: ptr<function, Stack>) {
     } else {
         let a = perlin3(T_SEED_MIRE ^ 0x51lu, p * (1.0lf / 45.0lf)) * band(45.0, gsd);
         let b = perlin3(T_SEED_MIRE ^ 0x52lu, p * (1.0lf / 110.0lf));
-        let c0 = mixc(srgb(166.0, 144.0, 98.0), srgb(150.0, 106.0, 78.0), smoothstep1(-0.25, 0.35, a));
-        let c1 = mixc(c0, srgb(120.0, 126.0, 76.0), 0.5 * smoothstep1(0.05, 0.45, b)) * (1.0 + 0.12 * mot);
+        let c0 = mixc(srgb(150.0, 132.0, 92.0), srgb(134.0, 98.0, 74.0), smoothstep1(-0.25, 0.35, a));
+        let c1 = mixc(c0, srgb(112.0, 118.0, 72.0), 0.5 * smoothstep1(0.05, 0.45, b)) * (1.0 + 0.12 * mot);
         let lagg = 1.0 - smoothstep1(0.04, 0.12, dpt);
         col = mixc(c1, srgb(80.0, 88.0, 54.0), lagg);
         let ring = dpt * 7.0 + 0.25 * perlin3(T_SEED_MIRE ^ 0x53lu, p * (1.0lf / 70.0lf));
@@ -392,8 +392,8 @@ fn temperate_stands(s: ptr<function, Stack>, fe: f32) {
         var col: vec3<f32>;
         var clear: f32;
         if (age < 3.0) {
-            let c0 = mixc(srgb(126.0, 108.0, 84.0), srgb(146.0, 104.0, 70.0), smoothstep1(-0.3, 0.4, mot));
-            let c1 = mixc(c0, spal(s, BP_SOIL), 0.25) * (1.0 + 0.18 * mot);
+            let c0 = mixc(srgb(116.0, 104.0, 88.0), srgb(134.0, 110.0, 86.0), smoothstep1(-0.3, 0.4, mot));
+            let c1 = mixc(c0, spal(s, BP_SOIL), 0.15) * (1.0 + 0.22 * mot);
             let tr = q.x / 19.0 + u01k(bid, 4lu);
             let trail = band_cov((tr - floor(tr) - 0.5) * 19.0, 1.6, fw) * band(19.0, gsd) * smoothstep1(4.0, 14.0, ey);
             let c2 = mixc(c1, srgb(162.0, 144.0, 114.0), 0.7 * trail);
@@ -411,9 +411,9 @@ fn temperate_stands(s: ptr<function, Stack>, fe: f32) {
         if (age > 3.0) {
             let grow = clamp((age - 3.0) / 10.0, 0.0, 1.0);
             let kp = temperate_parts(s, temperate_kp_young(), TEMPERATE_YOUNG_SIZE, TEMPERATE_YOUNG_MEAN.x, inside * (0.25 + 0.75 * grow), q, 0.0);
-            var tc = srgb(92.0, 120.0, 54.0);
+            var tc = srgb(84.0, 112.0, 50.0);
             if (u01k(bid, 5lu) < 0.65) {
-                tc = srgb(50.0, 80.0, 46.0);
+                tc = srgb(44.0, 70.0, 42.0);
             }
             composite(s, temperate_klayer(kp, TEMPERATE_YOUNG_MEAN, TEMPERATE_YOUNG_MALB, tc, tc, 0.6 * (age - 2.0)));
         }
@@ -594,13 +594,13 @@ fn temperate_kp_young() -> KP {
     var k: KP;
     k.kind = 0u;
     k.seed = 0x9cc43f7835cc0e13lu;
-    k.v = array<f32, 16>(2.6, 1.0, 2.0, 0.8, 1.25, 0.85, 1.15, 0.35, 0.25, 0.5, 1.0, 0.0, 0.3, 0.0, 0.0, 0.0);
+    k.v = array<f32, 16>(2.6, 1.0, 2.0, 0.55, 1.0, 0.85, 1.15, 0.35, 0.45, 0.7, 1.0, 0.0, 0.3, 0.0, 0.0, 0.0);
     k.col = array<vec3<f32>, 3>(vec3<f32>(1.0, 1.0, 1.0), vec3<f32>(0.09758735, 0.116970666, 0.04231141), vec3<f32>(0.0, 0.0, 0.0));
     return k;
 }
 const TEMPERATE_YOUNG_SIZE: f32 = 2.6;
-const TEMPERATE_YOUNG_MEAN: vec4<f32> = vec4<f32>(0.49894175, 0.35374844, 0.0, 0.0);
-const TEMPERATE_YOUNG_MALB: vec3<f32> = vec3<f32>(0.83224875, 0.83224875, 0.83224875);
+const TEMPERATE_YOUNG_MEAN: vec4<f32> = vec4<f32>(0.29940763, 0.34119454, 0.0, 0.0);
+const TEMPERATE_YOUNG_MALB: vec3<f32> = vec3<f32>(0.7615867, 0.7615867, 0.7615867);
 fn temperate_kp_logs() -> KP {
     var k: KP;
     k.kind = 0u;

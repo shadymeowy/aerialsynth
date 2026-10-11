@@ -52,7 +52,7 @@ const KERNELS: [(&str, &str, &str); 5] = [
     // larches
     ("larch", "scatter", "{cell: 6, density: 1, shape: cone, radius: [1.5, 2.3], height: [14, 21], jitter: 0.85, colour_var: 0.2, shade: 0.5, colour: [255, 255, 255]}"),
     // young trees of a regrowing clear-cut (planted: little jitter)
-    ("young", "scatter", "{cell: 2.6, density: 1, shape: cone, radius: [0.8, 1.25], height: [0.85, 1.15], jitter: 0.35, colour_var: 0.25, shade: 0.5, colour: [255, 255, 255]}"),
+    ("young", "scatter", "{cell: 2.6, density: 1, shape: cone, radius: [0.55, 1.0], height: [0.85, 1.15], jitter: 0.35, colour_var: 0.45, shade: 0.7, colour: [255, 255, 255]}"),
     // fallen trunks of a windthrow, along the storm (`aux[0]`)
     ("logs", "scatter", "{cell: 7, density: 1, shape: rect, radius: [0.3, 0.45], aspect: 10, orient: aux, height: [0.3, 0.6], jitter: 0.9, colour_var: 0.2, shade: 0.2, colour: [178, 168, 152], colour2: [116, 92, 68], second: 0.35}"),
     // dead grey trees in a beaver pond's flooded ring
@@ -366,8 +366,8 @@ fn mires(s: &mut Stack) {
         // pools on concentric rings near the dome's top
         let a = perlin3(SEED_MIRE ^ 0x51, p / 45.0) * band(45.0, gsd);
         let b = perlin3(SEED_MIRE ^ 0x52, p / 110.0);
-        let c0 = mixc(rgb(166.0, 144.0, 98.0), rgb(150.0, 106.0, 78.0), smoothstep(-0.25, 0.35, a));
-        let c1 = mixc(c0, rgb(120.0, 126.0, 76.0), 0.5 * smoothstep(0.05, 0.45, b)) * (1.0 + 0.12 * mot);
+        let c0 = mixc(rgb(150.0, 132.0, 92.0), rgb(134.0, 98.0, 74.0), smoothstep(-0.25, 0.35, a));
+        let c1 = mixc(c0, rgb(112.0, 118.0, 72.0), 0.5 * smoothstep(0.05, 0.45, b)) * (1.0 + 0.12 * mot);
         let lagg = 1.0 - smoothstep(0.04, 0.12, dpt);
         let col = mixc(c1, rgb(80.0, 88.0, 54.0), lagg);
         let ring = dpt * 7.0 + 0.25 * perlin3(SEED_MIRE ^ 0x53, p / 70.0);
@@ -546,8 +546,8 @@ fn stands(s: &mut Stack, fe: f64) {
         let (col, clear) = if age < 3.0 {
             // fresh: slash (brown, reddish dead needles), skid trails along the stand, a landing
             // at its edge, a few trees left standing
-            let c0 = mixc(rgb(126.0, 108.0, 84.0), rgb(146.0, 104.0, 70.0), smoothstep(-0.3, 0.4, mot));
-            let c1 = mixc(c0, s.pal(pal::SOIL), 0.25) * (1.0 + 0.18 * mot);
+            let c0 = mixc(rgb(116.0, 104.0, 88.0), rgb(134.0, 110.0, 86.0), smoothstep(-0.3, 0.4, mot));
+            let c1 = mixc(c0, s.pal(pal::SOIL), 0.15) * (1.0 + 0.22 * mot);
             let tr = q.x / 19.0 + u01k(bid, 4);
             let trail = kernels::band_cov((tr - tr.floor() - 0.5) * 19.0, 1.6, fw) * band(19.0, gsd) * smoothstep(4.0, 14.0, ey);
             let c2 = mixc(c1, rgb(162.0, 144.0, 114.0), 0.7 * trail);
@@ -568,7 +568,7 @@ fn stands(s: &mut Stack, fe: f64) {
             // the young trees: planted in rows (the stand's frame), growing with the age
             let grow = ((age - 3.0) / 10.0).clamp(0.0, 1.0);
             let kp = kernel_parts(s, K_YOUNG, inside * (0.25 + 0.75 * grow), q, 0.0);
-            let tc = if u01k(bid, 5) < 0.65 { rgb(50.0, 80.0, 46.0) } else { rgb(92.0, 120.0, 54.0) };
+            let tc = if u01k(bid, 5) < 0.65 { rgb(44.0, 70.0, 42.0) } else { rgb(84.0, 112.0, 50.0) };
             let ly = kernel_layer(s, K_YOUNG, &kp, tc, tc, 0.6 * (age - 2.0));
             s.composite(ly);
         }
@@ -864,6 +864,54 @@ mod tests {
             }
             eprintln!("{name}: seam {across:.0} vs inside {inside:.0}");
             assert!(across < 1.5 * inside + 3.0 * n as f64, "{name}: seam {across} inside {inside}");
+        }
+    }
+
+    /// The GPU generates the kit's places at every zoom without falling back to the CPU (an
+    /// instance family overflowing a block, a shader error): `Backend::Gpu` returns the error.
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn places_stay_on_the_gpu() {
+        let Ok(g) = crate::gpu::shared() else { return };
+        if g.check_generator().is_err() {
+            return;
+        }
+        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        for &(name, lat, lon) in &PLACES {
+            let ids: Vec<_> = [6u8, 8, 10, 12, 14, 16].iter().map(|&z| geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)).collect();
+            if let Err(e) = gen.tiles(&ids) {
+                panic!("{name}: GPU generation failed: {e:#}");
+            }
+        }
+        assert!(gen.backend_name().starts_with("GPU"), "{}", gen.backend_name());
+    }
+
+    /// GPU tiles/s at the kit's places (8 x 8 tiles per place and zoom; performance budget):
+    /// `cargo test -p terragen --release --lib kits::temperate::tests::bench_places -- --ignored --nocapture`.
+    /// For the baseline, run it with the kit's `KITS` entry commented out (the module stays).
+    #[cfg(feature = "gpu")]
+    #[test]
+    #[ignore]
+    fn bench_places() {
+        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        gen.tiles(&[geodesy::tiles::TileId::new(3, 4, 3)]).unwrap();
+        for z in [8u8, 10, 12, 14, 16] {
+            let mut ids = Vec::new();
+            for &(_, lat, lon) in &PLACES {
+                let c = geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z);
+                let n = 1i64 << z;
+                for dy in 0..8i64 {
+                    for dx in 0..8i64 {
+                        ids.push(geodesy::tiles::TileId::new(z, (c.x as i64 + dx - 4).rem_euclid(n) as u32, (c.y as i64 + dy - 4).clamp(0, n - 1) as u32));
+                    }
+                }
+            }
+            let t0 = std::time::Instant::now();
+            for chunk in ids.chunks(16) {
+                gen.tiles(chunk).unwrap();
+            }
+            let dt = t0.elapsed().as_secs_f64();
+            println!("bench z{z}: {} tiles {dt:.2} s {:.1} tiles/s", ids.len(), ids.len() as f64 / dt);
         }
     }
 
