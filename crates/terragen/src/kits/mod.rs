@@ -20,7 +20,7 @@ mod example;
 
 mod desert;
 
-// mod volcanic;
+mod volcanic;
 
 // mod mountains;
 
@@ -47,7 +47,7 @@ mod agriculture;
 pub static KITS: &[&Kit] = &[
     &desert::KIT,
 
-    // &volcanic::KIT,
+    &volcanic::KIT,
 
     // &mountains::KIT,
 
