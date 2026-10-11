@@ -82,7 +82,8 @@ fn temperate_forestry(s: ptr<function, Stack>) -> f32 {
         case 4u, 5u, 10u: { a = 0.2; }
         default: {}
     }
-    return a * (0.35 + 0.9 * temperate_eco_u1(s)) * (0.6 + 0.6 * st.misc.y) * (1.0 - smoothstep1(14.0, 19.0, (*s).bio.site.x));
+    let productive = smoothstep1(0.6, 0.75, sveg(s, VEG_TREES));
+    return a * (0.35 + 0.9 * temperate_eco_u1(s)) * (0.6 + 0.6 * st.misc.y) * (1.0 - smoothstep1(14.0, 19.0, (*s).bio.site.x)) * productive;
 }
 
 fn temperate_forest_est(s: ptr<function, Stack>) -> f32 {

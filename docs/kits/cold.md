@@ -55,18 +55,21 @@ kit draws.
 ## Stills
 
 GPU-generated (`terrain survey`, `AERIALSYNTH_GPU_STRICT=1`), default world, 10:30 local on the
-equinox. Lat, lon in brackets.
+equinox (glacier and polygon tundra: 12:00 at the December solstice). Lat, lon in brackets.
 
-**Valley glacier** (-66.095, 123.288, oblique 1.5 km): firn, crevasse fields, flow lines.
+**Valley glacier** (-66.095, 123.288, oblique 1.5 km, summer solstice noon): firn, dirty ice, crevasse
+fields, flow lines. The stills' grey snow is the sensor's fixed exposure, not the albedo.
 ![glacier](images/cold_glacier_1500m.jpg)
 
 **Ice field** (-72.199, -89.333, oblique 10 km): outlet streams, moraine bands.
 ![ice field](images/cold_icefield_10km.jpg)
 
-**Snow-patched polygon tundra** (-72.339, -102.499, oblique 300 m)
-![polygons](images/cold_polygons_300m.jpg)
+**Late-melt polygon tundra** (-72.339, -102.499, oblique 1.5 km): the bare patches are fragments
+with a polygon net of snow in the troughs, not blobs.
+![polygons](images/cold_polygons_1500m.jpg)
 
-**Kettle lakes and snowy taiga** (58.609, -92.893, oblique 1.5 km)
+**Kettle lakes and snowy taiga** (58.609, -92.893, oblique 1.5 km); the pale rectangles are the
+temperate kit's boreal clear-cuts (this is taiga at 2 C, not forest tundra).
 ![kettle](images/cold_kettle_1500m.jpg)
 
 **Forest tundra** (-71.075, -168.603, oblique and nadir 300 m): ice-wedge polygons, thermokarst
@@ -80,3 +83,11 @@ ponds.
 
 **Drumlin field under snow** (57.314, -26.177, nadir 10 km): the relief is subtle under the snow.
 ![drumlins](images/cold_drumlins_10km_nadir.jpg)
+
+## Notes
+
+* Seasonal snow's date fades to the annual mean over 10 km towards an ecoregion border (the
+  mosaic of two ecoregions with different dates drew snow-free blobs next to snow). The melt edge
+  is ragged with fine noise and a snow net along ~18 m polygon troughs.
+* The temperate kit's `forestry` is zero where the biome's trees are below 0.6 (forest tundra,
+  tundra, polar desert): no managed stands there.

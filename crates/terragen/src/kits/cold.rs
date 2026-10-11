@@ -102,9 +102,9 @@ pub(crate) fn climate(s: &Stack) -> ColdClimate {
     let site = &s.bio.site;
     let f = |x: f64| x as f32 as f64;
     let d = year_date(f(site.temp_c), f(site.precip_mm), f(site.temp_range_c), s.bio.style.season);
-    // (where the ecoregions' mosaic is below the pixel, the date's effect fades to the border,
-    // where both sides meet at the annual mean: no seam between a winter and a summer ecoregion)
-    let date = ts - half * (std::f64::consts::TAU * (d - 0.04)).cos() * (1.0 - 2.0 * s.bio.w).max(0.0);
+    // (the date's effect fades to the ecoregion border over the ecotone, where both sides meet at
+    // the annual mean: no patches of a winter and a spring ecoregion in the border mosaic)
+    let date = ts - half * (std::f64::consts::TAU * (d - 0.04)).cos() * smoothstep(0.0, 10.0, s.bio.edge_km);
     ColdClimate { t: ts, summer: ts + 0.95 * half, date }
 }
 
@@ -837,7 +837,22 @@ fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
         }
     }
     // (slopes facing the equator lose their snow first)
-    let mut cov = smoothstep(-0.8, -1.2, c.date + n + 2.5 * sunny(s).clamp(-1.0, 1.0)) * (1.0 - smoothstep(0.75, 1.3, s.l.slope));
+    let mut x = c.date + n + 2.5 * sunny(s).clamp(-1.0, 1.0);
+    // late melt: rims and centres of the frost polygons bare first, the troughs keep their snow
+    // (a net of snow), the edges ragged with fine noise
+    if x > -3.2 && x < 1.0 {
+        let b4 = band(4.0, gsd);
+        if b4 > 0.0 {
+            x += 0.8 * perlin3(SEED_SNOW + 4, p / 4.0) * b4 + 0.4 * perlin3(SEED_SNOW + 5, p / 1.3) * band(1.3, gsd);
+        }
+        let b18 = band(18.0, gsd);
+        if b18 > 0.0 {
+            let wc = worley3(SEED_SNOW + 6, p, 18.0, 0.9);
+            let ed = worley_edge_dist(&wc, p);
+            x += 1.2 * (u01k(wc.id, 1) - 0.5) * b18 - 1.6 * (1.0 - smoothstep(0.0, 1.8, ed)) * b18;
+        }
+    }
+    let mut cov = smoothstep(-0.55, -1.25, x) * (1.0 - smoothstep(0.75, 1.3, s.l.slope));
     if cov <= 0.0 {
         return;
     }

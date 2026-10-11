@@ -34,7 +34,7 @@ fn cold_climate(s: ptr<function, Stack>) -> ColdClimate {
     var c: ColdClimate;
     c.t = ts;
     c.summer = ts + 0.95 * half;
-    c.date = ts - half * cos(TAU * (d - 0.04)) * max(1.0 - 2.0 * (*s).bio.w, 0.0);
+    c.date = ts - half * cos(TAU * (d - 0.04)) * smoothstep1(0.0, 10.0, (*s).bio.edge_km);
     return c;
 }
 
@@ -651,7 +651,20 @@ fn cold_snow(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
             n += 0.25 * perlin3(COLD_SEED_SNOW + 3lu, p * (1.0lf / 12.0lf)) * b12;
         }
     }
-    var cov = smoothstep1(-0.8, -1.2, c.date + n + 2.5 * clamp(cold_sunny(s), -1.0, 1.0)) * (1.0 - smoothstep1(0.75, 1.3, (*s).l.slope));
+    var x = c.date + n + 2.5 * clamp(cold_sunny(s), -1.0, 1.0);
+    if (x > -3.2 && x < 1.0) {
+        let b4 = band(4.0, gsd);
+        if (b4 > 0.0) {
+            x += 0.8 * perlin3(COLD_SEED_SNOW + 4lu, p * (1.0lf / 4.0lf)) * b4 + 0.4 * perlin3(COLD_SEED_SNOW + 5lu, p * (1.0lf / 1.3lf)) * band(1.3, gsd);
+        }
+        let b18 = band(18.0, gsd);
+        if (b18 > 0.0) {
+            let wc = worley3(COLD_SEED_SNOW + 6lu, p, 18.0lf, 0.9);
+            let ed = worley_edge_dist(wc, p);
+            x += 1.2 * (u01k(wc.id, 1lu) - 0.5) * b18 - 1.6 * (1.0 - smoothstep1(0.0, 1.8, ed)) * b18;
+        }
+    }
+    var cov = smoothstep1(-0.55, -1.25, x) * (1.0 - smoothstep1(0.75, 1.3, (*s).l.slope));
     if (cov <= 0.0) {
         return;
     }

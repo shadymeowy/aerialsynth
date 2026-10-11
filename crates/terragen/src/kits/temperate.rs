@@ -209,7 +209,9 @@ fn forestry(s: &Stack) -> f64 {
         4 | 5 | 10 => 0.2,
         _ => 0.1,
     };
-    a * (0.35 + 0.9 * eco_u1(s)) * (0.6 + 0.6 * st.development) * (1.0 - smoothstep(14.0, 19.0, s.bio.site.temp_c))
+    // (no managed forest where the biome's trees are sparse: forest tundra, tundra, polar desert)
+    let productive = smoothstep(0.6, 0.75, s.veg(|v| v.trees));
+    a * (0.35 + 0.9 * eco_u1(s)) * (0.6 + 0.6 * st.development) * (1.0 - smoothstep(14.0, 19.0, s.bio.site.temp_c)) * productive
 }
 
 /// The natural forest at the sample as the canopy draws it (0..1, crisp at its edges): the
