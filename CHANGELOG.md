@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Tropical and savanna kit** (`docs/kits/tropical.md`): rainforest with emergent and
+  flowering crowns, meander scars and oxbow lakes, mangroves, cloud forest and páramo zones,
+  savannas with dry-season grass, burn scars, termite mounds, waterholes, gallery forests,
+  baobabs and palms, monsoon, dry and miombo woodland, slash-and-burn frontiers.
 - **Desert kit** (`docs/kits/desert.md`): sand seas whose dunes follow the atlas wind and its
   variability (transverse ridges, linear seif dunes with Y-junctions, star dunes, small dunes on
   the big ones), barchans on a stony fringe, playas with salt crust, cracks, brine pools and

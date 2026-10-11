@@ -722,7 +722,9 @@ impl GpuGenerator {
         let missing: Vec<u64> = ids.iter().copied().filter(|id| !cache.eco.contains_key(id)).collect();
         if !missing.is_empty() {
             use rayon::prelude::*;
+            let t_sites = std::time::Instant::now();
             let mut sites = crate::eco::find_sites(w, &missing, areas);
+            let found_near = sites.len();
             // (robustness: ids the tiles' areas did not explain are searched wider, then over
             // the whole lattice shell — the result is the same exact site either way)
             let rest: Vec<u64> = missing.iter().copied().filter(|id| !sites.contains_key(id)).collect();
@@ -736,6 +738,14 @@ impl GpuGenerator {
                     WARNED.call_once(|| eprintln!("warning: ecoregion sites found only by a global search ({} ids); please report", rest.len()));
                     sites.extend(crate::eco::find_sites(w, &rest, &[(DVec3::ZERO, w.ell.a + 20_000.0)]));
                 }
+            }
+            if std::env::var_os("TERRAGEN_PROFILE").is_some() {
+                eprintln!(
+                    "    ecoregion sites: {} new ids, {} found near the tiles, {:.1} ms",
+                    missing.len(),
+                    found_near,
+                    t_sites.elapsed().as_secs_f64() * 1e3
+                );
             }
             let computed: Vec<(u64, Option<crate::eco::EcoParams>)> =
                 missing.par_iter().map(|&id| (id, sites.get(&id).map(|&site| crate::eco::compute(w, reg, id, site)))).collect();
