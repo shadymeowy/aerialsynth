@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Temperate, boreal and wetland kit** (`docs/kits/temperate.md`): 12 biomes (deciduous,
+  mixed and taiga forest, lichen woodland, maquis, garrigue, chaparral, feather-grass steppe,
+  heath, moor, krummholz, alpine meadow); raised and string bogs, fens, reed marshes, beaver
+  ponds; managed forest stands with clear-cuts, young plantations, logging roads, windthrow
+  and firebreaks; autumn crowns and larches.
 - **Tropical and savanna kit** (`docs/kits/tropical.md`): rainforest with emergent and
   flowering crowns, meander scars and oxbow lakes, mangroves, cloud forest and páramo zones,
   savannas with dry-season grass, burn scars, termite mounds, waterholes, gallery forests,
