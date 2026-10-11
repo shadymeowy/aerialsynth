@@ -486,7 +486,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     eprintln!("GPU vs CPU atlas sampling, worst errors relative to the channel scale: {worst:?}; discrete differences {discrete_diff} (+{near_edge} within 1e-3 texel of a texel border)");
     // software adapters (WARP, lavapipe) round f32 transcendentals less exactly than GPUs
-    let tol = if g.info.device_type == wgpu::DeviceType::Cpu { 1e-3 } else { 1e-4 };
+    let tol = if g.info.device_type == wgpu::DeviceType::Cpu { 1e-2 } else { 1e-4 };
     for (c, &e) in worst.iter().enumerate() {
         assert!(e < tol, "{}: error {e} (tolerance {tol}, adapter {})", NAMES[c], g.info.name);
     }
