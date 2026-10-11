@@ -30,7 +30,7 @@ mod desert;
 
 mod tropical;
 
-// mod temperate;
+mod temperate;
 
 // mod agriculture;
 
@@ -57,7 +57,7 @@ pub static KITS: &[&Kit] = &[
 
     &tropical::KIT,
 
-    // &temperate::KIT,
+    &temperate::KIT,
 
     // &agriculture::KIT,
 
