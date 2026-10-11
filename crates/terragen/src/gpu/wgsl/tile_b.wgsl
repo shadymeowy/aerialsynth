@@ -422,7 +422,7 @@ fn st_save(sp: ptr<function, Stack>, b: u32) {
     pbw[b + 24u] = bitcast<u32>((*sp).emission.y);
     pbw[b + 25u] = bitcast<u32>((*sp).emission.z);
     pbw[b + 26u] = bitcast<u32>((*sp).lit);
-    pbw[b + 27u] = ((*sp).cls & 0xffffu) | select(0u, 0x10000u, (*sp).is_water) | select(0u, 0x20000u, (*sp).done) | select(0u, 0x40000u, (*sp).deferring);
+    pbw[b + 27u] = ((*sp).cls & 0xffffu) | select(0u, 0x10000u, (*sp).is_water) | select(0u, 0x20000u, (*sp).done) | select(0u, 0x40000u, (*sp).deferring) | select(0u, 0x80000u, (*sp).no_town);
     if (PB_STATE_FULL) {
         // (stage boundaries after step 5: the deferred layers and the town)
         let d = (*sp).def;
@@ -485,6 +485,7 @@ fn st_load(sp: ptr<function, Stack>, b: u32) {
     (*sp).is_water = (w & 0x10000u) != 0u;
     (*sp).done = (w & 0x20000u) != 0u;
     (*sp).deferring = (w & 0x40000u) != 0u;
+    (*sp).no_town = (w & 0x80000u) != 0u;
     if (PB_STATE_FULL) {
         var d: Deferred;
         d.k = bitcast<f32>(pbw[b + 28u]);

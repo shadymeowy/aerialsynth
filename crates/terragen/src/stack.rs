@@ -213,6 +213,9 @@ pub struct Stack<'a> {
     /// a layer ended the stack: the rest is skipped (set by kits; water surfaces skip only the
     /// seasonal slot, while `is_water`)
     pub done: bool,
+    /// set by a kit before the towns are selected (slots 1–5): no town here (volcanic craters,
+    /// ash and lava)
+    pub no_town: bool,
     /// layers 6–7: evaluated before the canopy, composited after it
     deferring: bool,
     deferred: Deferred,
@@ -449,6 +452,7 @@ pub fn eval(sm: &SurfaceModel, world: &World, cache: &mut Caches, ctx: &Ctx, l: 
         emission: DVec3::ZERO,
         is_water: false,
         done: false,
+        no_town: false,
         deferring: false,
         deferred: Deferred::default(),
     };

@@ -1,0 +1,74 @@
+# Volcanic kit biomes (docs/kits/volcanic.md): the ecoregions on volcanic rock outside the
+# deserts (the desert kit has its basalt harrat): dark andosol ground, black-sand beaches (the
+# beach palette), old lava fans in the volcanic fields. Volcanoes, craters, flows, ash and crater
+# lakes are drawn by the kit's code (kits/volcanic.rs) wherever its instances are, in any biome.
+#
+# Schema: docs/design/kit-guide.md ("Biomes").
+
+# Warm and temperate volcanic country: dark soils under thin scrub and open woodland, black
+# beaches, weathered lava fans.
+- id: volcanic_scrub
+  group: vegetation
+  koppen: [Af, Am, Aw, Cfa, Cfb, Cfc, Csa, Csb, Cwa, Cwb, BSh, BSk]
+  lithology: [volcanic]
+  weight: 1.6
+  palette:
+    soil: [[74, 62, 54], [86, 70, 58], [64, 60, 58], [98, 80, 64]]
+    rock: [[50, 46, 46], [66, 58, 54], [38, 36, 36]]
+    sand: [[84, 78, 74], [66, 62, 60], [104, 96, 88]]
+    beach: [58, 54, 52]
+    wet_sand: [32, 30, 32]
+    shrub: [74, 86, 52]
+    grass_dry: [138, 126, 84]
+  vegetation: { trees: 0.7, shrubs: 1.1, savanna: 0.5, meadow: 0.8, woodlots: 0.3 }
+  zonation:
+    - { below_c: 4, biome: volcanic_barren }
+  layers:
+    # weathered lava fans (fresh ones are black: the next layer)
+    - slot: azonal
+      kernel: lobes
+      mask: { volcanism: [0.28, 0.55, null, null], slope: [null, null, 0.6, 0.9] }
+      params: { cell: 800, density: 0.4, radius: [260, 600], span: 1.3, margin: 0.3, channels: 5, height: 0, colour: [78, 66, 56], colour2: [100, 84, 66] }
+      class: bare
+      height: none
+      clear: 0.7
+    - slot: azonal
+      kernel: lobes
+      mask: { volcanism: [0.4, 0.7, null, null], slope: [null, null, 0.6, 0.9] }
+      params: { cell: 1100, density: 0.3, radius: [300, 700], span: 1.2, margin: 0.25, channels: 6, height: 0, colour: [22, 20, 22], colour2: [54, 42, 38] }
+      class: lava
+      height: none
+      clear: 1.0
+  landuse: { agriculture: 0.35, towns: 0.5 }
+
+# Cold and high volcanic country: bare cinder and frost-shattered lava, thin tundra, black beaches.
+- id: volcanic_barren
+  group: bare
+  koppen: [Dfb, Dfc, Dfd, Dwc, Dwd, Dsc, ET, EF]
+  lithology: [volcanic]
+  weight: 1.6
+  palette:
+    soil: [[64, 58, 56], [76, 66, 60], [56, 54, 54], [88, 74, 62]]
+    rock: [[46, 42, 44], [60, 54, 52], [34, 32, 34]]
+    sand: [[74, 70, 68], [58, 56, 56], [92, 86, 80]]
+    beach: [54, 50, 50]
+    wet_sand: [30, 28, 30]
+    tundra: [96, 98, 72]
+    grass_cold: [92, 96, 70]
+  vegetation: { trees: 0.25, conifer: 0.5, shrubs: 0.5, meadow: 0.5, woodlots: 0.1 }
+  layers:
+    - slot: azonal
+      kernel: lobes
+      mask: { volcanism: [0.28, 0.55, null, null], slope: [null, null, 0.6, 0.9] }
+      params: { cell: 800, density: 0.4, radius: [260, 600], span: 1.3, margin: 0.3, channels: 5, height: 0, colour: [66, 58, 54], colour2: [88, 74, 62] }
+      class: bare
+      height: none
+      clear: 0.8
+    - slot: azonal
+      kernel: lobes
+      mask: { volcanism: [0.4, 0.7, null, null], slope: [null, null, 0.6, 0.9] }
+      params: { cell: 1100, density: 0.35, radius: [300, 700], span: 1.2, margin: 0.25, channels: 6, height: 0, colour: [22, 20, 22], colour2: [50, 40, 38] }
+      class: lava
+      height: none
+      clear: 1.0
+  landuse: { agriculture: 0.02, towns: 0.2 }

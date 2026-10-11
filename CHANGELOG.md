@@ -40,6 +40,13 @@
   faster). Kits read
   instances in layers with the new `inst_count` / `inst_get` / `inst_list_bin`; the kit guide
   has compile-time rules and the `compile_times` / `inlined_sizes` measurements.
+- **Volcanic kit** (`docs/kits/volcanic.md`): stratovolcanoes with craters, three tiers of radial
+  gullies and rim wobble, calderas with flat floors and lakes, shield volcanoes, and cinder-cone
+  fields with maars (three instance families placed by the atlas' volcanism, plate boundary and
+  hotspot fields; volcanoes are pass-A relief, so the drainage follows the cones and oceanic
+  ones make islands); ash and scoria on the upper cone and as an ash-fall apron, lava tongues
+  from fresh black to weathered brown to moss-green, hydrothermal patches, crater and maar
+  lakes at a flat water level, black-sand beaches, two volcanic-rock biomes with old lava fans.
 - **Agriculture kit** (`docs/kits/agriculture.md`): field systems by culture x climate x terrain
   instead of one farmland look everywhere: 1-mile section grids with centre pivots and
   section-line roads, shelterbelt steppe, open-field strips (furlongs, reverse-S), bocage with
