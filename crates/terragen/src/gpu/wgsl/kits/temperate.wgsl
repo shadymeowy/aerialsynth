@@ -504,11 +504,11 @@ fn temperate_firebreaks(s: ptr<function, Stack>, fe: f32, dry: f32) {
 
 fn temperate_autumn_colour(i: u32) -> vec3<f32> {
     switch i {
-        case 0u: { return srgb(198.0, 166.0, 50.0); }
-        case 1u: { return srgb(206.0, 134.0, 38.0); }
-        case 2u: { return srgb(196.0, 90.0, 30.0); }
-        case 3u: { return srgb(166.0, 42.0, 32.0); }
-        default: { return srgb(124.0, 84.0, 46.0); }
+        case 0u: { return srgb(176.0, 150.0, 62.0); }
+        case 1u: { return srgb(184.0, 124.0, 48.0); }
+        case 2u: { return srgb(172.0, 92.0, 40.0); }
+        case 3u: { return srgb(138.0, 52.0, 40.0); }
+        default: { return srgb(112.0, 84.0, 54.0); }
     }
 }
 

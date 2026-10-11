@@ -660,7 +660,7 @@ fn autumn_weights(red: f64) -> [f64; 5] {
 }
 
 fn autumn_colours() -> [DVec3; 5] {
-    [rgb(198.0, 166.0, 50.0), rgb(206.0, 134.0, 38.0), rgb(196.0, 90.0, 30.0), rgb(166.0, 42.0, 32.0), rgb(124.0, 84.0, 46.0)]
+    [rgb(176.0, 150.0, 62.0), rgb(184.0, 124.0, 48.0), rgb(172.0, 92.0, 40.0), rgb(138.0, 52.0, 40.0), rgb(112.0, 84.0, 54.0)]
 }
 
 /// Autumn colours: deciduous crowns in yellow, gold, orange, red and brown over the canopy, by

@@ -57,7 +57,38 @@ file (`wgsl_consts`, checked by `wgsl_consts_up_to_date`; `AERIALSYNTH_BLESS=1` 
 
 ## Stills
 
-STILLS
+GPU-generated (`terrain survey`, `AERIALSYNTH_GPU_STRICT=1`), default world, 10:30 local on the
+equinox. Lat, lon in brackets.
+
+**Managed boreal forest** (48.760, 120.806): rectangular stands in the land-use frame, one cut
+recently (skid trails, a landing, seed trees), one regrown to grass, one a dense young plantation in
+rows, logging roads along the stand edges.
+
+![clear-cut, nadir 300 m](images/temperate_clearcut_300m_nadir.jpg)
+![clear-cuts, nadir 1.5 km](images/temperate_clearcut_1500m_nadir.jpg)
+
+**Autumn and raised bog** (53.943, 131.837): mixed forest in muted yellow, gold, orange and red
+crowns with a young plantation (lime green); the pale-red boggy plain beside it.
+
+![autumn crowns, nadir 300 m](images/temperate_autumn_300m_nadir.jpg)
+![bog plain, oblique 1.5 km](images/temperate_bog_1500m.jpg)
+
+**Lichen woodland** (61.335, 115.374): cream lichen floor, scattered spires, dark spruce islands
+and mire ponds.
+
+![lichen woodland, oblique 300 m](images/temperate_lichen_300m.jpg)
+![lichen woodland, oblique 1.5 km](images/temperate_lichen_1500m.jpg)
+![lichen woodland, nadir 10 km](images/temperate_lichen_10km_nadir.jpg)
+
+**Steppe** (51.427, 160.549) and **maquis** (38.467, 5.375); **forest and farmland mosaic**
+(45.877, -2.573, oblique 10 km).
+
+![steppe, oblique 300 m](images/temperate_steppe_300m.jpg)
+![maquis, oblique 1.5 km](images/temperate_maquis_1500m.jpg)
+![mosaic, oblique 10 km](images/temperate_mosaic_10km.jpg)
+
+The reed marshes and beaver ponds are small (tens of metres) and need a dedicated close view; the
+stills above do not show them.
 
 ## Tests
 
@@ -66,4 +97,19 @@ STILLS
   clear-cuts, lichen woodland) at z16, z14, z12, z9 — at most 0.5 % of the pixels off;
 * `lod_seams_determinism`: parent vs mean of children (albedo, class histogram) at z12 and z15,
   determinism with a fresh generator, the E-W seam;
+* `places_stay_on_the_gpu`: the five places at z6 to z16 with `AERIALSYNTH_GPU_STRICT` semantics
+  (`Backend::Gpu` returns errors; no CPU fallback);
 * `find_places` / `find_features` (ignored): where the kit's biomes and classes are.
+
+## Performance
+
+`bench_places` (ignored test, GPU, 5 places x 8 x 8 tiles per zoom), the same build with the
+kit's `KITS` entry commented out (mean of two runs, shared machine, so +-3 % noise):
+
+| zoom | tiles/s without | with | cost |
+|---|---|---|---|
+| z8 | 18.1 | 19.1 | within noise |
+| z10 | 67.5 | 68.3 | within noise |
+| z12 | 120.3 | 117.5 | 2.3 % |
+| z14 | 116.5 | 112.4 | 3.5 % |
+| z16 | 123.4 | 116.8 | 5.4 % |
