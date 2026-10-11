@@ -356,57 +356,66 @@ fn band_index(gsd: f32) -> u32 {
     return b;
 }
 
-/// The kernel layers of the sample's biome(s) at `slot` (`layers::biome_layers`).
+/// The layer range of biome `bi` (weight `wt`) at band `band`: (first, count) in `band_idx`.
+fn biome_band_range(bi: u32, wt: f32, band: u32) -> vec2<u32> {
+    if (wt <= 0.0) {
+        return vec2<u32>(0u);
+    }
+    let bm = biomes[bi];
+    if (bm.r1.y == 0u) {
+        return vec2<u32>(0u);
+    }
+    return band_ranges[bm.r1.z + band];
+}
+
+/// The kernel layers of the sample's biome(s) at `slot` (`layers::biome_layers`): those of
+/// biome a, then of biome b, in one loop (one inlined `kernel_eval`).
 fn biome_layers(s: ptr<function, Stack>, slot: u32) {
     let band = band_index((*s).c.gsd);
-    for (var k = 0u; k < 2u; k++) {
-        var bi = (*s).bio.a;
-        var wt = 1.0 - (*s).bio.w;
-        if (k == 1u) {
-            bi = (*s).bio.b;
-            wt = (*s).bio.w;
-            if (bi == (*s).bio.a) {
-                continue;
-            }
-        } else if ((*s).bio.b == bi) {
-            wt = 1.0;
+    let ba = (*s).bio.a;
+    let bb = (*s).bio.b;
+    let wa = select(1.0 - (*s).bio.w, 1.0, bb == ba);
+    let wb = (*s).bio.w;
+    let ra = biome_band_range(ba, wa, band);
+    var rb = vec2<u32>(0u);
+    if (bb != ba) {
+        rb = biome_band_range(bb, wb, band);
+    }
+    let n = ra.y + rb.y;
+    for (var q = 0u; q < n; q++) {
+        var li = 0u;
+        var wt = wa;
+        if (q < ra.y) {
+            li = band_idx[ra.x + q];
+        } else {
+            li = band_idx[rb.x + q - ra.y];
+            wt = wb;
         }
-        if (wt <= 0.0) {
+        let l = klayers[li];
+        if (l.head.x != slot || (*s).done) {
             continue;
         }
-        let bm = biomes[bi];
-        if (bm.r1.y == 0u) {
+        var m = 1.0;
+        for (var w = 0u; w < l.head2.z; w++) {
+            m *= window_eval(l.win[w], s_field(s, l.wf[w]));
+        }
+        if (m <= 0.0) {
             continue;
         }
-        let br = band_ranges[bm.r1.z + band];
-        for (var j = 0u; j < br.y; j++) {
-            let li = band_idx[br.x + j];
-            let l = klayers[li];
-            if (l.head.x != slot || (*s).done) {
-                continue;
-            }
-            var m = 1.0;
-            for (var w = 0u; w < l.head2.z; w++) {
-                m *= window_eval(l.win[w], s_field(s, l.wf[w]));
-            }
-            if (m <= 0.0) {
-                continue;
-            }
-            let o = kernel_eval(li, s_kin(s, l.head.y, m * wt));
-            if (o.cov <= 0.0 && o.emit <= 0.0) {
-                continue;
-            }
-            var ly = layer_none();
-            ly.cov = o.cov;
-            ly.albedo = o.albedo;
-            ly.dh = o.dh;
-            ly.hmode = l.head.w & 0xffu;
-            ly.cls = l.head.z;
-            ly.emit = l.col[2].xyz * o.emit;
-            ly.clear = l.sz.y;
-            ly.mat = l.head.w >> 8u;
-            composite(s, ly);
+        let o = kernel_eval(li, s_kin(s, l.head.y, m * wt));
+        if (o.cov <= 0.0 && o.emit <= 0.0) {
+            continue;
         }
+        var ly = layer_none();
+        ly.cov = o.cov;
+        ly.albedo = o.albedo;
+        ly.dh = o.dh;
+        ly.hmode = l.head.w & 0xffu;
+        ly.cls = l.head.z;
+        ly.emit = l.col[2].xyz * o.emit;
+        ly.clear = l.sz.y;
+        ly.mat = l.head.w >> 8u;
+        composite(s, ly);
     }
 }
 
@@ -1042,50 +1051,86 @@ fn surface_eval(c: Ctx, t: Terrain, l: Local, pf: ptr<function, PixFields>) -> S
     s.deferring = false;
     s.def = deferred_none();
     let sp = &s;
+    // The slots run in one loop with ONE call site of `biome_layers` and of `kits_slot` (the
+    // drivers inline every call: one call per slot put the kernel library and the kits' code
+    // into pass B eleven times, minutes of compile time). Steps: 0..9 land, 10 standing water;
+    // the step's core layer, then its slot's biome and kit layers. The bounds depend on the
+    // sample (no unrolling).
+    var step = 0u;
+    var last = 9u;
     if (l.water > l.ground && l.water_kind != W_NONE) {
-        layer_standing(sp);
-        biome_layers(sp, SLOT_WATER);
-        kits_slot_water(sp);
-    } else {
-        snow_prepare(sp);
-        s_frame(sp);
-        layer_zonal(sp);
-        biome_layers(sp, SLOT_ZONAL);
-        kits_slot_zonal(sp);
-        biome_layers(sp, SLOT_ALTITUDINAL);
-        kits_slot_altitudinal(sp);
-        layer_azonal(sp);
-        biome_layers(sp, SLOT_AZONAL);
-        kits_slot_azonal(sp);
-        finish_ground(sp);
-        biome_layers(sp, SLOT_DISTURBANCE);
-        kits_slot_disturbance(sp);
-        layer_agriculture(sp);
-        biome_layers(sp, SLOT_AGRICULTURE);
-        kits_slot_agriculture(sp);
-        s.deferring = true;
-        select_town_layer(sp);
-        layer_linear(sp);
-        biome_layers(sp, SLOT_LINEAR);
-        kits_slot_linear(sp);
-        layer_built(sp);
-        biome_layers(sp, SLOT_BUILT);
-        kits_slot_built(sp);
-        s.deferring = false;
-        layer_canopy(sp);
-        biome_layers(sp, SLOT_CANOPY);
-        kits_slot_canopy(sp);
-        st_flush(sp);
-        layer_rivers(sp);
+        step = 10u;
+        last = 10u;
+    }
+    loop {
+        var slot = SLOT_WATER;
+        var skip = false;
+        switch step {
+            case 0u: {
+                snow_prepare(sp);
+                s_frame(sp);
+                layer_zonal(sp);
+                slot = SLOT_ZONAL;
+            }
+            case 1u: {
+                slot = SLOT_ALTITUDINAL;
+            }
+            case 2u: {
+                layer_azonal(sp);
+                slot = SLOT_AZONAL;
+            }
+            case 3u: {
+                finish_ground(sp);
+                slot = SLOT_DISTURBANCE;
+            }
+            case 4u: {
+                layer_agriculture(sp);
+                slot = SLOT_AGRICULTURE;
+            }
+            case 5u: {
+                s.deferring = true;
+                select_town_layer(sp);
+                layer_linear(sp);
+                slot = SLOT_LINEAR;
+            }
+            case 6u: {
+                layer_built(sp);
+                slot = SLOT_BUILT;
+            }
+            case 7u: {
+                s.deferring = false;
+                layer_canopy(sp);
+                slot = SLOT_CANOPY;
+            }
+            case 8u: {
+                st_flush(sp);
+                layer_rivers(sp);
+                slot = SLOT_WATER;
+            }
+            case 9u: {
+                // (the seasonal layers skip water: ice over it clears `is_water`)
+                skip = s.done || s.is_water;
+                if (!skip) {
+                    layer_snow(sp);
+                }
+                slot = SLOT_SEASONAL;
+            }
+            default: {
+                layer_standing(sp);
+                slot = SLOT_WATER;
+            }
+        }
+        if (skip) {
+            break;
+        }
         if (!s.done) {
-            biome_layers(sp, SLOT_WATER);
-            kits_slot_water(sp);
+            biome_layers(sp, slot);
+            kits_slot(sp, slot);
         }
-        if (!s.done && !s.is_water) {
-            layer_snow(sp);
-            biome_layers(sp, SLOT_SEASONAL);
-            kits_slot_seasonal(sp);
+        if (step >= last) {
+            break;
         }
+        step += 1u;
     }
     *pf = s.pf;
     var o: Surface;

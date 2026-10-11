@@ -371,6 +371,230 @@ fn wgsl_compiles() {
     }
 }
 
+/// `src` without the slot and kernel glue lines of the kits in `TERRAGEN_COMPILE_DROP` (a
+/// comma list of kit names: their code is then unreferenced; measurements only).
+fn drop_kits(src: String) -> String {
+    let Ok(drop) = std::env::var("TERRAGEN_COMPILE_DROP") else { return src };
+    let names: Vec<&str> = drop.split(',').collect();
+    src.lines()
+        .filter(|l| {
+            let t = l.trim_start();
+            let glue = t.starts_with("if (!(*s).done) { ") || (t.starts_with("case ") && t.contains("{ return ") && t.contains("(li, k)"));
+            !(glue && names.iter().any(|n| t.contains(&format!(" {n}_"))))
+        })
+        .map(|l| format!("{l}\n"))
+        .collect()
+}
+
+/// `src` with the bodies of the functions in `TERRAGEN_COMPILE_STUB` (`name=expr;name=expr`)
+/// replaced by `return expr;` (what a function costs the driver; measurements only).
+fn stub_fns(mut src: String) -> String {
+    let Ok(stubs) = std::env::var("TERRAGEN_COMPILE_STUB") else { return src };
+    for st in stubs.split(';').filter(|s| !s.is_empty()) {
+        let (name, expr) = st.split_once('=').expect("name=expr");
+        let head = format!("\nfn {name}(");
+        let a = src.find(&head).unwrap_or_else(|| panic!("no fn {name}"));
+        let open = a + src[a..].find("{\n").unwrap();
+        let close = open + src[open..].find("\n}\n").unwrap();
+        let ret = if expr.is_empty() { "return;".to_string() } else { format!("return {expr};") };
+        src.replace_range(open..close + 2, &format!("{{\n    {ret}\n}}"));
+    }
+    src
+}
+
+/// The size of each tile entry point once every call is inlined (as the drivers do): naga
+/// expressions per function times its call multiplicity, with the largest contributors. A cheap
+/// proxy of the driver's compile time (no GPU): `cargo test -p terragen --release --lib
+/// inlined_sizes -- --ignored --nocapture` (`TERRAGEN_COMPILE=pass_b,..`: only these entries).
+#[test]
+#[ignore]
+fn inlined_sizes() {
+    use naga::{Block, Statement};
+    fn calls(b: &Block, out: &mut Vec<naga::Handle<naga::Function>>) {
+        for st in b.iter() {
+            match st {
+                Statement::Block(b) => calls(b, out),
+                Statement::If { accept, reject, .. } => {
+                    calls(accept, out);
+                    calls(reject, out);
+                }
+                Statement::Switch { cases, .. } => cases.iter().for_each(|c| calls(&c.body, out)),
+                Statement::Loop { body, continuing, .. } => {
+                    calls(body, out);
+                    calls(continuing, out);
+                }
+                Statement::Call { function, .. } => out.push(*function),
+                _ => {}
+            }
+        }
+    }
+    let only: Option<Vec<String>> = std::env::var("TERRAGEN_COMPILE").ok().map(|s| s.split(',').map(String::from).collect());
+    let (_, tile, _) = super::sources();
+    let module = naga::front::wgsl::parse_str(&stub_fns(drop_kits(tile))).unwrap();
+    let own: Vec<usize> = module.functions.iter().map(|(_, f)| f.expressions.len()).collect();
+    let callees: Vec<Vec<naga::Handle<naga::Function>>> = module
+        .functions
+        .iter()
+        .map(|(_, f)| {
+            let mut v = Vec::new();
+            calls(&f.body, &mut v);
+            v
+        })
+        .collect();
+    let nf = own.len();
+    for ep in &module.entry_points {
+        if only.as_ref().is_some_and(|o| !o.contains(&ep.name)) {
+            continue;
+        }
+        let mut mult = vec![0f64; nf];
+        let mut root = Vec::new();
+        calls(&ep.function.body, &mut root);
+        // callees precede their callers in naga's arena (no recursion in WGSL): one backward sweep
+        for f in &root {
+            mult[f.index()] += 1.0;
+        }
+        for i in (0..nf).rev() {
+            if mult[i] == 0.0 {
+                continue;
+            }
+            for c in &callees[i] {
+                mult[c.index()] += mult[i];
+            }
+        }
+        let total: f64 = ep.function.expressions.len() as f64 + (0..nf).map(|i| mult[i] * own[i] as f64).sum::<f64>();
+        eprintln!("{:16} inlined size {:>10.0}", ep.name, total);
+        if only.is_some() {
+            let mut top: Vec<(f64, usize)> = (0..nf).map(|i| (mult[i] * own[i] as f64, i)).filter(|t| t.0 > 0.0).collect();
+            top.sort_by(|a, b| b.0.total_cmp(&a.0));
+            let name = |i: usize| module.functions.iter().nth(i).unwrap().1.name.clone().unwrap_or_default();
+            eprintln!("  own size x multiplicity:");
+            for (sz, i) in top.iter().take(25) {
+                eprintln!("    {:>9.0} {:5.1}%  x{:<5} {}", sz, sz / total * 100.0, mult[*i], name(*i));
+            }
+            // inclusive (inlined) size of one call, times the multiplicity
+            let mut incl = own.iter().map(|&o| o as f64).collect::<Vec<_>>();
+            for i in 0..nf {
+                for c in &callees[i] {
+                    incl[i] += incl[c.index()];
+                }
+            }
+            // `TERRAGEN_INLINED_FN=perlin3`: the inlined copies of that function under each caller
+            if let Ok(target) = std::env::var("TERRAGEN_INLINED_FN") {
+                let mut cnt = vec![0f64; nf];
+                for i in 0..nf {
+                    if name(i) == target {
+                        cnt[i] = 1.0;
+                    }
+                    for c in &callees[i] {
+                        cnt[i] += cnt[c.index()];
+                    }
+                }
+                let mut v: Vec<usize> = (0..nf).filter(|&i| mult[i] > 0.0 && cnt[i] > 0.0).collect();
+                v.sort_by(|&a, &b| (mult[b] * cnt[b]).total_cmp(&(mult[a] * cnt[a])));
+                eprintln!("  copies of {target} under (x multiplicity):");
+                for i in v.iter().take(80) {
+                    eprintln!("    {:>6.0} = x{:<4} * {:<5} {}", mult[*i] * cnt[*i], mult[*i], cnt[*i], name(*i));
+                }
+            }
+            let mut big: Vec<(f64, usize)> = (0..nf).filter(|&i| mult[i] > 0.0 && mult[i] * incl[i] > 0.01 * total).map(|i| (mult[i] * incl[i], i)).collect();
+            big.sort_by(|a, b| b.0.total_cmp(&a.0));
+            eprintln!("  repeated calls (multiplicity > 1, inclusive > 800):");
+            let mut rep: Vec<usize> = (0..nf).filter(|&i| mult[i] > 1.0 && incl[i] > 800.0).collect();
+            rep.sort_by(|&a, &b| (mult[b] * incl[b]).total_cmp(&(mult[a] * incl[a])));
+            for i in rep.iter().take(40) {
+                eprintln!("    {:>8.0} x{:<5} one {:>7.0} {}", mult[*i] * incl[*i], mult[*i], incl[*i], name(*i));
+            }
+            eprintln!("  inclusive size x multiplicity (> 1%):");
+            for (sz, i) in &big {
+                eprintln!("    {:>9.0} {:6.1}%  x{:<5} one {:>8.0} {}", sz, sz / total * 100.0, mult[*i], incl[*i], name(*i));
+            }
+        }
+    }
+}
+
+/// The driver's compile time of `n` inlined `perlin3` calls in a synthetic shader (how code
+/// shape scales; measurements only): `cargo test -p terragen --release --lib
+/// noise_compile_scaling -- --ignored --nocapture` (`TERRAGEN_COMPILE_WRAP=k`: groups of k
+/// calls each in a one-iteration loop the compiler cannot see through).
+#[test]
+#[ignore]
+fn noise_compile_scaling() {
+    let Some(g) = shaders() else { return };
+    let wrap: usize = std::env::var("TERRAGEN_COMPILE_WRAP").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+    for n in [100, 200, 400] {
+        let mut body = String::new();
+        for k in 0..n {
+            if wrap > 0 && k % wrap == 0 {
+                body.push_str("    for (var once = 0u; once < u32(grads[0].w) + 1u; once++) {\n");
+            }
+            body.push_str(&format!("    if (acc > -100.0) {{ acc += perlin3({k}lu ^ seed, p * {}lf); }}\n", 1.0 / (1.0 + k as f64 * 0.37)));
+            if wrap > 0 && (k % wrap == wrap - 1 || k == n - 1) {
+                body.push_str("    }\n");
+            }
+        }
+        let src = format!(
+            "{}{}\n@group(1) @binding(0) var<storage, read> pts: array<vec4<f64>>;\n@group(1) @binding(1) var<storage, read_write> out: array<f32>;\n@compute @workgroup_size(64)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {{\n    let p = pts[gid.x].xyz;\n    let seed = u64(gid.x);\n    var acc = 0.0;\n{body}    out[gid.x] = acc;\n}}\n",
+            tables::wgsl_consts(),
+            NOISE_WGSL
+        );
+        let m = g.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: None, source: wgpu::ShaderSource::Wgsl(src.into()) });
+        let t = std::time::Instant::now();
+        let _p = g.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: None,
+            layout: None,
+            module: &m,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        eprintln!("perlin3 x{n} (wrap {wrap}): {:.2} s", t.elapsed().as_secs_f64());
+    }
+}
+
+/// The driver's compile time per tile pipeline, one at a time and without pipeline caches
+/// (`TERRAGEN_COMPILE=pass_b,..`: only these entries; set `__GL_SHADER_DISK_CACHE=0` on NVIDIA):
+/// `cargo test -p terragen --release --lib compile_times -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn compile_times() {
+    let Some(g) = gpu() else { return };
+    let only: Option<Vec<String>> = std::env::var("TERRAGEN_COMPILE").ok().map(|s| s.split(',').map(String::from).collect());
+    let (points, tile, drain) = super::sources();
+    let tile = stub_fns(drop_kits(tile));
+    let d = &g.device;
+    for (name, src) in [("tile", tile), ("points", points), ("drain", drain)] {
+        let module = naga::front::wgsl::parse_str(&src).unwrap();
+        let entries: Vec<String> = module.entry_points.iter().map(|e| e.name.clone()).filter(|n| only.as_ref().is_none_or(|o| o.contains(n))).collect();
+        if entries.is_empty() {
+            continue;
+        }
+        // TERRAGEN_COMPILE_CHECKS=none|nobounds|noloop: naga's runtime checks
+        let mut checks = wgpu::ShaderRuntimeChecks::checked();
+        match std::env::var("TERRAGEN_COMPILE_CHECKS").as_deref() {
+            Ok("none") => checks = wgpu::ShaderRuntimeChecks::unchecked(),
+            Ok("nobounds") => checks.bounds_checks = false,
+            Ok("noloop") => checks.force_loop_bounding = false,
+            _ => {}
+        }
+        let desc = wgpu::ShaderModuleDescriptor { label: Some(name), source: wgpu::ShaderSource::Wgsl(src.into()) };
+        // SAFETY: measurements only (the generator's own shaders)
+        let m = unsafe { d.create_shader_module_trusted(desc, checks) };
+        for e in entries {
+            let t = std::time::Instant::now();
+            let _p = d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(&e),
+                layout: None,
+                module: &m,
+                entry_point: Some(&e),
+                compilation_options: Default::default(),
+                cache: None,
+            });
+            g.device.poll(wgpu::PollType::wait_indefinitely()).ok();
+            eprintln!("compile {name}::{e}: {:.1} s", t.elapsed().as_secs_f64());
+        }
+    }
+}
+
 // ---------------------------------------------------------------- kernel parity (for kits)
 
 const KERNEL_TEST: &str = r#"

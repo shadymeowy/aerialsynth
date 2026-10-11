@@ -714,20 +714,30 @@ struct GInst {
 @group(2) @binding(20) var<storage, read_write> inst_n: array<u32>;
 @group(2) @binding(21) var<storage, read_write> inst_v: array<GInst>;
 
-/// The instances of family `f` near `p`: the list of block `blk` (a bin of the tile), else a
-/// scan.
+/// The number of instances of family `f` listed for block `blk` (a bin of the tile: every
+/// tile-module caller has one).
+fn inst_count(f: u32, blk: u32) -> u32 {
+    return min(inst_n[blk * NFAM + f], INST_K);
+}
+
+/// Instance `k` (< `inst_count(f, blk)`) of family `f` in block `blk`'s list (sorted by id).
+fn inst_get(f: u32, blk: u32, k: u32) -> Inst {
+    let g = inst_v[(blk * NFAM + f) * INST_K + k];
+    var it: Inst;
+    it.id = g.id;
+    it.center = g.center.xyz;
+    it.v = array<f32, 8>(g.v0.x, g.v0.y, g.v0.z, g.v0.w, g.v1.x, g.v1.y, g.v1.z, g.v1.w);
+    return it;
+}
+
+/// The instances of family `f` near `p`: the list of block `blk` (`p` is unused here; the
+/// point and drainage modules scan instead). Layers: prefer `inst_count` / `inst_get` (no
+/// 512-byte list copy).
 fn inst_list(f: u32, blk: u32, p: vec3<f64>) -> InstList {
-    if (blk == 0xffffffffu) {
-        return inst_scan(f, p, 0.0);
-    }
     var l: InstList;
-    let b = blk * NFAM + f;
-    l.n = min(inst_n[b], INST_K);
+    l.n = inst_count(f, blk);
     for (var k = 0u; k < l.n; k++) {
-        let g = inst_v[b * INST_K + k];
-        l.items[k].id = g.id;
-        l.items[k].center = g.center.xyz;
-        l.items[k].v = array<f32, 8>(g.v0.x, g.v0.y, g.v0.z, g.v0.w, g.v1.x, g.v1.y, g.v1.z, g.v1.w);
+        l.items[k] = inst_get(f, blk, k);
     }
     return l;
 }
