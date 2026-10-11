@@ -409,6 +409,14 @@ fn stub_fns(mut src: String) -> String {
 #[test]
 #[ignore]
 fn inlined_sizes() {
+    let only: Option<Vec<String>> = std::env::var("TERRAGEN_COMPILE").ok().map(|s| s.split(',').map(String::from).collect());
+    let (points, tile, drain) = super::sources();
+    for src in [tile, points, drain] {
+        inlined_sizes_of(&naga::front::wgsl::parse_str(&stub_fns(drop_kits(src))).unwrap(), only.as_ref());
+    }
+}
+
+fn inlined_sizes_of(module: &naga::Module, only: Option<&Vec<String>>) {
     use naga::{Block, Statement};
     fn calls(b: &Block, out: &mut Vec<naga::Handle<naga::Function>>) {
         for st in b.iter() {
@@ -428,10 +436,19 @@ fn inlined_sizes() {
             }
         }
     }
-    let only: Option<Vec<String>> = std::env::var("TERRAGEN_COMPILE").ok().map(|s| s.split(',').map(String::from).collect());
-    let (_, tile, _) = super::sources();
-    let module = naga::front::wgsl::parse_str(&stub_fns(drop_kits(tile))).unwrap();
+    fn loops(b: &Block) -> usize {
+        b.iter()
+            .map(|st| match st {
+                Statement::Block(b) => loops(b),
+                Statement::If { accept, reject, .. } => loops(accept) + loops(reject),
+                Statement::Switch { cases, .. } => cases.iter().map(|c| loops(&c.body)).sum(),
+                Statement::Loop { body, continuing, .. } => 1 + loops(body) + loops(continuing),
+                _ => 0,
+            })
+            .sum()
+    }
     let own: Vec<usize> = module.functions.iter().map(|(_, f)| f.expressions.len()).collect();
+    let own_loops: Vec<usize> = module.functions.iter().map(|(_, f)| loops(&f.body)).collect();
     let callees: Vec<Vec<naga::Handle<naga::Function>>> = module
         .functions
         .iter()
@@ -443,7 +460,7 @@ fn inlined_sizes() {
         .collect();
     let nf = own.len();
     for ep in &module.entry_points {
-        if only.as_ref().is_some_and(|o| !o.contains(&ep.name)) {
+        if only.is_some_and(|o| !o.contains(&ep.name)) {
             continue;
         }
         let mut mult = vec![0f64; nf];
@@ -462,13 +479,15 @@ fn inlined_sizes() {
             }
         }
         let total: f64 = ep.function.expressions.len() as f64 + (0..nf).map(|i| mult[i] * own[i] as f64).sum::<f64>();
-        eprintln!("{:16} inlined size {:>10.0}", ep.name, total);
+        let nloops: f64 = loops(&ep.function.body) as f64 + (0..nf).map(|i| mult[i] * own_loops[i] as f64).sum::<f64>();
+        eprintln!("{:16} inlined size {:>10.0}, loops {:>6.0}", ep.name, total, nloops);
         if only.is_some() {
             let mut top: Vec<(f64, usize)> = (0..nf).map(|i| (mult[i] * own[i] as f64, i)).filter(|t| t.0 > 0.0).collect();
             top.sort_by(|a, b| b.0.total_cmp(&a.0));
             let name = |i: usize| module.functions.iter().nth(i).unwrap().1.name.clone().unwrap_or_default();
             eprintln!("  own size x multiplicity:");
-            for (sz, i) in top.iter().take(25) {
+            let ntop = if std::env::var_os("TERRAGEN_INLINED_ALL").is_some() { usize::MAX } else { 25 };
+            for (sz, i) in top.iter().take(ntop) {
                 eprintln!("    {:>9.0} {:5.1}%  x{:<5} {}", sz, sz / total * 100.0, mult[*i], name(*i));
             }
             // inclusive (inlined) size of one call, times the multiplicity
@@ -498,6 +517,12 @@ fn inlined_sizes() {
             }
             let mut big: Vec<(f64, usize)> = (0..nf).filter(|&i| mult[i] > 0.0 && mult[i] * incl[i] > 0.01 * total).map(|i| (mult[i] * incl[i], i)).collect();
             big.sort_by(|a, b| b.0.total_cmp(&a.0));
+            let mut lp: Vec<usize> = (0..nf).filter(|&i| mult[i] > 0.0 && own_loops[i] > 0).collect();
+            lp.sort_by(|&a, &b| (mult[b] * own_loops[b] as f64).total_cmp(&(mult[a] * own_loops[a] as f64)));
+            eprintln!("  loops (own x multiplicity):");
+            for i in lp.iter().take(30) {
+                eprintln!("    {:>5.0} = {} x{} {}", mult[*i] * own_loops[*i] as f64, own_loops[*i], mult[*i], name(*i));
+            }
             eprintln!("  repeated calls (multiplicity > 1, inclusive > 800):");
             let mut rep: Vec<usize> = (0..nf).filter(|&i| mult[i] > 1.0 && incl[i] > 800.0).collect();
             rep.sort_by(|&a, &b| (mult[b] * incl[b]).total_cmp(&(mult[a] * incl[a])));
@@ -521,7 +546,7 @@ fn inlined_sizes() {
 fn noise_compile_scaling() {
     let Some(g) = shaders() else { return };
     let wrap: usize = std::env::var("TERRAGEN_COMPILE_WRAP").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-    for n in [100, 200, 400] {
+    for n in [200] {
         let mut body = String::new();
         for k in 0..n {
             if wrap > 0 && k % wrap == 0 {
@@ -531,6 +556,11 @@ fn noise_compile_scaling() {
             if wrap > 0 && (k % wrap == wrap - 1 || k == n - 1) {
                 body.push_str("    }\n");
             }
+        }
+        // TERRAGEN_COMPILE_LOOPS=m: m small loops among the calls
+        let loops: usize = std::env::var("TERRAGEN_COMPILE_LOOPS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+        for k in 0..loops {
+            body.push_str(&format!("    for (var i = 0u; i < u32(grads[{}].w) + 2u; i++) {{ acc += f32(i) * acc; }}\n", k % 256));
         }
         let src = format!(
             "{}{}\n@group(1) @binding(0) var<storage, read> pts: array<vec4<f64>>;\n@group(1) @binding(1) var<storage, read_write> out: array<f32>;\n@compute @workgroup_size(64)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {{\n    let p = pts[gid.x].xyz;\n    let seed = u64(gid.x);\n    var acc = 0.0;\n{body}    out[gid.x] = acc;\n}}\n",
@@ -547,7 +577,7 @@ fn noise_compile_scaling() {
             compilation_options: Default::default(),
             cache: None,
         });
-        eprintln!("perlin3 x{n} (wrap {wrap}): {:.2} s", t.elapsed().as_secs_f64());
+        eprintln!("perlin3 x{n} (wrap {wrap}, loops {loops}): {:.2} s", t.elapsed().as_secs_f64());
     }
 }
 
@@ -734,9 +764,9 @@ pub(crate) fn kernel_parity(cases: &[(&str, &str)]) -> Option<Vec<(String, f64, 
     let b_layers = storage(d, "test layers", &layers);
     let gb = &gen.globals_bufs;
     let g0 = bind(d, &gen.k.l_globals, &[&gb[0], &gb[1], &gb[2], &gb[3], &gb[4], &gb[5], &gb[6], &gb[7], &gb[8], &b_layers, &gb[10], &gb[11]]);
-    let dummies: Vec<wgpu::Buffer> = (0..40).map(|_| output(d, "-", 256)).collect();
+    let dummies: Vec<wgpu::Buffer> = (0..41).map(|_| output(d, "-", 256)).collect();
     let g1 = bind(d, &gen.k.l_tables, &dummies[..18].iter().collect::<Vec<_>>());
-    let g2 = bind(d, &gen.k.l_tile, &dummies[18..40].iter().collect::<Vec<_>>());
+    let g2 = bind(d, &gen.k.l_tile, &dummies[18..41].iter().collect::<Vec<_>>());
     let b_in = storage(d, "test inputs", &ins);
     let b_out = output(d, "test outputs", (ins.len() * 32) as u64);
     let g3 = bind(d, &l_test, &[&b_in, &b_out]);

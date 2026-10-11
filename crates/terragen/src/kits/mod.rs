@@ -157,7 +157,8 @@ pub fn relief(w: &crate::world::World, r: &ReliefIn, h: &mut f64) {
     }
 }
 
-/// The kits' WGSL and the glue calling it (`kits_slot_<slot>`, `kits_kernel`, `kits_relief`).
+/// The kits' WGSL and the glue calling it (`kits_slot_<slot>`, `kits_kernel`, `kits_relief`; pass
+/// B's stages dispatch to `kits_slot_<slot>`: `gpu::stages_wgsl`).
 pub fn wgsl() -> String {
     let mut s = String::from("// ---------------------------------------------------------------- kits (generated)\n");
     for k in KITS {
@@ -173,14 +174,6 @@ pub fn wgsl() -> String {
         }
         s.push_str("}\n");
     }
-    // the dispatcher: one call site in `surface_eval` (every kit layer inlined once)
-    s.push_str("fn kits_slot(s: ptr<function, Stack>, slot: u32) {\n    switch slot {\n");
-    for (si, name) in crate::stack::slot::NAMES.iter().enumerate() {
-        if KITS.iter().any(|k| k.layers.iter().any(|l| l.0 == si)) {
-            s.push_str(&format!("        case {si}u: {{ kits_slot_{name}(s); }}\n"));
-        }
-    }
-    s.push_str("        default: {}\n    }\n}\n");
     s.push_str("fn kits_kernel(kind: u32, li: u32, k: KIn) -> KOut {\n    switch kind {\n");
     for ks in kernels() {
         s.push_str(&format!("        case {}u: {{ return {}(li, k); }}\n", ks.kind, ks.wgsl));

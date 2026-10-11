@@ -68,6 +68,12 @@ pub(crate) fn storage<T: bytemuck::Pod>(d: &wgpu::Device, label: &str, data: &[T
     })
 }
 
+/// The largest storage buffer binding of the device (bytes).
+fn lim_storage(d: &wgpu::Device) -> u64 {
+    let l = d.limits();
+    l.max_storage_buffer_binding_size.min(l.max_buffer_size)
+}
+
 /// An output storage buffer of `size` bytes (copyable to a read-back buffer).
 pub(crate) fn output(d: &wgpu::Device, label: &str, size: u64) -> wgpu::Buffer {
     d.create_buffer(&wgpu::BufferDescriptor {
@@ -147,7 +153,8 @@ struct Kernels {
     a2: wgpu::ComputePipeline,
     region_req: wgpu::ComputePipeline,
     town_req: wgpu::ComputePipeline,
-    pass_b: wgpu::ComputePipeline,
+    /// pass B's stages (`PB_STAGE_STEPS`)
+    pass_b: Vec<wgpu::ComputePipeline>,
     open_min_x: wgpu::ComputePipeline,
     open_min_y: wgpu::ComputePipeline,
     open_max_x: wgpu::ComputePipeline,
@@ -223,6 +230,72 @@ pub struct GpuGenerator {
     globals_bufs: Vec<wgpu::Buffer>,
     cache: Mutex<Cache>,
     lat: Mutex<Lattice>,
+    /// pass B's work buffer (kept: a few hundred MiB allocated per batch cost more than the stages)
+    pb_work: Mutex<Option<wgpu::Buffer>>,
+}
+
+/// The first stack step of each pass-B stage (`stack_step_<n>` in stack.wgsl: 0..=9 on land, 10
+/// on standing water, in the last stage). Each stage is one pipeline: the drivers inline the
+/// whole surface model into its entry point and compile time grows faster than its size, so
+/// the stack is cut where the kits' code splits about evenly. Boundaries stay at most 5 (the
+/// state between stages, `st_save`, holds no deferred layers or town).
+pub(crate) const PB_STAGE_STEPS: &[u32] = &[0, 3, 5];
+
+/// Pass B's work buffer (`pbw` in tile_b.wgsl): header words, samples per round, words per
+/// sample (stage state), per pixel (fields), per pixel (classes, flags).
+const PBW_HDR: usize = 4;
+const PB_RS: usize = 2;
+const PB_ST_F: usize = 28;
+const PB_PFW: usize = 20;
+const PB_ACCW: usize = 5;
+
+/// The slot of each stack step.
+const STEP_SLOTS: [usize; 11] = {
+    use crate::stack::slot::*;
+    [ZONAL, ALTITUDINAL, AZONAL, DISTURBANCE, AGRICULTURE, LINEAR, BUILT, CANOPY, WATER, SEASONAL, WATER]
+};
+
+/// Pass B's stage runners, kit dispatchers and entry points (`pass_b<n>`).
+fn stages_wgsl() -> String {
+    let ns = PB_STAGE_STEPS.len();
+    let mut s = format!(
+        "const PB_STAGES: u32 = {ns}u;\nconst PBW_HDR: u32 = {PBW_HDR}u;\nconst PB_RS: u32 = {PB_RS}u;\nconst ST_F: u32 = {PB_ST_F}u;\nconst PFW: u32 = {PB_PFW}u;\nconst ACCW: u32 = {PB_ACCW}u;\n"
+    );
+    for (si, &first) in PB_STAGE_STEPS.iter().enumerate() {
+        let last_stage = si + 1 == ns;
+        let end = if last_stage { 11 } else { PB_STAGE_STEPS[si + 1] };
+        let steps: Vec<u32> = (first..end).collect();
+        // the kits' layers of the stage's slots
+        let mut slots: Vec<usize> = steps.iter().map(|&st| STEP_SLOTS[st as usize]).collect();
+        slots.sort_unstable();
+        slots.dedup();
+        s += &format!("fn kits_slot_st{si}(s: ptr<function, Stack>, slot: u32) {{\n    switch slot {{\n");
+        for sl in slots {
+            s += &format!("        case {sl}u: {{ kits_slot_{}(s); }}\n", crate::stack::slot::NAMES[sl]);
+        }
+        s += "        default: {}\n    }\n}\n";
+        // the runner: one call site of `biome_layers` and of the kits' dispatcher; the bounds
+        // read an opaque 0 (`pbw[2]`) so the driver does not unroll the steps
+        let last_step = if last_stage { 9 } else { end - 1 };
+        s += &format!("fn stack_stage_{si}(sp: ptr<function, Stack>) {{\n    var step = {first}u + pbw[2];\n    var last = {last_step}u + pbw[2];\n");
+        if last_stage {
+            s += "    if (stack_water((*sp).l)) {\n        step = 10u + pbw[2];\n        last = step;\n    }\n";
+        }
+        s += "    loop {\n        var slot = SLOT_SKIP;\n        switch step {\n";
+        for &st in &steps {
+            s += &format!("            case {st}u: {{ slot = stack_step_{st}(sp); }}\n");
+        }
+        s += "            default: {}\n        }\n        if (slot == SLOT_SKIP) {\n            break;\n        }\n";
+        s += &format!("        if (!(*sp).done) {{\n            biome_layers(sp, slot);\n            kits_slot_st{si}(sp, slot);\n        }}\n");
+        s += "        if (step >= last) {\n            break;\n        }\n        step += 1u;\n    }\n}\n";
+        s += &format!("@compute @workgroup_size(16, 16)\nfn pass_b{si}(@builtin(global_invocation_id) gid: vec3<u32>) {{\n    pass_b_stage(gid, {si}u);\n}}\n");
+    }
+    s += "fn stack_stage(sp: ptr<function, Stack>, stage: u32) {\n    switch stage {\n";
+    for si in 0..ns {
+        s += &format!("        case {si}u: {{ stack_stage_{si}(sp); }}\n");
+    }
+    s += "        default: {}\n    }\n}\n";
+    s
 }
 
 /// The WGSL of the point kernels and of the tile kernels.
@@ -238,7 +311,7 @@ pub(crate) fn sources() -> (String, String, String) {
     let kits = crate::kits::wgsl();
     let points = format!("{consts}{NOISE_WGSL}{ATLAS_WGSL}{WORLD_WGSL}{relief}{scan}{POINTS_WGSL}");
     let classes = crate::landcover::WGSL;
-    let tile = format!("{consts}{reg}{pal}{classes}{NOISE_WGSL}{ATLAS_WGSL}{WORLD_WGSL}{relief}{TILE_A_WGSL}{REGISTRY_WGSL}{FEATURES_WGSL}{KERNELS_WGSL}{SURFACE_WGSL}{STACK_WGSL}{kits}{TILE_B_WGSL}");
+    let tile = format!("{consts}{reg}{pal}{classes}{NOISE_WGSL}{ATLAS_WGSL}{WORLD_WGSL}{relief}{TILE_A_WGSL}{REGISTRY_WGSL}{FEATURES_WGSL}{KERNELS_WGSL}{SURFACE_WGSL}{STACK_WGSL}{kits}{TILE_B_WGSL}{}", stages_wgsl());
     let drain = format!("{consts}{NOISE_WGSL}{ATLAS_WGSL}{WORLD_WGSL}{relief}{scan}{DRAIN_WGSL}");
     (points, tile, drain)
 }
@@ -292,7 +365,7 @@ impl GpuGenerator {
         let l_tables = layout(d, "tables", &[Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro]);
         let l_points = layout(d, "points", &[Ro, Rw, Rw, Rw]);
         let l_lat = layout(d, "drainage", &[Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw]);
-        let l_tile = layout(d, "tile", &[Ro, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw]);
+        let l_tile = layout(d, "tile", &[Ro, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw]);
         let globals = bind(
             d,
             &l_globals,
@@ -345,7 +418,6 @@ impl GpuGenerator {
             "pass_a2",
             "region_requests",
             "town_requests",
-            "pass_b",
             "open_min_x",
             "open_min_y",
             "open_max_x",
@@ -354,8 +426,13 @@ impl GpuGenerator {
             "finish",
         ];
         let dnames = ["lat_enum", "lat_heights", "mark_targets", "lat_targets", "mark_sources", "lat_sources", "gather_count", "gather_scan", "gather_write"];
+        let stage_names: Vec<String> = (0..PB_STAGE_STEPS.len()).map(|k| format!("pass_b{k}")).collect();
         let (points, mut tile, mut drain): (wgpu::ComputePipeline, Vec<wgpu::ComputePipeline>, Vec<wgpu::ComputePipeline>) = std::thread::scope(|s| {
-            let hs: Vec<_> = names.iter().map(|n| s.spawn(|| pipe(&m_tile, &pl_tile, n))).collect();
+            let hs: Vec<_> = names.iter().copied().chain(stage_names.iter().map(|n| n.as_str())).map(|n| {
+                    let (pipe, m, pl) = (&pipe, &m_tile, &pl_tile);
+                    s.spawn(move || pipe(m, pl, n))
+                })
+                .collect();
             let hd: Vec<_> = dnames.iter().map(|n| s.spawn(|| pipe(&m_drain, &pl_drain, n))).collect();
             let points = pipe(&m_points, &pl_points, "eval_points");
             (points, hs.into_iter().map(|h| h.join().expect("pipeline")).collect(), hd.into_iter().map(|h| h.join().expect("pipeline")).collect())
@@ -379,6 +456,7 @@ impl GpuGenerator {
         if std::env::var_os("TERRAGEN_PROFILE").is_some() {
             eprintln!("GPU generator: pipelines ready in {:.1} s", t_compile.elapsed().as_secs_f64());
         }
+        let stages = tile.split_off(names.len());
         let mut t = || tile.remove(0);
         let k = Kernels {
             points,
@@ -389,13 +467,13 @@ impl GpuGenerator {
             a2: t(),
             region_req: t(),
             town_req: t(),
-            pass_b: t(),
             open_min_x: t(),
             open_min_y: t(),
             open_max_x: t(),
             open_max_y: t(),
             open_apply: t(),
             finish: t(),
+            pass_b: stages,
             l_drain,
             l_tables,
             l_points,
@@ -417,7 +495,7 @@ impl GpuGenerator {
             cap: LAT_CAP,
             used: 0,
         };
-        Ok(GpuGenerator { world, surface, gpu, k, globals, globals_bufs, cache: Mutex::new(Cache::default()), lat: Mutex::new(lat) })
+        Ok(GpuGenerator { world, surface, gpu, k, globals, globals_bufs, cache: Mutex::new(Cache::default()), lat: Mutex::new(lat), pb_work: Mutex::new(None) })
     }
 
     /// Evaluate points on the GPU (pass A with exact macro fields, see `points.wgsl`): their
@@ -1034,6 +1112,21 @@ impl GpuGenerator {
         } else {
             (output(d, "-", 256), output(d, "-", 256), output(d, "-", 256), output(d, "-", 256), output(d, "-", 256))
         };
+        // pass B's work buffer, for `pb_chunk` tiles at a time
+        let pb_tile_words = NA * NA * (PB_RS * PB_ST_F + PB_PFW + PB_ACCW);
+        let pb_budget = (256u64 << 20).min(lim_storage(d));
+        let pb_max = ((pb_budget as usize / 4 - PBW_HDR) / pb_tile_words).max(1);
+        // (equal chunks)
+        let pb_chunk = nt.div_ceil(nt.div_ceil(pb_max));
+        let pb_bytes = ((PBW_HDR + pb_chunk * pb_tile_words) * 4) as u64;
+        let b_pbw = if full {
+            match self.pb_work.lock().unwrap().take() {
+                Some(b) if b.size() >= pb_bytes => b,
+                _ => output(d, "pass b work", pb_bytes.max(((PBW_HDR + pb_max.min(16) * pb_tile_words) * 4) as u64)),
+            }
+        } else {
+            output(d, "-", 256)
+        };
         let wg = |n: usize| n.div_ceil(16) as u32;
         let group2 = |list: &wgpu::Buffer| {
             bind(
@@ -1062,6 +1155,7 @@ impl GpuGenerator {
                     &b_eco_req,
                     &b_inst_n,
                     &b_inst_v,
+                    &b_pbw,
                 ],
             )
         };
@@ -1251,11 +1345,48 @@ impl GpuGenerator {
         );
         let g2 = group2(&unused);
         let grid = [wg(NA), wg(NA), nt as u32];
+        // pass B: per chunk of tiles and round of sub-samples, its stages in order (the header
+        // `pbw[0..4]`: round, first tile, 0, chunk tiles)
+        let rounds = (ss * ss).div_ceil(PB_RS);
+        let mut hdrs: Vec<u32> = Vec::new();
+        let mut steps = Vec::new();
+        for c0 in (0..nt).step_by(pb_chunk) {
+            let cn = pb_chunk.min(nt - c0);
+            for r in 0..rounds {
+                steps.push(((hdrs.len() * 4) as u64, cn));
+                hdrs.extend_from_slice(&[r as u32, c0 as u32, 0, pb_chunk as u32]);
+            }
+        }
+        let b_hdrs = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("pass b rounds"),
+            contents: bytemuck::cast_slice(&hdrs),
+            usage: wgpu::BufferUsages::COPY_SRC,
+        });
+        {
+            let t_b = std::time::Instant::now();
+            let mut enc = d.create_command_encoder(&Default::default());
+            enc.clear_buffer(&b_counters, 0, None);
+            for &(off, cn) in &steps {
+                enc.copy_buffer_to_buffer(&b_hdrs, off, &b_pbw, 0, 16);
+                let mut cp = enc.begin_compute_pass(&Default::default());
+                cp.set_bind_group(0, &self.globals, &[]);
+                cp.set_bind_group(1, &g1, &[]);
+                cp.set_bind_group(2, &g2, &[]);
+                for p in &self.k.pass_b {
+                    cp.set_pipeline(p);
+                    cp.dispatch_workgroups(wg(NA), wg(NA), cn as u32);
+                }
+            }
+            self.gpu.queue.submit([enc.finish()]);
+            if time_passes {
+                let _ = d.poll(wgpu::PollType::wait_indefinitely());
+                eprintln!("    pass b ({} stages, {} rounds, chunks of {pb_chunk}): {:.4}", self.k.pass_b.len(), rounds, t_b.elapsed().as_secs_f64());
+            }
+        }
         run_passes(
             &g1,
             &g2,
             &[
-                (&self.k.pass_b, grid),
                 (&self.k.open_min_x, grid),
                 (&self.k.open_min_y, grid),
                 (&self.k.open_max_x, grid),
@@ -1263,13 +1394,14 @@ impl GpuGenerator {
                 (&self.k.open_apply, grid),
                 (&self.k.finish, [wg(N), wg(N), nt as u32]),
             ],
-            true,
+            false,
         );
         let counters: Vec<u32> = read_back(&self.gpu, &b_counters, 8)?;
         if counters[5] != 0 {
             bail!("GPU generator: pass B lacked land-use data (flags {:#x})", counters[5]);
         }
         stamp("pass b");
+        *self.pb_work.lock().unwrap() = Some(b_pbw.clone());
         let out: Vec<u32> = read_back(&self.gpu, &b_out, nt * N * N * OUT_U)?;
         let ranges: Vec<u32> = read_back(&self.gpu, &b_ranges, nt * 2)?;
         let tiles = ids

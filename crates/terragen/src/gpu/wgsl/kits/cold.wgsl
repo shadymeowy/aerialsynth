@@ -286,7 +286,7 @@ fn cold_lake_mean_albedo(lat: ColdLakeLat, frozen: bool) -> vec3<f32> {
 }
 
 fn cold_drumlin_look(s: ptr<function, Stack>) {
-    let l = inst_list(FAM_COLD_DRUMLINS, (*s).l.blk, (*s).c.p);
+    let l = inst_list_bin(FAM_COLD_DRUMLINS, (*s).l.blk);
     if (l.n == 0u) {
         return;
     }

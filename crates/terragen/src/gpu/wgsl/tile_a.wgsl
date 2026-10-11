@@ -730,16 +730,30 @@ fn inst_get(f: u32, blk: u32, k: u32) -> Inst {
     return it;
 }
 
-/// The instances of family `f` near `p`: the list of block `blk` (`p` is unused here; the
-/// point and drainage modules scan instead). Layers: prefer `inst_count` / `inst_get` (no
-/// 512-byte list copy).
-fn inst_list(f: u32, blk: u32, p: vec3<f64>) -> InstList {
+/// The instances of family `f` listed for block `blk` (a bin of the tile). Pass-B layers always
+/// have one (`(*s).l.blk`): use this (or `inst_count` / `inst_get`), not `inst_list`, whose
+/// scan fallback puts every family's existence test into the layer.
+fn inst_list_bin(f: u32, blk: u32) -> InstList {
     var l: InstList;
-    l.n = inst_count(f, blk);
+    let b = blk * NFAM + f;
+    l.n = min(inst_n[b], INST_K);
     for (var k = 0u; k < l.n; k++) {
-        l.items[k] = inst_get(f, blk, k);
+        let g = inst_v[b * INST_K + k];
+        l.items[k].id = g.id;
+        l.items[k].center = g.center.xyz;
+        l.items[k].v = array<f32, 8>(g.v0.x, g.v0.y, g.v0.z, g.v0.w, g.v1.x, g.v1.y, g.v1.z, g.v1.w);
     }
     return l;
+}
+
+/// The instances of family `f` near `p` (relief operators): the list of block `blk`, else a
+/// scan (the point and drainage modules always scan). (Keep the fallback: without it pass A1
+/// ran 50 % slower on NVIDIA.)
+fn inst_list(f: u32, blk: u32, p: vec3<f64>) -> InstList {
+    if (blk == 0xffffffffu) {
+        return inst_scan(f, p, 0.0);
+    }
+    return inst_list_bin(f, blk);
 }
 
 /// Centre and radius of bin `bin` of a tile (the pass-A pixel centres it covers, + a pixel).

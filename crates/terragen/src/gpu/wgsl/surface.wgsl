@@ -315,7 +315,8 @@ struct Local {
     /// gradient of the ground (east, north; m/m): aspect, flow direction
     grad: vec2<f32>,
     fw: f32,
-    /// the pixel's block (instance lists: `inst_list(f, (*s).l.blk, (*s).c.p)`)
+    /// the pixel's block (instance lists: `inst_count(f, (*s).l.blk)` / `inst_get`, or
+    /// `inst_list_bin(f, (*s).l.blk)`)
     blk: u32,
 }
 
