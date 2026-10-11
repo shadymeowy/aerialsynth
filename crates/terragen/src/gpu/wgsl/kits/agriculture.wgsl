@@ -26,8 +26,8 @@ fn agri_arch_w(a: u32) -> array<f32, 14> {
         case 2u: { return array<f32, 14>(0.08, 0.0, 0.0, 0.0, 0.0, 0.32, 0.0, 0.02, 0.0, 0.0, 0.02, 0.0, 0.5, 0.06); }
         case 3u: { return array<f32, 14>(0.08, 0.05, 0.0, 0.0, 0.0, 0.1, 0.0, 0.04, 0.02, 0.22, 0.0, 0.09, 0.05, 0.35); }
         case 4u: { return array<f32, 14>(0.12, 0.04, 0.42, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.07); }
-        case 5u: { return array<f32, 14>(0.12, 0.0, 0.0, 0.04, 0.0, 0.06, 0.0, 0.16, 0.2, 0.25, 0.0, 0.08, 0.06, 0.03); }
-        case 6u: { return array<f32, 14>(0.28, 0.0, 0.02, 0.2, 0.2, 0.0, 0.0, 0.02, 0.05, 0.06, 0.0, 0.03, 0.14, 0.0); }
+        case 5u: { return array<f32, 14>(0.12, 0.0, 0.0, 0.04, 0.0, 0.06, 0.0, 0.16, 0.3, 0.25, 0.0, 0.08, 0.06, 0.03); }
+        case 6u: { return array<f32, 14>(0.28, 0.0, 0.02, 0.2, 0.2, 0.0, 0.0, 0.02, 0.08, 0.06, 0.0, 0.03, 0.14, 0.0); }
         case 7u: { return array<f32, 14>(0.1, 0.66, 0.02, 0.0, 0.0, 0.0, 0.0, 0.0, 0.02, 0.05, 0.0, 0.02, 0.09, 0.04); }
         case 8u: { return array<f32, 14>(0.1, 0.0, 0.0, 0.0, 0.0, 0.15, 0.6, 0.04, 0.0, 0.02, 0.05, 0.02, 0.02, 0.0); }
         case 9u: { return array<f32, 14>(0.4, 0.0, 0.0, 0.08, 0.06, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.45, 0.0); }
@@ -42,7 +42,7 @@ fn agri_sys(i: u32) -> AgSys {
         case 2u: { return AgSys(0u, vec2<f32>(1300.0, 900.0), vec4<u32>(0u, 1u, 2u, 3u), vec4<f32>(0.68, 0.22, 0.06, 0.04), vec2<u32>(2u, 5u), vec2<f32>(0.82, 0.1), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
         case 3u: { return AgSys(2u, vec2<f32>(520.0, 24.0), vec4<u32>(0u, 1u, 3u, 2u), vec4<f32>(0.72, 0.12, 0.12, 0.04), vec2<u32>(0u, 0u), vec2<f32>(1.0, 0.0), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
         case 4u: { return AgSys(1u, vec2<f32>(170.0, 1.5), vec4<u32>(2u, 0u, 3u, 1u), vec4<f32>(0.5, 0.3, 0.14, 0.06), vec2<u32>(1u, 3u), vec2<f32>(0.88, 0.06), vec2<f32>(0.3, 0.42), 0.0, 0.0); }
-        case 5u: { return AgSys(1u, vec2<f32>(48.0, 1.8), vec4<u32>(0u, 1u, 2u, 12u), vec4<f32>(0.6, 0.24, 0.1, 0.06), vec2<u32>(0u, 1u), vec2<f32>(0.6, 0.08), vec2<f32>(0.3, 0.42), 0.0, 0.2); }
+        case 5u: { return AgSys(1u, vec2<f32>(48.0, 1.8), vec4<u32>(0u, 1u, 2u, 12u), vec4<f32>(0.6, 0.24, 0.1, 0.06), vec2<u32>(0u, 1u), vec2<f32>(0.6, 0.08), vec2<f32>(0.3, 0.42), 0.0, 0.3); }
         case 6u: { return AgSys(0u, vec2<f32>(130.0, 90.0), vec4<u32>(9u, 11u, 0u, 12u), vec4<f32>(0.9, 0.025, 0.065, 0.01), vec2<u32>(6u, 7u), vec2<f32>(0.75, 0.25), vec2<f32>(0.7, 0.9), 1.0, 0.0); }
         case 7u: { return AgSys(1u, vec2<f32>(110.0, 1.3), vec4<u32>(0u, 5u, 1u, 4u), vec4<f32>(0.42, 0.28, 0.2, 0.1), vec2<u32>(3u, 0u), vec2<f32>(0.75, 0.25), vec2<f32>(0.7, 0.9), 1.0, 0.0); }
         case 8u: { return AgSys(0u, vec2<f32>(140.0, 70.0), vec4<u32>(6u, 5u, 4u, 1u), vec4<f32>(0.7, 0.1, 0.1, 0.1), vec2<u32>(5u, 0u), vec2<f32>(0.15, 0.85), vec2<f32>(0.6, 0.8), 0.0, 0.0); }
@@ -355,15 +355,8 @@ fn agriculture_slot_linear(s: ptr<function, Stack>) {
     if (cov <= 0.0) {
         return;
     }
-    let ixi = i64(ix);
-    let iyi = i64(iy);
-    let paved = ((ixi % 6li) + 6li) % 6li == 0li || ((iyi % 6li) + 6li) % 6li == 0li;
-    var col = srgb(168.0, 150.0, 122.0) * (1.0 + 0.05 * (*s).pf.f[PF_DETAIL]);
-    var cls = LC_TRACK;
-    if (paved) {
-        col = srgb(84.0, 84.0, 86.0);
-        cls = LC_ROAD_MINOR;
-    }
+    let col = srgb(168.0, 150.0, 122.0) * (1.0 + 0.05 * (*s).pf.f[PF_DETAIL]);
+    let cls = LC_TRACK;
     (*s).m.road_cov = max((*s).m.road_cov, cov);
     var ly = layer_paint(cov, col, cls);
     ly.hmode = HM_BLEND;
@@ -411,6 +404,7 @@ struct Parcel {
     size: f32,
     inside: f32,
     bedge: f32,
+    circ: f32,
 }
 
 struct Shade {
@@ -591,6 +585,7 @@ fn agri_part_grid(seed: u64, q0: vec2<f32>, p: vec3<f64>, w: f32, h: f32, sub: f
     o.size = min(cw, sh);
     o.inside = 1.0;
     o.bedge = min(min(fx, cw - fx), min(fy0, ch - fy0));
+    o.circ = 0.0;
     return o;
 }
 
@@ -613,6 +608,7 @@ fn agri_part_vor(seed: u64, q: vec2<f32>, cell0: f32, aspect_max: f32) -> Parcel
     o.size = cell0;
     o.inside = 1.0;
     o.bedge = e;
+    o.circ = 0.0;
     return o;
 }
 
@@ -647,6 +643,7 @@ fn agri_part_strip(seed: u64, q: vec2<f32>, w: f32, sw0: f32) -> Parcel {
     o.size = sw;
     o.inside = 1.0;
     o.bedge = bedge;
+    o.circ = 0.0;
     return o;
 }
 
@@ -676,6 +673,7 @@ fn agri_part_pivot(seed: u64, q: vec2<f32>, sp: f32, fw: f32) -> Parcel {
     o.size = sp;
     o.inside = inside;
     o.bedge = o.edge;
+    o.circ = 1.0;
     return o;
 }
 
@@ -702,6 +700,7 @@ fn agri_part_section(seed: u64, q: vec2<f32>, fw: f32, pivot_p: f32) -> Parcel {
         o.size = half;
         o.inside = band_cov(d, rad, fw);
         o.bedge = o.edge;
+        o.circ = 1.0;
         return o;
     }
     let mode = u01k(hq, 1lu);
@@ -733,6 +732,7 @@ fn agri_part_section(seed: u64, q: vec2<f32>, fw: f32, pivot_p: f32) -> Parcel {
     o.fc = o0 + fco;
     o.size = sw;
     o.bedge = min(min(lq.x, half - lq.x), min(lq.y, half - lq.y));
+    o.circ = 0.0;
     return o;
 }
 
@@ -943,11 +943,15 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
             let ph = clamp(px.season + 0.3 * (u01k(id, 20lu) - 0.5), 0.0, 1.0);
             col = agri_stage(cc, ph) * (0.92 + 0.16 * u01k(id, 8lu));
             col *= 1.0 + 0.10 * perlin3(id, p * (1.0lf / 35.0lf)) * band(35.0, gsd) + 0.07 * perlin3(id ^ 1lu, p * (1.0lf / 120.0lf)) * band(120.0, gsd);
+            col *= 1.0 + 0.09 * perlin3(id ^ 0x7E1lu, p * (1.0lf / 9.0lf)) * band(9.0, gsd) + 0.06 * perlin3(id ^ 0x7E2lu, p * (1.0lf / 2.8lf)) * band(2.8, gsd);
             let gz = perlin3(id ^ 0x6A0lu, p * (1.0lf / 55.0lf)) * band(55.0, gsd);
             col = mixc(col, col * vec3<f32>(1.1, 1.04, 0.84), 0.45 * smoothstep1(0.0, 0.6, gz));
             let hw = 8.0 + 10.0 * u01k(id, 11lu);
+            let rc = sqrt(pc.fx * pc.fx + pc.fy * pc.fy);
             var u = ru;
-            if (pc.edge < hw) {
+            if (pc.circ > 0.0) {
+                u = rc;
+            } else if (pc.edge < hw) {
                 u = rv;
             }
             col *= 1.0 + row.y * sin(TAU * u / row.x) * band(row.x, gsd);
@@ -959,6 +963,12 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
                 col = mixc(col, col * 0.78, tl * vis);
             }
             dh = row.z * max(1.0 - abs(2.0 * ph - 1.0), 0.25);
+            if (pc.circ > 0.0) {
+                let sp = 48.0 + 8.0 * u01k(id, 17lu);
+                let mt = rem_euclid(rc + 0.5 * sp, sp) - 0.5 * sp;
+                let vis = max(band(1.5, gsd), 0.3 * band(sp, gsd));
+                col = mixc(col, px.soil * 0.9, band_cov(mt, 0.5, fw) * vis * smoothstep1(20.0, 30.0, rc));
+            }
             if (k == AK_HAY) {
                 cls = LC_PASTURE;
             }
@@ -1168,7 +1178,7 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
     if (trees > 0.0) {
         let tr = agri_scatter_tree(pl.seed, q, tcell, trees, gsd, fw);
         if (tr.x > 0.0) {
-            col = mixc(col, px.crown * (0.85 + 0.25 * u01k(pc.id, 50lu)), tr.x);
+            col = mixc(col, px.crown * (0.85 + 0.25 * u01k(pc.id, 50lu)) * (0.72 + 0.4 * min(tr.y / 10.0, 1.0)), tr.x);
             dh = lerp(dh, tr.y, tr.x);
         }
     }
@@ -1201,6 +1211,8 @@ fn agri_pasture(pl: Plan, pc: Parcel, px: AgPx, id: u64, q: vec2<f32>) -> Shade 
     let fw = px.fw;
     var col = agri_pasture_col(px) * (0.86 + 0.28 * u01k(id, 8lu));
     col *= 1.0 + 0.08 * perlin3(id ^ 0x9A5lu, p * (1.0lf / 14.0lf)) * band(14.0, gsd) + 0.05 * perlin3(id ^ 0x9A6lu, p * (1.0lf / 4.0lf)) * band(4.0, gsd);
+    let tus = perlin3(id ^ 0x9A7lu, p * (1.0lf / 1.7lf)) * band(1.7, gsd);
+    col *= 1.0 + 0.10 * tus + 0.12 * perlin3(id ^ 0x9A8lu, p * (1.0lf / 40.0lf)) * band(40.0, gsd);
     var cls = LC_PASTURE;
     var dh = 0.1;
     if (pl.sys == AG_PASTURE || pl.sys == AG_SHELTER || pl.sys == AG_SECTION) {
@@ -1230,7 +1242,7 @@ fn agri_pasture(pl: Plan, pc: Parcel, px: AgPx, id: u64, q: vec2<f32>) -> Shade 
         let trough = band_cov(r, 1.4, fw);
         col = mixc(col, srgb(112.0, 118.0, 122.0), trough);
         dh += 0.8 * trough;
-        if (u01k(id, 63lu) < 0.35) {
+        if (u01k(id, 63lu) < 0.15) {
             let dc = rel - vec2<f32>(30.0, 0.0);
             let rd = 12.0 + 14.0 * u01k(id, 64lu);
             let w = band_cov(length(dc), rd, fw);
@@ -1324,9 +1336,9 @@ fn agri_border(b: u32, edge: f32, i: Shade, pc: Parcel, px: AgPx) -> Shade {
             }
             let clump = perlin3(hb, p * (1.0lf / f64(lam)));
             let tex = 1.0 + 0.18 * perlin3(hb ^ 1lu, p * (1.0lf / 2.2lf)) * band(2.2, gsd);
-            let hc = px.crown * dark * (0.85 + 0.25 * clump) * tex;
             let ea = abs(edge) / hw;
             let across = sqrt(max(1.0 - ea * ea, 0.0));
+            let hc = px.crown * dark * (0.8 + 0.35 * clump) * tex * (0.72 + 0.4 * across);
             let along = 0.55 + 0.45 * (0.5 + 0.5 * clump);
             o.col = mixc(i.col, hc, c);
             o.dh = lerp(i.dh, h * across * along, c);

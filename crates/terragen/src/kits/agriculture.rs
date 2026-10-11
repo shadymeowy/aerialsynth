@@ -162,7 +162,7 @@ const SYS: [SysDef; sys::N] = {
         SysDef { part: GRID, size: [140.0, 70.0], kinds: [VINE, OLIVE, ORCHARD, FALLOW], kw: [0.7, 0.1, 0.1, 0.1], borders: [TRACK, MARGIN], bp: [0.15, 0.85], slope: [0.6, 0.8], ..D },
         SysDef { part: VOR, size: [190.0, 1.4], kinds: [OLIVE, ORCHARD, CROP, FALLOW], kw: [0.55, 0.2, 0.15, 0.1], borders: [WALL, MARGIN], bp: [0.5, 0.5], slope: [0.6, 0.8], ..D },
         SysDef { part: GRID, size: [480.0, 360.0], kinds: [PALM, RUBBER, TEA, CROP], kw: [0.45, 0.22, 0.15, 0.18], borders: [TRACK, MARGIN], bp: [0.9, 0.1], slope: [0.6, 0.8], ..D },
-        SysDef { part: GRID, size: [95.0, 60.0], kinds: [GREENH, CROP, FALLOW, POND], kw: [0.74, 0.13, 0.08, 0.05], borders: [TRACK, MARGIN], bp: [0.25, 0.75], ..D },
+        SysDef { part: GRID, size: [95.0, 60.0], kinds: [GREENH, CROP, FALLOW, POND], kw: [0.76, 0.13, 0.09, 0.02], borders: [TRACK, MARGIN], bp: [0.25, 0.75], ..D },
         SysDef { part: GRID, size: [850.0, 650.0], kinds: [PASTURE, HAY, FALLOW, POND], kw: [0.82, 0.12, 0.04, 0.02], borders: [MARGIN, HEDGE], bp: [0.85, 0.15], slope: [0.38, 0.5], ..D },
         SysDef { part: PIVOT, size: [805.0, 805.0], kinds: [CROP, FALLOW, CROP, CROP], kw: [0.75, 0.25, 0.0, 0.0], borders: [NONE, NONE], bp: [1.0, 0.0], ..D },
     ]
@@ -177,8 +177,8 @@ const ARCH_W: [[f64; sys::N]; 12] = [
     [0.08, 0.0,  0.0,  0.0,  0.0,  0.32, 0.0,  0.02, 0.0,  0.0,  0.02, 0.0,  0.50, 0.06], // savanna pastoral
     [0.08, 0.05, 0.0,  0.0,  0.0,  0.10, 0.0,  0.04, 0.02, 0.22, 0.0,  0.09, 0.05, 0.35], // desert oasis
     [0.12, 0.04, 0.42, 0.10, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.25, 0.07], // steppe
-    [0.12, 0.0,  0.0,  0.04, 0.0,  0.06, 0.0,  0.16, 0.20, 0.25, 0.0,  0.08, 0.06, 0.03], // mediterranean
-    [0.28, 0.0,  0.02, 0.20, 0.20, 0.0,  0.0,  0.02, 0.05, 0.06, 0.0,  0.03, 0.14, 0.0 ], // temperate village
+    [0.12, 0.0,  0.0,  0.04, 0.0,  0.06, 0.0,  0.16, 0.30, 0.25, 0.0,  0.08, 0.06, 0.03], // mediterranean
+    [0.28, 0.0,  0.02, 0.20, 0.20, 0.0,  0.0,  0.02, 0.08, 0.06, 0.0,  0.03, 0.14, 0.0 ], // temperate village
     [0.10, 0.66, 0.02, 0.0,  0.0,  0.0,  0.0,  0.0,  0.02, 0.05, 0.0,  0.02, 0.09, 0.04], // survey grid
     [0.10, 0.0,  0.0,  0.0,  0.0,  0.15, 0.60, 0.04, 0.0,  0.02, 0.05, 0.02, 0.02, 0.0 ], // monsoon paddy
     [0.40, 0.0,  0.0,  0.08, 0.06, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.01, 0.45, 0.0 ], // boreal
@@ -192,7 +192,7 @@ const CROPS: [([[f64; 3]; 3], [f64; 3]); 12] = [
     ([[98.0, 122.0, 60.0], [196.0, 172.0, 104.0], [186.0, 170.0, 132.0]], [0.17, 0.06, 0.8]),   // wheat
     ([[112.0, 102.0, 76.0], [72.0, 108.0, 48.0], [178.0, 160.0, 110.0]], [0.76, 0.14, 2.2]),    // maize
     ([[112.0, 102.0, 80.0], [84.0, 118.0, 52.0], [172.0, 140.0, 78.0]], [0.5, 0.1, 0.8]),       // soy
-    ([[222.0, 204.0, 60.0], [108.0, 110.0, 66.0], [140.0, 120.0, 90.0]], [0.2, 0.05, 1.2]),     // rapeseed
+    ([[214.0, 198.0, 72.0], [108.0, 110.0, 66.0], [140.0, 120.0, 90.0]], [0.2, 0.05, 1.2]),     // rapeseed
     ([[100.0, 116.0, 64.0], [214.0, 180.0, 48.0], [84.0, 70.0, 52.0]], [0.7, 0.1, 1.8]),        // sunflower
     ([[126.0, 104.0, 82.0], [60.0, 96.0, 48.0], [128.0, 106.0, 84.0]], [0.75, 0.2, 0.6]),       // potato / vegetables
     ([[86.0, 122.0, 56.0], [112.0, 136.0, 66.0], [98.0, 122.0, 62.0]], [6.5, 0.1, 0.5]),        // alfalfa / hay (windrows)
@@ -443,7 +443,7 @@ fn fields(s: &mut Stack) {
     draw(s, &pl);
 }
 
-/// Slot 6: section-line roads (every mile, east / north).
+/// Slot 6: section-line farm tracks (every mile, east / north).
 fn roads(s: &mut Stack) {
     let Some(pl) = plan(s) else { return };
     if pl.sys != sys::SECTION {
@@ -459,9 +459,8 @@ fn roads(s: &mut Stack) {
     if cov <= 0.0 {
         return;
     }
-    // every sixth line paved (county roads), the others gravel
-    let paved = (ix as i64).rem_euclid(6) == 0 || (iy as i64).rem_euclid(6) == 0;
-    let (col, cls) = if paved { (srgb(84.0, 84.0, 86.0), CLS_ROAD_MINOR) } else { (srgb(168.0, 150.0, 122.0) * (1.0 + 0.05 * s.pf.detail), CLS_TRACK) };
+    // gravel farm tracks (roads proper are the transport kit's)
+    let (col, cls) = (srgb(168.0, 150.0, 122.0) * (1.0 + 0.05 * s.pf.detail), CLS_TRACK);
     s.m.road_cov = s.m.road_cov.max(cov);
     s.composite(Layer { cov, albedo: col, dh: 0.0, hmode: hmode::BLEND, cls, relit: 0.5, clear: 1.0, ..Default::default() });
 }
@@ -480,7 +479,6 @@ const CLS_HEDGEROW: u8 = crate::landcover::HEDGEROW;
 const CLS_FARMYARD: u8 = crate::landcover::FARMYARD;
 const CLS_BUILDING: u8 = crate::landcover::BUILDING;
 const CLS_TRACK: u8 = crate::landcover::TRACK;
-const CLS_ROAD_MINOR: u8 = crate::landcover::ROAD_MINOR;
 const CLS_CANAL: u8 = crate::landcover::CANAL;
 const CLS_AQUACULTURE: u8 = crate::landcover::AQUACULTURE;
 const CLS_RESERVOIR: u8 = crate::landcover::RESERVOIR;
@@ -531,6 +529,8 @@ struct Parcel {
     size: f64,
     inside: f64,
     bedge: f64,
+    /// 1 for centre pivots (circular rows and wheel tracks)
+    circ: f64,
 }
 
 fn draw(s: &mut Stack, pl: &Plan) {
@@ -678,6 +678,7 @@ fn part_grid(seed: u64, q0: DVec2, p: DVec3, w: f64, h: f64, sub: f64) -> Parcel
         size: cw.min(sh),
         inside: 1.0,
         bedge,
+        circ: 0.0,
     }
 }
 
@@ -692,7 +693,7 @@ fn part_vor(seed: u64, q: DVec2, cell0: f64, aspect_max: f64) -> Parcel {
     let e = worley2_edge_dist(&wc, qs) / nrm.max(1e-6);
     let c = DVec2::new(wc.point.x * aspect, wc.point.y);
     let rel = q - c;
-    Parcel { id: wc.id, fx: rel.x, fy: rel.y, edge: e, fc: c, size: cell0, inside: 1.0, bedge: e }
+    Parcel { id: wc.id, fx: rel.x, fy: rel.y, edge: e, fc: c, size: cell0, inside: 1.0, bedge: e, circ: 0.0 }
 }
 
 /// Furlongs (Voronoi cells of `w`) of parallel strips `sw` wide, along a per-furlong axis, with
@@ -712,7 +713,7 @@ fn part_strip(seed: u64, q: DVec2, w: f64, sw0: f64) -> Parcel {
     let n = (c2 / sw).floor();
     let fy = c2 - n * sw;
     let fc = wc.point + DVec2::new(-sa, ca) * ((n + 0.5) * sw);
-    Parcel { id: hash2(fid ^ 0x5751, n as i64, 0), fx: a, fy, edge: fy.min(sw - fy).min(bedge), fc, size: sw, inside: 1.0, bedge }
+    Parcel { id: hash2(fid ^ 0x5751, n as i64, 0), fx: a, fy, edge: fy.min(sw - fy).min(bedge), fc, size: sw, inside: 1.0, bedge, circ: 0.0 }
 }
 
 /// Centre pivots in a square grid of `s` (some cells empty).
@@ -728,7 +729,7 @@ fn part_pivot(seed: u64, q: DVec2, s: f64, fw: f64) -> Parcel {
     let ang = rel.y.atan2(rel.x) + std::f64::consts::PI + u01k(hc, 2) * 6.0;
     let sec = ((ang / std::f64::consts::TAU * nsec as f64).floor() as i64).rem_euclid(nsec);
     let edge = (rad - d).abs();
-    Parcel { id: mix64(hc ^ sec as u64), fx: rel.x, fy: rel.y, edge, fc: c, size: s, inside, bedge: edge }
+    Parcel { id: mix64(hc ^ sec as u64), fx: rel.x, fy: rel.y, edge, fc: c, size: s, inside, bedge: edge, circ: 1.0 }
 }
 
 /// 1-mile sections of the east / north frame: quarter sections, halves or forties, a pivot in
@@ -747,7 +748,7 @@ fn part_section(seed: u64, q: DVec2, fw: f64, pivot_p: f64) -> Parcel {
         let d = rel.length();
         let rad = 0.48 * half;
         let edge = (rad - d).abs();
-        return Parcel { id: hq, fx: rel.x, fy: rel.y, edge, fc: o + DVec2::splat(0.5 * half), size: half, inside: band_cov(d, rad, fw), bedge: edge };
+        return Parcel { id: hq, fx: rel.x, fy: rel.y, edge, fc: o + DVec2::splat(0.5 * half), size: half, inside: band_cov(d, rad, fw), bedge: edge, circ: 1.0 };
     }
     let mode = u01k(hq, 1);
     let n = if mode < 0.45 {
@@ -766,7 +767,7 @@ fn part_section(seed: u64, q: DVec2, fw: f64, pivot_p: f64) -> Parcel {
     let cc = (k + 0.5) * sw;
     let fc = o + if along_x { DVec2::new(0.5 * half, cc) } else { DVec2::new(cc, 0.5 * half) };
     let bedge = lq.x.min(half - lq.x).min(lq.y).min(half - lq.y);
-    Parcel { id: mix64(hq ^ k as u64), fx: a, fy, edge: a.min(half - a).min(fy).min(sw - fy), fc, size: sw, inside: 1.0, bedge }
+    Parcel { id: mix64(hq ^ k as u64), fx: a, fy, edge: a.min(half - a).min(fy).min(sw - fy), fc, size: sw, inside: 1.0, bedge, circ: 0.0 }
 }
 
 // ============================================================================= shading
@@ -943,11 +944,15 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
             let ph = (px.season + 0.3 * (u01k(id, 20) - 0.5)).clamp(0.0, 1.0);
             col = stage(&cc, ph) * (0.92 + 0.16 * u01k(id, 8));
             col *= 1.0 + 0.10 * perlin3(id, p / 35.0) * band(35.0, gsd) + 0.07 * perlin3(id ^ 1, p / 120.0) * band(120.0, gsd);
+            // soil and growth texture (band-limited)
+            col *= 1.0 + 0.09 * perlin3(id ^ 0x7E1, p / 9.0) * band(9.0, gsd) + 0.06 * perlin3(id ^ 0x7E2, p / 2.8) * band(2.8, gsd);
             let gz = perlin3(id ^ 0x6A0, p / 55.0) * band(55.0, gsd);
             col = mixc(col, col * DVec3::new(1.1, 1.04, 0.84), 0.45 * smoothstep(0.0, 0.6, gz));
             // headland: the rows turn parallel to the border
             let hw = 8.0 + 10.0 * u01k(id, 11);
-            let u = if pc.edge < hw { rv } else { ru };
+            // pivots: circular rows
+            let rc = (pc.fx * pc.fx + pc.fy * pc.fy).sqrt();
+            let u = if pc.circ > 0.0 { rc } else if pc.edge < hw { rv } else { ru };
             col *= 1.0 + row[1] * (std::f64::consts::TAU * u / row[0]).sin() * band(row[0], gsd);
             if pc.edge >= hw && (c == 0 || c == 2 || c == 3) {
                 let sp = 18.0 + 6.0 * (u01k(id, 15) * 3.0).floor();
@@ -957,6 +962,13 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
                 col = mixc(col, col * 0.78, tl * vis);
             }
             dh = row[2] * (1.0 - (2.0 * ph - 1.0).abs()).max(0.25);
+            if pc.circ > 0.0 {
+                // the wheel tracks of the pivot's towers
+                let sp = 48.0 + 8.0 * u01k(id, 17);
+                let mt = (rc + 0.5 * sp).rem_euclid(sp) - 0.5 * sp;
+                let vis = band(1.5, gsd).max(0.3 * band(sp, gsd));
+                col = mixc(col, px.soil * 0.9, band_cov(mt, 0.5, fw) * vis * smoothstep(20.0, 30.0, rc));
+            }
             if k == kind::HAY {
                 cls = CLS_PASTURE;
             }
@@ -1157,7 +1169,7 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
     if trees > 0.0 {
         let (tc, th) = scatter_tree(pl.seed, q, tcell, trees, gsd, fw);
         if tc > 0.0 {
-            col = mixc(col, px.crown * (0.85 + 0.25 * u01k(pc.id, 50)), tc);
+            col = mixc(col, px.crown * (0.85 + 0.25 * u01k(pc.id, 50)) * (0.72 + 0.4 * (th / 10.0).min(1.0)), tc);
             dh = lerp(dh, th, tc);
         }
     }
@@ -1213,6 +1225,9 @@ fn pasture(pl: &Plan, pc: &Parcel, px: &Px, id: u64, q: DVec2) -> (DVec3, f64, u
     let (p, gsd, fw) = (px.p, px.gsd, px.fw);
     let mut col = pasture_col(px) * (0.86 + 0.28 * u01k(id, 8));
     col *= 1.0 + 0.08 * perlin3(id ^ 0x9A5, p / 14.0) * band(14.0, gsd) + 0.05 * perlin3(id ^ 0x9A6, p / 4.0) * band(4.0, gsd);
+    // tussocks and grazed patches
+    let tus = perlin3(id ^ 0x9A7, p / 1.7) * band(1.7, gsd);
+    col *= 1.0 + 0.10 * tus + 0.12 * perlin3(id ^ 0x9A8, p / 40.0) * band(40.0, gsd);
     let mut cls = CLS_PASTURE;
     let mut dh = 0.1;
     // only paddocks big enough for trails (the big systems)
@@ -1245,7 +1260,7 @@ fn pasture(pl: &Plan, pc: &Parcel, px: &Px, id: u64, q: DVec2) -> (DVec3, f64, u
         col = mixc(col, srgb(112.0, 118.0, 122.0), trough);
         dh += 0.8 * trough;
         // farm dam
-        if u01k(id, 63) < 0.35 {
+        if u01k(id, 63) < 0.15 {
             let dc = rel - DVec2::new(30.0, 0.0);
             let rd = 12.0 + 14.0 * u01k(id, 64);
             let w = band_cov(dc.length(), rd, fw);
@@ -1319,8 +1334,8 @@ fn draw_border(b: u32, edge: f64, col: DVec3, dh: f64, cls: u8, pc: &Parcel, px:
             }
             let clump = perlin3(hb, p / if belt { 7.0 } else { 5.0 });
             let tex = 1.0 + 0.18 * perlin3(hb ^ 1, p / 2.2) * band(2.2, gsd);
-            let hc = px.crown * (if belt { 0.78 } else { 0.9 }) * (0.85 + 0.25 * clump) * tex;
             let across = (1.0 - (edge.abs() / hw).powi(2)).max(0.0).sqrt();
+            let hc = px.crown * (if belt { 0.78 } else { 0.9 }) * (0.8 + 0.35 * clump) * tex * (0.72 + 0.4 * across);
             let along = 0.55 + 0.45 * (0.5 + 0.5 * clump);
             let h = if belt { 9.0 + 6.0 * u01k(hb, 2) } else { 3.0 + 4.0 * u01k(hb, 2) };
             (mixc(col, hc, c), lerp(dh, h * across * along, c), if c > 0.5 { CLS_HEDGEROW } else { cls })
@@ -1500,19 +1515,19 @@ mod tests {
 
     /// Places of the systems in the default world (seed 1): name, lat, lon (deg).
     pub(super) const PLACES: &[(&str, f64, f64)] = &[
-        ("section", 42.3689, 125.0079),
-        ("shelterbelt", 45.6452, 130.9821),
-        ("strips", 49.3156, -82.0322),
-        ("bocage", 53.7266, 23.5400),
-        ("smallholder", -22.7706, 30.6479),
-        ("paddy", 0.7733, -93.0583),
-        ("terrace", 35.8711, 51.8475),
-        ("vineyard", -38.8021, 80.2557),
-        ("grove", 35.3757, -96.0769),
-        ("plantation", -6.1474, 156.2271),
-        ("greenhouse", 42.5573, 7.8738),
-        ("pasture", 30.3109, 129.8690),
-        ("pivot", -16.8915, -41.7753),
+        ("section", 35.8711, 51.8475),
+        ("shelterbelt", 54.4992, -104.7994),
+        ("strips", 55.6454, 28.0690),
+        ("bocage", -51.8166, -103.9835),
+        ("smallholder", 15.2294, 58.0429),
+        ("paddy", 18.4204, 160.8040),
+        ("terrace", -38.4956, 176.2920),
+        ("vineyard", 30.5227, 163.7190),
+        ("grove", 29.0000, 107.2354),
+        ("plantation", -11.5620, 165.4861),
+        ("greenhouse", 27.7830, 172.0161),
+        ("pasture", 34.4425, 147.2698),
+        ("pivot", 16.3893, 120.3407),
     ];
 
     /// Per-pixel comparison of two tiles: (layer, share of pixels off) (rgb > 2 DN, elevation
