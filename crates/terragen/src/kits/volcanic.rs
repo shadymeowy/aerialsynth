@@ -472,7 +472,6 @@ pub(crate) fn field(it: &Instance, p: DVec3, gsd: f64, fw: f64, look: bool) -> F
                 continue;
             }
             let (qx, qy) = (x - cx, y - cy);
-            let dd = qx.hypot(qy);
             if u01k(h, 7) < mshare {
                 let rm = cs * (0.12 + 0.12 * u01k(h, 4));
                 let dp = rm * (0.18 + 0.12 * u01k(h, 5)) * amp;
