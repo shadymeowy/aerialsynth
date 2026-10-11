@@ -196,7 +196,7 @@ pub(crate) fn coast_dh(t: &Types, h0: f64, p: DVec3, gsd: f64) -> f64 {
         let wd = lerp(2.4, 9.0, t.far);
         let gap = smoothstep(-0.35, 0.05, nz(SEED + 31, p, lerp(900.0, 1800.0, t.far), gsd));
         let x = (h0 - hb) / wd;
-        dh += t.reef * (-hb - 0.35) * gap * (-x * x).exp();
+        dh += t.reef * (-hb - 0.9) * gap * (-x * x).exp();
     }
     dh
 }
@@ -380,13 +380,14 @@ fn cliff_face(s: &mut Stack, ty: &Types) {
 fn rocky_shore(s: &mut Stack, ty: &Types) {
     let (p, gsd) = (s.ctx.p, s.ctx.gsd);
     let ground = s.l.ground;
-    let m = ty.skerry * (1.0 - smoothstep(14.0, 40.0, ground + 4.0 * nz(SEED + 42, p, 120.0, gsd)));
+    let m = ty.skerry * (1.0 - smoothstep(4.0, 16.0, ground + 4.0 * nz(SEED + 42, p, 120.0, gsd)));
     if m <= 0.0 {
         return;
     }
     let rock = mixc(s.pal(crate::registry::pal::ROCK), s.pal(crate::registry::pal::ROCK + 1), 0.5 + 0.5 * nz(SEED + 43, p, 25.0, gsd));
     let lichen = 0.5 + 0.5 * nz(SEED + 44, p, 6.0, gsd);
-    let col = mixc(rock, srgb(104.0, 112.0, 80.0), 0.25 * lichen * smoothstep(1.0, 6.0, ground));
+    let col = mixc(rock, srgb(104.0, 112.0, 80.0), 0.25 * lichen * smoothstep(1.0, 6.0, ground))
+        * (1.0 + 0.16 * nz(SEED + 46, p, 5.0, gsd) + 0.1 * nz(SEED + 47, p, 1.6, gsd));
     s.composite(Layer { cov: m, albedo: col, cls: cls::ROCK, clear: 1.0, ..Default::default() });
     s.m.natural_ok *= 1.0 - m;
 }
@@ -425,11 +426,11 @@ fn flats(s: &mut Stack, ty: &Types) {
 fn ponds(s: &mut Stack, zone: f64) {
     let t = s.t;
     let ground = s.l.ground;
-    if t.temp < 14.0 || ground < 0.45 || ground > 3.0 || zone < 0.5 {
+    if t.temp < 14.0 || ground < 0.3 || ground > 3.2 || zone < 0.5 {
         return;
     }
     let (p, gsd, fw) = (s.ctx.p, s.ctx.gsd, s.l.fw);
-    let area = smoothstep(0.0, 0.25, perlin3(SEED + 60, p / 2400.0));
+    let area = smoothstep(-0.2, 0.1, perlin3(SEED + 60, p / 2400.0));
     if area <= 0.0 {
         return;
     }
@@ -476,7 +477,7 @@ fn ponds(s: &mut Stack, zone: f64) {
 /// Slot 8: the colours of shallow coastal water.
 pub fn water(s: &mut Stack) {
     let l = s.l;
-    if !(l.water > l.ground) || l.water_kind != crate::world::water::OCEAN {
+    if l.water <= l.ground || l.water_kind != crate::world::water::OCEAN {
         return;
     }
     let depth = l.water - l.ground;
@@ -640,7 +641,7 @@ mod tests {
     fn types_vary() {
         let mut sums = [0.0f64; 5];
         for i in 0..2000 {
-            let h = mix64(i as u64 ^ 0x77);
+            let h = mix64(i ^ 0x77);
             let t = types(pt(i + 10), 0.6 * u01k(h, 1), 0.8 * u01k(h, 2).powi(3), u01k(h, 3), 30.0 * u01k(h, 4));
             for v in [t.cliff, t.skerry, t.flat, t.barrier, t.reef, t.arch] {
                 assert!((0.0..=1.0).contains(&v));
@@ -678,8 +679,8 @@ mod tests {
         eprintln!("{} coastal samples", hits.len());
         let mut tot = [0.0f64; 6];
         for h in &hits {
-            for k in 0..6 {
-                tot[k] += h.2[k];
+            for (t, v) in tot.iter_mut().zip(h.2) {
+                *t += v;
             }
         }
         eprintln!("mean weights cliff/skerry/flat/barrier/reef/arch: {:?}", tot.map(|x| x / hits.len() as f64));
@@ -698,8 +699,16 @@ mod tests {
     }
 
     /// Places of the default world where the kit draws: (name, lat, lon), for the tests and stills.
-    pub(crate) const PLACES: &[(&str, f64, f64)] =
-        &[("cliff", -37.334, 93.948), ("flat", 48.370, 19.518), ("barrier", 30.564, 173.216), ("reef", -14.620, 14.340), ("skerry", 59.902, 7.576)];
+    pub(crate) const PLACES: &[(&str, f64, f64)] = &[
+        ("cliff", -21.804, -43.364),
+        ("flat", 44.107, 11.756),
+        ("flat_arid", 26.538, -5.414),
+        ("barrier", 19.379, -14.658),
+        ("reef", 11.859, 81.198),
+        ("skerry", 61.882, 19.636),
+        ("atoll", 7.131, 87.717),
+        ("plain", -41.129, -152.831),
+    ];
 
     fn tile_at(name: &str, z: u8) -> geodesy::tiles::TileId {
         let &(_, lat, lon) = PLACES.iter().find(|p| p.0 == name).unwrap();
@@ -731,7 +740,19 @@ mod tests {
             }
         };
         let cpu = crate::Generator::new(cfg);
-        for (name, z) in [("cliff", 14u8), ("cliff", 16), ("flat", 14), ("flat", 16), ("barrier", 12), ("reef", 14), ("reef", 12), ("skerry", 14)] {
+        for (name, z) in [
+            ("cliff", 14u8),
+            ("cliff", 16),
+            ("flat", 14),
+            ("flat", 16),
+            ("flat_arid", 14),
+            ("barrier", 12),
+            ("reef", 14),
+            ("reef", 12),
+            ("skerry", 14),
+            ("atoll", 12),
+            ("atoll", 14),
+        ] {
             let id = tile_at(name, z);
             let g = gen.tiles(&[id]).unwrap().remove(0);
             let c = cpu.tile_cpu(id);
@@ -774,7 +795,7 @@ mod tests {
     fn lod_consistent_at_coast_places() {
         let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let n = crate::TILE_SIZE;
-        for (name, z) in [("cliff", 12u8), ("flat", 13), ("reef", 12), ("barrier", 12)] {
+        for (name, z) in [("cliff", 12u8), ("flat", 13), ("flat_arid", 12), ("flat_arid", 13), ("reef", 12), ("barrier", 12), ("atoll", 11)] {
             let parent = tile_at(name, z);
             let p = g.tile(parent);
             let kids = parent.children().map(|c| g.tile(c));
@@ -807,7 +828,7 @@ mod tests {
     fn seamless_at_coast_places() {
         let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let n = crate::TILE_SIZE;
-        for (name, z) in [("cliff", 14u8), ("flat", 15), ("reef", 14), ("skerry", 13)] {
+        for (name, z) in [("cliff", 14u8), ("flat", 15), ("flat_arid", 14), ("reef", 14), ("skerry", 13), ("atoll", 12)] {
             let id = tile_at(name, z);
             let a = g.tile(id);
             let (mut ea, mut ei, mut na, mut ni) = (0.0, 0.0, 0.0, 0.0);
@@ -841,7 +862,7 @@ mod tests {
         let cfg = crate::Config { tile_supersample: 1, ..crate::Config::default() };
         let a = crate::Generator::new(cfg.clone());
         let b = crate::Generator::new(cfg);
-        for (name, z) in [("cliff", 14u8), ("flat", 15)] {
+        for (name, z) in [("cliff", 14u8), ("flat", 15), ("reef", 15)] {
             let id = tile_at(name, z);
             let (x, y) = (a.tile(id), b.tile(id));
             assert!(x.elevation == y.elevation && x.albedo == y.albedo && x.landcover == y.landcover, "{name}");
@@ -966,6 +987,24 @@ mod tests {
             let step = (v.len() / 10).max(1);
             let list: Vec<String> = v.iter().step_by(step).take(10).map(|h| format!("({:.3}, {:.3})", h.0, h.1)).collect();
             eprintln!("{name}: {} samples: {}", v.len(), list.join(" "));
+        }
+    }
+
+    /// Debug: ground along a line at several pixel sizes.
+    #[test]
+    #[ignore]
+    fn probe_line() {
+        let w = crate::world::World::new(crate::Config::default());
+        let (lat0, lon0): (f64, f64) = (26.538, -5.414);
+        for j in 0..40 {
+            let dx = (j as f64 - 20.0) * 0.4;
+            let (la, lo) = (lat0, lon0 + dx / (111.0 * lat0.to_radians().cos()));
+            let g = |gsd: f64| {
+                let ctx = crate::world::Ctx::new(la.to_radians(), lo.to_radians(), gsd, &w.ell);
+                let t = w.terrain(&ctx);
+                format!("{:7.2}", t.ground)
+            };
+            eprintln!("{:6.1} km  gsd5 {} gsd40 {} gsd150 {} gsd600 {}", dx, g(5.0), g(40.0), g(150.0), g(600.0));
         }
     }
 }

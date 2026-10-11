@@ -121,7 +121,7 @@ fn co_dh(t: CoTypes, h0: f32, p: vec3<f64>, gsd: f32) -> f32 {
         let wd = lerp(2.4, 9.0, t.far);
         let gap = smoothstep1(-0.35, 0.05, co_nz(CO_SEED + 31lu, p, lerp(900.0, 1800.0, t.far), gsd));
         let x = (h0 - hb) / wd;
-        dh += t.reef * (-hb - 0.35) * gap * exp(-x * x);
+        dh += t.reef * (-hb - 0.9) * gap * exp(-x * x);
     }
     return dh;
 }

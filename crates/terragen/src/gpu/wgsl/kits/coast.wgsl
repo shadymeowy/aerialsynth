@@ -81,13 +81,13 @@ fn co_rocky_shore(s: ptr<function, Stack>, ty: CoTypes) {
     let p = (*s).c.p;
     let gsd = (*s).c.gsd;
     let ground = (*s).l.ground;
-    let m = ty.skerry * (1.0 - smoothstep1(14.0, 40.0, ground + 4.0 * co_nz(CO_SEED + 42lu, p, 120.0, gsd)));
+    let m = ty.skerry * (1.0 - smoothstep1(4.0, 16.0, ground + 4.0 * co_nz(CO_SEED + 42lu, p, 120.0, gsd)));
     if (m <= 0.0) {
         return;
     }
     let rock = mixc(spal(s, BP_ROCK), spal(s, BP_ROCK + 1u), 0.5 + 0.5 * co_nz(CO_SEED + 43lu, p, 25.0, gsd));
     let lichen = 0.5 + 0.5 * co_nz(CO_SEED + 44lu, p, 6.0, gsd);
-    let col = mixc(rock, srgb(104.0, 112.0, 80.0), 0.25 * lichen * smoothstep1(1.0, 6.0, ground));
+    let col = mixc(rock, srgb(104.0, 112.0, 80.0), 0.25 * lichen * smoothstep1(1.0, 6.0, ground)) * (1.0 + 0.16 * co_nz(CO_SEED + 46lu, p, 5.0, gsd) + 0.1 * co_nz(CO_SEED + 47lu, p, 1.6, gsd));
     var ly = layer_paint(m, col, LC_ROCK);
     ly.clear = 1.0;
     composite(s, ly);
@@ -135,13 +135,13 @@ fn co_flats(s: ptr<function, Stack>, ty: CoTypes) {
 fn co_ponds(s: ptr<function, Stack>, zone: f32) {
     let t = (*s).t;
     let ground = (*s).l.ground;
-    if (t.temp < 14.0 || ground < 0.45 || ground > 3.0 || zone < 0.5) {
+    if (t.temp < 14.0 || ground < 0.3 || ground > 3.2 || zone < 0.5) {
         return;
     }
     let p = (*s).c.p;
     let gsd = (*s).c.gsd;
     let fw = (*s).l.fw;
-    let area = smoothstep1(0.0, 0.25, perlin3(CO_SEED + 60lu, p * (1.0lf / 2400.0lf)));
+    let area = smoothstep1(-0.2, 0.1, perlin3(CO_SEED + 60lu, p * (1.0lf / 2400.0lf)));
     if (area <= 0.0) {
         return;
     }
