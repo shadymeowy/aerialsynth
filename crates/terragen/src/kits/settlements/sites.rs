@@ -216,10 +216,13 @@ pub fn port(ctx: &mut HostCtx, pl: &Place) -> Option<Option<Site>> {
                     }
                     break;
                 }
-                if t.water_kind != crate::world::water::NONE {
+                // (rivers are crossed: ports sit at river mouths)
+                if t.water_kind == crate::world::water::LAKE {
                     break;
                 }
-                prev = Some(u);
+                if t.water_kind == crate::world::water::NONE {
+                    prev = Some(u);
+                }
             }
             if pending {
                 break;

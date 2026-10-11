@@ -63,8 +63,8 @@ fn desert_slot_azonal(s: ptr<function, Stack>) {
 The WGSL glue (`kits_slot_<slot>`, `kits_kernel`, `kits_relief`, the family dispatch) is
 generated from `KITS` (`kits::wgsl()`); a WGSL function a kit's `Kit` names must exist with
 exactly that name and signature. On the GPU, pass B runs the stack in stages, one pipeline
-each (`gpu::PB_STAGE_STEPS`: slots zonal–azonal, disturbance–agriculture, linear–seasonal and
-standing water); see *Compile time* below.
+each (`gpu::PB_STAGE_STEPS`: slots zonal–azonal, disturbance–agriculture, linear–built,
+canopy–seasonal and standing water); see *Compile time* below.
 
 **Kernel kind ids:** each kit owns 16 ids from `kernels::KIT_BASE` (64), by its position in
 the placeholder list: desert 64, volcanic 80, mountains 96, cold 112, coast 128, tropical 144,
@@ -534,8 +534,8 @@ a kit may add at most **5 %** to the tiles/s of any zoom of the default bench pl
 
 The drivers (NVIDIA most of all) inline every call into the entry point and compile one
 pipeline in time that grows faster than its size (about size^1.4): pass B as one pipeline with
-five kits took 390 s and a sixth kit lost the device. Pass B now runs the stack in three
-pipelines (stages) of ~17–23 s each, compiled in parallel; each kit adds its layers to the
+five kits took 390 s and a sixth kit lost the device. Pass B now runs the stack in four
+pipelines (stages), compiled in parallel; each kit adds its layers to the
 stages of its slots. Rules that keep it there:
 
 * **One call site per heavy function.** A helper called from three slot functions, or twice in

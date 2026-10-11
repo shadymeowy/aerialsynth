@@ -540,13 +540,21 @@ mod tests {
             sites::sites_near(&mut ctx, p, 20_000.0, 50.0, &mut f);
             for st in &f.stamps {
                 let g = geodesy::ecef2geodetic(st.center, &w.ell);
-                found.entry(st.template).or_insert_with(Vec::new).push((g.lat.to_degrees(), g.lon.to_degrees()));
+                let v = found.entry(st.template).or_insert_with(Vec::new);
+                let c = (g.lat.to_degrees(), g.lon.to_degrees());
+                if !v.iter().any(|x: &(f64, f64)| (x.0 - c.0).abs() + (x.1 - c.1).abs() < 0.05) {
+                    v.push(c);
+                }
             }
-            for sg in &f.segs {
+            for sg in f.segs.iter().filter(|sg| sg.kind == sites::tpl::DAM) {
                 let g = geodesy::ecef2geodetic(sg.a, &w.ell);
-                found.entry(sg.kind).or_insert_with(Vec::new).push((g.lat.to_degrees(), g.lon.to_degrees()));
+                let v = found.entry(sg.kind).or_insert_with(Vec::new);
+                let c = (g.lat.to_degrees(), g.lon.to_degrees());
+                if !v.iter().any(|x: &(f64, f64)| (x.0 - c.0).abs() + (x.1 - c.1).abs() < 0.05) {
+                    v.push(c);
+                }
             }
-            if found.len() >= 9 && found.values().all(|v| v.len() >= 3) {
+            if found.len() >= 8 && found.values().all(|v| v.len() >= 3) {
                 break;
             }
         }
