@@ -94,7 +94,20 @@ pub struct Layer {
 
 impl Default for Layer {
     fn default() -> Self {
-        Layer { cov: 0.0, albedo: DVec3::ZERO, dh: 0.0, hmode: hmode::NONE, cls: 0, emit: DVec3::ZERO, lit: 1.0, relit: 0.0, mat: 0, clear: 0.0, water: false, solid: false }
+        Layer {
+            cov: 0.0,
+            albedo: DVec3::ZERO,
+            dh: 0.0,
+            hmode: hmode::NONE,
+            cls: 0,
+            emit: DVec3::ZERO,
+            lit: 1.0,
+            relit: 0.0,
+            mat: 0,
+            clear: 0.0,
+            water: false,
+            solid: false,
+        }
     }
 }
 

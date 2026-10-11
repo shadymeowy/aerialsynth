@@ -117,7 +117,9 @@ impl TownBase {
 impl Cache {
     /// Bound the memory of a long-lived cache.
     pub fn trim(&mut self) {
-        if self.points.len() + self.point_sinks.len() + self.lakes.len() + self.regions.len() + self.towns_base.len() + self.town_cands.len() + self.eco.len() > 2_000_000 {
+        if self.points.len() + self.point_sinks.len() + self.lakes.len() + self.regions.len() + self.towns_base.len() + self.town_cands.len() + self.eco.len()
+            > 2_000_000
+        {
             *self = Cache::default();
         }
     }

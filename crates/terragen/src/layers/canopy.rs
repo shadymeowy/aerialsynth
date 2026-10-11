@@ -147,7 +147,7 @@ pub fn layer(s: &mut crate::stack::Stack) {
     let trees_mult = s.veg(|v| v.trees) * style.trees;
     let base_cover = smoothstep(0.3, 0.68, wet) * smoothstep(-6.0, 2.0, temp) * veg.tree_density * trees_mult;
     let fpu = 0.5 + 0.5 * pf.forest; // ~[0, 1]
-    // forests where the patch field is below the cover fraction (crisp but noisy edges)
+                                     // forests where the patch field is below the cover fraction (crisp but noisy edges)
     let forest = smoothstep(-0.03, 0.03, base_cover - fpu);
     // savanna / steppe scattered trees, groves
     let savanna = smoothstep(0.18, 0.35, wet) * (1.0 - smoothstep(0.55, 0.7, wet)) * smoothstep(12.0, 20.0, temp) * 0.12 * s.veg(|v| v.savanna);
@@ -171,10 +171,12 @@ pub fn layer(s: &mut crate::stack::Stack) {
     // shrubs / bushes in steppe, maquis and rocky slopes
     let shrub_clim = smoothstep(0.15, 0.3, wet) * (1.0 - smoothstep(0.6, 0.8, wet)) * smoothstep(2.0, 10.0, temp);
     let shrub_patch = smoothstep(-0.2, 0.5, pf.patch + 0.4 * pf.land);
-    let shrub = ((0.45 * shrub_clim * shrub_patch * (1.0 - forest) * m.natural_ok.max(0.4 * m.rock) * (1.0 - m.field_cov) * s.veg(|v| v.shrubs) * style.shrubs + gully_scrub)
-        * veg.tree_density
-        * m.veg)
-        .clamp(0.0, 0.7);
+    let shrub =
+        ((0.45 * shrub_clim * shrub_patch * (1.0 - forest) * m.natural_ok.max(0.4 * m.rock) * (1.0 - m.field_cov) * s.veg(|v| v.shrubs) * style.shrubs
+            + gully_scrub)
+            * veg.tree_density
+            * m.veg)
+            .clamp(0.0, 0.7);
     // forest stands (~240 m, irregular borders): each of its own age (crown size, height), tone
     // and conifer / broadleaf mix, with small canopy gaps
     let stand_id = pf.stand_id.unwrap_or_else(|| s.sm.stand_id(p, Some(pf.stand_warp)));
@@ -197,7 +199,8 @@ pub fn layer(s: &mut crate::stack::Stack) {
     let tall = 0.5 + 0.5 * st[3] + s.veg(|v| v.tall);
     let reg = &s.sm.registry;
     let crowns = &reg.biomes[s.bio.a as usize].crowns;
-    let mut layers = [TreeLayer { cell: 1.0, seed: 0, density: 0.0, closure: 0.0, height: 0.0, color: DVec3::ZERO, shape: 0, scale: 1.0, tone: DVec3::ONE }; crate::registry::MAX_CROWNS];
+    let mut layers = [TreeLayer { cell: 1.0, seed: 0, density: 0.0, closure: 0.0, height: 0.0, color: DVec3::ZERO, shape: 0, scale: 1.0, tone: DVec3::ONE };
+        crate::registry::MAX_CROWNS];
     let n = crowns.len().min(layers.len());
     for (k, c) in crowns.iter().enumerate().take(n) {
         let share = match c.share {

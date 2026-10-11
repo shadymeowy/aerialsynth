@@ -404,9 +404,11 @@ module), with the family constants `FAM_<NAME>`. A layer reads a family with
 `inst_list(FAM_X, (*s).l.blk, (*s).c.p)` (CPU `s.instances(i)`), a relief operator with
 `inst_list(FAM_X, r.blk, c.p)` (CPU `r.instances(w, i)`), returning an `InstList { n, items }`
 of `Inst { id, center, v }`; its
-decision must not depend on per-pixel values (R-site). More than 8 instances of a family in a
-block is an error: choose a larger cell or a lower density (the density test in
-`tests/invariants.rs` checks the default world).
+decision must not depend on per-pixel values (R-site). At most 8 instances of a family reach one
+block: where more would, both backends keep the first 8 by id (deterministic, identical) and the
+generator warns once. Treat the warning as a bug in the kit: choose a larger cell or a lower
+density, or draw dense objects (mounds, small trees) with a `scatter` kernel; families are for
+sparse landmarks (the density test in `tests/invariants.rs` checks the default world).
 
 ---
 
@@ -437,6 +439,11 @@ its own neighbourhood (never of the tile). Per sample, `s.segments()` / `s.stamp
 signed distance, along-distance and fraction — the `aux` of the `linear` and `stamp` kernels.
 
 ---
+
+> **Height in the azonal slot:** the core's `azonal::finish_ground` sets the ground height
+> after the azonal slot (`height = ground + micro`), so a height (`dh`) a kit adds there is
+> overwritten. Add relief that must survive (e.g. barchans) in the disturbance slot, or as a
+> pass-A relief operator when drainage and the DSM must follow it.
 
 ## Rules (invariants)
 
@@ -534,8 +541,8 @@ cultures, development and population. The core uses it for:
 * **relief** — mountain ranges along plate boundaries (arcs, collision belts, rift shoulders:
   amplitude from `max(uplift, 0)`, `relief.tectonic_mountains`), the noise belts kept as old
   orogens (`relief.belt_mountains`), grabens from negative uplift;
-* **climate** — temperature = atlas sea-level temperature − lapse × height; moisture =
-  ln(P / 150 mm) / ln 30 plus a little noise;
+* **climate** — temperature = atlas sea-level temperature − lapse × height; moisture from the
+  aridity P / (20 T + 140) (Köppen's dry threshold) plus a little noise;
 * **ecoregions** — biome by the site's Köppen class, envelope, lithology; culture and archetype
   from the atlas' culture areas;
 * **land use** — town density by population, roads and lights by development.

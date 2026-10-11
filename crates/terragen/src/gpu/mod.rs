@@ -293,10 +293,15 @@ impl GpuGenerator {
         let l_points = layout(d, "points", &[Ro, Rw, Rw, Rw]);
         let l_lat = layout(d, "drainage", &[Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw]);
         let l_tile = layout(d, "tile", &[Ro, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw]);
-        let globals = bind(d, &l_globals, &[&g_cfg, &g_grads, &g_octs, &g_fbms, &g_pal, &g_atlas, &g_biomes, &g_crowns, &g_zones, &g_layers, &g_band_ranges, &g_band_idx]);
+        let globals = bind(
+            d,
+            &l_globals,
+            &[&g_cfg, &g_grads, &g_octs, &g_fbms, &g_pal, &g_atlas, &g_biomes, &g_crowns, &g_zones, &g_layers, &g_band_ranges, &g_band_idx],
+        );
         let globals_bufs = vec![g_cfg, g_grads, g_octs, g_fbms, g_pal, g_atlas, g_biomes, g_crowns, g_zones, g_layers, g_band_ranges, g_band_idx];
         let (src_points, src_tile, src_drain) = sources();
         let t_compile = std::time::Instant::now();
+        let compiling = gpu.compiling();
         let cache = PipelineCache::open(&gpu);
         let m_points = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("points"), source: wgpu::ShaderSource::Wgsl(src_points.into()) });
         let m_tile = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("tile"), source: wgpu::ShaderSource::Wgsl(src_tile.into()) });
@@ -370,6 +375,7 @@ impl GpuGenerator {
         if let Some(c) = &cache {
             c.save();
         }
+        drop(compiling);
         if std::env::var_os("TERRAGEN_PROFILE").is_some() {
             eprintln!("GPU generator: pipelines ready in {:.1} s", t_compile.elapsed().as_secs_f64());
         }
@@ -665,7 +671,7 @@ impl GpuGenerator {
                 if prof {
                     // each pass on its own (timing)
                     self.gpu.queue.submit([std::mem::replace(&mut enc, d.create_command_encoder(&Default::default())).finish()]);
-                    d.poll(wgpu::PollType::wait_indefinitely())?;
+                    self.gpu.wait_idle()?;
                     times += &format!(" {name} {:.3}", t.elapsed().as_secs_f64());
                 }
             }
@@ -716,7 +722,21 @@ impl GpuGenerator {
         let missing: Vec<u64> = ids.iter().copied().filter(|id| !cache.eco.contains_key(id)).collect();
         if !missing.is_empty() {
             use rayon::prelude::*;
-            let sites = crate::eco::find_sites(w, &missing, areas);
+            let mut sites = crate::eco::find_sites(w, &missing, areas);
+            // (robustness: ids the tiles' areas did not explain are searched wider, then over
+            // the whole lattice shell — the result is the same exact site either way)
+            let rest: Vec<u64> = missing.iter().copied().filter(|id| !sites.contains_key(id)).collect();
+            if !rest.is_empty() {
+                let cell = w.cfg.ecoregions.cell_km * 1000.0;
+                let wide: Vec<(DVec3, f64)> = areas.iter().map(|&(c, r)| (c, r + 3.0 * cell)).collect();
+                sites.extend(crate::eco::find_sites(w, &rest, &wide));
+                let rest: Vec<u64> = rest.into_iter().filter(|id| !sites.contains_key(id)).collect();
+                if !rest.is_empty() {
+                    static WARNED: std::sync::Once = std::sync::Once::new();
+                    WARNED.call_once(|| eprintln!("warning: ecoregion sites found only by a global search ({} ids); please report", rest.len()));
+                    sites.extend(crate::eco::find_sites(w, &rest, &[(DVec3::ZERO, w.ell.a + 20_000.0)]));
+                }
+            }
             let computed: Vec<(u64, Option<crate::eco::EcoParams>)> =
                 missing.par_iter().map(|&id| (id, sites.get(&id).map(|&site| crate::eco::compute(w, reg, id, site)))).collect();
             for (id, e) in computed {
@@ -1035,10 +1055,33 @@ impl GpuGenerator {
                 ],
             )
         };
+        // (TERRAGEN_PROFILE=passes: each pass on its own, timed)
+        let time_passes = std::env::var("TERRAGEN_PROFILE").is_ok_and(|v| v == "passes");
         let run_passes = |g1: &wgpu::BindGroup, g2: &wgpu::BindGroup, passes: &[(&wgpu::ComputePipeline, [u32; 3])], clear: bool| {
             let mut enc = d.create_command_encoder(&Default::default());
             if clear {
                 enc.clear_buffer(&b_counters, 0, None);
+            }
+            if time_passes {
+                self.gpu.queue.submit([enc.finish()]);
+                let mut times = String::new();
+                for (p, n) in passes {
+                    let t = std::time::Instant::now();
+                    let mut enc = d.create_command_encoder(&Default::default());
+                    {
+                        let mut cp = enc.begin_compute_pass(&Default::default());
+                        cp.set_bind_group(0, &self.globals, &[]);
+                        cp.set_bind_group(1, g1, &[]);
+                        cp.set_bind_group(2, g2, &[]);
+                        cp.set_pipeline(p);
+                        cp.dispatch_workgroups(n[0], n[1], n[2]);
+                    }
+                    self.gpu.queue.submit([enc.finish()]);
+                    let _ = d.poll(wgpu::PollType::wait_indefinitely());
+                    times += &format!(" {:.4}", t.elapsed().as_secs_f64());
+                }
+                eprintln!("    passes:{times}");
+                return;
             }
             {
                 let mut cp = enc.begin_compute_pass(&Default::default());
@@ -1060,7 +1103,14 @@ impl GpuGenerator {
             let b_keys = storage(d, "lake keys", &keys);
             let b_vals = storage(d, "lake levels", &vals);
             let b_list = output(d, "bin list", (bin_cap * 4) as u64);
-            let g1 = bind(d, &self.k.l_tables, &[b_segs, &empty, &b_sinks, &b_keys, &b_vals, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty]);
+            let g1 = bind(
+                d,
+                &self.k.l_tables,
+                &[
+                    b_segs, &empty, &b_sinks, &b_keys, &b_vals, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty,
+                    &empty,
+                ],
+            );
             let g2 = group2(&b_list);
             run_passes(
                 &g1,
@@ -1075,7 +1125,18 @@ impl GpuGenerator {
             );
             let counters: Vec<u32> = read_back(&self.gpu, &b_counters, 8)?;
             if counters[7] != 0 {
-                bail!("GPU generator: more than {} instances of a family reach a 16-pixel block ({} blocks): a family's cell or density is too fine", crate::instances::K, counters[7]);
+                // both backends keep the first K instances by id (`instances::near`, `inst_scan_n`),
+                // so a crowded block stays deterministic and the same on the CPU: a warning (once)
+                // for the kit author, not a reason to give up the GPU
+                static WARNED: std::sync::Once = std::sync::Once::new();
+                WARNED.call_once(|| {
+                    eprintln!(
+                        "warning: more than {} instances of a family reach a 16-pixel block ({} blocks in this batch); the first {} by id are kept: a family's cell or density is too fine for an instance family (use a scatter kernel for dense objects)",
+                        crate::instances::K,
+                        counters[7],
+                        crate::instances::K
+                    );
+                });
             }
             if counters[1] != 0 {
                 bin_cap = counters[0] as usize + 1024;
@@ -1094,7 +1155,14 @@ impl GpuGenerator {
         };
         stamp("relief, lakes, bins");
         // ---- the rest of pass A (the bins' pieces as the piece list), the sites pass B needs
-        let g1 = bind(d, &self.k.l_tables, &[b_segs, &b_list, &b_sinks, &b_keys, &b_vals, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty]);
+        let g1 = bind(
+            d,
+            &self.k.l_tables,
+            &[
+                b_segs, &b_list, &b_sinks, &b_keys, &b_vals, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty, &empty,
+                &empty,
+            ],
+        );
         let g2 = group2(&unused);
         let mut passes = vec![(&self.k.a2, [wg(NA2), wg(NA2), nt as u32])];
         if full {
@@ -1166,7 +1234,11 @@ impl GpuGenerator {
         let b_tl = storage(d, "town list", &tl);
         let b_tv = storage(d, "towns", &tv);
         // ---- pass B, canopy opening, outputs
-        let g1 = bind(d, &self.k.l_tables, &[b_segs, &b_list, &b_sinks, &b_keys, &b_vals, &b_rk, &b_ri, &b_rv, &b_tk, &b_tc, &b_tl, &b_tv, &b_ek, &b_ev, &b_fs, &b_fst, &b_fb, &b_fi]);
+        let g1 = bind(
+            d,
+            &self.k.l_tables,
+            &[b_segs, &b_list, &b_sinks, &b_keys, &b_vals, &b_rk, &b_ri, &b_rv, &b_tk, &b_tc, &b_tl, &b_tv, &b_ek, &b_ev, &b_fs, &b_fst, &b_fb, &b_fi],
+        );
         let g2 = group2(&unused);
         let grid = [wg(NA), wg(NA), nt as u32];
         run_passes(
@@ -1248,7 +1320,11 @@ fn from_orderable(u: u32) -> f32 {
 /// The features of the tiles as GPU tables: segments, stamps, per bin (first segment, count,
 /// first stamp, count) into the index list.
 #[allow(clippy::type_complexity)]
-fn feature_tables(w: &World, ids: &[TileId], feats: Vec<crate::features::Features>) -> (Vec<crate::features::gpu::GFSeg>, Vec<crate::features::gpu::GFStamp>, Vec<[u32; 4]>, Vec<u32>) {
+fn feature_tables(
+    w: &World,
+    ids: &[TileId],
+    feats: Vec<crate::features::Features>,
+) -> (Vec<crate::features::gpu::GFSeg>, Vec<crate::features::gpu::GFStamp>, Vec<[u32; 4]>, Vec<u32>) {
     let (mut segs, mut stamps, mut bins, mut idx) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for (id, f) in ids.iter().zip(feats) {
         let b = crate::features::bin(f, &crate::features::tile_bins(w, *id));
