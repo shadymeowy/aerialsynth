@@ -525,7 +525,7 @@ a kit may add at most **5 %** to the tiles/s of any zoom of the default bench pl
 The drivers (NVIDIA most of all) inline every call into the entry point and compile one
 pipeline in time that grows faster than its size (about size^1.4): pass B as one pipeline with
 five kits took 390 s and a sixth kit lost the device. Pass B now runs the stack in three
-pipelines (stages) of ~16–22 s each, compiled in parallel; each kit adds its layers to the
+pipelines (stages) of ~17–23 s each, compiled in parallel; each kit adds its layers to the
 stages of its slots. Rules that keep it there:
 
 * **One call site per heavy function.** A helper called from three slot functions, or twice in
