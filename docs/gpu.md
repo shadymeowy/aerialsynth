@@ -141,17 +141,19 @@ and builds the same world:
   * **Tables** (world-constant, group 0): the atlas (binding 5) and the biome registry —
     biomes, crown layers, zones, kernel layers with their calibrated means, per-GSD-band layer
     lists (bindings 6–11). Per batch (group 1): ecoregions, features and their bins.
-* **Batches:** 16 tiles per batch (~26 MB of GPU memory per tile). Kernels: grid nodes →
-  instance lists per 16-px bin → relief (and lake requests) → drainage pieces per bin → rest of
-  pass A (and site requests: regions, town cells, ecoregions) → pass B (adaptive supersampling)
-  → canopy opening → output layers. `TERRAGEN_PROFILE=passes` times each kernel on its own.
+* **Batches:** 16 tiles per batch (~26 MB of GPU memory per tile, and pass B's work buffer).
+  Kernels: grid nodes → instance lists per 16-px bin → relief (and lake requests) → drainage
+  pieces per bin → rest of pass A (and site requests: regions, town cells, ecoregions) → pass B
+  (three stages; adaptive supersampling in rounds) → canopy opening → output layers. `TERRAGEN_PROFILE=passes` times each kernel on its own.
 * **Startup:** the compiled pipelines are kept in `$XDG_CACHE_HOME/terrain/` (default
   `~/.cache/terrain/`; the driver's own shader cache is per executable); after the first run the
   generator is ready in ~0.1 s. The first compilation (new install, new driver, changed shaders)
-  takes ~25–30 s, set by pass B (`TERRAGEN_PROFILE=1` prints each pipeline's time). The driver
-  inlines every call, so the shaders call the big functions (the surface model, the pixel-field
-  fBm, a town) from one site each: with five call sites of the surface model pass B took
-  ~150 s. `terrain view` compiles in the background and generates on the CPU meanwhile
+  takes ~30 s on the RTX 6000 Ada (`TERRAGEN_PROFILE=1` prints each pipeline's time). The
+  driver inlines every call and its compile time grows faster than a pipeline's size, so the
+  shaders call the big functions (the surface model, the kernel library, the kits' layers, a
+  town) from one site each, and pass B runs the stack in three pipelines (`pass_b0..2`, the
+  stack's state between them in a work buffer of ~170 MB, kept across batches): as one pipeline
+  with five kits it took 390 s (`docs/design/kit-guide.md`, *Compile time*). `terrain view` compiles in the background and generates on the CPU meanwhile
   (`Generator::prepare_gpu_in_background`).
 
 | | CPU (8 threads) | GPU (RTX 2080 Ti) |

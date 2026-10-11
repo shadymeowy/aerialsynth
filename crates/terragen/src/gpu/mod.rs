@@ -237,15 +237,34 @@ pub struct GpuGenerator {
 /// The first stack step of each pass-B stage (`stack_step_<n>` in stack.wgsl: 0..=9 on land, 10
 /// on standing water, in the last stage). Each stage is one pipeline: the drivers inline the
 /// whole surface model into its entry point and compile time grows faster than its size, so
-/// the stack is cut where the kits' code splits about evenly. Boundaries stay at most 5 (the
-/// state between stages, `st_save`, holds no deferred layers or town).
+/// the stack is cut where the kits' code splits about evenly (`compile_times` in gpu/tests.rs
+/// measures the stages). A boundary after step 5 doubles the state between stages (the
+/// deferred layers and the town: `PB_STATE_FULL`).
 pub(crate) const PB_STAGE_STEPS: &[u32] = &[0, 3, 5];
 
 /// Pass B's work buffer (`pbw` in tile_b.wgsl): header words, samples per round, words per
 /// sample (stage state), per pixel (fields), per pixel (classes, flags).
 const PBW_HDR: usize = 4;
 const PB_RS: usize = 2;
-const PB_ST_F: usize = 28;
+const PB_STATE_FULL: bool = {
+    let mut full = false;
+    let mut i = 0;
+    while i < PB_STAGE_STEPS.len() {
+        full |= PB_STAGE_STEPS[i] > 5;
+        i += 1;
+    }
+    full
+};
+const PB_ST_F: usize = if PB_STATE_FULL { 52 } else { 28 };
+const _: () = {
+    // stages start at step 0, increase, and the last holds at least step 9 (and 10: water)
+    assert!(PB_STAGE_STEPS[0] == 0);
+    let mut i = 1;
+    while i < PB_STAGE_STEPS.len() {
+        assert!(PB_STAGE_STEPS[i] > PB_STAGE_STEPS[i - 1] && PB_STAGE_STEPS[i] <= 9);
+        i += 1;
+    }
+};
 const PB_PFW: usize = 20;
 const PB_ACCW: usize = 5;
 
@@ -259,7 +278,7 @@ const STEP_SLOTS: [usize; 11] = {
 fn stages_wgsl() -> String {
     let ns = PB_STAGE_STEPS.len();
     let mut s = format!(
-        "const PB_STAGES: u32 = {ns}u;\nconst PBW_HDR: u32 = {PBW_HDR}u;\nconst PB_RS: u32 = {PB_RS}u;\nconst ST_F: u32 = {PB_ST_F}u;\nconst PFW: u32 = {PB_PFW}u;\nconst ACCW: u32 = {PB_ACCW}u;\n"
+        "const PB_STAGES: u32 = {ns}u;\nconst PB_STATE_FULL: bool = {PB_STATE_FULL};\nconst PBW_HDR: u32 = {PBW_HDR}u;\nconst PB_RS: u32 = {PB_RS}u;\nconst ST_F: u32 = {PB_ST_F}u;\nconst PFW: u32 = {PB_PFW}u;\nconst ACCW: u32 = {PB_ACCW}u;\n"
     );
     for (si, &first) in PB_STAGE_STEPS.iter().enumerate() {
         let last_stage = si + 1 == ns;
@@ -431,7 +450,11 @@ impl GpuGenerator {
         let dnames = ["lat_enum", "lat_heights", "mark_targets", "lat_targets", "mark_sources", "lat_sources", "gather_count", "gather_scan", "gather_write"];
         let stage_names: Vec<String> = (0..PB_STAGE_STEPS.len()).map(|k| format!("pass_b{k}")).collect();
         let (points, mut tile, mut drain): (wgpu::ComputePipeline, Vec<wgpu::ComputePipeline>, Vec<wgpu::ComputePipeline>) = std::thread::scope(|s| {
-            let hs: Vec<_> = names.iter().copied().chain(stage_names.iter().map(|n| n.as_str())).map(|n| {
+            let hs: Vec<_> = names
+                .iter()
+                .copied()
+                .chain(stage_names.iter().map(|n| n.as_str()))
+                .map(|n| {
                     let (pipe, m, pl) = (&pipe, &m_tile, &pl_tile);
                     s.spawn(move || pipe(m, pl, n))
                 })
@@ -1125,7 +1148,8 @@ impl GpuGenerator {
         let b_pbw = if full {
             match self.pb_work.lock().unwrap().take() {
                 Some(b) if b.size() >= pb_bytes => b,
-                _ => output(d, "pass b work", pb_bytes.max(((PBW_HDR + pb_max.min(16) * pb_tile_words) * 4) as u64)),
+                // (sized for a full batch of 16 tiles, so smaller batches reuse it)
+                _ => output(d, "pass b work", pb_bytes.max(((PBW_HDR + 16usize.div_ceil(16usize.div_ceil(pb_max)) * pb_tile_words) * 4) as u64)),
             }
         } else {
             output(d, "-", 256)

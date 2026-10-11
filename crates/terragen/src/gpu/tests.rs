@@ -402,10 +402,12 @@ fn stub_fns(mut src: String) -> String {
     src
 }
 
-/// The size of each tile entry point once every call is inlined (as the drivers do): naga
-/// expressions per function times its call multiplicity, with the largest contributors. A cheap
-/// proxy of the driver's compile time (no GPU): `cargo test -p terragen --release --lib
-/// inlined_sizes -- --ignored --nocapture` (`TERRAGEN_COMPILE=pass_b,..`: only these entries).
+/// The size of each entry point once every call is inlined (as the drivers do): naga expressions
+/// per function times its call multiplicity, and its loops; with `TERRAGEN_COMPILE=pass_b0,..`
+/// the largest contributors and repeated calls (`TERRAGEN_INLINED_FN=perlin3`: that function's
+/// copies by caller). A cheap proxy of the driver's compile time, which grows faster than the
+/// size (no GPU): `cargo test -p terragen --release --lib inlined_sizes -- --ignored
+/// --nocapture`. (`pass_b<k>` counts every stage; the driver keeps only stage k.)
 #[test]
 #[ignore]
 fn inlined_sizes() {
@@ -537,53 +539,11 @@ fn inlined_sizes_of(module: &naga::Module, only: Option<&Vec<String>>) {
     }
 }
 
-/// The driver's compile time of `n` inlined `perlin3` calls in a synthetic shader (how code
-/// shape scales; measurements only): `cargo test -p terragen --release --lib
-/// noise_compile_scaling -- --ignored --nocapture` (`TERRAGEN_COMPILE_WRAP=k`: groups of k
-/// calls each in a one-iteration loop the compiler cannot see through).
-#[test]
-#[ignore]
-fn noise_compile_scaling() {
-    let Some(g) = shaders() else { return };
-    let wrap: usize = std::env::var("TERRAGEN_COMPILE_WRAP").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-    for n in [200] {
-        let mut body = String::new();
-        for k in 0..n {
-            if wrap > 0 && k % wrap == 0 {
-                body.push_str("    for (var once = 0u; once < u32(grads[0].w) + 1u; once++) {\n");
-            }
-            body.push_str(&format!("    if (acc > -100.0) {{ acc += perlin3({k}lu ^ seed, p * {}lf); }}\n", 1.0 / (1.0 + k as f64 * 0.37)));
-            if wrap > 0 && (k % wrap == wrap - 1 || k == n - 1) {
-                body.push_str("    }\n");
-            }
-        }
-        // TERRAGEN_COMPILE_LOOPS=m: m small loops among the calls
-        let loops: usize = std::env::var("TERRAGEN_COMPILE_LOOPS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-        for k in 0..loops {
-            body.push_str(&format!("    for (var i = 0u; i < u32(grads[{}].w) + 2u; i++) {{ acc += f32(i) * acc; }}\n", k % 256));
-        }
-        let src = format!(
-            "{}{}\n@group(1) @binding(0) var<storage, read> pts: array<vec4<f64>>;\n@group(1) @binding(1) var<storage, read_write> out: array<f32>;\n@compute @workgroup_size(64)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {{\n    let p = pts[gid.x].xyz;\n    let seed = u64(gid.x);\n    var acc = 0.0;\n{body}    out[gid.x] = acc;\n}}\n",
-            tables::wgsl_consts(),
-            NOISE_WGSL
-        );
-        let m = g.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: None, source: wgpu::ShaderSource::Wgsl(src.into()) });
-        let t = std::time::Instant::now();
-        let _p = g.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: None,
-            layout: None,
-            module: &m,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-        eprintln!("perlin3 x{n} (wrap {wrap}, loops {loops}): {:.2} s", t.elapsed().as_secs_f64());
-    }
-}
-
-/// The driver's compile time per tile pipeline, one at a time and without pipeline caches
-/// (`TERRAGEN_COMPILE=pass_b,..`: only these entries; set `__GL_SHADER_DISK_CACHE=0` on NVIDIA):
-/// `cargo test -p terragen --release --lib compile_times -- --ignored --nocapture`.
+/// The driver's compile time per pipeline, one at a time and without pipeline caches (set
+/// `__GL_SHADER_DISK_CACHE=0` on NVIDIA; `TERRAGEN_COMPILE=pass_b0,..`: only these entries;
+/// `TERRAGEN_COMPILE_DROP=kit,..` / `TERRAGEN_COMPILE_STUB=fn=expr;..`: what a kit or a function
+/// costs): `cargo test -p terragen --release --lib compile_times -- --ignored --nocapture`
+/// (on the farm: `rrun --gpu`).
 #[test]
 #[ignore]
 fn compile_times() {
@@ -598,17 +558,7 @@ fn compile_times() {
         if entries.is_empty() {
             continue;
         }
-        // TERRAGEN_COMPILE_CHECKS=none|nobounds|noloop: naga's runtime checks
-        let mut checks = wgpu::ShaderRuntimeChecks::checked();
-        match std::env::var("TERRAGEN_COMPILE_CHECKS").as_deref() {
-            Ok("none") => checks = wgpu::ShaderRuntimeChecks::unchecked(),
-            Ok("nobounds") => checks.bounds_checks = false,
-            Ok("noloop") => checks.force_loop_bounding = false,
-            _ => {}
-        }
-        let desc = wgpu::ShaderModuleDescriptor { label: Some(name), source: wgpu::ShaderSource::Wgsl(src.into()) };
-        // SAFETY: measurements only (the generator's own shaders)
-        let m = unsafe { d.create_shader_module_trusted(desc, checks) };
+        let m = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some(name), source: wgpu::ShaderSource::Wgsl(src.into()) });
         for e in entries {
             let t = std::time::Instant::now();
             let _p = d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {

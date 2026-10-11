@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **GPU compile time** (cold, RTX 6000 Ada, five kits): pass B 390 s -> three pipelines of
+  16–21 s (pass B runs the stack in stages, compiled in parallel; one call site of the kernel
+  library and of every kit layer instead of eleven), pass A1 16 s -> 11 s, point and drainage
+  pipelines 18 / 13 s -> 15 / 10 s; start-up with empty caches ~30 s instead of ~6 min, and
+  the volcanic kit no longer loses the device. Same tiles (52 bench stills: 50 identical, two
+  with one pixel 1 DN off), same speed (pass A 35 % faster: flat Worley loops). Kits read
+  instances in layers with the new `inst_count` / `inst_get` / `inst_list_bin`; the kit guide
+  has compile-time rules and the `compile_times` / `inlined_sizes` measurements.
 - **Agriculture kit** (`docs/kits/agriculture.md`): field systems by culture x climate x terrain
   instead of one farmland look everywhere: 1-mile section grids with centre pivots and
   section-line roads, shelterbelt steppe, open-field strips (furlongs, reverse-S), bocage with

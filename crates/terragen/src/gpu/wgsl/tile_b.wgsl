@@ -387,7 +387,8 @@ fn sample_in(ti: TileInfo, i: u32, j: u32, sx: u32, sy: u32, slope: f32, grad: v
 /// then per chunk pixel: the stage state of each sample of the round, its pixel fields, its
 /// samples' classes and flags.
 /// (`PBW_HDR`, `PB_RS` samples per round, `ST_F` words of stage state per sample: masks (19),
-/// colour (3), height, emission (3), lit, class and flags; `PFW` words of pixel fields: f (16),
+/// colour (3), height, emission (3), lit, class and flags, with `PB_STATE_FULL` (a stage
+/// boundary after step 5) the deferred layers (10) and the town (14); `PFW` words of pixel fields: f (16),
 /// pending, has_stand, stand (2); `ACCW` words of classes (8 bits each, up to 16) and flags
 /// (1: finished): constants from `gpu::stages_wgsl`)
 @group(2) @binding(22) var<storage, read_write> pbw: array<u32>;
@@ -421,7 +422,36 @@ fn st_save(sp: ptr<function, Stack>, b: u32) {
     pbw[b + 24u] = bitcast<u32>((*sp).emission.y);
     pbw[b + 25u] = bitcast<u32>((*sp).emission.z);
     pbw[b + 26u] = bitcast<u32>((*sp).lit);
-    pbw[b + 27u] = ((*sp).cls & 0xffffu) | select(0u, 0x10000u, (*sp).is_water) | select(0u, 0x20000u, (*sp).done);
+    pbw[b + 27u] = ((*sp).cls & 0xffffu) | select(0u, 0x10000u, (*sp).is_water) | select(0u, 0x20000u, (*sp).done) | select(0u, 0x40000u, (*sp).deferring);
+    if (PB_STATE_FULL) {
+        // (stage boundaries after step 5: the deferred layers and the town)
+        let d = (*sp).def;
+        pbw[b + 28u] = bitcast<u32>(d.k);
+        pbw[b + 29u] = bitcast<u32>(d.c.x);
+        pbw[b + 30u] = bitcast<u32>(d.c.y);
+        pbw[b + 31u] = bitcast<u32>(d.c.z);
+        pbw[b + 32u] = bitcast<u32>(d.kh);
+        pbw[b + 33u] = bitcast<u32>(d.ch);
+        pbw[b + 34u] = bitcast<u32>(d.la);
+        pbw[b + 35u] = bitcast<u32>(d.lb);
+        pbw[b + 36u] = bitcast<u32>(d.lmin);
+        pbw[b + 37u] = d.cls;
+        let tw = (*sp).town;
+        pbw[b + 38u] = bitcast<u32>((*sp).town_i);
+        pbw[b + 39u] = select(0u, 1u, tw.px.ok) | select(0u, 2u, tw.px.shadow_ok);
+        pbw[b + 40u] = bitcast<u32>(tw.px.col.x);
+        pbw[b + 41u] = bitcast<u32>(tw.px.col.y);
+        pbw[b + 42u] = bitcast<u32>(tw.px.col.z);
+        pbw[b + 43u] = bitcast<u32>(tw.px.h);
+        pbw[b + 44u] = bitcast<u32>(tw.px.cov);
+        pbw[b + 45u] = tw.px.cls;
+        pbw[b + 46u] = bitcast<u32>(tw.px.em.x);
+        pbw[b + 47u] = bitcast<u32>(tw.px.em.y);
+        pbw[b + 48u] = bitcast<u32>(tw.px.em.z);
+        pbw[b + 49u] = bitcast<u32>(tw.px.street);
+        pbw[b + 50u] = bitcast<u32>(tw.px.resolved);
+        pbw[b + 51u] = bitcast<u32>(tw.shadow);
+    }
 }
 
 fn st_load(sp: ptr<function, Stack>, b: u32) {
@@ -454,6 +484,33 @@ fn st_load(sp: ptr<function, Stack>, b: u32) {
     (*sp).cls = w & 0xffffu;
     (*sp).is_water = (w & 0x10000u) != 0u;
     (*sp).done = (w & 0x20000u) != 0u;
+    (*sp).deferring = (w & 0x40000u) != 0u;
+    if (PB_STATE_FULL) {
+        var d: Deferred;
+        d.k = bitcast<f32>(pbw[b + 28u]);
+        d.c = vec3<f32>(bitcast<f32>(pbw[b + 29u]), bitcast<f32>(pbw[b + 30u]), bitcast<f32>(pbw[b + 31u]));
+        d.kh = bitcast<f32>(pbw[b + 32u]);
+        d.ch = bitcast<f32>(pbw[b + 33u]);
+        d.la = bitcast<f32>(pbw[b + 34u]);
+        d.lb = bitcast<f32>(pbw[b + 35u]);
+        d.lmin = bitcast<f32>(pbw[b + 36u]);
+        d.cls = pbw[b + 37u];
+        (*sp).def = d;
+        (*sp).town_i = bitcast<i32>(pbw[b + 38u]);
+        let fl = pbw[b + 39u];
+        var tw: TownOut;
+        tw.px.ok = (fl & 1u) != 0u;
+        tw.px.shadow_ok = (fl & 2u) != 0u;
+        tw.px.col = vec3<f32>(bitcast<f32>(pbw[b + 40u]), bitcast<f32>(pbw[b + 41u]), bitcast<f32>(pbw[b + 42u]));
+        tw.px.h = bitcast<f32>(pbw[b + 43u]);
+        tw.px.cov = bitcast<f32>(pbw[b + 44u]);
+        tw.px.cls = pbw[b + 45u];
+        tw.px.em = vec3<f32>(bitcast<f32>(pbw[b + 46u]), bitcast<f32>(pbw[b + 47u]), bitcast<f32>(pbw[b + 48u]));
+        tw.px.street = bitcast<f32>(pbw[b + 49u]);
+        tw.px.resolved = bitcast<f32>(pbw[b + 50u]);
+        tw.shadow = bitcast<f32>(pbw[b + 51u]);
+        (*sp).town = tw;
+    }
 }
 
 fn pf_save(b: u32, pf: PixFields) {
