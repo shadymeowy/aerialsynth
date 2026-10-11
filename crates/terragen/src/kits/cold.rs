@@ -19,8 +19,8 @@
 //! ([`climate`]). The date of an ecoregion is its style's season (spring … autumn), or a winter
 //! date for a share of the ecoregions (from their site climate).
 
-use crate::kernels::{band_cov, KIn, KOut, KParams, KernelSpec, C, P};
 use crate::instances::{Family, InstSite, Instance};
+use crate::kernels::{band_cov, KIn, KOut, KParams, KernelSpec, C, P};
 use crate::kits::{Kit, ReliefIn};
 use crate::noise::*;
 use crate::stack::{hmode, slot, Layer, Stack};
@@ -91,7 +91,6 @@ pub(crate) fn year_date(site_t: f64, site_p: f64, site_r: f64, season: f64) -> f
         0.17 + 0.66 * season
     }
 }
-
 
 /// The climate at a sample.
 pub(crate) fn climate(s: &Stack) -> ColdClimate {
@@ -248,7 +247,11 @@ pub(crate) fn lake_at(lat: &LakeLat, p: DVec3, sc: f64, fw: f64) -> LakeHit {
                 if u01k(h, 4) >= lat.dens {
                     continue;
                 }
-                let c = DVec3::new(cx as f64 + 0.5 + 0.8 * (u01k(h, 1) - 0.5), cy as f64 + 0.5 + 0.8 * (u01k(h, 2) - 0.5), cz as f64 + 0.5 + 0.8 * (u01k(h, 3) - 0.5)) * lat.cell;
+                let c = DVec3::new(
+                    cx as f64 + 0.5 + 0.8 * (u01k(h, 1) - 0.5),
+                    cy as f64 + 0.5 + 0.8 * (u01k(h, 2) - 0.5),
+                    cz as f64 + 0.5 + 0.8 * (u01k(h, 3) - 0.5),
+                ) * lat.cell;
                 let rel = p - c;
                 let r = lat.r0 + (lat.r1 - lat.r0) * u01k(h, 5);
                 let el = 1.3 + 0.8 * u01k(h, 6);
@@ -402,7 +405,8 @@ fn lakes(s: &mut Stack, lat: &LakeLat, sc: f64, frozen: bool) {
             }
         } else {
             // drained basin: sedge meadow, wetter towards the centre
-            xa = mixc(srgb(104.0, 126.0, 60.0), srgb(82.0, 100.0, 58.0), smoothstep(0.55, 0.0, hit.rn)) * (1.0 + 0.08 * perlin3(hit.h ^ 0xBA5, p / 9.0) * band(9.0, gsd));
+            xa = mixc(srgb(104.0, 126.0, 60.0), srgb(82.0, 100.0, 58.0), smoothstep(0.55, 0.0, hit.rn))
+                * (1.0 + 0.08 * perlin3(hit.h ^ 0xBA5, p / 9.0) * band(9.0, gsd));
             ly.cls = cls::MARSH;
             ly.hmode = hmode::BLEND;
             ly.dh = -1.2;
@@ -465,7 +469,16 @@ fn drumlins_exist(w: &crate::world::World, s: &InstSite) -> Option<[f32; 8]> {
         return None;
     }
     let f = |x: f64| x as f32;
-    Some([f(9000.0 + 5000.0 * u01k(s.id, 2)), f(std::f64::consts::TAU * u01k(s.id, 3)), f(8.0 + 14.0 * u01k(s.id, 4)), f(0.7 + 0.6 * u01k(s.id, 5)), f(u01k(s.id, 6)), 0.0, 0.0, 0.0])
+    Some([
+        f(9000.0 + 5000.0 * u01k(s.id, 2)),
+        f(std::f64::consts::TAU * u01k(s.id, 3)),
+        f(8.0 + 14.0 * u01k(s.id, 4)),
+        f(0.7 + 0.6 * u01k(s.id, 5)),
+        f(u01k(s.id, 6)),
+        0.0,
+        0.0,
+        0.0,
+    ])
 }
 
 /// Mean height of unresolved drumlins per unit height: density × mean area share × mean of the
@@ -574,7 +587,7 @@ const SEED_FLOE: u64 = 0xC01D_F10E;
 /// frozen lakes, by the temperature at the ecoregion's date.
 pub fn water(s: &mut Stack) {
     let l = s.l;
-    if !(l.water > l.ground) {
+    if l.water <= l.ground {
         rivers(s);
         return;
     }
@@ -659,7 +672,16 @@ pub fn water(s: &mut Stack) {
             let cr = band_cov(worley_edge_dist(&ck, p), 0.35, fw) * e * (0.4 + 0.6 * sw);
             col = mixc(col, srgb(120.0, 138.0, 150.0), cr);
         }
-        s.composite(Layer { cov: 1.0, albedo: col, dh: l.water + 0.2, hmode: hmode::ABS, cls: cls::FROZEN_WATER, relit: 1.0, solid: true, ..Default::default() });
+        s.composite(Layer {
+            cov: 1.0,
+            albedo: col,
+            dh: l.water + 0.2,
+            hmode: hmode::ABS,
+            cls: cls::FROZEN_WATER,
+            relit: 1.0,
+            solid: true,
+            ..Default::default()
+        });
     }
 }
 
@@ -721,7 +743,9 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     let _ = c;
     let abl = smoothstep(-1.6, -0.4, g.p);
     // firn: wind ripples (sastrugi) and drifts
-    let tex = 0.025 * perlin3(SEED_ICE + 3, p / 7.0) * band(7.0, gsd) + 0.02 * perlin3(SEED_ICE + 4, p / 2.5) * band(2.5, gsd) + 0.03 * perlin3(SEED_ICE + 5, p / 120.0) * band(120.0, gsd);
+    let tex = 0.025 * perlin3(SEED_ICE + 3, p / 7.0) * band(7.0, gsd)
+        + 0.02 * perlin3(SEED_ICE + 4, p / 2.5) * band(2.5, gsd)
+        + 0.03 * perlin3(SEED_ICE + 5, p / 120.0) * band(120.0, gsd);
     let firn = srgb(236.0, 241.0, 247.0) * (1.0 + tex);
     // bare ice: blue-grey, dirtier towards the margin and the snout
     let dirt = smoothstep(-0.2, 0.5, perlin3(SEED_ICE + 6, p / 150.0) * band(150.0, gsd) + 0.6 * smoothstep(-1.4, -0.4, g.g));
@@ -730,7 +754,9 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     let mut dh = 0.0;
     // blue ice on cold flat ice caps
     if g.p < -4.0 && slope < 0.08 {
-        let bi = smoothstep(0.32, 0.36, perlin3(SEED_ICE + 7, p / 900.0) + 0.3 * perlin3(SEED_ICE + 8, p / 300.0) * band(300.0, gsd)) * smoothstep(-4.0, -6.0, g.p) * (1.0 - smoothstep(0.04, 0.08, slope));
+        let bi = smoothstep(0.32, 0.36, perlin3(SEED_ICE + 7, p / 900.0) + 0.3 * perlin3(SEED_ICE + 8, p / 300.0) * band(300.0, gsd))
+            * smoothstep(-4.0, -6.0, g.p)
+            * (1.0 - smoothstep(0.04, 0.08, slope));
         col = mixc(col, srgb(150.0, 186.0, 212.0), bi);
     }
     // ogives: arcs of darker ice below icefalls (bands along the contours, 35 m in height)
@@ -989,7 +1015,8 @@ mod tests {
             ("sea_ice", Box::new(|la, t| t.water_kind == 1 && t.water - t.ground < 40.0 && summer(la, t) < 2.0)),
         ];
         for (name, f) in &kinds {
-            let hits: Vec<String> = pts.iter().filter(|(la, _, t)| f(*la, t)).take(8).map(|(la, lo, t)| format!("({la:.3}, {lo:.3}) t {:.1} h {:.0}", t.temp, t.ground)).collect();
+            let hits: Vec<String> =
+                pts.iter().filter(|(la, _, t)| f(*la, t)).take(8).map(|(la, lo, t)| format!("({la:.3}, {lo:.3}) t {:.1} h {:.0}", t.temp, t.ground)).collect();
             let count = pts.iter().filter(|(la, _, t)| f(*la, t)).count();
             let moist: Vec<f64> = pts.iter().filter(|(la, _, t)| f(*la, t)).map(|p| p.2.moist).collect();
             let mm = moist.iter().sum::<f64>() / moist.len().max(1) as f64;
@@ -1105,7 +1132,16 @@ mod tests {
             }
         };
         let cpu = crate::Generator::new(cfg);
-        for (name, z) in [("valley_glaciers", 15u8), ("valley_glaciers", 12), ("ice_field", 14), ("polygon_lakes", 15), ("polygon_lakes", 17), ("kettle_lakes", 14), ("forest_tundra", 16), ("sea_ice", 13)] {
+        for (name, z) in [
+            ("valley_glaciers", 15u8),
+            ("valley_glaciers", 12),
+            ("ice_field", 14),
+            ("polygon_lakes", 15),
+            ("polygon_lakes", 17),
+            ("kettle_lakes", 14),
+            ("forest_tundra", 16),
+            ("sea_ice", 13),
+        ] {
             let id = tile_at(name, z);
             let g = gen.tiles(&[id]).unwrap().remove(0);
             let c = cpu.tile_cpu(id);
@@ -1115,6 +1151,55 @@ mod tests {
             eprintln!("{name} z{z}: rgb off {:.3}% elevation off {:.3}% landcover off {:.3}%", rgb.0 * 100.0, el.0 * 100.0, lc.0 * 100.0);
             assert!(rgb.0 < 0.005 && el.0 < 0.005 && lc.0 < 0.005, "{name} z{z}");
         }
+    }
+
+    /// Every place generates on the GPU at all zooms (no CPU fallback: an overflowing family, a
+    /// shader error): `Backend::Gpu` returns the error.
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn places_stay_on_the_gpu() {
+        let Ok(g) = crate::gpu::shared() else { return };
+        if g.check_generator().is_err() {
+            return;
+        }
+        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        for &(name, lat, lon) in PLACES {
+            let ids: Vec<_> = [6u8, 8, 10, 12, 14, 16].iter().map(|&z| geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)).collect();
+            if let Err(e) = gen.tiles(&ids) {
+                panic!("{name}: GPU generation failed: {e:#}");
+            }
+        }
+        assert!(gen.backend_name().starts_with("GPU"), "{}", gen.backend_name());
+    }
+
+    /// GPU tiles/s at the kit's places (8 x 8 tiles per place and zoom; performance budget):
+    /// `cargo test -p terragen --release --lib kits::cold::tests::bench_places -- --ignored --nocapture`.
+    /// For the baseline, run it with the kit's `KITS` entry commented out (the module stays).
+    #[cfg(feature = "gpu")]
+    #[test]
+    #[ignore]
+    fn bench_places() {
+        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        gen.tiles(&[geodesy::tiles::TileId::new(3, 4, 3)]).unwrap();
+        for z in [8u8, 10, 12, 14, 16] {
+            let mut ids = Vec::new();
+            for &(_, lat, lon) in PLACES {
+                let c = geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z);
+                let n = 1i64 << z;
+                for dy in 0..8i64 {
+                    for dx in 0..8i64 {
+                        ids.push(geodesy::tiles::TileId::new(z, (c.x as i64 + dx - 4).rem_euclid(n) as u32, (c.y as i64 + dy - 4).clamp(0, n - 1) as u32));
+                    }
+                }
+            }
+            let t0 = std::time::Instant::now();
+            for chunk in ids.chunks(16) {
+                gen.tiles(chunk).unwrap();
+            }
+            let dt = t0.elapsed().as_secs_f64();
+            println!("bench z{z}: {} tiles {dt:.2} s {:.1} tiles/s", ids.len(), ids.len() as f64 / dt);
+        }
+        println!("backend: {}", gen.backend_name());
     }
 
     fn params(y: &str) -> KParams {
@@ -1133,7 +1218,8 @@ mod tests {
             let (mut a, mut h) = (DVec3::ZERO, 0.0);
             for j in 0..n {
                 let q = DVec2::new(crate::kernels::halton(j + 7, 5) * 90.0 * sz + 1e4, crate::kernels::halton(j + 7, 7) * 90.0 * sz - 3e3);
-                let i = KIn { q, p: DVec3::new(6_371_000.0, q.x, q.y), east: DVec3::Y, north: DVec3::Z, gsd: sz / 50.0, fw: sz / 50.0, amount: 1.0, aux: [0.0; 4] };
+                let i =
+                    KIn { q, p: DVec3::new(6_371_000.0, q.x, q.y), east: DVec3::Y, north: DVec3::Z, gsd: sz / 50.0, fw: sz / 50.0, amount: 1.0, aux: [0.0; 4] };
                 let o = polygons(&k, &i);
                 a += o.albedo;
                 h += o.dh;
@@ -1147,7 +1233,11 @@ mod tests {
     #[cfg(feature = "gpu")]
     #[test]
     fn kernels_match_the_cpu() {
-        let Some(r) = crate::gpu::tests::kernel_parity(&[("cold_polygons", "{cell: 16}"), ("cold_polygons", "{cell: 4, trough: 0.8, rim: 0.5, pond: 0.3, high: 0.2}")]) else { return };
+        let Some(r) =
+            crate::gpu::tests::kernel_parity(&[("cold_polygons", "{cell: 16}"), ("cold_polygons", "{cell: 4, trough: 0.8, rim: 0.5, pond: 0.3, high: 0.2}")])
+        else {
+            return;
+        };
         for (name, bad, mx) in r {
             eprintln!("  {name} off {:.3}% max {mx:.3}", bad * 100.0);
             assert!(bad < 0.005, "{name}");
