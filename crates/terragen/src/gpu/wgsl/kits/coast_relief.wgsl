@@ -135,7 +135,7 @@ fn coast_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
             *h += (max(*h, a.z) - *h) * k;
         }
     }
-    if (m.coast_km > 30.0 || m.coast_km < -100.0) {
+    if (m.coast_km > 60.0 || m.coast_km < -100.0) {
         return;
     }
     let h0 = *h;

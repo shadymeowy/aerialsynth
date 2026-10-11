@@ -204,7 +204,7 @@ pub(crate) fn coast_dh(t: &Types, h0: f64, p: DVec3, gsd: f64) -> f64 {
 fn relief(w: &crate::world::World, r: &ReliefIn, h: &mut f64) {
     atolls_relief(w, r, h);
     let m = r.m;
-    if m.coast_km > 30.0 || m.coast_km < -100.0 {
+    if m.coast_km > 60.0 || m.coast_km < -100.0 {
         return;
     }
     let h0 = *h;
@@ -316,10 +316,10 @@ fn atolls_relief(w: &crate::world::World, r: &ReliefIn, h: &mut f64) {
 pub fn azonal(s: &mut Stack) {
     let t = s.t;
     let ground = s.l.ground;
-    if ground > -0.3 && ground < 4.0 && t.coast_km < -5.0 {
+    if ground > -0.3 && ground < 4.0 && t.coast_km < -50.0 {
         motus(s);
     }
-    if t.coast_km > 30.0 || t.coast_km < -5.0 || ground > 500.0 || ground < -1.0 {
+    if t.coast_km > 60.0 || t.coast_km < -40.0 || ground > 500.0 || ground < -1.0 {
         return;
     }
     let ty = types(s.ctx.p, t.uplift, t.mountain, t.glaciation, t.temp);
@@ -493,7 +493,7 @@ pub fn water(s: &mut Stack) {
             atoll = 1.0;
         }
     }
-    let coastal = t.coast_km <= 5.0 && t.coast_km >= -120.0;
+    let coastal = t.coast_km <= 40.0 && t.coast_km >= -120.0;
     if !coastal && atoll == 0.0 {
         return;
     }

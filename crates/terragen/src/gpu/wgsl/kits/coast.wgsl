@@ -5,10 +5,10 @@
 fn coast_slot_azonal(s: ptr<function, Stack>) {
     let t = (*s).t;
     let ground = (*s).l.ground;
-    if (ground > -0.3 && ground < 4.0 && t.coast_km < -5.0) {
+    if (ground > -0.3 && ground < 4.0 && t.coast_km < -50.0) {
         co_motus(s);
     }
-    if (t.coast_km > 30.0 || t.coast_km < -5.0 || ground > 500.0 || ground < -1.0) {
+    if (t.coast_km > 60.0 || t.coast_km < -40.0 || ground > 500.0 || ground < -1.0) {
         return;
     }
     let ty = co_types((*s).c.p, t.uplift, t.mountain, t.glaciation, t.temp);
@@ -220,7 +220,7 @@ fn coast_slot_water(s: ptr<function, Stack>) {
             atoll = 1.0;
         }
     }
-    let coastal = t.coast_km <= 5.0 && t.coast_km >= -120.0;
+    let coastal = t.coast_km <= 40.0 && t.coast_km >= -120.0;
     if (!coastal && atoll == 0.0) {
         return;
     }
