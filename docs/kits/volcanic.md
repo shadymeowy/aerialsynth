@@ -54,20 +54,21 @@ was at most 0.04 % of pixels off at nine places and zooms.
 
 ## Performance
 
-`bench_places` (RTX 6000 Ada, 9 places x 8 x 8 tiles per zoom, median of three blocks), tiles/s,
-the same build with the `KITS` entry commented out vs the kit; and `zoom_bench` at the 13
-default places (4 x 4 tiles):
+`bench_places` (Tesla P4: the farm's RTX 6000 Ada cards were taken by other jobs; all six kits, 9
+places x 8 x 8 tiles per zoom, median of three blocks), tiles/s, the same build with the `KITS`
+entry commented out vs the kit (farm noise +-10 %):
 
-| zoom | places: without | with | default places: without | with |
-|---|---|---|---|---|
-| z10 | 73.8 | 73.8 | 69.0 | 62.0 |
-| z12 | 134.8 | 132-145 | 134.8 | 135.1 |
-| z14 | 127.3 | 128-129 | 127.7 | 128.7 |
-| z16 | 131.6 | 129-132 | 133.4 | 133.3 |
+| zoom | without | with |
+|---|---|---|
+| z8 | 7.1 | 7.1 |
+| z10 | 13.6 | 12.9 |
+| z12 | 17.1 | 16.5 |
+| z14 | 14.9 | 14.7 |
+| z16 | 16.0 | 16.1 |
 
-(z8 is dominated by shader compilation.) A sample reads only the instances there are (an
-`InstList` zero-initialises 512 bytes per list: the first version of the layer cost 10-20 % at
-every place because of it).
+A sample reads only the instances there are (`inst_count` / `inst_get`; an `InstList`
+zero-initialises 512 bytes per list). No "more than 8 instances" warning appears at z8-z16 of the
+places.
 
 Cold compile (RTX 6000 Ada, all six kits): pass B 24 / 26 / 26 s (three pipelines), pass A1 17 s,
 point evaluation 19 s, drainage heights 15 s.
