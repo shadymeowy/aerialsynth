@@ -254,28 +254,13 @@ fn vc_field_look(s: ptr<function, Stack>, it: Inst) {
     }
 }
 
-/// The number of instances of family `f` in the block's list, and instance `k` of it (a sample
-/// reads only the instances there are: `inst_list` would build all of an `InstList`).
-fn vc_inst_n(f: u32, blk: u32) -> u32 {
-    return min(inst_n[blk * NFAM + f], INST_K);
-}
-
-fn vc_inst(f: u32, blk: u32, k: u32) -> Inst {
-    let g = inst_v[(blk * NFAM + f) * INST_K + k];
-    var it: Inst;
-    it.id = g.id;
-    it.center = g.center.xyz;
-    it.v = array<f32, 8>(g.v0.x, g.v0.y, g.v0.z, g.v0.w, g.v1.x, g.v1.y, g.v1.z, g.v1.w);
-    return it;
-}
-
 fn volcanic_slot_azonal(s: ptr<function, Stack>) {
     vc_beach(s);
     let blk = (*s).l.blk;
     for (var f = 0u; f < 2u; f++) {
-        let n = vc_inst_n(FAM_VOLCANIC_VOLCANOES + f, blk);
+        let n = inst_count(FAM_VOLCANIC_VOLCANOES + f, blk);
         for (var i = 0u; i < n; i++) {
-            let v = vc_vol(vc_inst(FAM_VOLCANIC_VOLCANOES + f, blk, i));
+            let v = vc_vol(inst_get(FAM_VOLCANIC_VOLCANOES + f, blk, i));
             let k = vc_cone(v, (*s).c.p, (*s).c.gsd, false);
             if (k.ok) {
                 (*s).m.natural_ok *= smoothstep1(1.0, 1.6, k.rr / k.rce);
@@ -286,8 +271,8 @@ fn volcanic_slot_azonal(s: ptr<function, Stack>) {
             }
         }
     }
-    let n2 = vc_inst_n(FAM_VOLCANIC_FIELDS, blk);
+    let n2 = inst_count(FAM_VOLCANIC_FIELDS, blk);
     for (var i = 0u; i < n2; i++) {
-        vc_field_look(s, vc_inst(FAM_VOLCANIC_FIELDS, blk, i));
+        vc_field_look(s, inst_get(FAM_VOLCANIC_FIELDS, blk, i));
     }
 }
