@@ -71,6 +71,7 @@ pub mod sys {
     pub const PASTURE: u32 = 12;
     pub const PIVOT: u32 = 13;
     pub const N: usize = 14;
+    #[allow(dead_code)]
     pub const NAMES: [&str; N] = [
         "core",
         "section",
@@ -323,17 +324,17 @@ pub fn weights(e: &EcoV) -> [f64; sys::N] {
     m[SECTION as usize] *= 0.4 + 1.0 * dev;
     m[PIVOT as usize] *= (0.4 + 1.0 * dev) * (0.1 + 0.9 * (1.0 - smoothstep(700.0, 1200.0, e.precip)));
     let mut total = 0.0;
-    for i in 0..N {
-        w[i] *= m[i] * (0.4 + 1.2 * u01k(e.id, 0xA600 + i as u64));
-        total += w[i];
+    for (i, wi) in w.iter_mut().enumerate() {
+        *wi *= m[i] * (0.4 + 1.2 * u01k(e.id, 0xA600 + i as u64));
+        total += *wi;
     }
     // one dominant system per ecoregion
     let v = u01k(e.id, 0xA6FF) * total;
     let mut acc = 0.0;
-    for i in 0..N {
-        acc += w[i];
+    for wi in w.iter_mut() {
+        acc += *wi;
         if v < acc {
-            w[i] *= 3.0;
+            *wi *= 3.0;
             break;
         }
     }
@@ -623,7 +624,9 @@ fn pivot_share(e: &EcoV) -> f64 {
 fn parcel(pl: &Plan, d: &SysDef, q: DVec2, p: DVec3, fw: f64) -> Parcel {
     let seed = pl.seed;
     match d.part {
-        part::GRID => part_grid(seed, q, p, d.size[0] * pl.scale, d.size[1] * pl.scale, if pl.sys == sys::SHELTER || pl.sys == sys::PASTURE { 2.5 } else { 1.0 }),
+        part::GRID => {
+            part_grid(seed, q, p, d.size[0] * pl.scale, d.size[1] * pl.scale, if pl.sys == sys::SHELTER || pl.sys == sys::PASTURE { 2.5 } else { 1.0 })
+        }
         part::VOR => part_vor(seed, q, d.size[0] * pl.scale, d.size[1]),
         part::STRIP => part_strip(seed, q, d.size[0] * pl.scale, d.size[1] * pl.scale),
         part::PIVOT => part_pivot(seed, q, if u01k(seed, 4) < 0.5 { 805.0 } else { 402.0 }, fw),
@@ -748,7 +751,17 @@ fn part_section(seed: u64, q: DVec2, fw: f64, pivot_p: f64) -> Parcel {
         let d = rel.length();
         let rad = 0.48 * half;
         let edge = (rad - d).abs();
-        return Parcel { id: hq, fx: rel.x, fy: rel.y, edge, fc: o + DVec2::splat(0.5 * half), size: half, inside: band_cov(d, rad, fw), bedge: edge, circ: 1.0 };
+        return Parcel {
+            id: hq,
+            fx: rel.x,
+            fy: rel.y,
+            edge,
+            fc: o + DVec2::splat(0.5 * half),
+            size: half,
+            inside: band_cov(d, rad, fw),
+            bedge: edge,
+            circ: 1.0,
+        };
     }
     let mode = u01k(hq, 1);
     let n = if mode < 0.45 {
@@ -783,8 +796,8 @@ fn pick_kind(d: &SysDef, u: f64, season: f64) -> u32 {
     let total = w[0] + w[1] + w[2] + w[3];
     let v = u * total;
     let mut acc = 0.0;
-    for i in 0..4 {
-        acc += w[i];
+    for (i, wi) in w.iter().enumerate().take(4) {
+        acc += *wi;
         if v < acc {
             return d.kinds[i];
         }
@@ -870,7 +883,7 @@ fn paddy_col(st: u32) -> DVec3 {
     match st {
         0 => srgb(64.0, 84.0, 94.0),
         1 => srgb(76.0, 100.0, 86.0),
-        2 => srgb(96.0, 142.0, 56.0),
+        2 => srgb(80.0, 116.0, 50.0),
         3 => srgb(188.0, 172.0, 92.0),
         _ => srgb(150.0, 128.0, 88.0),
     }
@@ -952,7 +965,13 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
             let hw = 8.0 + 10.0 * u01k(id, 11);
             // pivots: circular rows
             let rc = (pc.fx * pc.fx + pc.fy * pc.fy).sqrt();
-            let u = if pc.circ > 0.0 { rc } else if pc.edge < hw { rv } else { ru };
+            let u = if pc.circ > 0.0 {
+                rc
+            } else if pc.edge < hw {
+                rv
+            } else {
+                ru
+            };
             col *= 1.0 + row[1] * (std::f64::consts::TAU * u / row[0]).sin() * band(row[0], gsd);
             if pc.edge >= hw && (c == 0 || c == 2 || c == 3) {
                 let sp = 18.0 + 6.0 * (u01k(id, 15) * 3.0).floor();
@@ -1375,6 +1394,7 @@ fn lerp(a: f64, b: f64, t: f64) -> f64 {
 // ============================================================================= WGSL tables
 
 /// The WGSL of the catalogue's tables (between the markers of `agriculture.wgsl`).
+#[cfg(test)]
 pub fn wgsl_tables() -> String {
     let f = |x: f64| {
         let s = format!("{:?}", x as f32);
@@ -1585,6 +1605,119 @@ mod tests {
         assert!(worst < 0.005, "worst {:.3}%", worst * 100.0);
     }
 
+    /// The places the LOD / seam / determinism test visits (CPU tiles are slow).
+    const LOD_PLACES: [&str; 5] = ["section", "strips", "paddy", "vineyard", "plantation"];
+
+    fn tile_at(name: &str, z: u8) -> geodesy::tiles::TileId {
+        let &(_, lat, lon) = PLACES.iter().find(|p| p.0 == name).unwrap();
+        geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)
+    }
+
+    /// Parent ≈ mean of the children (albedo and class histogram) at the kit's places, and the
+    /// tiles are deterministic and seamless there.
+    #[test]
+    fn lod_seams_determinism() {
+        let cfg = crate::Config { tile_supersample: 1, ..crate::Config::default() };
+        let g = crate::Generator::new(cfg.clone());
+        let n = crate::TILE_SIZE;
+        for (name, _, _) in PLACES.iter().filter(|p| LOD_PLACES.contains(&p.0)) {
+            for z in [12u8, 15] {
+                let parent = tile_at(name, z);
+                let p = g.tile(parent);
+                let kids = parent.children().map(|c| g.tile(c));
+                let (mut err, mut cnt) = (0.0, 0.0);
+                let mut hp = vec![0f64; 256];
+                let mut hk = vec![0f64; 256];
+                for (k, kid) in kids.iter().enumerate() {
+                    let (ox, oy) = ((k % 2) * n / 2, (k / 2) * n / 2);
+                    for j in (0..n).step_by(2) {
+                        for i in (0..n).step_by(2) {
+                            for c in 0..3 {
+                                let a = |ii: usize, jj: usize| kid.albedo[3 * (jj * n + ii) + c] as f64;
+                                let m = (a(i, j) + a(i + 1, j) + a(i, j + 1) + a(i + 1, j + 1)) / 4.0;
+                                err += (m - p.albedo[3 * ((oy + j / 2) * n + ox + i / 2) + c] as f64).abs();
+                                cnt += 1.0;
+                            }
+                            for (jj, ii) in [(j, i), (j, i + 1), (j + 1, i), (j + 1, i + 1)] {
+                                hk[kid.landcover[jj * n + ii] as usize] += 0.25;
+                            }
+                            hp[p.landcover[(oy + j / 2) * n + ox + i / 2] as usize] += 1.0;
+                        }
+                    }
+                }
+                let hist: f64 = hp.iter().zip(&hk).map(|(a, b)| (a - b).abs()).sum::<f64>() / (2.0 * (n * n) as f64);
+                eprintln!("{name} z{z}: albedo |parent - mean(children)| {:.2} DN, class histogram {:.3}", err / cnt, hist);
+                // (the core alone, without the kit, at these places: up to 14.5 DN and 0.17 at
+                // z15 — the canopy's crowns at the crossfade)
+                assert!(err / cnt < 12.0, "{name} z{z}: albedo {}", err / cnt);
+                assert!(hist < 0.1, "{name} z{z}: class histogram {hist}");
+            }
+            // determinism (a fresh generator) and the seam to the eastern neighbour
+            let id = tile_at(name, 15);
+            let a = g.tile(id);
+            let b = crate::Generator::new(cfg.clone()).tile(id);
+            assert_eq!(a.rgb, b.rgb, "{name}: not deterministic");
+            let r = g.tile(geodesy::tiles::TileId::new(id.z, id.x + 1, id.y));
+            let (mut across, mut inside) = (0.0, 0.0);
+            for j in 0..n {
+                for c in 0..3 {
+                    across += (a.rgb[3 * (j * n + n - 1) + c] as f64 - r.rgb[3 * (j * n) + c] as f64).abs();
+                    inside += (a.rgb[3 * (j * n + n - 2) + c] as f64 - a.rgb[3 * (j * n + n - 1) + c] as f64).abs();
+                }
+            }
+            eprintln!("{name}: seam {across:.0} vs inside {inside:.0}");
+            assert!(across < 1.5 * inside + 3.0 * n as f64, "{name}: seam {across} inside {inside}");
+        }
+    }
+
+    /// The GPU generates the kit's places at every zoom without falling back to the CPU (an
+    /// instance family overflowing a block, a shader error): `Backend::Gpu` returns the error.
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn places_stay_on_the_gpu() {
+        let Ok(g) = crate::gpu::shared() else { return };
+        if g.check_generator().is_err() {
+            return;
+        }
+        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        for &(name, lat, lon) in PLACES {
+            let ids: Vec<_> = [6u8, 8, 10, 12, 14, 16].iter().map(|&z| geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)).collect();
+            if let Err(e) = gen.tiles(&ids) {
+                panic!("{name}: GPU generation failed: {e:#}");
+            }
+        }
+        assert!(gen.backend_name().starts_with("GPU"), "{}", gen.backend_name());
+    }
+
+    /// GPU tiles/s at the kit's places (8 x 8 tiles per place and zoom; performance budget):
+    /// `cargo test -p terragen --release --lib kits::agriculture::tests::bench_places -- --ignored --nocapture`.
+    /// For the baseline, run it with the kit's `KITS` entry commented out (the module stays).
+    #[cfg(feature = "gpu")]
+    #[test]
+    #[ignore]
+    fn bench_places() {
+        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        gen.tiles(&[geodesy::tiles::TileId::new(3, 4, 3)]).unwrap();
+        for z in [8u8, 10, 12, 14, 16] {
+            let mut ids = Vec::new();
+            for &(_, lat, lon) in PLACES {
+                let c = geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z);
+                let n = 1i64 << z;
+                for dy in 0..8i64 {
+                    for dx in 0..8i64 {
+                        ids.push(geodesy::tiles::TileId::new(z, (c.x as i64 + dx - 4).rem_euclid(n) as u32, (c.y as i64 + dy - 4).clamp(0, n - 1) as u32));
+                    }
+                }
+            }
+            let t0 = std::time::Instant::now();
+            for chunk in ids.chunks(16) {
+                gen.tiles(chunk).unwrap();
+            }
+            let dt = t0.elapsed().as_secs_f64();
+            println!("bench z{z}: {} tiles {dt:.2} s {:.1} tiles/s", ids.len(), ids.len() as f64 / dt);
+        }
+    }
+
     /// Places of every system in the default world (for stills):
     /// `cargo test --release -p terragen --lib find_places -- --ignored --nocapture`.
     #[test]
@@ -1610,7 +1743,12 @@ mod tests {
                 }
                 let e = EcoV::of(&crate::eco::compute(&w, &reg, t.eco.id, t.eco.center));
                 let s = pick_system(&e, t.region.id);
-                Some((s, lat, lon, format!("agri {:.2} T {:.0} M {:.2} h {:.0} arch {} K {} P {:.0}", t.agri, t.temp, t.moist, t.ground, e.arch, e.koppen, e.precip)))
+                Some((
+                    s,
+                    lat,
+                    lon,
+                    format!("agri {:.2} T {:.0} M {:.2} h {:.0} arch {} K {} P {:.0}", t.agri, t.temp, t.moist, t.ground, e.arch, e.koppen, e.precip),
+                ))
             })
             .collect();
         for sy in 0..sys::N as u32 {

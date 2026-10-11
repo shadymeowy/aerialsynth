@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Agriculture kit** (`docs/kits/agriculture.md`): field systems by culture x climate x terrain
+  instead of one farmland look everywhere: 1-mile section grids with centre pivots and
+  section-line roads, shelterbelt steppe, open-field strips (furlongs, reverse-S), bocage with
+  hedgerows, smallholder mosaics with homestead compounds, rice paddies (flooded, green or ripe
+  by season) and contour terraces, stone-walled dry terraces, vineyards, olive / almond / citrus /
+  date groves, plantations on contours, greenhouse seas, paddocks with livestock trails and farm
+  dams, irrigated pivots in deserts; each land-use region draws one system by its ecoregion's
+  culture, climate and development.
 - **Cold kit** (`docs/kits/cold.md`): polygon tundra, shrub tundra, polar desert and forest
   tundra; glaciers with firn, bare ice, crevasses, ogives and moraines by the summer
   temperature and aspect; thermokarst and kettle lakes, drained basins, pingos; drumlin fields
