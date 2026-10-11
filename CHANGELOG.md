@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Coast and ocean kit** (`kits/coast.rs`, `docs/kits/coast.md`): coast types per ~50 km
+  stretch (atlas uplift, mountains, glaciation, sea-level temperature × noise); cliffs with
+  wave-cut platforms and strata, skerries and archipelagos with kelp, tidal flats and salt marsh
+  with dendritic creeks, barrier islands and lagoons, fringing and barrier reefs with coral
+  heads, salt and aquaculture ponds, and an instance family of atolls with motus. All
+  height-domain remaps near sea level in pass A (no distance to the coast); no core changes.
 - **Low-zoom tiles in seconds again**: `configs/quick.yaml` (70 tiles, z0–z15) generated in
   187 s on an RTX 6000 Ada (2.7 s now) and 437 s on the CPU (33 s now, 6 threads). The
   instance lists of a zoom-0 block scanned millions of lattice cells per family (37 s per

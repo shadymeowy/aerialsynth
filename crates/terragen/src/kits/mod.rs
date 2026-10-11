@@ -26,7 +26,7 @@ mod volcanic;
 
 mod cold;
 
-// mod coast;
+mod coast;
 
 mod tropical;
 
@@ -53,7 +53,7 @@ pub static KITS: &[&Kit] = &[
 
     &cold::KIT,
 
-    // &coast::KIT,
+    &coast::KIT,
 
     &tropical::KIT,
 
