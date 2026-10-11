@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **First-run shader compile is announced, the pipeline cache is pruned**: the CLI, viewer
+  (status bar), Python (`verbose=True`) and C (`as_set_verbose`) say when the GPU shaders
+  are being compiled (~30 s once per GPU, driver and version) and how long it took; the cache
+  file is keyed by adapter and shader hash, so stale versions are deleted instead of piling
+  up (`terragen::gpu::set_compile_observer`, `docs/gpu.md`).
 - **GPU compile time** (cold, RTX 6000 Ada, five kits): pass B 390 s -> three pipelines of
   17–23 s (pass B runs the stack in stages, compiled in parallel; one call site of the kernel
   library and of every kit layer instead of eleven), pass A1 16 s -> 12 s, point and drainage

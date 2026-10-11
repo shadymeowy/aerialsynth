@@ -84,6 +84,15 @@ and Windows on the runners' virtual or software GPUs, macOS on Intel on the CPU 
 
 ## Quick start
 
+**First run.** The first run on a GPU compiles the generator's compute shaders: about 30 s on a
+fast desktop GPU, longer on laptops and integrated GPUs. `terrain` says so on stderr
+(`compiling GPU shaders for <GPU> ...`, then `GPU shaders ready in N s`), the viewer shows it in
+its status bar, and Python / C report it with `verbose` on. The result is cached per GPU, driver
+and aerialsynth version in `$XDG_CACHE_HOME/terrain/` (`~/.cache/terrain/`), where later runs
+start in about a second; files of older versions are deleted automatically. To clear the cache,
+delete that directory. (Metal and DX12 keep their own driver caches; the notice can appear on
+every run there.)
+
 ```sh
 cargo build --release                       # the binary: target/release/terrain
 cargo install --locked --path crates/cli --target-dir target   # optional: `terrain` on the PATH (reuses that build)

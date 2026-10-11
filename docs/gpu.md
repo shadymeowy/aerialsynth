@@ -19,6 +19,24 @@ render:
 
 Build: the `gpu` feature of the `render` and `terragen` crates (on by default).
 
+## First run: shader compilation
+
+**First run.** The first run on a GPU compiles the generator's compute shaders: about 30 s on a
+fast desktop GPU, longer on laptops and integrated GPUs. `terrain` says so on stderr
+(`compiling GPU shaders for <GPU> ...`, then `GPU shaders ready in N s`), the viewer shows it in
+its status bar, and Python / C report it with `verbose` on. The result is cached per GPU, driver
+and aerialsynth version in `$XDG_CACHE_HOME/terrain/` (`~/.cache/terrain/`), where later runs
+start in about a second; files of older versions are deleted automatically. To clear the cache,
+delete that directory. (Metal and DX12 keep their own driver caches; the notice can appear on
+every run there.)
+
+The cache file is `pipelines-<adapter key>-<hash>.bin`; the hash covers the generated WGSL and
+the wgpu version, so a new shader version never reuses a stale file, and saving deletes the
+other files of the same adapter. Library users can watch the compile with
+`terragen::gpu::set_compile_observer` (events `CompileEvent::Started { gpu_name, cold }` and
+`Finished { secs, cold }`; silent by default), `terragen::gpu::stderr_observer()` (the CLI's
+messages) and `terragen::gpu::compiling_since()` (polled by the viewer).
+
 ## Split of the work
 
 | stage | where | why |

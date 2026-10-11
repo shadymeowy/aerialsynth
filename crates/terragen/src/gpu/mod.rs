@@ -6,6 +6,8 @@
 //! GPU point evaluations and cached across batches.
 
 pub mod device;
+pub(crate) mod notice;
+pub use notice::{compiling_since, set_compile_observer, stderr_observer, CompileEvent, Observer as CompileObserver};
 pub(crate) mod host;
 pub(crate) mod tables;
 pub mod types;
@@ -395,9 +397,13 @@ impl GpuGenerator {
         );
         let globals_bufs = vec![g_cfg, g_grads, g_octs, g_fbms, g_pal, g_atlas, g_biomes, g_crowns, g_zones, g_layers, g_band_ranges, g_band_idx];
         let (src_points, src_tile, src_drain) = sources();
+        let hash = sources_hash(&[&src_points, &src_tile, &src_drain]);
+        let cache = PipelineCache::open(&gpu, hash);
+        // (no pipeline cache, or no file for these shaders: the compile may be cold)
+        let cold = !cache.as_ref().is_some_and(|c| c.warm);
+        notice::emit(CompileEvent::Started { gpu_name: gpu.info.name.clone(), cold });
         let t_compile = std::time::Instant::now();
         let compiling = gpu.compiling();
-        let cache = PipelineCache::open(&gpu);
         let m_points = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("points"), source: wgpu::ShaderSource::Wgsl(src_points.into()) });
         let m_tile = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("tile"), source: wgpu::ShaderSource::Wgsl(src_tile.into()) });
         let m_drain = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("drainage"), source: wgpu::ShaderSource::Wgsl(src_drain.into()) });
@@ -479,8 +485,10 @@ impl GpuGenerator {
             c.save();
         }
         drop(compiling);
+        let secs = t_compile.elapsed().as_secs_f64();
+        notice::emit(CompileEvent::Finished { secs, cold });
         if std::env::var_os("TERRAGEN_PROFILE").is_some() {
-            eprintln!("GPU generator: pipelines ready in {:.1} s", t_compile.elapsed().as_secs_f64());
+            eprintln!("GPU generator: pipelines ready in {secs:.1} s");
         }
         let stages = tile.split_off(names.len());
         let mut t = || tile.remove(0);
@@ -1612,15 +1620,51 @@ fn dbox(ell: &geodesy::Ellipsoid, center: DVec3, lo: DVec3, hi: DVec3, cell: f64
     }
 }
 
-/// The compiled pipelines kept on disk (`~/.cache/terrain/pipelines-<adapter>.bin`): the
-/// driver's own shader cache is per executable, and compiling the generator takes minutes.
+/// The compiled pipelines kept on disk (`~/.cache/terrain/pipelines-<adapter>-<hash>.bin`): the
+/// driver's own shader cache is per executable, and compiling the generator takes half a minute
+/// or more. `<hash>` covers the generated WGSL and the wgpu version, so a file that exists is a
+/// warm start, and files of other versions are deleted on save.
 struct PipelineCache {
     cache: wgpu::PipelineCache,
     path: std::path::PathBuf,
+    key: String,
+    /// The file existed (read at open).
+    warm: bool,
+}
+
+/// FNV-1a over the sources and the wgpu version.
+fn sources_hash(srcs: &[&str]) -> u64 {
+    let mut h = 0xcbf29ce484222325u64;
+    for s in srcs.iter().copied().chain([env!("TERRAGEN_WGPU_VERSION")]) {
+        for b in s.bytes().chain([0xff]) {
+            h = (h ^ b as u64).wrapping_mul(0x100000001b3);
+        }
+    }
+    h
+}
+
+fn cache_file(dir: &std::path::Path, key: &str, hash: u64) -> std::path::PathBuf {
+    dir.join(format!("pipelines-{key}-{hash:016x}.bin"))
+}
+
+/// Delete the cache files of `key` other than `keep`: other shader versions and the old
+/// unhashed `pipelines-<key>.bin`.
+fn prune_cache(dir: &std::path::Path, key: &str, keep: &std::path::Path) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let prefix = format!("pipelines-{key}-");
+    for e in rd.flatten() {
+        let name = e.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let stale = name == format!("pipelines-{key}.bin")
+            || name.strip_prefix(&prefix).and_then(|r| r.strip_suffix(".bin")).is_some_and(|h| h.len() == 16 && h.bytes().all(|b| b.is_ascii_hexdigit()));
+        if stale && e.path() != keep {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
 }
 
 impl PipelineCache {
-    fn open(gpu: &Gpu) -> Option<PipelineCache> {
+    fn open(gpu: &Gpu, hash: u64) -> Option<PipelineCache> {
         if !gpu.device.features().contains(wgpu::Features::PIPELINE_CACHE) {
             return None;
         }
@@ -1629,27 +1673,59 @@ impl PipelineCache {
             .map(std::path::PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".cache")))?
             .join("terrain");
-        let path = dir.join(format!("pipelines-{key}.bin"));
+        let path = cache_file(&dir, &key, hash);
         let data = std::fs::read(&path).ok();
         // SAFETY: the data is what `get_data` returned for this adapter key (or nothing); wgpu and
         // the driver validate it and fall back to an empty cache
         let cache =
             unsafe { gpu.device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor { label: Some("terrain"), data: data.as_deref(), fallback: true }) };
-        Some(PipelineCache { cache, path })
+        Some(PipelineCache { cache, path, key, warm: data.is_some() })
     }
 
     fn save(&self) {
         let Some(data) = self.cache.get_data() else { return };
-        if std::fs::read(&self.path).is_ok_and(|old| old == data) {
-            return;
-        }
-        if let Some(dir) = self.path.parent() {
+        let Some(dir) = self.path.parent() else { return };
+        if !std::fs::read(&self.path).is_ok_and(|old| old == data) {
             let _ = std::fs::create_dir_all(dir);
+            let tmp = self.path.with_extension(format!("tmp{}", std::process::id()));
+            if std::fs::write(&tmp, &data).is_ok() {
+                let _ = std::fs::rename(&tmp, &self.path);
+            }
         }
-        let tmp = self.path.with_extension(format!("tmp{}", std::process::id()));
-        if std::fs::write(&tmp, &data).is_ok() {
-            let _ = std::fs::rename(&tmp, &self.path);
+        if self.path.exists() {
+            prune_cache(dir, &self.key, &self.path);
         }
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    #[test]
+    fn cache_names_and_pruning() {
+        let dir = std::env::temp_dir().join(format!("terragen-pcache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_ne!(sources_hash(&["a"]), sources_hash(&["b"]));
+        assert_ne!(sources_hash(&["ab", "c"]), sources_hash(&["a", "bc"]));
+        let keep = cache_file(&dir, "gpu-a", 1);
+        assert_eq!(keep.file_name().unwrap().to_str().unwrap(), "pipelines-gpu-a-0000000000000001.bin");
+        for f in [
+            "pipelines-gpu-a-0000000000000001.bin",
+            "pipelines-gpu-a-00000000000000ff.bin",
+            "pipelines-gpu-a.bin",
+            "pipelines-gpu-a-b-0000000000000001.bin",
+            "pipelines-gpu-b.bin",
+            "other.bin",
+        ] {
+            std::fs::write(dir.join(f), b"x").unwrap();
+        }
+        prune_cache(&dir, "gpu-a", &keep);
+        let mut left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        left.sort();
+        assert_eq!(left, ["other.bin", "pipelines-gpu-a-0000000000000001.bin", "pipelines-gpu-a-b-0000000000000001.bin", "pipelines-gpu-b.bin"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

@@ -64,6 +64,8 @@ fn main() -> anyhow::Result<()> {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
     let cli = Cli::parse();
+    // first run on a GPU: say that the shaders are being compiled (silent otherwise)
+    terragen::gpu::set_compile_observer(Some(terragen::gpu::stderr_observer()));
     match cli.cmd {
         Cmd::Run(a) => commands::run(a),
         Cmd::Tiles(a) => commands::tiles(a),
