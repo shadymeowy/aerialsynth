@@ -746,9 +746,12 @@ fn inst_list_bin(f: u32, blk: u32) -> InstList {
     return l;
 }
 
+/// (the tile module reads the bins' lists: nothing to prepare per relief evaluation)
+fn relief_lists(p: vec3<f64>, blk: u32) {}
+
 /// The instances of family `f` near `p` (relief operators): the list of block `blk`, else a
-/// scan (the point and drainage modules always scan). (Keep the fallback: without it pass A1
-/// ran 50 % slower on NVIDIA.)
+/// scan. Every tile caller has a block, but keep the scan: without it pass A1 ran 50 % slower
+/// on NVIDIA (other code generation; a cheap stand-in branch did not help).
 fn inst_list(f: u32, blk: u32, p: vec3<f64>) -> InstList {
     if (blk == 0xffffffffu) {
         return inst_scan(f, p, 0.0);

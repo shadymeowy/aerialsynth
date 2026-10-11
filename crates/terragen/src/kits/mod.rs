@@ -190,6 +190,8 @@ pub fn wgsl_relief() -> String {
         s.push('\n');
     }
     s.push_str("fn kits_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {\n");
+    // (the module's instance lists of the point: `relief_lists`, gpu::sources)
+    s.push_str("    relief_lists(c.p, r.blk);\n");
     for k in KITS {
         if k.relief.is_some() {
             s.push_str(&format!("    {}_relief(c, m, r, h);\n", k.name));

@@ -306,7 +306,14 @@ pub(crate) fn sources() -> (String, String, String) {
     // the instance families and the kits' relief (every module with pass A); points and
     // drainage scan for instances, tiles read their bins' lists (tile_a.wgsl)
     let relief = format!("{INSTANCES_WGSL}{}{}", crate::instances::wgsl(), crate::kits::wgsl_relief());
-    let scan = "fn inst_list(f: u32, blk: u32, p: vec3<f64>) -> InstList {\n    return inst_scan(f, p, 0.0);\n}\n";
+    // the point and drainage modules scan the relief families once per relief evaluation, in
+    // one loop (one inlined copy of the existence tests; a scan per `inst_list` call put every
+    // family's tests into the relief once per call); the tile module reads its bins' lists
+    let nfam = crate::instances::families().count();
+    let scan = format!(
+        "var<private> rl_lists: array<InstList, {}>;\nfn relief_lists(p: vec3<f64>, blk: u32) {{\n    for (var f = 0u; f < NFAM; f++) {{\n        if (fam_relief(f)) {{\n            rl_lists[f] = inst_scan(f, p, 0.0);\n        }}\n    }}\n}}\nfn inst_list(f: u32, blk: u32, p: vec3<f64>) -> InstList {{\n    return rl_lists[f];\n}}\n",
+        nfam.max(1)
+    );
     let reg = crate::registry::gpu::wgsl_consts();
     let kits = crate::kits::wgsl();
     let points = format!("{consts}{NOISE_WGSL}{ATLAS_WGSL}{WORLD_WGSL}{relief}{scan}{POINTS_WGSL}");

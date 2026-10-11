@@ -163,6 +163,7 @@ pub fn wgsl() -> String {
     s += &sw("fam_jitter", "f32", "0.0", &|f| format!("{:?}", f.jitter as f32));
     s += &sw("fam_reach", "f32", "0.0", &|f| format!("{:?}", f.reach as f32));
     s += &sw("fam_key", "u64", "0lu", &|f| format!("{:#x}lu", key(f)));
+    s += &sw("fam_relief", "bool", "false", &|f| format!("{}", f.relief));
     s.push_str("fn family_exists(f: u32, site: InstSite) -> InstOut {\n    switch f {\n");
     for (i, f) in fams.iter().enumerate() {
         s.push_str(&format!("        case {i}u: {{ return {}_exists(site); }}\n", f.name));
