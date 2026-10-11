@@ -624,7 +624,7 @@ fn select_town_layer(s: ptr<function, Stack>) {
     (*s).town_i = -1;
     (*s).town.px.ok = false;
     var urban = 0.0;
-    if (t.town != 0u && !(*s).no_town && cfg.towns > 0.0) {
+    if (KITS_LEGACY_TOWNS && t.town != 0u && !(*s).no_town && cfg.towns > 0.0) {
         let sel = select_town((*s).c.p, (*s).c.gsd, town_slope, river_clear, (*s).pf.f[PF_WARP2]);
         if (sel.x == -2.0) {
             surface_missing |= MISS_TOWN;
@@ -634,7 +634,7 @@ fn select_town_layer(s: ptr<function, Stack>) {
         }
     }
     var cov = 0.0;
-    if ((*s).town_i >= 0) {
+    if (KITS_LEGACY_TOWNS && (*s).town_i >= 0) {
         (*s).town = town_eval(towns[(*s).town_i], (*s).c.p, (*s).c.gsd, l.fw, town_slope, river_clear, (*s).pf.f[PF_DETAIL], (*s).pf.f[PF_WARP2]);
         if ((*s).town.px.ok) {
             cov = (*s).town.px.cov;
@@ -717,7 +717,7 @@ fn layer_built(s: ptr<function, Stack>) {
             composite(s, ly);
         }
     }
-    if (m.road_major_cov > 0.0 && (*s).town_i >= 0) {
+    if (KITS_LEGACY_TOWNS && m.road_major_cov > 0.0 && (*s).town_i >= 0) {
         let town = towns[(*s).town_i];
         let dist = dist64(p, town.center.xyz);
         let near = 1.0 - smoothstep1(1.2 * town.radius, 2.2 * town.radius, dist);
@@ -747,7 +747,7 @@ fn layer_built(s: ptr<function, Stack>) {
         }
         composite(s, layer_emit(vec3<f32>(1.0, 0.80, 0.55) * (4.0 * exp(-(dl * dl) / (2.0 * 0.5 * 0.5)) * dots * smoothstep1(0.25, 0.45, m.town_urban))));
     }
-    if ((*s).town_i >= 0 && (*s).town.px.ok) {
+    if (KITS_LEGACY_TOWNS && (*s).town_i >= 0 && (*s).town.px.ok) {
         let tp = (*s).town.px;
         var ly = layer_paint(tp.cov, tp.col, tp.cls);
         ly.dh = tp.h;

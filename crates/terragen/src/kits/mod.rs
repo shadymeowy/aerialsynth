@@ -34,7 +34,7 @@ mod temperate;
 
 mod agriculture;
 
-// mod settlements;
+pub mod settlements;
 
 // mod transport;
 
@@ -61,7 +61,7 @@ pub static KITS: &[&Kit] = &[
 
     &agriculture::KIT,
 
-    // &settlements::KIT,
+    &settlements::KIT,
 
     // &transport::KIT,
     #[cfg(test)]
@@ -124,10 +124,18 @@ pub struct Kit {
     pub families: &'static [crate::instances::Family],
     /// its host-built linear features and stamps (`crate::features`)
     pub host: Option<crate::features::HostFn>,
+    /// the kit draws the settlements: the core's grid towns are off ([`legacy_towns`])
+    pub replaces_towns: bool,
 }
 
 impl Kit {
-    pub const EMPTY: Kit = Kit { name: "", biomes_yaml: "", wgsl: "", layers: &[], kernels: &[], relief: None, relief_wgsl: "", families: &[], host: None };
+    pub const EMPTY: Kit = Kit { name: "", biomes_yaml: "", wgsl: "", layers: &[], kernels: &[], relief: None, relief_wgsl: "", families: &[], host: None, replaces_towns: false };
+}
+
+/// Does the core draw its grid towns (`layers::built`, the town lattice of pass A)? Off when a
+/// kit replaces them (the settlements kit).
+pub fn legacy_towns() -> bool {
+    !KITS.iter().any(|k| k.replaces_towns)
 }
 
 /// Run the kits' layers of `slot`.
@@ -189,6 +197,7 @@ pub fn wgsl_relief() -> String {
         s.push_str(k.relief_wgsl);
         s.push('\n');
     }
+    s.push_str(&format!("const KITS_LEGACY_TOWNS: bool = {};\n", legacy_towns()));
     s.push_str("fn kits_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {\n");
     // (the module's instance lists of the point: `relief_lists`, gpu::sources)
     s.push_str("    relief_lists(c.p, r.blk);\n");
