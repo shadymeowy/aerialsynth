@@ -117,6 +117,7 @@ struct Stack {
     emission: vec3<f32>,
     is_water: bool,
     done: bool,
+    no_town: bool,
     deferring: bool,
     def: Deferred,
 }
@@ -623,7 +624,7 @@ fn select_town_layer(s: ptr<function, Stack>) {
     (*s).town_i = -1;
     (*s).town.px.ok = false;
     var urban = 0.0;
-    if (t.town != 0u && cfg.towns > 0.0) {
+    if (t.town != 0u && !(*s).no_town && cfg.towns > 0.0) {
         let sel = select_town((*s).c.p, (*s).c.gsd, town_slope, river_clear, (*s).pf.f[PF_WARP2]);
         if (sel.x == -2.0) {
             surface_missing |= MISS_TOWN;
@@ -1048,6 +1049,7 @@ fn stack_new(c: Ctx, t: Terrain, l: Local, pf: PixFields) -> Stack {
     s.emission = vec3<f32>(0.0);
     s.is_water = false;
     s.done = false;
+    s.no_town = false;
     s.deferring = false;
     s.def = deferred_none();
     return s;

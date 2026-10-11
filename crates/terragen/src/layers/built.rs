@@ -427,7 +427,11 @@ pub fn select_town(s: &mut crate::stack::Stack) {
     // towns avoid steep relief, judged from the relief type (smooth), not the slope of each
     // pixel (that cut houses in half along every terrace edge and gully wall)
     let town_slope = 0.12 + 0.75 * t.rock_expect;
-    let sel = if t.town.id != 0 && world.cfg.landuse.towns > 0.0 { s.sm.select_town(world, s.cache, p, gsd, town_slope, river_clear, s.pf, 2) } else { None };
+    let sel = if t.town.id != 0 && !s.no_town && world.cfg.landuse.towns > 0.0 {
+        s.sm.select_town(world, s.cache, p, gsd, town_slope, river_clear, s.pf, 2)
+    } else {
+        None
+    };
     let urban = sel.map_or(0.0, |x| x.1);
     let px = sel.and_then(|(town, _)| s.sm.town(&town, p, gsd, fw, town_slope, river_clear, world.cfg.satellite.shadows, s.pf));
     let cov = px.map_or(0.0, |x| x.2);

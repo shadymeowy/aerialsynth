@@ -32,7 +32,8 @@ old moss-green by age; no trees, no fields on them); hydrothermal sulphur, rust 
 at the crater; crater and caldera lakes at one flat water level of the instance; in fields the
 cinder cones (dark crater, pale rim), tephra rings and lakes of maars, an ash apron, short lava
 tongues. Snow caps come from the climate (lapse rate; the cold kit's snow model). No fields
-or towns in craters, on lava, ash or lakes (`Masks::natural_ok`).
+in craters, on lava, ash or lakes (`Masks::natural_ok`), and no town on a cone (`Stack::no_town`,
+set in slots 1-5: the town is not selected there; the active cone's ash apron counts).
 
 **Biomes** `volcanic_scrub` (warm and temperate volcanic country; black beaches) and
 `volcanic_barren` (cold and high), with old and fresh lava fans from the `lobes` kernel. Arid
@@ -68,24 +69,20 @@ default places (4 x 4 tiles):
 `InstList` zero-initialises 512 bytes per list: the first version of the layer cost 10-20 % at
 every place because of it).
 
-**Build note.** These numbers are of a build with only the cold and volcanic kits: with all
-kits on, pass B's pipeline takes ~370 s to compile on the farm's RTX 6000 Ada and the device is
-lost for any compile over ~400 s ("driver implementation is at fault"). Master with five kits is
-just under that; no kit can be added on top of it until the core compiles pass B faster.
+Cold compile (RTX 6000 Ada, all six kits): pass B 24 / 26 / 26 s (three pipelines), pass A1 17 s,
+point evaluation 19 s, drainage heights 15 s.
 
 ## Stills
 
-GPU-generated (`terrain survey`, default world, 10:30 local on the equinox, the cold and
-volcanic kits only, for the reason above). Rendered once more after the first fixes. Two fixes
-(short fat lava tongues on shields; no towns in craters, on ash or lava) and a speed-up (same
-look) came after the last render and were not re-rendered.
+GPU-generated (`terrain survey`, default world, 10:30 local on the equinox, all six kits). Oblique
+views stand off from the cone along the view direction.
 
-**Crater lake** (11.850, -106.320): oblique 300 m, nadir 1.5 km, oblique 1.5 km from 7 km.
+**Crater lake** (11.850, -106.320): oblique 300 m, nadir 1.5 km, oblique 1.5 km from 3 km.
 ![crater lake](images/volcanic_crater_lake_300m.jpg)
 ![crater lake, nadir](images/volcanic_crater_lake_1500m_nadir.jpg)
 ![dormant cone](images/volcanic_cone_1500m.jpg)
 
-**Caldera lake** (-44.677, 9.339, oblique 10 km): fields on the farmland around the ring.
+**Caldera lake** (-44.677, 9.339, oblique 10 km from 13 km): fields on the farmland around the ring.
 ![caldera](images/volcanic_caldera_10km.jpg)
 
 **Snow-capped cone** (56.885, -101.647, oblique 1.5 km): gullies show as ridges in the snow.

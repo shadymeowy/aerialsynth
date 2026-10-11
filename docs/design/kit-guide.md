@@ -145,7 +145,8 @@ with `s.composite(layer)` / `composite(s, ly)`. Class ids are the v2 ids of
 | `s.col`, `s.height`, `s.class`, `s.lit`, `s.emission` | same | the composite so far |
 
 A kit may lower `s.m.natural_ok` (no fields / farmsteads there) or `s.m.veg` (no trees), and
-should do it through `Layer::clear` where it draws. Publish nothing else into `Masks`; if a kit
+should do it through `Layer::clear` where it draws. A kit that must keep towns off its ground
+(a volcano's cone) sets `s.no_town = true` before slot 6 (the town is then not selected). Publish nothing else into `Masks`; if a kit
 needs a new shared value, ask for a field in the core.
 
 ---

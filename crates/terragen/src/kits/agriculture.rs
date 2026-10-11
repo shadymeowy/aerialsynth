@@ -457,7 +457,8 @@ fn roads(s: &mut Stack) {
     let d = (q.x - ix * MILE).abs().min((q.y - iy * MILE).abs());
     let steep = smoothstep(-0.02, 0.02, 0.45 - s.l.slope);
     let cov = band_cov(d, 4.0, s.l.fw.max(0.5 * gsd)) * steep * (1.0 - s.m.snow);
-    if cov <= 0.0 {
+    // (no tracks across a kit's lakes: crater lakes, kettles)
+    if cov <= 0.0 || s.class == crate::landcover::LAKE {
         return;
     }
     // gravel farm tracks (roads proper are the transport kit's)

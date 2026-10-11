@@ -352,7 +352,7 @@ fn agriculture_slot_linear(s: ptr<function, Stack>) {
     let d = min(abs(q.x - ix * AG_MILE), abs(q.y - iy * AG_MILE));
     let steep = smoothstep1(-0.02, 0.02, 0.45 - (*s).l.slope);
     let cov = band_cov(d, 4.0, max((*s).l.fw, 0.5 * gsd)) * steep * (1.0 - (*s).m.snow);
-    if (cov <= 0.0) {
+    if (cov <= 0.0 || (*s).cls == LC_LAKE) {
         return;
     }
     let col = srgb(168.0, 150.0, 122.0) * (1.0 + 0.05 * (*s).pf.f[PF_DETAIL]);

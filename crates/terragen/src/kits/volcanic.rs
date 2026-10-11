@@ -600,7 +600,10 @@ fn volcano_look(s: &mut Stack, v: &Vol) {
     let p = s.ctx.p;
     let gsd = s.ctx.gsd;
     let Some(k) = cone(v, p, gsd, false) else { return };
-    // (no fields or towns in the crater)
+    // no fields in the crater, no towns on the cone (on the ash apron of an active one)
+    if k.u < 0.45 + 0.55 * v.act || k.rr < 1.6 * k.rce {
+        s.no_town = true;
+    }
     s.m.natural_ok *= smoothstep(1.0, 1.6, k.rr / k.rce);
     ash(s, v, &k);
     flows(s, v, &k);
@@ -691,19 +694,19 @@ fn hydrothermal(s: &mut Stack, v: &Vol, k: &Cone) {
     let strength = 0.35 + 0.65 * v.act;
     let n = nz(SEED_HYD ^ v.id, p, 38.0, gsd) + 0.5 * nz((SEED_HYD ^ v.id) + 1, p, 11.0, gsd);
     let wd = 0.06 + 0.25 * (1.0 - band(38.0, gsd));
-    let cov = smoothstep(-wd, wd, n - (1.1 - zone * strength));
+    let cov = smoothstep(-wd, wd, n - (1.3 - zone * strength));
     if cov <= 0.0 {
         return;
     }
     let pick = nz(SEED_HYD + 7, p, 90.0, gsd);
-    let col = mixc(mixc(srgb(204.0, 178.0, 62.0), srgb(176.0, 92.0, 48.0), smoothstep(-0.15, 0.2, pick)), srgb(214.0, 208.0, 194.0), smoothstep(0.1, 0.5, n));
+    let col = mixc(mixc(srgb(204.0, 178.0, 62.0), srgb(176.0, 92.0, 48.0), smoothstep(-0.15, 0.2, pick)), srgb(176.0, 158.0, 118.0), smoothstep(0.1, 0.5, n));
     s.composite(Layer { cov, albedo: col, cls: cls::BARE, clear: 1.0, ..Default::default() });
     s.m.natural_ok *= 1.0 - cov;
 }
 
 /// The crater or caldera lake: water at the instance's level where the ground is below it.
 fn crater_lake(s: &mut Stack, v: &Vol, k: &Cone) {
-    if v.lake < -1.0e5 || k.rr > 1.4 * v.rc.max(k.rce) {
+    if v.lake < -1.0e5 || k.rr > 1.02 * v.rc.max(k.rce) {
         return;
     }
     let l = s.l;
@@ -728,7 +731,7 @@ fn field_look(s: &mut Stack, it: &Instance) {
     // ash apron: a darkened ground, strongest at the field's heart
     if f.apron > 0.0 {
         let n = 0.5 + 0.5 * nz(SEED_ASH + 5, p, 120.0, gsd);
-        let cov = 0.62 * f.apron * (0.4 + 0.6 * n);
+        let cov = 0.5 * f.apron * smoothstep(0.2, 0.8, n);
         s.composite(Layer { cov, albedo: ash_col(n) * 0.9, cls: cls::VOLCANIC_ASH, clear: 0.8, ..Default::default() });
     }
     if f.lava > 0.0 {

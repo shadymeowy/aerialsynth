@@ -163,12 +163,12 @@ fn vc_hydro(s: ptr<function, Stack>, v: VcVol, k: VcCone) {
     let strength = 0.35 + 0.65 * v.act;
     let n = vc_nz(VC_SEED_HYD ^ v.id, p, 38.0, gsd) + 0.5 * vc_nz((VC_SEED_HYD ^ v.id) + 1lu, p, 11.0, gsd);
     let wd = 0.06 + 0.25 * (1.0 - band(38.0, gsd));
-    let cov = smoothstep1(-wd, wd, n - (1.1 - zone * strength));
+    let cov = smoothstep1(-wd, wd, n - (1.3 - zone * strength));
     if (cov <= 0.0) {
         return;
     }
     let pick = vc_nz(VC_SEED_HYD + 7lu, p, 90.0, gsd);
-    let col = mixc(mixc(srgb(204.0, 178.0, 62.0), srgb(176.0, 92.0, 48.0), smoothstep1(-0.15, 0.2, pick)), srgb(214.0, 208.0, 194.0), smoothstep1(0.1, 0.5, n));
+    let col = mixc(mixc(srgb(204.0, 178.0, 62.0), srgb(176.0, 92.0, 48.0), smoothstep1(-0.15, 0.2, pick)), srgb(176.0, 158.0, 118.0), smoothstep1(0.1, 0.5, n));
     var ly = layer_paint(cov, col, LC_BARE);
     ly.clear = 1.0;
     composite(s, ly);
@@ -177,7 +177,7 @@ fn vc_hydro(s: ptr<function, Stack>, v: VcVol, k: VcCone) {
 
 /// `volcanic::crater_lake`.
 fn vc_crater_lake(s: ptr<function, Stack>, v: VcVol, k: VcCone) {
-    if (v.lake < -1.0e5 || k.rr > 1.4 * max(v.rc, k.rce)) {
+    if (v.lake < -1.0e5 || k.rr > 1.02 * max(v.rc, k.rce)) {
         return;
     }
     let l = (*s).l;
@@ -213,7 +213,7 @@ fn vc_field_look(s: ptr<function, Stack>, it: Inst) {
     }
     if (f.apron > 0.0) {
         let n = 0.5 + 0.5 * vc_nz(VC_SEED_ASH + 5lu, p, 120.0, gsd);
-        let cov = 0.62 * f.apron * (0.4 + 0.6 * n);
+        let cov = 0.5 * f.apron * smoothstep1(0.2, 0.8, n);
         var ly = layer_paint(cov, vc_ash_col(n) * 0.9, LC_VOLCANIC_ASH);
         ly.clear = 0.8;
         composite(s, ly);
@@ -263,6 +263,9 @@ fn volcanic_slot_azonal(s: ptr<function, Stack>) {
             let v = vc_vol(inst_get(FAM_VOLCANIC_VOLCANOES + f, blk, i));
             let k = vc_cone(v, (*s).c.p, (*s).c.gsd, false);
             if (k.ok) {
+                if (k.u < 0.45 + 0.55 * v.act || k.rr < 1.6 * k.rce) {
+                    (*s).no_town = true;
+                }
                 (*s).m.natural_ok *= smoothstep1(1.0, 1.6, k.rr / k.rce);
                 vc_ash(s, v, k);
                 vc_flows(s, v, k);
