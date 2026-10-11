@@ -183,7 +183,7 @@ fn tropical_fire(li: u32, i: KIn) -> KOut {
         }
         col *= 1.0 - 0.35 * fresh * (1.0 - smoothstep1(0.0, 0.04, m)) * band(0.04 * k.v[0], i.gsd);
     }
-    col *= 1.0 + k.v[4] * (perlin3(k.seed ^ 0xA55lu, i.p * (1.0lf / (0.3lf * sc))) * band(0.3 * k.v[0], i.gsd));
+    col *= 1.0 + k.v[4] * (2.0 * u - 1.0);
     var o = kout_none();
     o.cov = cov;
     o.albedo = col;
@@ -485,7 +485,7 @@ fn tropical_mangrove(li: u32, i: KIn) -> KOut {
     let col = mean_c * 0.93 + (tex - mean_c * 0.93) * bt;
     let near = min(smoothstep1(0.0, 3.0 * k.v[2] + 2.0, e1 - w1), smoothstep1(0.0, 1.5 * k.v[2] + 1.0, e2 - w2));
     let zone = 0.85 + 0.3 * (0.5 + 0.5 * perlin3(k.seed ^ 0x3D2lu, i.p * (1.0lf / (0.5lf * sc))));
-    o.cov = ext;
+    o.cov = ext * (1.0 - chan);
     o.albedo = col * (0.9 + 0.1 * near);
     o.dh = k.v[3] * (0.55 + 0.45 * near) * zone * (0.88 + 0.12 * (1.0 - x * x) * bt);
     o.id = wc.id;
@@ -516,14 +516,10 @@ fn tropical_grass(li: u32, i: KIn) -> KOut {
     let bw = clamp(2.0 * i.fw / (0.6 * k.v[0]), 1e-3, 0.5);
     let bare = smoothstep1(-bw, bw, k.v[1] - ub);
     col = col + (k.col[2] - col) * bare;
-    let w1 = band(2.2, i.gsd);
-    let w2 = band(0.9, i.gsd);
+    let w1 = band(1.6, i.gsd);
     var m = 0.0;
     if (w1 > 0.0) {
-        m += 0.2 * perlin3(k.seed ^ 0x6A4lu, i.p * (1.0lf / 2.2lf)) * w1;
-    }
-    if (w2 > 0.0) {
-        m += 0.14 * perlin3(k.seed ^ 0x6A5lu, i.p * (1.0lf / 0.9lf)) * w2;
+        m += 0.24 * perlin3(k.seed ^ 0x6A4lu, i.p * (1.0lf / 1.6lf)) * w1;
     }
     col *= (1.0 + k.v[2] * m * (1.0 - 0.6 * bare)) * (1.0 + k.v[3] * (t - 0.5));
     var o = kout_none();

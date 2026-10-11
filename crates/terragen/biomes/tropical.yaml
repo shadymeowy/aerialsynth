@@ -5,9 +5,10 @@
 # forests; cloud forest and páramo as altitudinal zones; mangroves on low tropical coasts.
 #
 # Schema: docs/design/kit-guide.md ("Biomes"). The kernels `tropical_*` are the kit's.
-# Mangrove masks: near the coast (`coast_km`: the atlas' ~20 km texels place the coast within
-# ~15 km), near sea level (the intertidal and estuary flats: they replace the beaches there),
-# not on arid coasts; they take the coastal flats from the fields.
+# Mangroves grow on the sea where it is shallower than ~5 m (water slot; the bed below sea
+# level: no lakes inland) and on the coastal and delta flats below ~3 m, not on arid coasts. The
+# atlas' coast distance (~20 km texels) misses the pixel coast by up to hundreds of km, so it is
+# not used.
 
 # ---------------------------------------------------------------- rainforest (core, patched)
 
@@ -74,22 +75,23 @@
       params: { cell: 7, density: 0.95, radius: [3, 5], height: [14, 22], colour: [88, 110, 74], colour2: [56, 90, 44], second: 0.5, colour_var: 0.3 }
       class: tropical_rainforest
       height: blend
-    # mangroves on low coasts and estuaries
+    # mangroves on the shallow tidal shores of low coasts and estuaries (water slot: on the
+    # sea shallower than ~5 m; tidal creeks stay open water)
     - &mangrove
-      slot: canopy
+      slot: water
       kernel: tropical_mangrove
       seed: 0x7E20
-      mask: { coast_km: [null, null, 15, 30], height: [null, null, 3.0, 6.0], moist: [0.4, 0.55, null, null], slope: [null, null, 0.03, 0.08] }
+      mask: { height: [-7.0, -4.0, 0.0, 1.5], moist: [0.4, 0.55, null, null], temp: [20, 22, null, null] }
       params: { scale: 420, width: 9, height: 12, crown: 4.5 }
       class: mangrove
-    - &mangrove_channels
+    # ... and on the land flats of the coast and the deltas near sea level, cut by creeks
+    - &mangrove_land
       slot: canopy
       kernel: tropical_mangrove
       seed: 0x7E20
-      mask: { coast_km: [null, null, 15, 30], height: [null, null, 3.0, 6.0], moist: [0.4, 0.55, null, null], slope: [null, null, 0.03, 0.08] }
-      params: { scale: 420, part: channels, width: 9 }
-      class: river
-      height: blend
+      mask: { height: [null, null, 1.5, 3.5], slope: [null, null, 0.02, 0.05], moist: [0.4, 0.55, null, null], temp: [20, 22, null, null] }
+      params: { scale: 420, width: 9, height: 12, crown: 4.5 }
+      class: mangrove
 
 # ---------------------------------------------------------------- flooded forest (várzea, igapó)
 
@@ -146,7 +148,7 @@
       class: tropical_rainforest
       height: blend
     - *mangrove
-    - *mangrove_channels
+    - *mangrove_land
 
 # ---------------------------------------------------------------- monsoon (semi-deciduous) forest
 
@@ -204,7 +206,7 @@
       class: broadleaf_forest
       height: blend
     - *mangrove
-    - *mangrove_channels
+    - *mangrove_land
 
 # ---------------------------------------------------------------- dry deciduous forest
 
@@ -253,7 +255,7 @@
       params: { cell: 7, density: 0.9, radius: [3, 5], height: [12, 18], colour: [48, 80, 38], colour2: [70, 98, 46], second: 0.35, colour_var: 0.25 }
       class: broadleaf_forest
     - *mangrove
-    - *mangrove_channels
+    - *mangrove_land
 
 # ---------------------------------------------------------------- savannas (core tropical_dry, patched)
 
@@ -304,7 +306,7 @@
       params: { cell: 7, density: 0.95, radius: [3.5, 5.5], height: [12, 20], colour: [42, 72, 36], colour2: [64, 92, 44], second: 0.3, colour_var: 0.25 }
       class: broadleaf_forest
     - *mangrove
-    - *mangrove_channels
+    - *mangrove_land
 
 - id: savanna_acacia
   group: vegetation
@@ -349,7 +351,7 @@
       height: blend
     - *gallery_gully
     - *mangrove
-    - *mangrove_channels
+    - *mangrove_land
 
 - id: savanna_baobab
   group: vegetation

@@ -406,7 +406,8 @@ fn fire(k: &KParams, i: &KIn) -> KOut {
         }
         col *= 1.0 - 0.35 * fresh * (1.0 - smoothstep(0.0, 0.04, m)) * band(0.04 * sc, i.gsd);
     }
-    col *= 1.0 + v[4] * (perlin3(k.seed ^ 0xA55, i.p / (0.3 * sc)) * band(0.3 * sc, i.gsd));
+    // (variation from the scar noise itself: no extra octave)
+    col *= 1.0 + v[4] * (2.0 * u - 1.0);
     KOut { cov, albedo: col, dh: 0.0, emit: 0.0, id: (bin as u64) + 1 }
 }
 
@@ -638,7 +639,7 @@ fn meander(k: &KParams, i: &KIn) -> KOut {
 
 /// `tropical_mangrove`: mangrove forest: a crisp extent (lobate noise threshold by the
 /// amount: the mask moves the edge), a dense dark canopy of small crown clumps, lower along
-/// the creeks (`canopy`); tidal creeks along the edges of two warped Worley lattices (ECEF:
+/// the creeks, open over the creeks (`canopy`); tidal creeks along the edges of two warped Worley lattices (ECEF:
 /// seamless), each edge its own width, some absent (`channels`). v: scale, part, width,
 /// height, crown, colour_var.
 fn mangrove(k: &KParams, i: &KIn) -> KOut {
@@ -684,7 +685,8 @@ fn mangrove(k: &KParams, i: &KIn) -> KOut {
     let near = smoothstep(0.0, 3.0 * v[2] + 2.0, e1 - w1).min(smoothstep(0.0, 1.5 * v[2] + 1.0, e2 - w2));
     let zone = 0.85 + 0.3 * (0.5 + 0.5 * perlin3(k.seed ^ 0x3D2, i.p / (0.5 * sc)));
     let dh = v[3] * (0.55 + 0.45 * near) * zone * (0.88 + 0.12 * (1.0 - x * x) * bt);
-    KOut { cov: ext, albedo: col * (0.9 + 0.1 * near), dh, emit: 0.0, id: wc.id }
+    // the creeks stay open (over standing water: the water shows through)
+    KOut { cov: ext * (1.0 - chan), albedo: col * (0.9 + 0.1 * near), dh, emit: 0.0, id: wc.id }
 }
 
 /// `tropical_grass`: savanna grass in dry-season colours: golden and grey-straw tones at
@@ -709,14 +711,10 @@ fn grass(k: &KParams, i: &KIn) -> KOut {
     let bw = (2.0 * i.fw / (0.6 * sc)).clamp(1e-3, 0.5);
     let bare = smoothstep(-bw, bw, v[1] - ub);
     col = col + (k.col[2] - col) * bare;
-    let w1 = band(2.2, i.gsd);
-    let w2 = band(0.9, i.gsd);
+    let w1 = band(1.6, i.gsd);
     let mut m = 0.0;
     if w1 > 0.0 {
-        m += 0.2 * perlin3(k.seed ^ 0x6A4, i.p / 2.2) * w1;
-    }
-    if w2 > 0.0 {
-        m += 0.14 * perlin3(k.seed ^ 0x6A5, i.p / 0.9) * w2;
+        m += 0.24 * perlin3(k.seed ^ 0x6A4, i.p / 1.6) * w1;
     }
     col *= (1.0 + v[2] * m * (1.0 - 0.6 * bare)) * (1.0 + v[3] * (t - 0.5));
     KOut { cov, albedo: col, dh: 0.0, emit: 0.0, id: 0 }
@@ -913,6 +911,35 @@ mod tests {
         assert!(gen.backend_name().starts_with("GPU"), "{}", gen.backend_name());
     }
 
+    /// GPU tiles/s at the kit's places (8 × 8 tiles per place and zoom; performance budget):
+    /// `cargo test -p terragen --release --lib kits::tropical::tests::bench_places -- --ignored --nocapture`.
+    /// For the baseline, run it with the kit's `KITS` entry commented out (the module stays).
+    #[cfg(feature = "gpu")]
+    #[test]
+    #[ignore]
+    fn bench_places() {
+        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        gen.tiles(&[geodesy::tiles::TileId::new(3, 4, 3)]).unwrap();
+        for z in [8u8, 10, 12, 14, 16] {
+            let mut ids = Vec::new();
+            for &(_, lat, lon) in PLACES {
+                let c = geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z);
+                let n = 1i64 << z;
+                for dy in 0..8i64 {
+                    for dx in 0..8i64 {
+                        ids.push(geodesy::tiles::TileId::new(z, (c.x as i64 + dx - 4).rem_euclid(n) as u32, (c.y as i64 + dy - 4).clamp(0, n - 1) as u32));
+                    }
+                }
+            }
+            let t0 = std::time::Instant::now();
+            for chunk in ids.chunks(16) {
+                gen.tiles(chunk).unwrap();
+            }
+            let dt = t0.elapsed().as_secs_f64();
+            println!("bench z{z}: {} tiles {dt:.2} s {:.1} tiles/s", ids.len(), ids.len() as f64 / dt);
+        }
+    }
+
     /// Places of the default world where the kit's biomes and features are (to choose stills):
     /// `cargo test -p terragen --release --lib kits::tropical::tests::find_places -- --ignored --nocapture`.
     /// Per biome a few points, and per feature (meander floodplains, mangrove coasts, classes the
@@ -946,7 +973,8 @@ mod tests {
             if coast_only {
                 // low tropical coasts only (mangrove places): pass A first, cheap
                 let t = w.terrain(&crate::world::Ctx::new(lat, lon, 30.0, &w.ell));
-                if !(t.coast_km < 25.0 && t.ground > 0.0 && t.ground < 3.0 && t.temp > 20.0 && t.water_kind == crate::world::water::NONE) {
+                // shallow tropical sea near the coast (the mangroves' water-slot layer)
+                if !(t.coast_km < 15.0 && t.water_kind == crate::world::water::OCEAN && t.water - t.ground < 2.5 && t.temp > 20.0) {
                     continue;
                 }
             }
@@ -973,7 +1001,7 @@ mod tests {
                 if t.river_hw > 0.0 { t.river_d.abs() - t.river_hw } else { -1.0 },
                 crate::registry::classes::name(cls)
             );
-            if t.water_kind != crate::world::water::NONE && t.water > t.ground {
+            if !coast_only && t.water_kind != crate::world::water::NONE && t.water > t.ground {
                 continue;
             }
             add(format!("biome {name}"), s.clone());
@@ -981,8 +1009,8 @@ mod tests {
             if t.floodplain > 0.35 && t.river_hw > 0.0 && t.river_d.abs() < 2500.0 {
                 add(format!("floodplain {name}"), s.clone());
             }
-            if t.coast_km < 25.0 && t.ground < 3.0 {
-                add(format!("mangrove coast {name}"), s.clone());
+            if coast_only {
+                add(format!("mangrove shore {name}"), s.clone());
             }
             if t.temp < 17.5 && t.temp > 10.0 {
                 add(format!("cloud forest {name}"), s.clone());
