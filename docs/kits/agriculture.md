@@ -77,5 +77,13 @@ equinox. Lat, lon in brackets.
 
 ## Performance
 
-See the table in the commit message / CHANGELOG notes: `bench_places` (GPU, 13 places x 8 x 8
-tiles per zoom), with and without the kit's `KITS` entry.
+`bench_places` (ignored test, GPU, 13 places x 8 x 8 tiles per zoom), the same build with the
+kit's `KITS` entry commented out (mean of two runs, tiles/s; shared machine, +-3 % noise):
+
+| zoom | without | with | cost |
+|---|---|---|---|
+| z8 | 17.0 | 15.5 | 9 % |
+| z10 | 65.1 | 64.3 | 1.3 % |
+| z12 | 114.7 | 112.9 | 1.5 % |
+| z14 | 111.6 | 108.4 | 2.9 % |
+| z16 | 116.8 | 113.5 | 2.9 % |
