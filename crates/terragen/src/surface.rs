@@ -669,7 +669,6 @@ impl SurfaceModel {
         });
         info
     }
-
 }
 
 #[cfg(test)]

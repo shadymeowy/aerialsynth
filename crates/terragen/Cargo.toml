@@ -19,10 +19,14 @@ wgpu = { workspace = true, optional = true }
 pollster = { workspace = true, optional = true }
 bytemuck = { workspace = true, optional = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# pins the GPU driver's libraries until the process ends (`gpu::device::pin_driver`)
+libc = { version = "0.2", optional = true }
+
 [features]
 default = ["gpu"]
 # tile generation on the GPU (wgpu compute; needs 64-bit float and integer shader support)
-gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
+gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:libc"]
 
 [dev-dependencies]
 image.workspace = true

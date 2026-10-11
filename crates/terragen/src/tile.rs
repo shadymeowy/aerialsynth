@@ -267,7 +267,9 @@ impl Generator {
     /// (`Ok`); else the error.
     #[cfg(feature = "gpu")]
     fn on_gpu_failure(&self, e: anyhow::Error) -> anyhow::Result<()> {
-        if self.backend != Backend::Auto {
+        // `AERIALSYNTH_GPU_STRICT=1` (development, CI): a GPU failure is an error, never a
+        // silent switch to the (much slower) CPU
+        if self.backend != Backend::Auto || std::env::var("AERIALSYNTH_GPU_STRICT").is_ok_and(|v| !v.is_empty() && v != "0") {
             return Err(e);
         }
         if !self.gpu_failed.swap(true, std::sync::atomic::Ordering::Relaxed) {
@@ -361,6 +363,12 @@ impl Generator {
         let pf = self.surface.pixel_fields(ctx.p, gsd);
         let s = self.surface.eval(&self.world, &mut caches, &ctx, &local, &pf);
         (t, s.height, s.class)
+    }
+
+    /// The biome of the ecoregion at pass-A point `t` (index into the registry, its name).
+    pub fn biome(&self, t: &Terrain) -> (u16, &str) {
+        let e = self.surface.eco.params(&self.world, &self.surface.registry, &mut Caches::default(), t.eco.id, t.eco.center);
+        (e.biome, self.surface.registry.biomes[e.biome as usize].name.as_str())
     }
 
     /// Pass A of a tile: the terrain at the pixel centres of the tile and a 2-pixel apron

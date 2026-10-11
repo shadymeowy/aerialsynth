@@ -1,8 +1,12 @@
 /*
  * aerialsynth C API example: read (or generate) a tile and print statistics of its layers.
  *
- *   cc -std=c99 tile.c -I../include -L../../../target/release -laerialsynth \
- *      -Wl,-rpath,$PWD/../../../target/release -o tile
+ * In the source tree (after `cargo build --release -p aerialsynth-capi`), from the repository root:
+ *   cc -std=c99 bindings/c/examples/tile.c -I bindings/c/include -L target/release -laerialsynth \
+ *      -Wl,-rpath,$PWD/target/release -o tile
+ * In a release archive (terrain-<version>-<target>), from its top directory:
+ *   cc -std=c99 examples/tile.c -I include -L lib -laerialsynth -Wl,-rpath,$PWD/lib -o tile
+ *
  *   ./tile out/world.h5 [CONFIG.yaml|- [Z X Y]]
  *
  * CONFIG.yaml is a scenario (its `world:` section) or a world config; "-" or nothing = the default

@@ -11,7 +11,7 @@ it without any Python:
 ```sh
 terrain run -c configs/quick.yaml
 terrain show out/quick/seq.h5                                   # the viewer
-terrain show out/quick/seq.h5 --snapshot shot.png --frame 20    # one picture, no window
+terrain show out/quick/seq.h5 --snapshot shot.png --frame 10    # one picture, no window
 terrain export out/quick/seq.h5 --out out/quick/frames          # PNGs of every modality
 terrain export out/quick/seq.h5 --side-by-side --out quick.mp4  # one labelled video (ffmpeg)
 ```

@@ -118,8 +118,9 @@ pub fn near(w: &World, fi: usize, p: DVec3, r: f64) -> Vec<Instance> {
 /// A family's site and existence (cached per thread: pure functions of the world and the cell).
 fn cached_site(w: &World, fi: usize, f: &Family, c: (i64, i64, i64)) -> Option<(InstSite, Option<[f32; 8]>)> {
     type Key = (u64, usize, i64, i64, i64);
+    type Site = Option<(InstSite, Option<[f32; 8]>)>;
     thread_local! {
-        static CACHE: std::cell::RefCell<FxHashMap<Key, Option<(InstSite, Option<[f32; 8]>)>>> = Default::default();
+        static CACHE: std::cell::RefCell<FxHashMap<Key, Site>> = Default::default();
     }
     let key = (w.cache_key, fi, c.0, c.1, c.2);
     if let Some(v) = CACHE.with(|m| m.borrow().get(&key).copied()) {

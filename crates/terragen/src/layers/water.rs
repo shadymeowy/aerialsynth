@@ -29,7 +29,8 @@ pub fn standing(s: &mut Stack) {
         let wave = depth + 0.18 * perlin3(0x5F1, p / 40.0);
         let broken = smoothstep(-0.25, 0.35, perlin3(0x5F2, p / 22.0) + 0.5 * perlin3(0x5F3, p / 7.0));
         let line = |c: f64, w: f64| (-((wave - c) / w).powi(2)).exp();
-        let foam = (0.85 * line(0.06, 0.05) + 0.6 * broken * line(0.45, 0.05) + 0.4 * broken * line(1.0, 0.06)) * (0.75 + 0.25 * perlin3(7, p / 3.0)) * band(3.0, gsd);
+        let foam =
+            (0.85 * line(0.06, 0.05) + 0.6 * broken * line(0.45, 0.05) + 0.4 * broken * line(1.0, 0.06)) * (0.75 + 0.25 * perlin3(7, p / 3.0)) * band(3.0, gsd);
         col = mixc(col, srgb(225.0, 232.0, 230.0), foam.min(1.0));
     }
     let cls = if l.water_kind == water::OCEAN { lc::OCEAN } else { lc::LAKE };
@@ -72,6 +73,13 @@ pub fn rivers(s: &mut Stack) {
         lc::SAND
     };
     // (the snow cover leaves open water free, and frozen rivers a faint line)
-    s.m.river_cov = cov * if frozen { 0.4 } else if wet_r > 0.5 { 1.0 } else { 0.0 };
+    s.m.river_cov = cov
+        * if frozen {
+            0.4
+        } else if wet_r > 0.5 {
+            1.0
+        } else {
+            0.0
+        };
     s.composite(Layer { cov, albedo: rc, dh: l.river_level, hmode: hmode::ABS, cls, relit: 1.0, water: !frozen && wet_r > 0.5, ..Default::default() });
 }

@@ -321,7 +321,10 @@ fn draw_style(id: u64, s: &atlas::AtlasSample, arch: usize, temp: f64) -> EcoSty
     let pick = |a: [f64; 3], b: [f64; 3], t: f64| crate::surface::srgb(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t);
     let mut soil = pick(lc[0], lc[1], u(1));
     // black steppe soils (chernozem) in temperate grasslands on soft rock
-    let steppe = smoothstep(250.0, 400.0, s.precip_mm) * (1.0 - smoothstep(550.0, 800.0, s.precip_mm)) * smoothstep(0.0, 6.0, temp) * (1.0 - smoothstep(14.0, 20.0, temp));
+    let steppe = smoothstep(250.0, 400.0, s.precip_mm)
+        * (1.0 - smoothstep(550.0, 800.0, s.precip_mm))
+        * smoothstep(0.0, 6.0, temp)
+        * (1.0 - smoothstep(14.0, 20.0, temp));
     if steppe > 0.3 && lit != 2 && u(9) < 0.7 {
         soil = soil + (crate::surface::srgb(76.0, 62.0, 50.0) - soil) * steppe;
     }

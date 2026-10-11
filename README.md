@@ -2,6 +2,14 @@
 
 <p align="center"><img src="showcase/media/globe.jpg" width="440" alt="The generated planet (seed 1) seen from 15,000 km: continents, deserts, forests and oceans"></p>
 
+> [!WARNING]
+> **The terrain generator on `master` is being rewritten** (a modular generator with
+> climate-driven biomes, cultures and landscape kits; generator version 4). Until that work
+> is finished, `master` may look unfinished or change between commits, and tile stores made
+> with it are not compatible with releases. **To try aerialsynth, use the latest release,
+> [v0.2.0](https://github.com/shadymeowy/aerialsynth/releases/tag/v0.2.0)** (prebuilt
+> wheels and binaries there, or `git checkout v0.2.0` to build from source).
+
 A procedural planet for aerial vision research. `terrain` generates a deterministic world as
 Web-Mercator XYZ tiles, flies cameras and an IMU over it, and writes datasets with exact
 ground truth. A viewer flies over the world in realtime. There is no imagery or elevation data
@@ -78,7 +86,7 @@ and Windows on the runners' virtual or software GPUs, macOS on Intel on the CPU 
 
 ```sh
 cargo build --release                       # the binary: target/release/terrain
-cargo install --path crates/cli             # optional: puts `terrain` on the PATH
+cargo install --locked --path crates/cli --target-dir target   # optional: `terrain` on the PATH (reuses that build)
 terrain view                                # the default world (seed 1, tiles in out/world.h5)
 terrain config > my.yaml                    # a commented scenario template; edit it
 terrain run -c my.yaml                      # trajectory → tiles → render (→ events)
@@ -91,7 +99,9 @@ different planet. A tile store holds exactly one world: a store made with anothe
 config is refused (the error names the settings that differ), so give each world its own
 `tiles.file`.
 
-`configs/quick.yaml` is a 10 s smoke test and `configs/dataset.yaml` a fuller dataset.
+`configs/quick.yaml` is a 3 s smoke test (16 frames of a 320 × 256 camera; under a minute on
+4 CPU cores without a GPU, most of it generating its ~75 tiles, and ~6 s with one) and
+`configs/dataset.yaml` a fuller dataset.
 `configs/examples/` has night flights, a full moon, an event camera rig, a star tracker, a
 fisheye, a 10 km cruise, a sunset and an IMU check.
 
@@ -130,6 +140,9 @@ Tiles and rendering from C and Python ([`bindings/`](bindings/README.md)): open 
 store and get a layer of tile z/x/y, or render a camera image (RGB, depth, land cover) from a
 pose with the renderer of `terrain run`; tiles that are not stored yet are generated (GPU if
 available, else CPU) and stored first. The world is given like `terrain -c FILE --seed N`.
+The first render at a new place generates a few hundred tiles: under half a minute on a GPU,
+minutes on a CPU (`World(..., verbose=True)` / `as_set_verbose` shows the progress, `World.prefetch` /
+`as_prefetch` makes an area's tiles ahead; [details](bindings/README.md#rendering)).
 
 ```python
 import aerialsynth                                       # bindings/python (maturin, abi3 ≥ 3.10)

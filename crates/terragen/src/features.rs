@@ -241,7 +241,16 @@ pub mod gpu {
 
     pub fn stamp(s: &FStamp) -> GFStamp {
         let v = |d: DVec3| [d.x as f32, d.y as f32, d.z as f32, 0.0];
-        GFStamp { center: [s.center.x, s.center.y, s.center.z, 0.0], ex: v(s.ex), ey: v(s.ey), half: s.half, template: s.template, h: s.h, v: s.v, _p: [0.0; 4] }
+        GFStamp {
+            center: [s.center.x, s.center.y, s.center.z, 0.0],
+            ex: v(s.ex),
+            ey: v(s.ey),
+            half: s.half,
+            template: s.template,
+            h: s.h,
+            v: s.v,
+            _p: [0.0; 4],
+        }
     }
 
     #[test]

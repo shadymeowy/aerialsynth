@@ -18,19 +18,19 @@ use crate::world::{Ctx, Macro};
 #[cfg(test)]
 mod example;
 
-// mod desert;
+mod desert;
 
 // mod volcanic;
 
 // mod mountains;
 
-// mod cold;
+mod cold;
 
 // mod coast;
 
-// mod tropical;
+mod tropical;
 
-// mod temperate;
+mod temperate;
 
 mod agriculture;
 
@@ -42,27 +42,28 @@ mod agriculture;
 /// `kernels::KIT_BASE` (64) on, by its line here: desert 64, volcanic 80, mountains 96,
 /// cold 112, coast 128, tropical 144, temperate 160, agriculture 176, settlements 192,
 /// transport 208.
+// (the blank lines between the entries keep parallel kit merges conflict-free: not formatted)
+#[rustfmt::skip]
 pub static KITS: &[&Kit] = &[
-    // &desert::KIT,
+    &desert::KIT,
 
     // &volcanic::KIT,
 
     // &mountains::KIT,
 
-    // &cold::KIT,
+    &cold::KIT,
 
     // &coast::KIT,
 
-    // &tropical::KIT,
+    &tropical::KIT,
 
-    // &temperate::KIT,
+    &temperate::KIT,
 
     &agriculture::KIT,
 
     // &settlements::KIT,
 
     // &transport::KIT,
-
     #[cfg(test)]
     &example::KIT,
 ];
@@ -96,6 +97,9 @@ impl ReliefIn<'_> {
     }
 }
 
+/// A kit's layer function for one stack slot.
+pub type LayerFn = fn(&mut Stack);
+
 /// A kit.
 pub struct Kit {
     /// lower_snake_case; prefixes its WGSL functions
@@ -106,7 +110,7 @@ pub struct Kit {
     pub wgsl: &'static str,
     /// layer functions by stack slot (`stack::slot`); the WGSL file defines
     /// `fn <name>_slot_<slot name>(s: ptr<function, Stack>)` for each
-    pub layers: &'static [(usize, fn(&mut Stack))],
+    pub layers: &'static [(usize, LayerFn)],
     /// its kernels (kinds in its range; WGSL: `fn <wgsl>(li: u32, k: KIn) -> KOut`)
     pub kernels: &'static [KernelSpec],
     /// a pass-A relief operator: changes the height `h` (m) before the drainage carves it.
