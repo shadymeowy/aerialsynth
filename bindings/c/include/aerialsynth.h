@@ -353,7 +353,9 @@ int as_set_cache_mb(const struct as_world *w, size_t mb);
 /**
  * Report tile generation on stderr (`on` != 0) or not (0, the default): a line per batch of
  * tiles generated (count, zooms, CPU or GPU, time) by `as_tile`, `as_tiles`, `as_prefetch` and
- * the renders of the world's cameras (`as_render`). The first render at a new place generates
+ * the renders of the world's cameras (`as_render`), and the first-run compile of the GPU
+ * shaders ("compiling GPU shaders for <GPU> ..." and "GPU shaders ready in N s": ~30 s once
+ * per GPU, driver and version, cached afterwards). The first render at a new place generates
  * the tiles in view, which on the CPU can take minutes. Returns `AS_OK` or
  * `AS_ERR_INVALID_ARGUMENT` (`w` is NULL).
  *

@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+- **Low-zoom tiles in seconds again**: `configs/quick.yaml` (70 tiles, z0–z15) generated in
+  187 s on an RTX 6000 Ada (2.7 s now) and 437 s on the CPU (33 s now, 6 threads). The
+  instance lists of a zoom-0 block scanned millions of lattice cells per family (37 s per
+  batch); a family is now left out of blocks whose finest pixel is at least its reach
+  (`instances::sub_pixel`, both backends: its instances cover at most a pixel there). Bench
+  stills: z5–z16 identical; z3–z4 deserts ≤ 0.2 % of the pixels change (≤ 0.013 % by more than
+  8 DN); z0–z2 lose sub-pixel inselbergs, playas and drumlins, of which the lists kept 8
+  arbitrary ones per block before. A batch whose land-use site requests outgrow their buffers
+  grows them and repeats only the request passes, instead of halving the batch and generating
+  it again (three halvings cost 110 s per run). z8–z16 throughput unchanged (`zoom_bench`).
+- **Fewer spurious warnings**: "more than 8 instances of a family reach a 16-pixel block" only
+  for blocks no wider than the family's cell (the kit's density problem, zoom ~8 and up; the
+  desert playas and inselbergs and the cold kit's drumlins stay below it at the 13 bench
+  places, z8–z16), and "ecoregion sites
+  found only by a global search" not for tiles of zoom ≤ 2, whose corner discs do not bound
+  them.
+- **GPU stalls are actionable**: the error names the likely cause (another process using the
+  GPU), `AERIALSYNTH_GPU` to pick another adapter, and the new `AERIALSYNTH_GPU_STALL_S` to
+  wait longer than the default 120 s (`docs/gpu.md`, *Troubleshooting*).
+- **Shader compile notice on Metal / DX12**: devices without a wgpu pipeline cache keep a
+  marker file per adapter and shader version in `$XDG_CACHE_HOME/terrain/`, so later runs are
+  announced as warm (a message only if the compile takes more than 5 s) instead of as a
+  first-run compile every time.
+
+- **First-run shader compile is announced, the pipeline cache is pruned**: the CLI, viewer
+  (status bar), Python (`verbose=True`) and C (`as_set_verbose`) say when the GPU shaders
+  are being compiled (~30 s once per GPU, driver and version) and how long it took; the cache
+  file is keyed by adapter and shader hash, so stale versions are deleted instead of piling
+  up (`terragen::gpu::set_compile_observer`, `docs/gpu.md`).
+- **GPU compile time** (cold, RTX 6000 Ada, five kits): pass B 390 s -> three pipelines of
+  17–23 s (pass B runs the stack in stages, compiled in parallel; one call site of the kernel
+  library and of every kit layer instead of eleven), pass A1 16 s -> 12 s, point and drainage
+  pipelines 18 / 13 s -> 15 / 10 s; start-up with empty caches ~30 s instead of ~6 min, and
+  the volcanic kit no longer loses the device. Same tiles (52 bench stills: 50 identical, two
+  with one pixel 1 DN off), same speed or faster (pass A 35 % faster: flat Worley loops; agriculture places z12–z16 ~10 %
+  faster). Kits read
+  instances in layers with the new `inst_count` / `inst_get` / `inst_list_bin`; the kit guide
+  has compile-time rules and the `compile_times` / `inlined_sizes` measurements.
 - **Volcanic kit** (`docs/kits/volcanic.md`): stratovolcanoes with craters, three tiers of radial
   gullies and rim wobble, calderas with flat floors and lakes, shield volcanoes, and cinder-cone
   fields with maars (three instance families placed by the atlas' volcanism, plate boundary and

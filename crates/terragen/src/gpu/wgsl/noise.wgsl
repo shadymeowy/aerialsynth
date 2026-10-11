@@ -318,6 +318,30 @@ fn nb_gap(f: f32, d: i32, half: f32) -> f32 {
     return 0.0;
 }
 
+/// The neighbour offsets of a 3D cell (27) and of a 2D cell (9) in ring order (centre, faces,
+/// edges, corners: as nested ring, z, y, x loops visit them), 6 bits each, 10 per word:
+/// (dx + 1) | (dy + 1) << 2 | (dz + 1) << 4. One flat loop per query (the ring loop visited
+/// every cell four times; this is faster on the GPU, same order, same results).
+const NB3_0: u64 = 0x184065656511155lu;
+const NB3_1: u64 = 0x299a485a612409lu;
+const NB3_2: u64 = 0x2aa2280a202lu;
+const NB2: u64 = 0xa202009184045lu;
+
+fn nb_code(w: u64, k: u32) -> vec3<i32> {
+    let c = u32(w >> ((k % 10u) * 6u)) & 63u;
+    return vec3<i32>(i32(c & 3u) - 1, i32((c >> 2u) & 3u) - 1, i32((c >> 4u) & 3u) - 1);
+}
+
+fn nb3(k: u32) -> vec3<i32> {
+    var w = NB3_0;
+    if (k >= 20u) {
+        w = NB3_2;
+    } else if (k >= 10u) {
+        w = NB3_1;
+    }
+    return nb_code(w, k);
+}
+
 /// Feature point of lattice cell `c` (lattice units), its id in `id`.
 fn worley3_site(seed: u64, c: vec3<i64>, jitter: f32) -> Sites {
     let h = hash3(seed, c.x, c.y, c.z);
@@ -339,40 +363,35 @@ fn worley3_sites(seed: u64, p: vec3<f64>, inv_cell: f64, jitter: f32) -> Sites {
     var f2 = FMAX;
     // the centre cell, then faces, edges and corners: the nearest candidates first, so the
     // distance bound skips most of the far ones
-    for (var ring = 0; ring <= 3; ring++) {
-        for (var dz = -1; dz <= 1; dz++) {
-            for (var dy = -1; dy <= 1; dy++) {
-                for (var dx = -1; dx <= 1; dx++) {
-                    if (i32(dx != 0) + i32(dy != 0) + i32(dz != 0) != ring) {
-                        continue;
-                    }
-                    let gx = nb_gap(fq.x, dx, half);
-                    let gy = nb_gap(fq.y, dy, half);
-                    let gz = nb_gap(fq.z, dz, half);
-                    if (gx * gx + gy * gy + gz * gz > f2 + 1e-6) {
-                        continue;
-                    }
-                    let c = iq + vec3<i64>(i64(dx), i64(dy), i64(dz));
-                    let h = hash3(seed, c.x, c.y, c.z);
-                    let jit = jitter * (vec3<f32>(u01k(h, 1lu), u01k(h, 2lu), u01k(h, 3lu)) - 0.5);
-                    // relative to the query's cell: exact small numbers
-                    let rel = vec3<f32>(f32(dx), f32(dy), f32(dz)) + 0.5 + jit - fq;
-                    let d = dot(rel, rel);
-                    let fp = vec3<f64>(f64(c.x), f64(c.y), f64(c.z)) + vec3<f64>(vec3<f32>(0.5) + jit);
-                    if (d < f1) {
-                        f2 = f1;
-                        best.id1 = best.id0;
-                        best.p1 = best.p0;
-                        f1 = d;
-                        best.id0 = h;
-                        best.p0 = fp;
-                    } else if (d < f2) {
-                        f2 = d;
-                        best.id1 = h;
-                        best.p1 = fp;
-                    }
-                }
-            }
+    for (var k = 0u; k < 27u; k++) {
+        let o = nb3(k);
+        let dx = o.x;
+        let dy = o.y;
+        let dz = o.z;
+        let gx = nb_gap(fq.x, dx, half);
+        let gy = nb_gap(fq.y, dy, half);
+        let gz = nb_gap(fq.z, dz, half);
+        if (gx * gx + gy * gy + gz * gz > f2 + 1e-6) {
+            continue;
+        }
+        let c = iq + vec3<i64>(i64(dx), i64(dy), i64(dz));
+        let h = hash3(seed, c.x, c.y, c.z);
+        let jit = jitter * (vec3<f32>(u01k(h, 1lu), u01k(h, 2lu), u01k(h, 3lu)) - 0.5);
+        // relative to the query's cell: exact small numbers
+        let rel = vec3<f32>(f32(dx), f32(dy), f32(dz)) + 0.5 + jit - fq;
+        let d = dot(rel, rel);
+        let fp = vec3<f64>(f64(c.x), f64(c.y), f64(c.z)) + vec3<f64>(vec3<f32>(0.5) + jit);
+        if (d < f1) {
+            f2 = f1;
+            best.id1 = best.id0;
+            best.p1 = best.p0;
+            f1 = d;
+            best.id0 = h;
+            best.p0 = fp;
+        } else if (d < f2) {
+            f2 = d;
+            best.id1 = h;
+            best.p1 = fp;
         }
     }
     return best;
@@ -440,35 +459,31 @@ fn worley2(seed: u64, p: vec2<f32>, cell: f32, jitter: f32) -> Cell2 {
     var best: Cell2;
     best.f1 = FMAX;
     best.f2 = FMAX;
-    for (var ring = 0; ring <= 2; ring++) {
-        for (var dy = -1; dy <= 1; dy++) {
-            for (var dx = -1; dx <= 1; dx++) {
-                if (i32(dx != 0) + i32(dy != 0) != ring) {
-                    continue;
-                }
-                let gx = nb_gap(fq.x, dx, half);
-                let gy = nb_gap(fq.y, dy, half);
-                if (gx * gx + gy * gy > best.f2 + 1e-6) {
-                    continue;
-                }
-                let h = hash2(seed, ix + i64(dx), iy + i64(dy));
-                let rel = vec2<f32>(f32(dx), f32(dy)) + 0.5 + jitter * (vec2<f32>(u01k(h, 1lu), u01k(h, 2lu)) - 0.5);
-                let fp = qf + rel;
-                let r = rel - fq;
-                let d = dot(r, r);
-                if (d < best.f1) {
-                    best.f2 = best.f1;
-                    best.id2 = best.id;
-                    best.point2 = best.point;
-                    best.f1 = d;
-                    best.id = h;
-                    best.point = fp;
-                } else if (d < best.f2) {
-                    best.f2 = d;
-                    best.id2 = h;
-                    best.point2 = fp;
-                }
-            }
+    for (var k = 0u; k < 9u; k++) {
+        let o = nb_code(NB2, k);
+        let dx = o.x;
+        let dy = o.y;
+        let gx = nb_gap(fq.x, dx, half);
+        let gy = nb_gap(fq.y, dy, half);
+        if (gx * gx + gy * gy > best.f2 + 1e-6) {
+            continue;
+        }
+        let h = hash2(seed, ix + i64(dx), iy + i64(dy));
+        let rel = vec2<f32>(f32(dx), f32(dy)) + 0.5 + jitter * (vec2<f32>(u01k(h, 1lu), u01k(h, 2lu)) - 0.5);
+        let fp = qf + rel;
+        let r = rel - fq;
+        let d = dot(r, r);
+        if (d < best.f1) {
+            best.f2 = best.f1;
+            best.id2 = best.id;
+            best.point2 = best.point;
+            best.f1 = d;
+            best.id = h;
+            best.point = fp;
+        } else if (d < best.f2) {
+            best.f2 = d;
+            best.id2 = h;
+            best.point2 = fp;
         }
     }
     best.f1 = sqrt(best.f1) * cell;

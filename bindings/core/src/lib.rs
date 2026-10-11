@@ -243,6 +243,21 @@ pub struct World {
     _open: OpenFile,
 }
 
+/// Some world was set verbose: the shader compile is reported (the generator is shared by the process).
+static ANY_VERBOSE: AtomicBool = AtomicBool::new(false);
+
+fn install_compile_notice() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let say = terragen::gpu::stderr_observer();
+        terragen::gpu::set_compile_observer(Some(Box::new(move |e| {
+            if ANY_VERBOSE.load(Ordering::Relaxed) {
+                say(e);
+            }
+        })));
+    });
+}
+
 /// Tiles files open in this process (canonical paths). A second `TileStore` of the same file
 /// would keep its own index of the file's rows: the two would overwrite each other's tiles.
 static OPEN: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
@@ -313,8 +328,15 @@ impl World {
     /// Report tile generation (by [`World::tile`], [`World::tiles_into`], [`World::prefetch`] and
     /// the renders of cameras over this world) on stderr: a line per batch of tiles, with the
     /// count, zooms, backend and time. Off by default.
+    ///
+    /// Also reports the first-run compile of the GPU shaders (two lines, ~30 s on a fast GPU).
+    /// That compile is per process, not per world: it is reported while any world has verbose on.
     pub fn set_verbose(&self, on: bool) {
         self.verbose.store(on, Ordering::Relaxed);
+        if on {
+            ANY_VERBOSE.store(true, Ordering::Relaxed);
+            install_compile_notice();
+        }
     }
 
     /// Is tile generation reported ([`World::set_verbose`])?

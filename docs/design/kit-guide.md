@@ -62,7 +62,9 @@ fn desert_slot_azonal(s: ptr<function, Stack>) {
 
 The WGSL glue (`kits_slot_<slot>`, `kits_kernel`, `kits_relief`, the family dispatch) is
 generated from `KITS` (`kits::wgsl()`); a WGSL function a kit's `Kit` names must exist with
-exactly that name and signature.
+exactly that name and signature. On the GPU, pass B runs the stack in stages, one pipeline
+each (`gpu::PB_STAGE_STEPS`: slots zonal–azonal, disturbance–agriculture, linear–seasonal and
+standing water); see *Compile time* below.
 
 **Kernel kind ids:** each kit owns 16 ids from `kernels::KIT_BASE` (64), by its position in
 the placeholder list: desert 64, volcanic 80, mountains 96, cold 112, coast 128, tropical 144,
@@ -341,7 +343,7 @@ fn desert_slot_azonal(s: ptr<function, Stack>) {
 (`&(*s).pf`) to a function — copy it to a local `var` and back (naga's SPIR-V backend panics:
 "Expression is not cached"); `target`, `class`, `template`, `filter`, `sample`, `mod`, … are reserved words; no
 recursion; every call site of a big function is inlined (keep one call site per heavy
-function); 64-bit types (`u64`, `i64`, `f64`) are available; positions are `vec3<f64>`, local
+function; see *Compile time*); 64-bit types (`u64`, `i64`, `f64`) are available; positions are `vec3<f64>`, local
 coordinates `f32`. `cargo test -p terragen wgsl_compiles` parses, validates and compiles every
 entry point to SPIR-V without a GPU.
 
@@ -401,14 +403,23 @@ fields, and the atlas (`w.atlas().sample(site.center.normalize())`; WGSL
 `atlas_sample(vec3<f32>(normalize(site.center)))`: `boundary`, `volcanism`, `hotspot`,
 `litho`, `glaciation` …). Its WGSL `<name>_exists` goes into the kit's relief WGSL (every
 module), with the family constants `FAM_<NAME>`. A layer reads a family with
-`inst_list(FAM_X, (*s).l.blk, (*s).c.p)` (CPU `s.instances(i)`), a relief operator with
-`inst_list(FAM_X, r.blk, c.p)` (CPU `r.instances(w, i)`), returning an `InstList { n, items }`
-of `Inst { id, center, v }`; its
+`inst_count(FAM_X, (*s).l.blk)` and `inst_get(FAM_X, (*s).l.blk, k)` (an `Inst { id, center,
+v }`; CPU `s.instances(i)`), or `inst_list_bin(FAM_X, (*s).l.blk)` where a helper shared with
+the relief takes an `InstList { n, items }`; a relief operator with `inst_list(FAM_X, r.blk,
+c.p)` (CPU `r.instances(w, i)`; `p` must be the operator's `c.p`: the point and drainage
+modules scan the relief families once per point). Never call `inst_list` from a layer: its
+scan fallback puts every family's existence test into the layer. An instance's
 decision must not depend on per-pixel values (R-site). At most 8 instances of a family reach one
-block: where more would, both backends keep the first 8 by id (deterministic, identical) and the
-generator warns once. Treat the warning as a bug in the kit: choose a larger cell or a lower
-density, or draw dense objects (mounds, small trees) with a `scatter` kernel; families are for
-sparse landmarks (the density test in `tests/invariants.rs` checks the default world).
+block: where more would, both backends keep the first 8 by id (deterministic, identical). The
+generator warns once when that happens in a block no wider than the family's cell (16 pixels ≤
+`cell`: zoom ~8 and up for a 16 km cell), where a sparse family holds a handful; larger blocks at
+low zooms hold many instances by design and do not warn. Treat the warning as a bug in the kit:
+choose a larger cell or a lower density, or draw dense objects (mounds, small trees) with a
+`scatter` kernel; families are for sparse landmarks (the density test in `tests/invariants.rs`
+checks the default world). A family is not listed at all in blocks whose finest pixel is at
+least its `reach` (planet-scale tiles, zooms ~0–5): its instances cover at most a pixel there,
+and scanning the block's lattice cells took half a minute per zoom-0 tile
+(`instances::sub_pixel`, both backends).
 
 ---
 
@@ -434,7 +445,10 @@ pub host: Option<fn(&mut HostCtx, &Area) -> Features>   // in `Kit`
 `HostCtx` gives the world and point evaluations of the terrain (`ctx.terrain(lat, lon, gsd)`:
 `None` while the GPU evaluates it — return what you have; the host re-runs you), identical on
 both backends. Lists are cached per area; a feature must be a pure function of the world and
-its own neighbourhood (never of the tile). Per sample, `s.segments()` / `s.stamps()` (WGSL
+its own neighbourhood (never of the tile). The area of a low-zoom tile spans thousands of
+kilometres (`area.radius`): return nothing where your features are far below its pixel
+(`area.gsd`), as the example kit does above 2 km (an `instances::near` over a zoom-0 area
+visits hundreds of millions of lattice cells: minutes per tile). Per sample, `s.segments()` / `s.stamps()` (WGSL
 `feat_seg_*`, `feat_stamp_*`) give the bin's features, and `features::seg_frame(seg, p)` the
 signed distance, along-distance and fraction — the `aux` of the `linear` and `stamp` kernels.
 
@@ -515,6 +529,37 @@ a kit may add at most **5 %** to the tiles/s of any zoom of the default bench pl
 * Work that depends on an instance or a site only belongs in its existence test / host list,
   not per pixel.
 
+### Compile time
+
+The drivers (NVIDIA most of all) inline every call into the entry point and compile one
+pipeline in time that grows faster than its size (about size^1.4): pass B as one pipeline with
+five kits took 390 s and a sixth kit lost the device. Pass B now runs the stack in three
+pipelines (stages) of ~17–23 s each, compiled in parallel; each kit adds its layers to the
+stages of its slots. Rules that keep it there:
+
+* **One call site per heavy function.** A helper called from three slot functions, or twice in
+  one, is compiled three or two times: compute it once and pass the result, or loop.
+* **A loop around a big call keeps one copy of it** (the core's slot loop, `biome_layers`):
+  naga bounds every loop, so the drivers do not unroll them. Do not wrap small code (one noise
+  octave, a `perlin3`'s corners) in loops: in a big pipeline the loops cost more than they save.
+* **Noise is most of the code** (a `perlin3` is ~200 instructions, 14 64-bit hashes): ~125 of
+  pass B's ~240 `perlin3` copies are in kits. Share octaves (an fBm table, `fbm(f, …)`, is one
+  copy for all its octaves), drop octaves that are never visible.
+* **Instances:** `inst_count` / `inst_get` (or `inst_list_bin`) in layers, never `inst_list`;
+  relief operators call `inst_list(F, r.blk, c.p)` with a constant `F` where they can.
+* **No large private arrays** (an `InstList` is 512 bytes) and no 512-byte copies per sample.
+
+Measure (farm, `rrun --gpu`): `__GL_SHADER_DISK_CACHE=0 cargo test -p terragen --release --lib
+compile_times -- --ignored --nocapture` (cold compile time of every pipeline, one at a time;
+`TERRAGEN_COMPILE=pass_b0,pass_b1,pass_b2` only these; `TERRAGEN_COMPILE_DROP=<kit>` without a
+kit's layers and kernels: its cost). Without a GPU, `cargo test -p terragen --release --lib
+inlined_sizes -- --ignored --nocapture` prints each entry point's inlined size and, with
+`TERRAGEN_COMPILE=<entry>`, the largest contributors and repeated calls. Budget: no pipeline
+above ~30 s cold on the farm; if a stage grows past it, move a boundary in
+`gpu::PB_STAGE_STEPS` (or add one: any step 1–9; boundaries after step 5 carry the deferred
+layers and the town between stages, twice the state). `TERRAGEN_PROFILE=1` prints each
+pipeline's compile time at start-up (in parallel, so ~1.3× the one-at-a-time numbers).
+
 ---
 
 ## Checklist
@@ -527,6 +572,7 @@ a kit may add at most **5 %** to the tiles/s of any zoom of the default bench pl
       variety, `wgsl_compiles`
 - [ ] stills before / after at z8, z12, z14, z16 of the places the kit changes
 - [ ] `zoom_bench` before / after: within the performance budget
+- [ ] `compile_times` (cold): no pipeline above ~30 s; the kit's own cost (`TERRAGEN_COMPILE_DROP`)
 - [ ] `CHANGELOG.md` (Unreleased) line; `GENERATOR_VERSION` is the lead's (one bump per release)
 
 ---

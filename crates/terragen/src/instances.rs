@@ -137,17 +137,40 @@ fn cached_site(w: &World, fi: usize, f: &Family, c: (i64, i64, i64)) -> Option<(
     v
 }
 
+/// Whether family `f` is left out of the lists of a block whose finest pixel is `gsd` (m): its
+/// instances reach at most one pixel there (planet-scale tiles, zooms ~0 to 5). Their relief is
+/// below the pixel (a few metres of mean height) and their colour a few isolated pixels, while
+/// the block's scan visits millions of lattice cells at zoom 0 (half a minute per tile) and
+/// thousands of instances reach the block, of which [`K`] arbitrary ones would be kept. The
+/// same `f32` comparison as the GPU's `instance_lists`.
+pub fn sub_pixel(f: &Family, gsd: f32) -> bool {
+    f.reach as f32 <= gsd
+}
+
+/// The finest pixel (m) of the 16-pixel block row `by` of a tile's pass-A grid (rows `oy - 2 +
+/// j`, `j` < `na2`, of the global pixel grid at zoom `z`; as the GPU's `bin_gsd`, from the
+/// tile's row table).
+pub fn block_gsd(ell: &geodesy::Ellipsoid, z: u8, oy: f64, na2: usize, by: usize) -> f32 {
+    let gsd = |j: usize| {
+        let (lat, _) = geodesy::tiles::pixel_to_latlon(glam::DVec2::new(0.0, oy + j as f64 - 2.0 + 0.5), z, crate::TILE_SIZE as u32);
+        geodesy::tiles::gsd_ew(lat, z, crate::TILE_SIZE as u32, ell) as f32
+    };
+    let j0 = by * 16;
+    gsd(j0).min(gsd((j0 + 15).min(na2 - 1)))
+}
+
 /// The instances of every family that can reach the disc of radius `r` around `p` (only the
-/// relief families with `relief_only`).
-pub fn lists(w: &World, p: DVec3, r: f64, relief_only: bool) -> Vec<Vec<Instance>> {
-    families().enumerate().map(|(i, f)| if relief_only && !f.relief { Vec::new() } else { near(w, i, p, r) }).collect()
+/// relief families with `relief_only`), in a block whose finest pixel is `gsd` (0: any; see
+/// [`sub_pixel`]).
+pub fn lists(w: &World, p: DVec3, r: f64, relief_only: bool, gsd: f32) -> Vec<Vec<Instance>> {
+    families().enumerate().map(|(i, f)| if (relief_only && !f.relief) || sub_pixel(f, gsd) { Vec::new() } else { near(w, i, p, r) }).collect()
 }
 
 /// The WGSL of the families (in every module): constants `FAM_<NAME>`, their lattice
 /// parameters and the existence dispatch (`<name>_exists` lives in the kit's relief WGSL).
 pub fn wgsl() -> String {
     let fams: Vec<&Family> = families().collect();
-    let mut s = format!("const NFAM: u32 = {}u;\n", fams.len());
+    let mut s = format!("const NFAM: u32 = {}u;\n// (at least 1: array sizes)\nconst NFAM_1: u32 = {}u;\n", fams.len(), fams.len().max(1));
     for (i, f) in fams.iter().enumerate() {
         s.push_str(&format!("const FAM_{}: u32 = {i}u;\n", f.name.to_uppercase()));
     }
@@ -163,6 +186,7 @@ pub fn wgsl() -> String {
     s += &sw("fam_jitter", "f32", "0.0", &|f| format!("{:?}", f.jitter as f32));
     s += &sw("fam_reach", "f32", "0.0", &|f| format!("{:?}", f.reach as f32));
     s += &sw("fam_key", "u64", "0lu", &|f| format!("{:#x}lu", key(f)));
+    s += &sw("fam_relief", "bool", "false", &|f| format!("{}", f.relief));
     s.push_str("fn family_exists(f: u32, site: InstSite) -> InstOut {\n    switch f {\n");
     for (i, f) in fams.iter().enumerate() {
         s.push_str(&format!("        case {i}u: {{ return {}_exists(site); }}\n", f.name));

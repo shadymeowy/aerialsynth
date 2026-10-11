@@ -242,7 +242,9 @@ class World:
     def verbose(self) -> bool:
         """Report tile generation on stderr: a line per batch of tiles generated (count, zooms,
         CPU or GPU, time) by :meth:`tile`, :meth:`tiles`, :meth:`prefetch` and the renders of
-        this world's cameras. Settable; off by default."""
+        this world's cameras, and the first-run compile of the GPU shaders ("compiling GPU shaders
+        for <GPU> ..." and "GPU shaders ready in N s"; about 30 s once per GPU, driver and version,
+        cached afterwards; reported while any world has verbose on). Settable; off by default."""
         return self._w.verbose
 
     @verbose.setter

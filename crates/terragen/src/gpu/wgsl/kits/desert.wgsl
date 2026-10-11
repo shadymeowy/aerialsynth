@@ -152,7 +152,7 @@ fn desert_slot_azonal(s: ptr<function, Stack>) {
     let p = c.p;
     let gsd = c.gsd;
     let fw = (*s).l.fw;
-    let pl = desert_playa(inst_list(FAM_DESERT_PLAYAS, (*s).l.blk, p), p, c.east, c.north);
+    let pl = desert_playa(inst_list_bin(FAM_DESERT_PLAYAS, (*s).l.blk), p, c.east, c.north);
     if (pl.found && pl.x < 1.4) {
         let x = pl.x;
         let r = pl.r;
@@ -179,7 +179,7 @@ fn desert_slot_azonal(s: ptr<function, Stack>) {
             }
         }
     }
-    let ins = inst_list(FAM_DESERT_INSELBERGS, (*s).l.blk, p);
+    let ins = inst_list_bin(FAM_DESERT_INSELBERGS, (*s).l.blk);
     for (var i = 0u; i < ins.n; i++) {
         let sh = desert_ins_shape(ins.items[i].id, desert_offset(p, ins.items[i].center, c.east, c.north));
         let cov = clamp((0.9 - sh.x) * sh.y / max(fw, 1e-3) + 0.5, 0.0, 1.0);

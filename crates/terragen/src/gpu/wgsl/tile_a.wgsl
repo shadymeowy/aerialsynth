@@ -714,12 +714,26 @@ struct GInst {
 @group(2) @binding(20) var<storage, read_write> inst_n: array<u32>;
 @group(2) @binding(21) var<storage, read_write> inst_v: array<GInst>;
 
-/// The instances of family `f` near `p`: the list of block `blk` (a bin of the tile), else a
-/// scan.
-fn inst_list(f: u32, blk: u32, p: vec3<f64>) -> InstList {
-    if (blk == 0xffffffffu) {
-        return inst_scan(f, p, 0.0);
-    }
+/// The number of instances of family `f` listed for block `blk` (a bin of the tile: every
+/// tile-module caller has one).
+fn inst_count(f: u32, blk: u32) -> u32 {
+    return min(inst_n[blk * NFAM + f], INST_K);
+}
+
+/// Instance `k` (< `inst_count(f, blk)`) of family `f` in block `blk`'s list (sorted by id).
+fn inst_get(f: u32, blk: u32, k: u32) -> Inst {
+    let g = inst_v[(blk * NFAM + f) * INST_K + k];
+    var it: Inst;
+    it.id = g.id;
+    it.center = g.center.xyz;
+    it.v = array<f32, 8>(g.v0.x, g.v0.y, g.v0.z, g.v0.w, g.v1.x, g.v1.y, g.v1.z, g.v1.w);
+    return it;
+}
+
+/// The instances of family `f` listed for block `blk` (a bin of the tile). Pass-B layers always
+/// have one (`(*s).l.blk`): use this (or `inst_count` / `inst_get`), not `inst_list`, whose
+/// scan fallback puts every family's existence test into the layer.
+fn inst_list_bin(f: u32, blk: u32) -> InstList {
     var l: InstList;
     let b = blk * NFAM + f;
     l.n = min(inst_n[b], INST_K);
@@ -730,6 +744,29 @@ fn inst_list(f: u32, blk: u32, p: vec3<f64>) -> InstList {
         l.items[k].v = array<f32, 8>(g.v0.x, g.v0.y, g.v0.z, g.v0.w, g.v1.x, g.v1.y, g.v1.z, g.v1.w);
     }
     return l;
+}
+
+/// The relief families' lists of a point without a block (a scan, in one loop: one inlined copy
+/// of the existence tests). Every tile caller has a block: never taken, but keep it: without
+/// a scan in pass A1 it ran 50 % slower on NVIDIA (other code generation; a cheap stand-in
+/// branch did not help).
+var<private> rl_lists: array<InstList, NFAM_1>;
+fn relief_lists(p: vec3<f64>, blk: u32) {
+    if (blk == 0xffffffffu) {
+        for (var f = 0u; f < NFAM; f++) {
+            if (fam_relief(f)) {
+                rl_lists[f] = inst_scan(f, p, 0.0);
+            }
+        }
+    }
+}
+
+/// The instances of family `f` near `p` (relief operators): the list of block `blk`.
+fn inst_list(f: u32, blk: u32, p: vec3<f64>) -> InstList {
+    if (blk == 0xffffffffu) {
+        return rl_lists[f];
+    }
+    return inst_list_bin(f, blk);
 }
 
 /// Centre and radius of bin `bin` of a tile (the pass-A pixel centres it covers, + a pixel).
@@ -759,6 +796,13 @@ fn bin_disc(ti: TileInfo, bin: u32) -> BinDisc {
     return o;
 }
 
+/// The finest pixel of bin `bin` of a tile (`instances::block_gsd`).
+fn bin_gsd(ti: TileInfo, bin: u32) -> f32 {
+    let j0 = (bin / NBIN) * 16u;
+    let j1 = min(j0 + 15u, NA2 - 1u);
+    return min(rows[ti.row_a + j0].gsd, rows[ti.row_a + j1].gsd);
+}
+
 /// The instances of every family that can reach each bin (`instances::lists`).
 @compute @workgroup_size(64)
 fn instance_lists(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -773,8 +817,16 @@ fn instance_lists(@builtin(global_invocation_id) gid: vec3<u32>) {
     let f = k % nf;
     let d = bin_disc(ti, bin);
     var over = false;
-    let l = inst_scan_n(f, d.c, d.r, &over);
-    if (over) {
+    var l: InstList;
+    l.n = 0u;
+    // (a family that reaches at most a pixel of the block lists nothing: `instances::sub_pixel`)
+    let g = bin_gsd(ti, bin);
+    if (fam_reach(f) > g) {
+        l = inst_scan_n(f, d.c, d.r, &over);
+    }
+    // (a crowded block is a kit's problem only where the block spans at most one lattice cell;
+    // larger blocks at low zooms hold many instances by design)
+    if (over && 16.0 * g <= f32(fam_cell(f))) {
         atomicAdd(&counters[7], 1u);
     }
     let b = (ti.bin0 + bin) * NFAM + f;

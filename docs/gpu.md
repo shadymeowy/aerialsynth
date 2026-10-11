@@ -19,6 +19,25 @@ render:
 
 Build: the `gpu` feature of the `render` and `terragen` crates (on by default).
 
+## First run: shader compilation
+
+**First run.** The first run on a GPU compiles the generator's compute shaders: about 30 s on a
+fast desktop GPU, longer on laptops and integrated GPUs. `terrain` says so on stderr
+(`compiling GPU shaders for <GPU> ...`, then `GPU shaders ready in N s`), the viewer shows it in
+its status bar, and Python / C report it with `verbose` on. The result is cached per GPU, driver
+and aerialsynth version in `$XDG_CACHE_HOME/terrain/` (`~/.cache/terrain/`), where later runs
+start in about a second; files of older versions are deleted automatically. To clear the cache,
+delete that directory. (Metal and DX12 keep their own driver caches: a marker file in that
+directory records that this GPU compiled these shaders, and later runs say nothing unless the
+compile takes more than 5 s.)
+
+The cache file is `pipelines-<adapter key>-<hash>.bin`; the hash covers the generated WGSL and
+the wgpu version, so a new shader version never reuses a stale file, and saving deletes the
+other files of the same adapter. Library users can watch the compile with
+`terragen::gpu::set_compile_observer` (events `CompileEvent::Started { gpu_name, cold }` and
+`Finished { secs, cold }`; silent by default), `terragen::gpu::stderr_observer()` (the CLI's
+messages) and `terragen::gpu::compiling_since()` (polled by the viewer).
+
 ## Split of the work
 
 | stage | where | why |
@@ -141,17 +160,19 @@ and builds the same world:
   * **Tables** (world-constant, group 0): the atlas (binding 5) and the biome registry —
     biomes, crown layers, zones, kernel layers with their calibrated means, per-GSD-band layer
     lists (bindings 6–11). Per batch (group 1): ecoregions, features and their bins.
-* **Batches:** 16 tiles per batch (~26 MB of GPU memory per tile). Kernels: grid nodes →
-  instance lists per 16-px bin → relief (and lake requests) → drainage pieces per bin → rest of
-  pass A (and site requests: regions, town cells, ecoregions) → pass B (adaptive supersampling)
-  → canopy opening → output layers. `TERRAGEN_PROFILE=passes` times each kernel on its own.
+* **Batches:** 16 tiles per batch (~26 MB of GPU memory per tile, and pass B's work buffer).
+  Kernels: grid nodes → instance lists per 16-px bin → relief (and lake requests) → drainage
+  pieces per bin → rest of pass A (and site requests: regions, town cells, ecoregions) → pass B
+  (three stages; adaptive supersampling in rounds) → canopy opening → output layers. `TERRAGEN_PROFILE=passes` times each kernel on its own.
 * **Startup:** the compiled pipelines are kept in `$XDG_CACHE_HOME/terrain/` (default
   `~/.cache/terrain/`; the driver's own shader cache is per executable); after the first run the
   generator is ready in ~0.1 s. The first compilation (new install, new driver, changed shaders)
-  takes ~25–30 s, set by pass B (`TERRAGEN_PROFILE=1` prints each pipeline's time). The driver
-  inlines every call, so the shaders call the big functions (the surface model, the pixel-field
-  fBm, a town) from one site each: with five call sites of the surface model pass B took
-  ~150 s. `terrain view` compiles in the background and generates on the CPU meanwhile
+  takes ~30 s on the RTX 6000 Ada (`TERRAGEN_PROFILE=1` prints each pipeline's time). The
+  driver inlines every call and its compile time grows faster than a pipeline's size, so the
+  shaders call the big functions (the surface model, the kernel library, the kits' layers, a
+  town) from one site each, and pass B runs the stack in three pipelines (`pass_b0..2`, the
+  stack's state between them in a work buffer of ~170 MB, kept across batches): as one pipeline
+  with five kits it took 390 s (`docs/design/kit-guide.md`, *Compile time*). `terrain view` compiles in the background and generates on the CPU meanwhile
   (`Generator::prepare_gpu_in_background`).
 
 | | CPU (8 threads) | GPU (RTX 2080 Ti) |
@@ -183,6 +204,14 @@ regions, each needing a point evaluation with the finest drainage network), for 
 * **Lake levels:** every lake's level takes 11 terrain evaluations with the finest drainage
   network around it.
 
+Two costs that grew with the planet-scale tiles are bounded: instance families are not listed
+in 16-pixel blocks whose pixel is at least the family's reach (`instances::sub_pixel`; at zoom
+0 the scan visited millions of lattice cells per block and took 37 s per batch), and a batch
+whose site requests outgrow their buffers (a distinct ecoregion per pixel at zoom 0) grows
+them and runs only the request passes again, instead of halving the batch and redoing it.
+`configs/quick.yaml` (70 tiles, z0–z15): 187 s → 2.7 s on the RTX 6000 Ada (8 s on a Tesla P4), 437 s → 33 s on
+the CPU (6 threads).
+
 ## Troubleshooting
 
 - **Several GPUs:** `AERIALSYNTH_GPU` picks the one to use, for the CLI, the viewer and the C /
@@ -208,6 +237,12 @@ regions, each needing a point evaluation with the finest drainage network), for 
 - **Silent CPU fallback:** with `backend: auto`, a failed GPU batch is generated on the CPU
   from then on, with a one-line warning. Set `AERIALSYNTH_GPU_STRICT=1` (development, CI) to
   make such a failure an error instead.
+- **"the GPU stalled (no read-back completed in 120 s)":** the GPU finished no work for two
+  minutes. Usually another process (a training job at 100 %) is using it heavily; pick another
+  adapter with `AERIALSYNTH_GPU` (see *Several GPUs*), or let the generator wait longer with
+  `AERIALSYNTH_GPU_STALL_S=<seconds>` (default 120). The bound stays because a driver that
+  stopped executing the queue never recovers: without it the run would hang instead of failing
+  (or, with `backend: auto`, continuing on the CPU).
 - **A GPU process hangs at start over SSH:** with X forwarding (`DISPLAY` set to a remote
   display), some NVIDIA Vulkan drivers block while creating the device. Run headless work with
   `env -u DISPLAY terrain …` (the same for Python and C programs).

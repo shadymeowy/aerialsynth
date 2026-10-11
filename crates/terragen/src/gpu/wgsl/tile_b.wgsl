@@ -288,13 +288,16 @@ fn pixel_fields_b(ti: TileInfo, i: u32, j: u32, p: vec3<f64>, gsd: f32) -> PixFi
     return pf;
 }
 
-/// One sub-sample (sx, sy) of pass-B pixel (i, j): its surface and bare ground.
-struct Sample {
-    s: Surface,
+/// The inputs of sub-sample (sx, sy) of pass-B pixel (i, j): its frame, terrain, local values
+/// and bare ground.
+struct SampleIn {
+    c: Ctx,
+    t: Terrain,
+    l: Local,
     ground: f32,
 }
 
-fn sample_b(ti: TileInfo, i: u32, j: u32, sx: u32, sy: u32, slope: f32, grad: vec2<f32>, gsd: f32, pf: ptr<function, PixFields>) -> Sample {
+fn sample_in(ti: TileInfo, i: u32, j: u32, sx: u32, sy: u32, slope: f32, grad: vec2<f32>, gsd: f32) -> SampleIn {
     let ss = ti.ss;
     let fxo = sub_offset(sx, ss);
     let fyo = sub_offset(sy, ss);
@@ -362,54 +365,233 @@ fn sample_b(ti: TileInfo, i: u32, j: u32, sx: u32, sy: u32, slope: f32, grad: ve
     l.blk = ti.bin0 + ((j + 1u) / 16u) * NBIN + (i + 1u) / 16u;
     let r = rows[ti.row_b + j * ss + sy];
     let c = cols[ti.col_b + i * ss + sx];
-    let ctx = row_col_ctx(r, c, gsd);
-    var o: Sample;
-    o.s = surface_eval(ctx, t, l, pf);
+    var o: SampleIn;
+    o.c = row_col_ctx(r, c, gsd);
+    o.t = t;
+    o.l = l;
     o.ground = ground;
     return o;
 }
 
-// one vote for the majority class of a pixel (pass B's `counts`: 8-bit counters, 4 per word)
-fn vote(counts: ptr<function, array<u32, 32>>, cls: u32) {
-    let c = min(cls, LC_MAX_CLASSES - 1u);
-    (*counts)[c >> 2u] += 1u << ((c & 3u) * 8u);
+// ---- pass B in stages
+//
+// The stack runs in `PB_STAGES` pipelines (`pass_b0`, `pass_b1`, ..: each a range of the
+// stack's steps, `gpu::stages_wgsl`), so that no pipeline holds the whole surface model (the
+// drivers inline every call into one function: one pipeline with every kit took minutes to
+// compile, and its compile time grows faster than its size). Between stages the stack's
+// mutable state goes through `pbw`. The sub-samples run in rounds of `PB_RS` (adaptive: the
+// diagonal pair, then the other two only where it disagrees); the last stage accumulates the
+// pixel's sums in `pixb` and finishes it.
+
+/// The pass-B work buffer: header (round, first tile of the chunk, an opaque 0, chunk tiles),
+/// then per chunk pixel: the stage state of each sample of the round, its pixel fields, its
+/// samples' classes and flags.
+/// (`PBW_HDR`, `PB_RS` samples per round, `ST_F` words of stage state per sample: masks (19),
+/// colour (3), height, emission (3), lit, class and flags, with `PB_STATE_FULL` (a stage
+/// boundary after step 5) the deferred layers (10) and the town (14); `PFW` words of pixel fields: f (16),
+/// pending, has_stand, stand (2); `ACCW` words of classes (8 bits each, up to 16) and flags
+/// (1: finished): constants from `gpu::stages_wgsl`)
+@group(2) @binding(22) var<storage, read_write> pbw: array<u32>;
+
+fn st_save(sp: ptr<function, Stack>, b: u32) {
+    let m = (*sp).m;
+    pbw[b + 0u] = bitcast<u32>(m.cover);
+    pbw[b + 1u] = bitcast<u32>(m.rock);
+    pbw[b + 2u] = bitcast<u32>(m.sand);
+    pbw[b + 3u] = bitcast<u32>(m.beach);
+    pbw[b + 4u] = bitcast<u32>(m.snow);
+    pbw[b + 5u] = bitcast<u32>(m.shore_keep);
+    pbw[b + 6u] = bitcast<u32>(m.natural_ok);
+    pbw[b + 7u] = bitcast<u32>(m.flat_ok);
+    pbw[b + 8u] = bitcast<u32>(m.micro);
+    pbw[b + 9u] = bitcast<u32>(m.riparian);
+    pbw[b + 10u] = bitcast<u32>(m.woodlot);
+    pbw[b + 11u] = bitcast<u32>(m.field_cov);
+    pbw[b + 12u] = bitcast<u32>(m.town_urban);
+    pbw[b + 13u] = bitcast<u32>(m.town_cov);
+    pbw[b + 14u] = bitcast<u32>(m.river_clear);
+    pbw[b + 15u] = bitcast<u32>(m.road_major_cov);
+    pbw[b + 16u] = bitcast<u32>(m.road_cov);
+    pbw[b + 17u] = bitcast<u32>(m.river_cov);
+    pbw[b + 18u] = bitcast<u32>(m.veg);
+    pbw[b + 19u] = bitcast<u32>((*sp).col.x);
+    pbw[b + 20u] = bitcast<u32>((*sp).col.y);
+    pbw[b + 21u] = bitcast<u32>((*sp).col.z);
+    pbw[b + 22u] = bitcast<u32>((*sp).height);
+    pbw[b + 23u] = bitcast<u32>((*sp).emission.x);
+    pbw[b + 24u] = bitcast<u32>((*sp).emission.y);
+    pbw[b + 25u] = bitcast<u32>((*sp).emission.z);
+    pbw[b + 26u] = bitcast<u32>((*sp).lit);
+    pbw[b + 27u] = ((*sp).cls & 0xffffu) | select(0u, 0x10000u, (*sp).is_water) | select(0u, 0x20000u, (*sp).done) | select(0u, 0x40000u, (*sp).deferring);
+    if (PB_STATE_FULL) {
+        // (stage boundaries after step 5: the deferred layers and the town)
+        let d = (*sp).def;
+        pbw[b + 28u] = bitcast<u32>(d.k);
+        pbw[b + 29u] = bitcast<u32>(d.c.x);
+        pbw[b + 30u] = bitcast<u32>(d.c.y);
+        pbw[b + 31u] = bitcast<u32>(d.c.z);
+        pbw[b + 32u] = bitcast<u32>(d.kh);
+        pbw[b + 33u] = bitcast<u32>(d.ch);
+        pbw[b + 34u] = bitcast<u32>(d.la);
+        pbw[b + 35u] = bitcast<u32>(d.lb);
+        pbw[b + 36u] = bitcast<u32>(d.lmin);
+        pbw[b + 37u] = d.cls;
+        let tw = (*sp).town;
+        pbw[b + 38u] = bitcast<u32>((*sp).town_i);
+        pbw[b + 39u] = select(0u, 1u, tw.px.ok) | select(0u, 2u, tw.px.shadow_ok);
+        pbw[b + 40u] = bitcast<u32>(tw.px.col.x);
+        pbw[b + 41u] = bitcast<u32>(tw.px.col.y);
+        pbw[b + 42u] = bitcast<u32>(tw.px.col.z);
+        pbw[b + 43u] = bitcast<u32>(tw.px.h);
+        pbw[b + 44u] = bitcast<u32>(tw.px.cov);
+        pbw[b + 45u] = tw.px.cls;
+        pbw[b + 46u] = bitcast<u32>(tw.px.em.x);
+        pbw[b + 47u] = bitcast<u32>(tw.px.em.y);
+        pbw[b + 48u] = bitcast<u32>(tw.px.em.z);
+        pbw[b + 49u] = bitcast<u32>(tw.px.street);
+        pbw[b + 50u] = bitcast<u32>(tw.px.resolved);
+        pbw[b + 51u] = bitcast<u32>(tw.shadow);
+    }
 }
 
-/// Pass B per pixel of the tile and its 1-pixel apron: the supersampled surface.
-@compute @workgroup_size(16, 16)
-fn pass_b(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let ti = tiles[gid.z];
+fn st_load(sp: ptr<function, Stack>, b: u32) {
+    var m: Masks;
+    m.cover = bitcast<f32>(pbw[b + 0u]);
+    m.rock = bitcast<f32>(pbw[b + 1u]);
+    m.sand = bitcast<f32>(pbw[b + 2u]);
+    m.beach = bitcast<f32>(pbw[b + 3u]);
+    m.snow = bitcast<f32>(pbw[b + 4u]);
+    m.shore_keep = bitcast<f32>(pbw[b + 5u]);
+    m.natural_ok = bitcast<f32>(pbw[b + 6u]);
+    m.flat_ok = bitcast<f32>(pbw[b + 7u]);
+    m.micro = bitcast<f32>(pbw[b + 8u]);
+    m.riparian = bitcast<f32>(pbw[b + 9u]);
+    m.woodlot = bitcast<f32>(pbw[b + 10u]);
+    m.field_cov = bitcast<f32>(pbw[b + 11u]);
+    m.town_urban = bitcast<f32>(pbw[b + 12u]);
+    m.town_cov = bitcast<f32>(pbw[b + 13u]);
+    m.river_clear = bitcast<f32>(pbw[b + 14u]);
+    m.road_major_cov = bitcast<f32>(pbw[b + 15u]);
+    m.road_cov = bitcast<f32>(pbw[b + 16u]);
+    m.river_cov = bitcast<f32>(pbw[b + 17u]);
+    m.veg = bitcast<f32>(pbw[b + 18u]);
+    (*sp).m = m;
+    (*sp).col = vec3<f32>(bitcast<f32>(pbw[b + 19u]), bitcast<f32>(pbw[b + 20u]), bitcast<f32>(pbw[b + 21u]));
+    (*sp).height = bitcast<f32>(pbw[b + 22u]);
+    (*sp).emission = vec3<f32>(bitcast<f32>(pbw[b + 23u]), bitcast<f32>(pbw[b + 24u]), bitcast<f32>(pbw[b + 25u]));
+    (*sp).lit = bitcast<f32>(pbw[b + 26u]);
+    let w = pbw[b + 27u];
+    (*sp).cls = w & 0xffffu;
+    (*sp).is_water = (w & 0x10000u) != 0u;
+    (*sp).done = (w & 0x20000u) != 0u;
+    (*sp).deferring = (w & 0x40000u) != 0u;
+    if (PB_STATE_FULL) {
+        var d: Deferred;
+        d.k = bitcast<f32>(pbw[b + 28u]);
+        d.c = vec3<f32>(bitcast<f32>(pbw[b + 29u]), bitcast<f32>(pbw[b + 30u]), bitcast<f32>(pbw[b + 31u]));
+        d.kh = bitcast<f32>(pbw[b + 32u]);
+        d.ch = bitcast<f32>(pbw[b + 33u]);
+        d.la = bitcast<f32>(pbw[b + 34u]);
+        d.lb = bitcast<f32>(pbw[b + 35u]);
+        d.lmin = bitcast<f32>(pbw[b + 36u]);
+        d.cls = pbw[b + 37u];
+        (*sp).def = d;
+        (*sp).town_i = bitcast<i32>(pbw[b + 38u]);
+        let fl = pbw[b + 39u];
+        var tw: TownOut;
+        tw.px.ok = (fl & 1u) != 0u;
+        tw.px.shadow_ok = (fl & 2u) != 0u;
+        tw.px.col = vec3<f32>(bitcast<f32>(pbw[b + 40u]), bitcast<f32>(pbw[b + 41u]), bitcast<f32>(pbw[b + 42u]));
+        tw.px.h = bitcast<f32>(pbw[b + 43u]);
+        tw.px.cov = bitcast<f32>(pbw[b + 44u]);
+        tw.px.cls = pbw[b + 45u];
+        tw.px.em = vec3<f32>(bitcast<f32>(pbw[b + 46u]), bitcast<f32>(pbw[b + 47u]), bitcast<f32>(pbw[b + 48u]));
+        tw.px.street = bitcast<f32>(pbw[b + 49u]);
+        tw.px.resolved = bitcast<f32>(pbw[b + 50u]);
+        tw.shadow = bitcast<f32>(pbw[b + 51u]);
+        (*sp).town = tw;
+    }
+}
+
+fn pf_save(b: u32, pf: PixFields) {
+    for (var k = 0u; k < PF_N; k++) {
+        pbw[b + k] = bitcast<u32>(pf.f[k]);
+    }
+    pbw[b + 16u] = pf.pending;
+    pbw[b + 17u] = pf.has_stand;
+    pbw[b + 18u] = u32(pf.stand & 0xfffffffflu);
+    pbw[b + 19u] = u32(pf.stand >> 32u);
+}
+
+/// The pixel fields `pixel_fields_b` made (with the lazy ones evaluated since).
+fn pf_load(ti: TileInfo, b: u32, p: vec3<f64>, gsd: f32) -> PixFields {
+    var pf: PixFields;
+    pf.p = p;
+    pf.gsd = gsd;
+    if ((ti.flags & TF_GRID) != 0u) {
+        pf.cut = ti.pf_cut;
+        pf.split = SPLIT_HIGH;
+    } else {
+        pf.cut = 0.0;
+        pf.split = SPLIT_ALL;
+    }
+    for (var k = 0u; k < PF_N; k++) {
+        pf.f[k] = bitcast<f32>(pbw[b + k]);
+    }
+    pf.pending = pbw[b + 16u];
+    pf.has_stand = pbw[b + 17u];
+    pf.stand = u64(pbw[b + 18u]) | (u64(pbw[b + 19u]) << 32u);
+    return pf;
+}
+
+/// Pass B, stage `stage` (a constant per entry point), round `pbw[0]`, per pixel of the tile
+/// and its 1-pixel apron.
+fn pass_b_stage(gid: vec3<u32>, stage: u32) {
     let i = gid.x;
     let j = gid.y;
     if (i >= NA || j >= NA) {
         return;
     }
+    let round = pbw[0];
+    let ch = pbw[3];
+    let ti = tiles[pbw[1] + gid.z];
+    let last = stage + 1u == PB_STAGES;
+    // chunk pixel; its state, fields and classes
+    let lp = (gid.z * NA + j) * NA + i;
+    let pfb = PBW_HDR + ch * NA * NA * PB_RS * ST_F + lp * PFW;
+    let ab = PBW_HDR + ch * NA * NA * (PB_RS * ST_F + PFW) + lp * ACCW;
+    if (round > 0u && (pbw[ab + 4u] & 1u) != 0u) {
+        return;
+    }
+    if (round == 0u && stage == 0u) {
+        pbw[ab + 4u] = 0u;
+    }
     surface_missing = 0u;
     let ss = ti.ss;
+    let n = ss * ss;
     // the pixel centre's row (= pass-A row j + 1)
     let rc = rows[ti.row_a + j + 1u];
     let gsd = rc.gsd;
     let ctx = row_col_ctx(rc, cols[ti.col_a + i + 1u], gsd);
-    var pf = pixel_fields_b(ti, i, j, ctx.p, gsd);
+    var pf: PixFields;
+    if (round == 0u && stage == 0u) {
+        pf = pixel_fields_b(ti, i, j, ctx.p, gsd);
+    } else {
+        pf = pf_load(ti, pfb, ctx.p, gsd);
+    }
     // slope of the bare ground at pixel scale
     let ii = i32(i);
     let jj = i32(j);
     let dx = (at(ti, ii + 1, jj).ground - at(ti, ii - 1, jj).ground) / (2.0 * gsd);
     let dy = (at(ti, ii, jj + 1).ground - at(ti, ii, jj - 1).ground) / (2.0 * rc.gsd_ns);
     let slope = sqrt(dx * dx + dy * dy);
-    var acc_a = vec3<f32>(0.0);
-    var acc_e = vec3<f32>(0.0);
-    var acc_h = 0.0;
-    var acc_l = 0.0;
-    var acc_g = 0.0;
-    var counts: array<u32, 32>;
-    var taken = ss * ss;
-    // One call site of `sample_b` (the driver inlines the whole surface model at every call:
-    // five of them took minutes to compile). Adaptive (ss = 2): the diagonal pair first, the
-    // other two only where it disagrees.
     let adaptive = (cfg.flags & CF_ADAPTIVE) != 0u;
+    let pb = (ti.pix0 + j * NA2 + i) * PB_F;
+    let k0 = round * PB_RS;
+    let k1 = min(k0 + PB_RS, n);
     var first_s: Surface;
-    for (var k = 0u; k < ss * ss; k++) {
+    // One call site of the stage (the driver inlines the surface model at every call).
+    for (var k = k0; k < k1; k++) {
         var sx = k % ss;
         var sy = k / ss;
         if (adaptive) {
@@ -417,62 +599,118 @@ fn pass_b(@builtin(global_invocation_id) gid: vec3<u32>) {
             sx = select(k & 1u, 1u - (k & 1u), k >= 2u);
             sy = k & 1u;
         }
-        let s = sample_b(ti, i, j, sx, sy, slope, vec2<f32>(dx, -dy), gsd, &pf);
-        acc_a += s.s.albedo;
-        acc_e += s.s.emission;
-        acc_h += s.s.height;
-        acc_l += s.s.lit;
-        acc_g += s.ground;
-        vote(&counts, s.s.cls);
-        if (adaptive && k == 0u) {
-            first_s = s.s;
-        }
-        if (adaptive && k == 1u) {
-            let da = abs(first_s.albedo - s.s.albedo);
-            let de = abs(first_s.emission - s.s.emission);
-            let similar = first_s.cls == s.s.cls && max3(da) < 0.012 && max3(de) < 0.02 && abs(first_s.height - s.s.height) < 0.15 && abs(first_s.lit - s.s.lit) < 0.05;
-            if (similar) {
-                taken = 2u;
-                break;
-            }
-        }
-    }
-    let inv = 1.0 / f32(taken);
-    // the most frequent class (of equals the highest id, as `max_by_key` over the counts)
-    var cls = 0u;
-    var best = 0u;
-    for (var w = 0u; w < LC_MAX_CLASSES / 4u; w++) {
-        let cw = counts[w];
-        if (cw == 0u) {
+        let si = sample_in(ti, i, j, sx, sy, slope, vec2<f32>(dx, -dy), gsd);
+        let water = stack_water(si.l);
+        // (standing water: the last stage's step 10 only)
+        if (water && !last) {
             continue;
         }
-        for (var b = 0u; b < 4u; b++) {
-            let n = (cw >> (b * 8u)) & 0xFFu;
-            if (n >= best && n > 0u) {
-                best = n;
-                cls = w * 4u + b;
+        var s = stack_new(si.c, si.t, si.l, pf);
+        let sb = PBW_HDR + (lp * PB_RS + k - k0) * ST_F;
+        if (stage > 0u && !water) {
+            s_frame(&s);
+            st_load(&s, sb);
+        }
+        stack_stage(&s, stage);
+        pf = s.pf;
+        if (!last) {
+            st_save(&s, sb);
+            continue;
+        }
+        // the last stage: the pixel's sums (in `pixb` until it is finished), the samples' classes
+        let o = stack_surface(&s);
+        if (k == 0u) {
+            pixb[pb + 0u] = o.emission.x;
+            pixb[pb + 1u] = o.emission.y;
+            pixb[pb + 2u] = o.emission.z;
+            pixb[pb + 3u] = o.albedo.x;
+            pixb[pb + 4u] = o.albedo.y;
+            pixb[pb + 5u] = o.albedo.z;
+            pixb[pb + 6u] = o.height;
+            pixb[pb + 7u] = si.ground;
+            pixb[pb + 8u] = o.lit;
+        } else {
+            pixb[pb + 0u] += o.emission.x;
+            pixb[pb + 1u] += o.emission.y;
+            pixb[pb + 2u] += o.emission.z;
+            pixb[pb + 3u] += o.albedo.x;
+            pixb[pb + 4u] += o.albedo.y;
+            pixb[pb + 5u] += o.albedo.z;
+            pixb[pb + 6u] += o.height;
+            pixb[pb + 7u] += si.ground;
+            pixb[pb + 8u] += o.lit;
+        }
+        let cw = ab + k / 4u;
+        let csh = (k & 3u) * 8u;
+        let cv = min(o.cls, LC_MAX_CLASSES - 1u) << csh;
+        if ((k & 3u) == 0u) {
+            pbw[cw] = cv;
+        } else {
+            pbw[cw] |= cv;
+        }
+        var taken = 0u;
+        if (adaptive && k == 0u) {
+            first_s = o;
+        }
+        if (adaptive && k == 1u) {
+            let da = abs(first_s.albedo - o.albedo);
+            let de = abs(first_s.emission - o.emission);
+            let similar = first_s.cls == o.cls && max3(da) < 0.012 && max3(de) < 0.02 && abs(first_s.height - o.height) < 0.15 && abs(first_s.lit - o.lit) < 0.05;
+            if (similar) {
+                taken = 2u;
             }
         }
+        if (k + 1u == n) {
+            taken = n;
+        }
+        if (taken > 0u) {
+            pass_b_finish(pb, ab, taken);
+            break;
+        }
     }
-    let b = (ti.pix0 + j * NA2 + i) * PB_F;
-    let e = acc_e * inv;
-    let a = acc_a * inv;
-    let h = acc_h * inv;
-    let g = acc_g * inv;
-    pixb[b + 0u] = e.x;
-    pixb[b + 1u] = e.y;
-    pixb[b + 2u] = e.z;
-    pixb[b + 3u] = a.x;
-    pixb[b + 4u] = a.y;
-    pixb[b + 5u] = a.z;
-    pixb[b + 6u] = h;
-    pixb[b + 7u] = g;
-    pixb[b + 8u] = acc_l * inv;
-    pixb[b + 9u] = f32(cls);
-    pixb[b + 10u] = max(h - g, 0.0);
+    if (!(last && k1 == n)) {
+        pf_save(pfb, pf);
+    }
     if (surface_missing != 0u) {
         atomicOr(&counters[C_MISSING], surface_missing);
     }
+}
+
+/// A finished pixel: the means of its `taken` samples and their most frequent class (of equals
+/// the highest id, as `max_by_key` over the counts).
+fn pass_b_finish(pb: u32, ab: u32, taken: u32) {
+    pbw[ab + 4u] = 1u;
+    var cls = 0u;
+    var best = 0u;
+    for (var a = 0u; a < taken; a++) {
+        let ca = (pbw[ab + a / 4u] >> ((a & 3u) * 8u)) & 0xFFu;
+        var cnt = 0u;
+        for (var b = 0u; b < taken; b++) {
+            if (((pbw[ab + b / 4u] >> ((b & 3u) * 8u)) & 0xFFu) == ca) {
+                cnt += 1u;
+            }
+        }
+        if (cnt > best || (cnt == best && ca > cls)) {
+            best = cnt;
+            cls = ca;
+        }
+    }
+    let inv = 1.0 / f32(taken);
+    let e = vec3<f32>(pixb[pb + 0u], pixb[pb + 1u], pixb[pb + 2u]) * inv;
+    let a = vec3<f32>(pixb[pb + 3u], pixb[pb + 4u], pixb[pb + 5u]) * inv;
+    let h = pixb[pb + 6u] * inv;
+    let g = pixb[pb + 7u] * inv;
+    pixb[pb + 0u] = e.x;
+    pixb[pb + 1u] = e.y;
+    pixb[pb + 2u] = e.z;
+    pixb[pb + 3u] = a.x;
+    pixb[pb + 4u] = a.y;
+    pixb[pb + 5u] = a.z;
+    pixb[pb + 6u] = h;
+    pixb[pb + 7u] = g;
+    pixb[pb + 8u] = pixb[pb + 8u] * inv;
+    pixb[pb + 9u] = f32(cls);
+    pixb[pb + 10u] = max(h - g, 0.0);
 }
 
 // ---- canopy clean-up: morphological opening of the height above ground (~1 m radius)

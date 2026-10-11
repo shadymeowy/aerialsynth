@@ -157,7 +157,8 @@ pub fn relief(w: &crate::world::World, r: &ReliefIn, h: &mut f64) {
     }
 }
 
-/// The kits' WGSL and the glue calling it (`kits_slot_<slot>`, `kits_kernel`, `kits_relief`).
+/// The kits' WGSL and the glue calling it (`kits_slot_<slot>`, `kits_kernel`, `kits_relief`; pass
+/// B's stages dispatch to `kits_slot_<slot>`: `gpu::stages_wgsl`).
 pub fn wgsl() -> String {
     let mut s = String::from("// ---------------------------------------------------------------- kits (generated)\n");
     for k in KITS {
@@ -189,6 +190,8 @@ pub fn wgsl_relief() -> String {
         s.push('\n');
     }
     s.push_str("fn kits_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {\n");
+    // (the module's instance lists of the point: `relief_lists`, gpu::sources)
+    s.push_str("    relief_lists(c.p, r.blk);\n");
     for k in KITS {
         if k.relief.is_some() {
             s.push_str(&format!("    {}_relief(c, m, r, h);\n", k.name));

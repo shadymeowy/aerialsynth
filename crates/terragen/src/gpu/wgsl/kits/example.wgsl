@@ -1,11 +1,12 @@
 // The test-only example kit (`kits/example.rs`).
 
 fn example_slot_azonal(s: ptr<function, Stack>) {
-    let l = inst_list(FAM_EXAMPLE_CONES, (*s).l.blk, (*s).c.p);
+    let blk = (*s).l.blk;
     var cov = 0.0;
-    for (var k = 0u; k < l.n; k++) {
-        let d = dist64((*s).c.p, l.items[k].center);
-        cov = max(cov, kband_cov(d, 0.6 * l.items[k].v[0], max((*s).l.fw, 0.5 * (*s).c.gsd)));
+    for (var k = 0u; k < inst_count(FAM_EXAMPLE_CONES, blk); k++) {
+        let it = inst_get(FAM_EXAMPLE_CONES, blk, k);
+        let d = dist64((*s).c.p, it.center);
+        cov = max(cov, kband_cov(d, 0.6 * it.v[0], max((*s).l.fw, 0.5 * (*s).c.gsd)));
     }
     if (cov > 0.0) {
         var ly = layer_paint(cov, srgb(70.0, 64.0, 62.0), LC_VOLCANIC_ASH);

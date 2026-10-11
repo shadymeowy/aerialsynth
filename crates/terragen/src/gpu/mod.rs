@@ -6,6 +6,8 @@
 //! GPU point evaluations and cached across batches.
 
 pub mod device;
+pub(crate) mod notice;
+pub use notice::{compiling_since, set_compile_observer, stderr_observer, CompileEvent, Observer as CompileObserver};
 pub(crate) mod host;
 pub(crate) mod tables;
 pub mod types;
@@ -66,6 +68,12 @@ pub(crate) fn storage<T: bytemuck::Pod>(d: &wgpu::Device, label: &str, data: &[T
         contents: bytes,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     })
+}
+
+/// The largest storage buffer binding of the device (bytes).
+fn lim_storage(d: &wgpu::Device) -> u64 {
+    let l = d.limits();
+    l.max_storage_buffer_binding_size.min(l.max_buffer_size)
 }
 
 /// An output storage buffer of `size` bytes (copyable to a read-back buffer).
@@ -147,7 +155,8 @@ struct Kernels {
     a2: wgpu::ComputePipeline,
     region_req: wgpu::ComputePipeline,
     town_req: wgpu::ComputePipeline,
-    pass_b: wgpu::ComputePipeline,
+    /// pass B's stages (`PB_STAGE_STEPS`)
+    pass_b: Vec<wgpu::ComputePipeline>,
     open_min_x: wgpu::ComputePipeline,
     open_min_y: wgpu::ComputePipeline,
     open_max_x: wgpu::ComputePipeline,
@@ -223,6 +232,91 @@ pub struct GpuGenerator {
     globals_bufs: Vec<wgpu::Buffer>,
     cache: Mutex<Cache>,
     lat: Mutex<Lattice>,
+    /// pass B's work buffer (kept: a few hundred MiB allocated per batch cost more than the stages)
+    pb_work: Mutex<Option<wgpu::Buffer>>,
+}
+
+/// The first stack step of each pass-B stage (`stack_step_<n>` in stack.wgsl: 0..=9 on land, 10
+/// on standing water, in the last stage). Each stage is one pipeline: the drivers inline the
+/// whole surface model into its entry point and compile time grows faster than its size, so
+/// the stack is cut where the kits' code splits about evenly (`compile_times` in gpu/tests.rs
+/// measures the stages). A boundary after step 5 doubles the state between stages (the
+/// deferred layers and the town: `PB_STATE_FULL`).
+pub(crate) const PB_STAGE_STEPS: &[u32] = &[0, 3, 5];
+
+/// Pass B's work buffer (`pbw` in tile_b.wgsl): header words, samples per round, words per
+/// sample (stage state), per pixel (fields), per pixel (classes, flags).
+const PBW_HDR: usize = 4;
+const PB_RS: usize = 2;
+const PB_STATE_FULL: bool = {
+    let mut full = false;
+    let mut i = 0;
+    while i < PB_STAGE_STEPS.len() {
+        full |= PB_STAGE_STEPS[i] > 5;
+        i += 1;
+    }
+    full
+};
+const PB_ST_F: usize = if PB_STATE_FULL { 52 } else { 28 };
+const _: () = {
+    // stages start at step 0, increase, and the last holds at least step 9 (and 10: water)
+    assert!(PB_STAGE_STEPS[0] == 0);
+    let mut i = 1;
+    while i < PB_STAGE_STEPS.len() {
+        assert!(PB_STAGE_STEPS[i] > PB_STAGE_STEPS[i - 1] && PB_STAGE_STEPS[i] <= 9);
+        i += 1;
+    }
+};
+const PB_PFW: usize = 20;
+const PB_ACCW: usize = 5;
+
+/// The slot of each stack step.
+const STEP_SLOTS: [usize; 11] = {
+    use crate::stack::slot::*;
+    [ZONAL, ALTITUDINAL, AZONAL, DISTURBANCE, AGRICULTURE, LINEAR, BUILT, CANOPY, WATER, SEASONAL, WATER]
+};
+
+/// Pass B's stage runners, kit dispatchers and entry points (`pass_b<n>`).
+fn stages_wgsl() -> String {
+    let ns = PB_STAGE_STEPS.len();
+    let mut s = format!(
+        "const PB_STAGES: u32 = {ns}u;\nconst PB_STATE_FULL: bool = {PB_STATE_FULL};\nconst PBW_HDR: u32 = {PBW_HDR}u;\nconst PB_RS: u32 = {PB_RS}u;\nconst ST_F: u32 = {PB_ST_F}u;\nconst PFW: u32 = {PB_PFW}u;\nconst ACCW: u32 = {PB_ACCW}u;\n"
+    );
+    for (si, &first) in PB_STAGE_STEPS.iter().enumerate() {
+        let last_stage = si + 1 == ns;
+        let end = if last_stage { 11 } else { PB_STAGE_STEPS[si + 1] };
+        let steps: Vec<u32> = (first..end).collect();
+        // the kits' layers of the stage's slots
+        let mut slots: Vec<usize> = steps.iter().map(|&st| STEP_SLOTS[st as usize]).collect();
+        slots.sort_unstable();
+        slots.dedup();
+        s += &format!("fn kits_slot_st{si}(s: ptr<function, Stack>, slot: u32) {{\n    switch slot {{\n");
+        for sl in slots {
+            s += &format!("        case {sl}u: {{ kits_slot_{}(s); }}\n", crate::stack::slot::NAMES[sl]);
+        }
+        s += "        default: {}\n    }\n}\n";
+        // the runner: one call site of `biome_layers` and of the kits' dispatcher; the bounds
+        // read an opaque 0 (`pbw[2]`) so the driver does not unroll the steps
+        let last_step = if last_stage { 9 } else { end - 1 };
+        s += &format!("fn stack_stage_{si}(sp: ptr<function, Stack>) {{\n    var step = {first}u + pbw[2];\n    var last = {last_step}u + pbw[2];\n");
+        if last_stage {
+            s += "    if (stack_water((*sp).l)) {\n        step = 10u + pbw[2];\n        last = step;\n    }\n";
+        }
+        s += "    loop {\n        var slot = SLOT_SKIP;\n        switch step {\n";
+        for &st in &steps {
+            s += &format!("            case {st}u: {{ slot = stack_step_{st}(sp); }}\n");
+        }
+        s += "            default: {}\n        }\n        if (slot == SLOT_SKIP) {\n            break;\n        }\n";
+        s += &format!("        if (!(*sp).done) {{\n            biome_layers(sp, slot);\n            kits_slot_st{si}(sp, slot);\n        }}\n");
+        s += "        if (step >= last) {\n            break;\n        }\n        step += 1u;\n    }\n}\n";
+        s += &format!("@compute @workgroup_size(16, 16)\nfn pass_b{si}(@builtin(global_invocation_id) gid: vec3<u32>) {{\n    pass_b_stage(gid, {si}u);\n}}\n");
+    }
+    s += "fn stack_stage(sp: ptr<function, Stack>, stage: u32) {\n    switch stage {\n";
+    for si in 0..ns {
+        s += &format!("        case {si}u: {{ stack_stage_{si}(sp); }}\n");
+    }
+    s += "        default: {}\n    }\n}\n";
+    s
 }
 
 /// The WGSL of the point kernels and of the tile kernels.
@@ -233,12 +327,15 @@ pub(crate) fn sources() -> (String, String, String) {
     // the instance families and the kits' relief (every module with pass A); points and
     // drainage scan for instances, tiles read their bins' lists (tile_a.wgsl)
     let relief = format!("{INSTANCES_WGSL}{}{}", crate::instances::wgsl(), crate::kits::wgsl_relief());
-    let scan = "fn inst_list(f: u32, blk: u32, p: vec3<f64>) -> InstList {\n    return inst_scan(f, p, 0.0);\n}\n";
+    // the point and drainage modules scan the relief families once per relief evaluation, in
+    // one loop (one inlined copy of the existence tests; a scan per `inst_list` call put every
+    // family's tests into the relief once per call); the tile module reads its bins' lists
+    let scan = "var<private> rl_lists: array<InstList, NFAM_1>;\nfn relief_lists(p: vec3<f64>, blk: u32) {\n    for (var f = 0u; f < NFAM; f++) {\n        if (fam_relief(f)) {\n            rl_lists[f] = inst_scan(f, p, 0.0);\n        }\n    }\n}\nfn inst_list(f: u32, blk: u32, p: vec3<f64>) -> InstList {\n    return rl_lists[f];\n}\n";
     let reg = crate::registry::gpu::wgsl_consts();
     let kits = crate::kits::wgsl();
     let points = format!("{consts}{NOISE_WGSL}{ATLAS_WGSL}{WORLD_WGSL}{relief}{scan}{POINTS_WGSL}");
     let classes = crate::landcover::WGSL;
-    let tile = format!("{consts}{reg}{pal}{classes}{NOISE_WGSL}{ATLAS_WGSL}{WORLD_WGSL}{relief}{TILE_A_WGSL}{REGISTRY_WGSL}{FEATURES_WGSL}{KERNELS_WGSL}{SURFACE_WGSL}{STACK_WGSL}{kits}{TILE_B_WGSL}");
+    let tile = format!("{consts}{reg}{pal}{classes}{NOISE_WGSL}{ATLAS_WGSL}{WORLD_WGSL}{relief}{TILE_A_WGSL}{REGISTRY_WGSL}{FEATURES_WGSL}{KERNELS_WGSL}{SURFACE_WGSL}{STACK_WGSL}{kits}{TILE_B_WGSL}{}", stages_wgsl());
     let drain = format!("{consts}{NOISE_WGSL}{ATLAS_WGSL}{WORLD_WGSL}{relief}{scan}{DRAIN_WGSL}");
     (points, tile, drain)
 }
@@ -292,7 +389,7 @@ impl GpuGenerator {
         let l_tables = layout(d, "tables", &[Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro]);
         let l_points = layout(d, "points", &[Ro, Rw, Rw, Rw]);
         let l_lat = layout(d, "drainage", &[Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw]);
-        let l_tile = layout(d, "tile", &[Ro, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw]);
+        let l_tile = layout(d, "tile", &[Ro, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw]);
         let globals = bind(
             d,
             &l_globals,
@@ -300,9 +397,15 @@ impl GpuGenerator {
         );
         let globals_bufs = vec![g_cfg, g_grads, g_octs, g_fbms, g_pal, g_atlas, g_biomes, g_crowns, g_zones, g_layers, g_band_ranges, g_band_idx];
         let (src_points, src_tile, src_drain) = sources();
+        let hash = sources_hash(&[&src_points, &src_tile, &src_drain]);
+        let cache = PipelineCache::open(&gpu, hash);
+        let marker = if cache.is_none() { CompileMarker::open(&gpu, hash) } else { None };
+        // (no file for these shaders in the pipeline cache, or without one no marker that this
+        // adapter compiled them before: the compile may be cold)
+        let cold = !(cache.as_ref().is_some_and(|c| c.warm) || marker.as_ref().is_some_and(|m| m.path.exists()));
+        notice::emit(CompileEvent::Started { gpu_name: gpu.info.name.clone(), cold });
         let t_compile = std::time::Instant::now();
         let compiling = gpu.compiling();
-        let cache = PipelineCache::open(&gpu);
         let m_points = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("points"), source: wgpu::ShaderSource::Wgsl(src_points.into()) });
         let m_tile = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("tile"), source: wgpu::ShaderSource::Wgsl(src_tile.into()) });
         let m_drain = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("drainage"), source: wgpu::ShaderSource::Wgsl(src_drain.into()) });
@@ -345,7 +448,6 @@ impl GpuGenerator {
             "pass_a2",
             "region_requests",
             "town_requests",
-            "pass_b",
             "open_min_x",
             "open_min_y",
             "open_max_x",
@@ -354,8 +456,17 @@ impl GpuGenerator {
             "finish",
         ];
         let dnames = ["lat_enum", "lat_heights", "mark_targets", "lat_targets", "mark_sources", "lat_sources", "gather_count", "gather_scan", "gather_write"];
+        let stage_names: Vec<String> = (0..PB_STAGE_STEPS.len()).map(|k| format!("pass_b{k}")).collect();
         let (points, mut tile, mut drain): (wgpu::ComputePipeline, Vec<wgpu::ComputePipeline>, Vec<wgpu::ComputePipeline>) = std::thread::scope(|s| {
-            let hs: Vec<_> = names.iter().map(|n| s.spawn(|| pipe(&m_tile, &pl_tile, n))).collect();
+            let hs: Vec<_> = names
+                .iter()
+                .copied()
+                .chain(stage_names.iter().map(|n| n.as_str()))
+                .map(|n| {
+                    let (pipe, m, pl) = (&pipe, &m_tile, &pl_tile);
+                    s.spawn(move || pipe(m, pl, n))
+                })
+                .collect();
             let hd: Vec<_> = dnames.iter().map(|n| s.spawn(|| pipe(&m_drain, &pl_drain, n))).collect();
             let points = pipe(&m_points, &pl_points, "eval_points");
             (points, hs.into_iter().map(|h| h.join().expect("pipeline")).collect(), hd.into_iter().map(|h| h.join().expect("pipeline")).collect())
@@ -375,10 +486,16 @@ impl GpuGenerator {
         if let Some(c) = &cache {
             c.save();
         }
-        drop(compiling);
-        if std::env::var_os("TERRAGEN_PROFILE").is_some() {
-            eprintln!("GPU generator: pipelines ready in {:.1} s", t_compile.elapsed().as_secs_f64());
+        if let Some(m) = &marker {
+            m.save();
         }
+        drop(compiling);
+        let secs = t_compile.elapsed().as_secs_f64();
+        notice::emit(CompileEvent::Finished { secs, cold });
+        if std::env::var_os("TERRAGEN_PROFILE").is_some() {
+            eprintln!("GPU generator: pipelines ready in {secs:.1} s");
+        }
+        let stages = tile.split_off(names.len());
         let mut t = || tile.remove(0);
         let k = Kernels {
             points,
@@ -389,13 +506,13 @@ impl GpuGenerator {
             a2: t(),
             region_req: t(),
             town_req: t(),
-            pass_b: t(),
             open_min_x: t(),
             open_min_y: t(),
             open_max_x: t(),
             open_max_y: t(),
             open_apply: t(),
             finish: t(),
+            pass_b: stages,
             l_drain,
             l_tables,
             l_points,
@@ -417,7 +534,7 @@ impl GpuGenerator {
             cap: LAT_CAP,
             used: 0,
         };
-        Ok(GpuGenerator { world, surface, gpu, k, globals, globals_bufs, cache: Mutex::new(Cache::default()), lat: Mutex::new(lat) })
+        Ok(GpuGenerator { world, surface, gpu, k, globals, globals_bufs, cache: Mutex::new(Cache::default()), lat: Mutex::new(lat), pb_work: Mutex::new(None) })
     }
 
     /// Evaluate points on the GPU (pass A with exact macro fields, see `points.wgsl`): their
@@ -714,8 +831,10 @@ impl GpuGenerator {
     }
 
     /// The parameters of ecoregions by id (cached): their sites are found from the ids' lattice
-    /// cells around the tiles, so both backends compute them from the same exact site.
-    fn eco_params(&self, cache: &mut Cache, ids: &[u64], areas: &[(DVec3, f64)]) -> Result<Vec<crate::eco::EcoParams>> {
+    /// cells around the tiles, so both backends compute them from the same exact site. `planet`:
+    /// some tiles span a quarter of the globe or more (zoom ≤ 2), whose discs around the corners
+    /// do not bound them, so a global search is expected.
+    fn eco_params(&self, cache: &mut Cache, ids: &[u64], areas: &[(DVec3, f64)], planet: bool) -> Result<Vec<crate::eco::EcoParams>> {
         let w = &self.world;
         let reg = &self.surface.registry;
         let mut out = Vec::with_capacity(ids.len());
@@ -735,7 +854,9 @@ impl GpuGenerator {
                 let rest: Vec<u64> = rest.into_iter().filter(|id| !sites.contains_key(id)).collect();
                 if !rest.is_empty() {
                     static WARNED: std::sync::Once = std::sync::Once::new();
-                    WARNED.call_once(|| eprintln!("warning: ecoregion sites found only by a global search ({} ids); please report", rest.len()));
+                    if !planet {
+                        WARNED.call_once(|| eprintln!("warning: ecoregion sites found only by a global search ({} ids); please report", rest.len()));
+                    }
                     sites.extend(crate::eco::find_sites(w, &rest, &[(DVec3::ZERO, w.ell.a + 20_000.0)]));
                 }
             }
@@ -822,8 +943,8 @@ impl GpuGenerator {
         Ok(self.gpu.scoped(|| self.run(ids, false))?.0)
     }
 
-    /// Generate tiles (one batch on the GPU; halved while its land-use sites overflow the
-    /// request buffers).
+    /// Generate tiles (one batch on the GPU; its land-use site request buffers grow with the
+    /// batch, and it is halved only when they would exceed the device's storage limit).
     pub fn tiles(&self, ids: &[TileId]) -> Result<Vec<TileData>> {
         self.gpu.scoped(|| self.tiles_split(ids))
     }
@@ -1014,11 +1135,13 @@ impl GpuGenerator {
         let empty = output(d, "empty", 256);
         let unused = output(d, "unused", 256);
         let lake_cap = 1usize << 16;
-        let site_cap = 1 << 18;
+        // (the site requests: grown when a batch has more, see below)
+        let mut site_cap = 1usize << 18;
+        let site_bufs = |cap: usize| {
+            (output(d, "region requests", (cap * 64) as u64), output(d, "town requests", (cap * 16) as u64), output(d, "ecoregion requests", (cap * 64) as u64))
+        };
         let b_lake_req = output(d, "lake requests", (lake_cap * 64) as u64);
-        let b_region_req = output(d, "region requests", (site_cap * 64) as u64);
-        let b_town_req = output(d, "town requests", (site_cap * 16) as u64);
-        let b_eco_req = output(d, "ecoregion requests", (site_cap * 64) as u64);
+        let site_req = std::cell::RefCell::new(site_bufs(site_cap));
         let nfam = crate::instances::families().count();
         let b_inst_n = output(d, "instance counts", (nt * NBIN * NBIN * nfam.max(1) * 4) as u64);
         let b_inst_v = output(d, "instances", (nt * NBIN * NBIN * nfam.max(1) * crate::instances::K * 96) as u64);
@@ -1034,8 +1157,25 @@ impl GpuGenerator {
         } else {
             (output(d, "-", 256), output(d, "-", 256), output(d, "-", 256), output(d, "-", 256), output(d, "-", 256))
         };
+        // pass B's work buffer, for `pb_chunk` tiles at a time
+        let pb_tile_words = NA * NA * (PB_RS * PB_ST_F + PB_PFW + PB_ACCW);
+        let pb_budget = (256u64 << 20).min(lim_storage(d));
+        let pb_max = ((pb_budget as usize / 4 - PBW_HDR) / pb_tile_words).max(1);
+        // (equal chunks)
+        let pb_chunk = nt.div_ceil(nt.div_ceil(pb_max));
+        let pb_bytes = ((PBW_HDR + pb_chunk * pb_tile_words) * 4) as u64;
+        let b_pbw = if full {
+            match self.pb_work.lock().unwrap().take() {
+                Some(b) if b.size() >= pb_bytes => b,
+                // (sized for a full batch of 16 tiles, so smaller batches reuse it)
+                _ => output(d, "pass b work", pb_bytes.max(((PBW_HDR + 16usize.div_ceil(16usize.div_ceil(pb_max)) * pb_tile_words) * 4) as u64)),
+            }
+        } else {
+            output(d, "-", 256)
+        };
         let wg = |n: usize| n.div_ceil(16) as u32;
         let group2 = |list: &wgpu::Buffer| {
+            let req = site_req.borrow();
             bind(
                 d,
                 &self.k.l_tile,
@@ -1057,11 +1197,12 @@ impl GpuGenerator {
                     &b_scr_b,
                     &b_out,
                     &b_ranges,
-                    &b_region_req,
-                    &b_town_req,
-                    &b_eco_req,
+                    &req.0,
+                    &req.1,
+                    &req.2,
                     &b_inst_n,
                     &b_inst_v,
+                    &b_pbw,
                 ],
             )
         };
@@ -1141,7 +1282,7 @@ impl GpuGenerator {
                 static WARNED: std::sync::Once = std::sync::Once::new();
                 WARNED.call_once(|| {
                     eprintln!(
-                        "warning: more than {} instances of a family reach a 16-pixel block ({} blocks in this batch); the first {} by id are kept: a family's cell or density is too fine for an instance family (use a scatter kernel for dense objects)",
+                        "warning: more than {} instances of a family reach a 16-pixel block no wider than its lattice cell ({} blocks in this batch); the first {} by id are kept: the family's density is too high for an instance family (use a scatter kernel for dense objects)",
                         crate::instances::K,
                         counters[7],
                         crate::instances::K
@@ -1174,22 +1315,38 @@ impl GpuGenerator {
             ],
         );
         let g2 = group2(&unused);
+        let req_passes = [(&self.k.region_req, [wg(NA), wg(NA), nt as u32]), (&self.k.town_req, [wg(NA), wg(NA), nt as u32])];
         let mut passes = vec![(&self.k.a2, [wg(NA2), wg(NA2), nt as u32])];
         if full {
-            passes.push((&self.k.region_req, [wg(NA), wg(NA), nt as u32]));
-            passes.push((&self.k.town_req, [wg(NA), wg(NA), nt as u32]));
+            passes.extend(req_passes);
         }
         run_passes(&g1, &g2, &passes, true);
         if !full {
             let all: Vec<GTerrain> = read_back(&self.gpu, &b_terr, nt * NA2 * NA2)?;
             return Ok((all.chunks(NA2 * NA2).map(|c| c.to_vec()).collect(), vec![]));
         }
-        let counters: Vec<u32> = read_back(&self.gpu, &b_counters, 8)?;
+        let mut counters: Vec<u32> = read_back(&self.gpu, &b_counters, 8)?;
         stamp("pass a");
+        let need = counters[3].max(counters[4]).max(counters[6]) as usize;
+        if need > site_cap {
+            // more site requests than the buffers hold (planet-scale tiles: a distinct ecoregion
+            // per pixel): larger buffers and the request passes again (functions of pass A; the
+            // host sorts and dedups the requests, so the result does not depend on the order)
+            let cap = need + need / 8 + 1024;
+            if (cap * 64) as u64 > lim_storage(d) {
+                return Err(Overflow(format!("{} regions, {} town cells, {} ecoregions", counters[3], counters[4], counters[6])).into());
+            }
+            site_cap = cap;
+            *site_req.borrow_mut() = site_bufs(site_cap);
+            run_passes(&g1, &group2(&unused), &req_passes, true);
+            counters = read_back(&self.gpu, &b_counters, 8)?;
+            stamp(&format!("site requests again ({need} > buffers)"));
+        }
         let (nreg, ntown, neco) = (counters[3] as usize, counters[4] as usize, counters[6] as usize);
         if nreg > site_cap || ntown > site_cap || neco > site_cap {
             return Err(Overflow(format!("{nreg} regions, {ntown} town cells, {neco} ecoregions")).into());
         }
+        let (b_region_req, b_town_req, b_eco_req) = site_req.borrow().clone();
         let reg_reqs: Vec<GSiteReq> = read_back(&self.gpu, &b_region_req, nreg)?;
         let town_reqs: Vec<[i32; 4]> = read_back(&self.gpu, &b_town_req, ntown)?;
         let mut reg_ids: Vec<(u64, DVec3)> = reg_reqs.iter().map(|r| (r.id, DVec3::new(r.pt[0], r.pt[1], r.pt[2]))).collect();
@@ -1210,7 +1367,7 @@ impl GpuGenerator {
         eco_ids.sort_unstable();
         eco_ids.dedup();
         let areas: Vec<(DVec3, f64)> = tq.iter().map(|q| (q.center, q.radius)).collect();
-        let ecos = self.eco_params(&mut cache, &eco_ids, &areas)?;
+        let ecos = self.eco_params(&mut cache, &eco_ids, &areas, ids.iter().any(|t| t.z <= 2))?;
         let (ek, ev) = eco_table(&ecos);
         let b_ek = storage(d, "ecoregion keys", &ek);
         let b_ev = storage(d, "ecoregions", &ev);
@@ -1251,11 +1408,48 @@ impl GpuGenerator {
         );
         let g2 = group2(&unused);
         let grid = [wg(NA), wg(NA), nt as u32];
+        // pass B: per chunk of tiles and round of sub-samples, its stages in order (the header
+        // `pbw[0..4]`: round, first tile, 0, chunk tiles)
+        let rounds = (ss * ss).div_ceil(PB_RS);
+        let mut hdrs: Vec<u32> = Vec::new();
+        let mut steps = Vec::new();
+        for c0 in (0..nt).step_by(pb_chunk) {
+            let cn = pb_chunk.min(nt - c0);
+            for r in 0..rounds {
+                steps.push(((hdrs.len() * 4) as u64, cn));
+                hdrs.extend_from_slice(&[r as u32, c0 as u32, 0, pb_chunk as u32]);
+            }
+        }
+        let b_hdrs = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("pass b rounds"),
+            contents: bytemuck::cast_slice(&hdrs),
+            usage: wgpu::BufferUsages::COPY_SRC,
+        });
+        {
+            let t_b = std::time::Instant::now();
+            let mut enc = d.create_command_encoder(&Default::default());
+            enc.clear_buffer(&b_counters, 0, None);
+            for &(off, cn) in &steps {
+                enc.copy_buffer_to_buffer(&b_hdrs, off, &b_pbw, 0, 16);
+                let mut cp = enc.begin_compute_pass(&Default::default());
+                cp.set_bind_group(0, &self.globals, &[]);
+                cp.set_bind_group(1, &g1, &[]);
+                cp.set_bind_group(2, &g2, &[]);
+                for p in &self.k.pass_b {
+                    cp.set_pipeline(p);
+                    cp.dispatch_workgroups(wg(NA), wg(NA), cn as u32);
+                }
+            }
+            self.gpu.queue.submit([enc.finish()]);
+            if time_passes {
+                let _ = d.poll(wgpu::PollType::wait_indefinitely());
+                eprintln!("    pass b ({} stages, {} rounds, chunks of {pb_chunk}): {:.4}", self.k.pass_b.len(), rounds, t_b.elapsed().as_secs_f64());
+            }
+        }
         run_passes(
             &g1,
             &g2,
             &[
-                (&self.k.pass_b, grid),
                 (&self.k.open_min_x, grid),
                 (&self.k.open_min_y, grid),
                 (&self.k.open_max_x, grid),
@@ -1263,13 +1457,14 @@ impl GpuGenerator {
                 (&self.k.open_apply, grid),
                 (&self.k.finish, [wg(N), wg(N), nt as u32]),
             ],
-            true,
+            false,
         );
         let counters: Vec<u32> = read_back(&self.gpu, &b_counters, 8)?;
         if counters[5] != 0 {
             bail!("GPU generator: pass B lacked land-use data (flags {:#x})", counters[5]);
         }
         stamp("pass b");
+        *self.pb_work.lock().unwrap() = Some(b_pbw.clone());
         let out: Vec<u32> = read_back(&self.gpu, &b_out, nt * N * N * OUT_U)?;
         let ranges: Vec<u32> = read_back(&self.gpu, &b_ranges, nt * 2)?;
         let tiles = ids
@@ -1453,44 +1648,167 @@ fn dbox(ell: &geodesy::Ellipsoid, center: DVec3, lo: DVec3, hi: DVec3, cell: f64
     }
 }
 
-/// The compiled pipelines kept on disk (`~/.cache/terrain/pipelines-<adapter>.bin`): the
-/// driver's own shader cache is per executable, and compiling the generator takes minutes.
+/// The compiled pipelines kept on disk (`~/.cache/terrain/pipelines-<adapter>-<hash>.bin`): the
+/// driver's own shader cache is per executable, and compiling the generator takes half a minute
+/// or more. `<hash>` covers the generated WGSL and the wgpu version, so a file that exists is a
+/// warm start, and files of other versions are deleted on save.
 struct PipelineCache {
     cache: wgpu::PipelineCache,
     path: std::path::PathBuf,
+    key: String,
+    /// The file existed (read at open).
+    warm: bool,
+}
+
+/// FNV-1a over the sources and the wgpu version.
+fn sources_hash(srcs: &[&str]) -> u64 {
+    let mut h = 0xcbf29ce484222325u64;
+    for s in srcs.iter().copied().chain([env!("TERRAGEN_WGPU_VERSION")]) {
+        for b in s.bytes().chain([0xff]) {
+            h = (h ^ b as u64).wrapping_mul(0x100000001b3);
+        }
+    }
+    h
+}
+
+fn cache_file(dir: &std::path::Path, key: &str, hash: u64) -> std::path::PathBuf {
+    dir.join(format!("pipelines-{key}-{hash:016x}.bin"))
+}
+
+/// Delete the cache files of `key` other than `keep`: other shader versions and the old
+/// unhashed `pipelines-<key>.bin`.
+fn prune_cache(dir: &std::path::Path, key: &str, keep: &std::path::Path) {
+    prune_files(dir, &format!("pipelines-{key}-"), ".bin", Some(&format!("pipelines-{key}.bin")), keep);
+}
+
+/// Delete the files `<prefix><16 hex digits><suffix>` (and `legacy`) of `dir` other than `keep`.
+fn prune_files(dir: &std::path::Path, prefix: &str, suffix: &str, legacy: Option<&str>, keep: &std::path::Path) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let name = e.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let stale = Some(name) == legacy
+            || name.strip_prefix(prefix).and_then(|r| r.strip_suffix(suffix)).is_some_and(|h| h.len() == 16 && h.bytes().all(|b| b.is_ascii_hexdigit()));
+        if stale && e.path() != keep {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
+/// The generator's cache directory: `$XDG_CACHE_HOME/terrain` (`~/.cache/terrain`).
+fn cache_dir() -> Option<std::path::PathBuf> {
+    Some(
+        std::env::var_os("XDG_CACHE_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".cache")))?
+            .join("terrain"),
+    )
+}
+
+/// Devices without a pipeline cache (Metal, DX12: their drivers cache compiled shaders
+/// themselves): an empty marker file per adapter and shader version, written after the
+/// compile, says that this adapter compiled these shaders before (the compile is announced as
+/// warm; the driver's cache may still be gone, then the observer reports the time it took).
+struct CompileMarker {
+    path: std::path::PathBuf,
+    prefix: String,
+}
+
+impl CompileMarker {
+    fn open(gpu: &Gpu, hash: u64) -> Option<CompileMarker> {
+        let i = &gpu.info;
+        let adapter = sources_hash(&[&format!("{:?}", i.backend), &i.name, &format!("{:x}:{:x}", i.vendor, i.device), &i.driver, &i.driver_info]);
+        Some(Self::at(&cache_dir()?, adapter, hash))
+    }
+
+    fn at(dir: &std::path::Path, adapter: u64, hash: u64) -> CompileMarker {
+        let prefix = format!("compiled-{adapter:016x}-");
+        CompileMarker { path: dir.join(format!("{prefix}{hash:016x}")), prefix }
+    }
+
+    fn save(&self) {
+        let Some(dir) = self.path.parent() else { return };
+        if !self.path.exists() {
+            let _ = std::fs::create_dir_all(dir);
+            let _ = std::fs::write(&self.path, b"");
+        }
+        if self.path.exists() {
+            prune_files(dir, &self.prefix, "", None, &self.path);
+        }
+    }
 }
 
 impl PipelineCache {
-    fn open(gpu: &Gpu) -> Option<PipelineCache> {
+    fn open(gpu: &Gpu, hash: u64) -> Option<PipelineCache> {
         if !gpu.device.features().contains(wgpu::Features::PIPELINE_CACHE) {
             return None;
         }
         let key = wgpu::util::pipeline_cache_key(&gpu.info)?;
-        let dir = std::env::var_os("XDG_CACHE_HOME")
-            .map(std::path::PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".cache")))?
-            .join("terrain");
-        let path = dir.join(format!("pipelines-{key}.bin"));
+        let dir = cache_dir()?;
+        let path = cache_file(&dir, &key, hash);
         let data = std::fs::read(&path).ok();
         // SAFETY: the data is what `get_data` returned for this adapter key (or nothing); wgpu and
         // the driver validate it and fall back to an empty cache
         let cache =
             unsafe { gpu.device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor { label: Some("terrain"), data: data.as_deref(), fallback: true }) };
-        Some(PipelineCache { cache, path })
+        Some(PipelineCache { cache, path, key, warm: data.is_some() })
     }
 
     fn save(&self) {
         let Some(data) = self.cache.get_data() else { return };
-        if std::fs::read(&self.path).is_ok_and(|old| old == data) {
-            return;
-        }
-        if let Some(dir) = self.path.parent() {
+        let Some(dir) = self.path.parent() else { return };
+        if !std::fs::read(&self.path).is_ok_and(|old| old == data) {
             let _ = std::fs::create_dir_all(dir);
+            let tmp = self.path.with_extension(format!("tmp{}", std::process::id()));
+            if std::fs::write(&tmp, &data).is_ok() {
+                let _ = std::fs::rename(&tmp, &self.path);
+            }
         }
-        let tmp = self.path.with_extension(format!("tmp{}", std::process::id()));
-        if std::fs::write(&tmp, &data).is_ok() {
-            let _ = std::fs::rename(&tmp, &self.path);
+        if self.path.exists() {
+            prune_cache(dir, &self.key, &self.path);
         }
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    #[test]
+    fn cache_names_and_pruning() {
+        let dir = std::env::temp_dir().join(format!("terragen-pcache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_ne!(sources_hash(&["a"]), sources_hash(&["b"]));
+        assert_ne!(sources_hash(&["ab", "c"]), sources_hash(&["a", "bc"]));
+        let keep = cache_file(&dir, "gpu-a", 1);
+        assert_eq!(keep.file_name().unwrap().to_str().unwrap(), "pipelines-gpu-a-0000000000000001.bin");
+        for f in [
+            "pipelines-gpu-a-0000000000000001.bin",
+            "pipelines-gpu-a-00000000000000ff.bin",
+            "pipelines-gpu-a.bin",
+            "pipelines-gpu-a-b-0000000000000001.bin",
+            "pipelines-gpu-b.bin",
+            "other.bin",
+        ] {
+            std::fs::write(dir.join(f), b"x").unwrap();
+        }
+        prune_cache(&dir, "gpu-a", &keep);
+        let mut left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        left.sort();
+        assert_eq!(left, ["other.bin", "pipelines-gpu-a-0000000000000001.bin", "pipelines-gpu-a-b-0000000000000001.bin", "pipelines-gpu-b.bin"]);
+        // markers (devices without a pipeline cache): one per adapter, the current shaders'
+        let old = CompileMarker::at(&dir, 7, 1);
+        old.save();
+        assert!(old.path.exists());
+        let other = CompileMarker::at(&dir, 8, 1);
+        other.save();
+        let m = CompileMarker::at(&dir, 7, 2);
+        assert!(!m.path.exists());
+        m.save();
+        assert!(m.path.exists() && !old.path.exists() && other.path.exists());
+        assert!(m.path.file_name().unwrap().to_str().unwrap() == "compiled-0000000000000007-0000000000000002");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

@@ -356,57 +356,66 @@ fn band_index(gsd: f32) -> u32 {
     return b;
 }
 
-/// The kernel layers of the sample's biome(s) at `slot` (`layers::biome_layers`).
+/// The layer range of biome `bi` (weight `wt`) at band `band`: (first, count) in `band_idx`.
+fn biome_band_range(bi: u32, wt: f32, band: u32) -> vec2<u32> {
+    if (wt <= 0.0) {
+        return vec2<u32>(0u);
+    }
+    let bm = biomes[bi];
+    if (bm.r1.y == 0u) {
+        return vec2<u32>(0u);
+    }
+    return band_ranges[bm.r1.z + band];
+}
+
+/// The kernel layers of the sample's biome(s) at `slot` (`layers::biome_layers`): those of
+/// biome a, then of biome b, in one loop (one inlined `kernel_eval`).
 fn biome_layers(s: ptr<function, Stack>, slot: u32) {
     let band = band_index((*s).c.gsd);
-    for (var k = 0u; k < 2u; k++) {
-        var bi = (*s).bio.a;
-        var wt = 1.0 - (*s).bio.w;
-        if (k == 1u) {
-            bi = (*s).bio.b;
-            wt = (*s).bio.w;
-            if (bi == (*s).bio.a) {
-                continue;
-            }
-        } else if ((*s).bio.b == bi) {
-            wt = 1.0;
+    let ba = (*s).bio.a;
+    let bb = (*s).bio.b;
+    let wa = select(1.0 - (*s).bio.w, 1.0, bb == ba);
+    let wb = (*s).bio.w;
+    let ra = biome_band_range(ba, wa, band);
+    var rb = vec2<u32>(0u);
+    if (bb != ba) {
+        rb = biome_band_range(bb, wb, band);
+    }
+    let n = ra.y + rb.y;
+    for (var q = 0u; q < n; q++) {
+        var li = 0u;
+        var wt = wa;
+        if (q < ra.y) {
+            li = band_idx[ra.x + q];
+        } else {
+            li = band_idx[rb.x + q - ra.y];
+            wt = wb;
         }
-        if (wt <= 0.0) {
+        let l = klayers[li];
+        if (l.head.x != slot || (*s).done) {
             continue;
         }
-        let bm = biomes[bi];
-        if (bm.r1.y == 0u) {
+        var m = 1.0;
+        for (var w = 0u; w < l.head2.z; w++) {
+            m *= window_eval(l.win[w], s_field(s, l.wf[w]));
+        }
+        if (m <= 0.0) {
             continue;
         }
-        let br = band_ranges[bm.r1.z + band];
-        for (var j = 0u; j < br.y; j++) {
-            let li = band_idx[br.x + j];
-            let l = klayers[li];
-            if (l.head.x != slot || (*s).done) {
-                continue;
-            }
-            var m = 1.0;
-            for (var w = 0u; w < l.head2.z; w++) {
-                m *= window_eval(l.win[w], s_field(s, l.wf[w]));
-            }
-            if (m <= 0.0) {
-                continue;
-            }
-            let o = kernel_eval(li, s_kin(s, l.head.y, m * wt));
-            if (o.cov <= 0.0 && o.emit <= 0.0) {
-                continue;
-            }
-            var ly = layer_none();
-            ly.cov = o.cov;
-            ly.albedo = o.albedo;
-            ly.dh = o.dh;
-            ly.hmode = l.head.w & 0xffu;
-            ly.cls = l.head.z;
-            ly.emit = l.col[2].xyz * o.emit;
-            ly.clear = l.sz.y;
-            ly.mat = l.head.w >> 8u;
-            composite(s, ly);
+        let o = kernel_eval(li, s_kin(s, l.head.y, m * wt));
+        if (o.cov <= 0.0 && o.emit <= 0.0) {
+            continue;
         }
+        var ly = layer_none();
+        ly.cov = o.cov;
+        ly.albedo = o.albedo;
+        ly.dh = o.dh;
+        ly.hmode = l.head.w & 0xffu;
+        ly.cls = l.head.z;
+        ly.emit = l.col[2].xyz * o.emit;
+        ly.clear = l.sz.y;
+        ly.mat = l.head.w >> 8u;
+        composite(s, ly);
     }
 }
 
@@ -1017,13 +1026,13 @@ fn masks_none() -> Masks {
     return m;
 }
 
-/// The surface at one sub-sample (`stack::eval`).
-fn surface_eval(c: Ctx, t: Terrain, l: Local, pf: ptr<function, PixFields>) -> Surface {
+/// A sub-sample's stack before its first layer (`stack::eval`).
+fn stack_new(c: Ctx, t: Terrain, l: Local, pf: PixFields) -> Stack {
     var s: Stack;
     s.c = c;
     s.t = t;
     s.l = l;
-    s.pf = *pf;
+    s.pf = pf;
     s.bio = bio_at(t, l.eco_edge, c);
     s.m = masks_none();
     s.has_region = false;
@@ -1041,62 +1050,96 @@ fn surface_eval(c: Ctx, t: Terrain, l: Local, pf: ptr<function, PixFields>) -> S
     s.done = false;
     s.deferring = false;
     s.def = deferred_none();
-    let sp = &s;
-    if (l.water > l.ground && l.water_kind != W_NONE) {
-        layer_standing(sp);
-        biome_layers(sp, SLOT_WATER);
-        kits_slot_water(sp);
-    } else {
-        snow_prepare(sp);
-        s_frame(sp);
-        layer_zonal(sp);
-        biome_layers(sp, SLOT_ZONAL);
-        kits_slot_zonal(sp);
-        biome_layers(sp, SLOT_ALTITUDINAL);
-        kits_slot_altitudinal(sp);
-        layer_azonal(sp);
-        biome_layers(sp, SLOT_AZONAL);
-        kits_slot_azonal(sp);
-        finish_ground(sp);
-        biome_layers(sp, SLOT_DISTURBANCE);
-        kits_slot_disturbance(sp);
-        layer_agriculture(sp);
-        biome_layers(sp, SLOT_AGRICULTURE);
-        kits_slot_agriculture(sp);
-        s.deferring = true;
-        select_town_layer(sp);
-        layer_linear(sp);
-        biome_layers(sp, SLOT_LINEAR);
-        kits_slot_linear(sp);
-        layer_built(sp);
-        biome_layers(sp, SLOT_BUILT);
-        kits_slot_built(sp);
-        s.deferring = false;
-        layer_canopy(sp);
-        biome_layers(sp, SLOT_CANOPY);
-        kits_slot_canopy(sp);
-        st_flush(sp);
-        layer_rivers(sp);
-        if (!s.done) {
-            biome_layers(sp, SLOT_WATER);
-            kits_slot_water(sp);
-        }
-        if (!s.done && !s.is_water) {
-            layer_snow(sp);
-            biome_layers(sp, SLOT_SEASONAL);
-            kits_slot_seasonal(sp);
-        }
+    return s;
+}
+
+/// Is the sample standing water (step 10 only)?
+fn stack_water(l: Local) -> bool {
+    return l.water > l.ground && l.water_kind != W_NONE;
+}
+
+// The steps of the stack: 0..9 on land, 10 on standing water; each runs its core layer and
+// returns its slot (`SLOT_SKIP`: the seasonal step skipped, the stack is done). One function
+// per step: pass B runs them in stages (`stack_stage_<n>`, generated by `gpu::stages_wgsl`): each stage one pipeline,
+// with ONE call site of `biome_layers` and of the kits' slot dispatcher (the drivers inline
+// every call). `stack.rs::eval` is the CPU's sequence.
+const SLOT_SKIP: u32 = 0xffffffffu;
+
+fn stack_step_0(sp: ptr<function, Stack>) -> u32 {
+    snow_prepare(sp);
+    s_frame(sp);
+    layer_zonal(sp);
+    return SLOT_ZONAL;
+}
+
+fn stack_step_1(sp: ptr<function, Stack>) -> u32 {
+    return SLOT_ALTITUDINAL;
+}
+
+fn stack_step_2(sp: ptr<function, Stack>) -> u32 {
+    layer_azonal(sp);
+    return SLOT_AZONAL;
+}
+
+fn stack_step_3(sp: ptr<function, Stack>) -> u32 {
+    finish_ground(sp);
+    return SLOT_DISTURBANCE;
+}
+
+fn stack_step_4(sp: ptr<function, Stack>) -> u32 {
+    layer_agriculture(sp);
+    return SLOT_AGRICULTURE;
+}
+
+fn stack_step_5(sp: ptr<function, Stack>) -> u32 {
+    (*sp).deferring = true;
+    select_town_layer(sp);
+    layer_linear(sp);
+    return SLOT_LINEAR;
+}
+
+fn stack_step_6(sp: ptr<function, Stack>) -> u32 {
+    layer_built(sp);
+    return SLOT_BUILT;
+}
+
+fn stack_step_7(sp: ptr<function, Stack>) -> u32 {
+    (*sp).deferring = false;
+    layer_canopy(sp);
+    return SLOT_CANOPY;
+}
+
+fn stack_step_8(sp: ptr<function, Stack>) -> u32 {
+    st_flush(sp);
+    layer_rivers(sp);
+    return SLOT_WATER;
+}
+
+fn stack_step_9(sp: ptr<function, Stack>) -> u32 {
+    // (the seasonal layers skip water: ice over it clears `is_water`)
+    if ((*sp).done || (*sp).is_water) {
+        return SLOT_SKIP;
     }
-    *pf = s.pf;
+    layer_snow(sp);
+    return SLOT_SEASONAL;
+}
+
+fn stack_step_10(sp: ptr<function, Stack>) -> u32 {
+    layer_standing(sp);
+    return SLOT_WATER;
+}
+
+/// The surface of a finished stack.
+fn stack_surface(sp: ptr<function, Stack>) -> Surface {
     var o: Surface;
-    if (s.is_water) {
-        o.albedo = s.col;
+    if ((*sp).is_water) {
+        o.albedo = (*sp).col;
     } else {
-        o.albedo = max(s.col, vec3<f32>(0.0));
+        o.albedo = max((*sp).col, vec3<f32>(0.0));
     }
-    o.height = s.height;
-    o.cls = s.cls;
-    o.lit = s.lit;
-    o.emission = s.emission;
+    o.height = (*sp).height;
+    o.cls = (*sp).cls;
+    o.lit = (*sp).lit;
+    o.emission = (*sp).emission;
     return o;
 }
