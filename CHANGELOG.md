@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Cold kit** (`docs/kits/cold.md`): polygon tundra, shrub tundra, polar desert and forest
+  tundra; glaciers with firn, bare ice, crevasses, ogives and moraines by the summer
+  temperature and aspect; thermokarst and kettle lakes, drained basins, pingos; drumlin fields
+  with eskers (instance family); sea ice (fast ice, floes, leads, pressure ridges), frozen lakes
+  and rivers; seasonal snow and nevé.
 - **Temperate, boreal and wetland kit** (`docs/kits/temperate.md`): 12 biomes (deciduous,
   mixed and taiga forest, lichen woodland, maquis, garrigue, chaparral, feather-grass steppe,
   heath, moor, krummholz, alpine meadow); raised and string bogs, fens, reed marshes, beaver
