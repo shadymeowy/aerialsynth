@@ -178,6 +178,18 @@ impl World {
         Ok(())
     }
 
+    /// Report tile generation on stderr.
+    #[getter]
+    fn verbose(&self) -> PyResult<bool> {
+        Ok(self.get()?.verbose())
+    }
+
+    #[setter]
+    fn set_verbose(&self, on: bool) -> PyResult<()> {
+        self.get()?.set_verbose(on);
+        Ok(())
+    }
+
     /// `(size in MiB, bytes held, layers of tiles held, hits, misses)` of the tile cache.
     fn cache_info(&self) -> PyResult<(usize, usize, usize, u64, u64)> {
         let s = self.get()?.cache_stats();

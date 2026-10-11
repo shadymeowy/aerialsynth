@@ -1,0 +1,281 @@
+# Desert kit (docs/kits/desert.md): hot and cold deserts by palette and lithology. The landforms
+# (dunes by wind regime, barchans, playas, washes, yardangs, inselbergs) are the kit's code and
+# follow the climate; these biomes give each desert ecoregion its colours and ground textures:
+# desert varnish, gravel mottling, rock pavement, scrub along the washes, oasis groves.
+#
+# Schema: docs/design/kit-guide.md ("Biomes"). Colours are sRGB 0..255.
+#
+# Masks used below: sand (the sand-sea mask), slope (tan), moist (0..1), river_dist (m from the
+# bank of a channel, negative inside), patch (pixel noise ~[-1, 1]), temp (°C).
+
+# ---- the core deserts: the kit's ground textures
+- id: desert
+  patch: true
+  # (the kit's deserts share the BWh / BWk sites with it: the variety budget of the desert
+  # biomes together is ~6 % of the land)
+  min_share: 0.012
+  layers:
+    # desert varnish: dark brown patches on old, stable surfaces of the stony desert (reg)
+    - slot: azonal
+      kernel: patches
+      mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.3, 0.45], moist: [null, null, 0.26, 0.36] }
+      params: { scale: 520, fraction: 0.24, octaves: 3, roughness: 0.55, colour: [126, 98, 74], colour2: [112, 88, 68], colour_var: 0.2 }
+      class: gravel
+    # pale gravel and silt mottling of the pavement
+    - slot: azonal
+      kernel: patches
+      mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.25, 0.4], moist: [null, null, 0.26, 0.36] }
+      params: { scale: 28, fraction: 0.35, octaves: 2, roughness: 0.5, colour: [200, 182, 150], colour2: [186, 168, 140], colour_var: 0.15 }
+    # sparse scrub on the plains
+    - slot: canopy
+      kernel: scatter
+      mask: { sand: [null, null, 0.2, 0.4], moist: [0.03, 0.2, 2, 3], veg: [0.4, 0.7, 2, 3] }
+      params: { cell: 9, density: 0.14, shape: dome, radius: [0.7, 1.5], height: [0.5, 1.3], colour: [96, 92, 64], colour2: [120, 108, 72], second: 0.4, colour_var: 0.3 }
+      class: desert_scrub
+    # acacia and tamarisk along the washes
+    - slot: canopy
+      kernel: scatter
+      mask: { river_dist: [-15, 0, 20, 50], moist: [0.0, 0.08, 2, 3], veg: [0.4, 0.7, 2, 3] }
+      params: { cell: 13, density: 0.45, shape: umbrella, radius: [1.8, 3.6], height: [2.5, 6], colour: [82, 90, 56], colour_var: 0.3 }
+      class: desert_scrub
+    # oases: date palm groves along some stretches of the washes, gardens under them
+    - slot: agriculture
+      kernel: cells
+      mask: { river_dist: [null, null, 120, 220], patch: [0.3, 0.45, 2, 3], temp: [17, 21, 60, 70], veg: [0.4, 0.7, 2, 3] }
+      params: { cell: 24, fill: 0.85, edge: 1.2, edge_height: 0.6, colour: [96, 118, 52], colour2: [138, 128, 82], edge_colour: [164, 140, 104], colour_var: 0.3 }
+      class: crop
+      clear: 1.0
+    - slot: canopy
+      kernel: scatter
+      mask: { river_dist: [null, null, 110, 200], patch: [0.3, 0.45, 2, 3], temp: [17, 21, 60, 70], sand: [null, null, 0.4, 0.6] }
+      params: { cell: 8, density: 0.8, shape: star, radius: [2.8, 4.2], height: [9, 16], colour: [56, 78, 42], colour2: [70, 88, 46], second: 0.3, colour_var: 0.25 }
+      class: orchard
+
+- id: desert_red
+  patch: true
+  layers:
+    - slot: azonal
+      kernel: patches
+      mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.3, 0.45], moist: [null, null, 0.26, 0.36] }
+      params: { scale: 560, fraction: 0.26, octaves: 3, roughness: 0.55, colour: [118, 70, 50], colour2: [104, 64, 48], colour_var: 0.2 }
+      class: gravel
+    - slot: azonal
+      kernel: patches
+      mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.25, 0.4], moist: [null, null, 0.26, 0.36] }
+      params: { scale: 30, fraction: 0.3, octaves: 2, roughness: 0.5, colour: [196, 132, 92], colour2: [176, 118, 84], colour_var: 0.15 }
+    - slot: canopy
+      kernel: scatter
+      mask: { sand: [null, null, 0.3, 0.55], moist: [0.03, 0.2, 2, 3], veg: [0.4, 0.7, 2, 3] }
+      params: { cell: 10, density: 0.2, shape: dome, radius: [0.8, 1.8], height: [0.5, 1.2], colour: [118, 116, 70], colour2: [140, 132, 84], second: 0.5, colour_var: 0.3 }
+      class: desert_scrub
+    - slot: canopy
+      kernel: scatter
+      mask: { river_dist: [-15, 0, 25, 60], moist: [0.0, 0.08, 2, 3], veg: [0.4, 0.7, 2, 3] }
+      params: { cell: 14, density: 0.5, shape: umbrella, radius: [2, 4], height: [3, 7], colour: [86, 96, 60], colour_var: 0.3 }
+      class: desert_scrub
+
+# ---- hot deserts
+# sand seas of the Sahara and Arabia: yellow to orange sands, tan reg
+- id: hot_desert_erg
+  group: bare
+  koppen: [BWh]
+  lithology: [sedimentary, unconsolidated, carbonate]
+  weight: 0.8
+  min_share: 0.004
+  palette:
+    soil: [[190, 160, 118], [176, 146, 108], [160, 140, 116], [204, 178, 136]]
+    sand: [[226, 186, 128], [214, 164, 104], [232, 204, 154]]
+    rock: [[150, 116, 86], [170, 136, 100], [112, 92, 76]]
+    shrub: [104, 98, 66]
+  vegetation: { trees: 0.15, shrubs: 0.5, savanna: 0.5, meadow: 0.2, woodlots: 0.0 }
+  landuse: { agriculture: 0.15, towns: 0.4 }
+  layers:
+    - slot: azonal
+      kernel: patches
+      mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.3, 0.45], moist: [null, null, 0.26, 0.36] }
+      params: { scale: 640, fraction: 0.22, octaves: 3, roughness: 0.55, colour: [140, 106, 78], colour2: [124, 96, 72], colour_var: 0.2 }
+      class: gravel
+    - slot: azonal
+      kernel: patches
+      mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.25, 0.4], moist: [null, null, 0.26, 0.36] }
+      params: { scale: 26, fraction: 0.4, octaves: 2, roughness: 0.5, colour: [214, 190, 150], colour2: [198, 176, 140], colour_var: 0.15 }
+    - slot: canopy
+      kernel: scatter
+      mask: { sand: [null, null, 0.2, 0.4], moist: [0.04, 0.2, 2, 3], veg: [0.4, 0.7, 2, 3] }
+      params: { cell: 11, density: 0.1, shape: dome, radius: [0.7, 1.4], height: [0.5, 1.2], colour: [100, 96, 62], colour_var: 0.3 }
+      class: desert_scrub
+    - slot: canopy
+      kernel: scatter
+      mask: { river_dist: [-15, 0, 20, 50], moist: [0.0, 0.08, 2, 3], veg: [0.4, 0.7, 2, 3] }
+      params: { cell: 14, density: 0.4, shape: umbrella, radius: [1.8, 3.6], height: [2.5, 6], colour: [84, 92, 56], colour_var: 0.3 }
+      class: desert_scrub
+    - slot: agriculture
+      kernel: cells
+      mask: { river_dist: [null, null, 120, 220], patch: [0.3, 0.45, 2, 3], temp: [17, 21, 60, 70], veg: [0.4, 0.7, 2, 3] }
+      params: { cell: 22, fill: 0.85, edge: 1.2, edge_height: 0.6, colour: [98, 120, 52], colour2: [142, 130, 84], edge_colour: [170, 146, 108], colour_var: 0.3 }
+      class: crop
+      clear: 1.0
+    - slot: canopy
+      kernel: scatter
+      mask: { river_dist: [null, null, 110, 200], patch: [0.3, 0.45, 2, 3], temp: [17, 21, 60, 70], sand: [null, null, 0.4, 0.6] }
+      params: { cell: 8, density: 0.8, shape: star, radius: [2.8, 4.2], height: [9, 16], colour: [56, 78, 42], colour2: [70, 88, 46], second: 0.3, colour_var: 0.25 }
+      class: orchard
+
+# hamada: rocky plateau pavement, dark varnished blocks over pale limestone or sandstone
+- id: hot_desert_hamada
+  group: bare
+  koppen: [BWh]
+  lithology: [carbonate, sedimentary, crystalline]
+  weight: 0.5
+  palette:
+    soil: [[150, 124, 98], [132, 108, 86], [120, 110, 98], [168, 142, 110]]
+    rock: [[112, 86, 66], [138, 108, 82], [74, 62, 54]]
+    sand: [[212, 178, 128], [200, 158, 108], [222, 196, 152]]
+  vegetation: { trees: 0.1, shrubs: 0.4, savanna: 0.3, meadow: 0.1, woodlots: 0.0 }
+  landuse: { agriculture: 0.05, towns: 0.3 }
+  layers:
+    # blocks and slabs of the rock pavement
+    - slot: azonal
+      kernel: cells
+      mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.4, 0.6], moist: [null, null, 0.28, 0.38] }
+      params: { cell: 5, jitter: 0.9, fill: 0.55, edge: 0, colour: [74, 60, 50], colour2: [104, 84, 66], colour_var: 0.35, fill_height: 0.25 }
+      class: rock
+    # large varnished surfaces and paler deflation hollows
+    - slot: azonal
+      kernel: patches
+      mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.4, 0.6] }
+      params: { scale: 700, fraction: 0.45, octaves: 3, roughness: 0.6, colour: [80, 62, 50], colour2: [62, 52, 46], colour_var: 0.2 }
+      class: rock
+    - slot: azonal
+      kernel: patches
+      mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.25, 0.4] }
+      params: { scale: 160, fraction: 0.18, octaves: 2, roughness: 0.5, colour: [196, 176, 146], colour2: [184, 164, 136], colour_var: 0.1 }
+      class: bare
+    - slot: canopy
+      kernel: scatter
+      mask: { river_dist: [-15, 0, 20, 50], moist: [0.0, 0.08, 2, 3], veg: [0.4, 0.7, 2, 3] }
+      params: { cell: 15, density: 0.35, shape: umbrella, radius: [1.8, 3.4], height: [2.5, 5], colour: [84, 90, 56], colour_var: 0.3 }
+      class: desert_scrub
+
+# black basalt fields (harrat) and black sand on volcanic rock
+- id: basalt_harrat
+  group: bare
+  koppen: [BWh, BWk, BSh]
+  lithology: [volcanic]
+  weight: 1.5
+  palette:
+    soil: [[96, 86, 78], [80, 72, 66], [70, 66, 64], [112, 100, 88]]
+    rock: [[46, 42, 42], [62, 56, 54], [36, 34, 34]]
+    sand: [[92, 88, 86], [72, 68, 66], [118, 112, 104]]
+    shrub: [96, 96, 66]
+  vegetation: { trees: 0.1, shrubs: 0.5, savanna: 0.3, meadow: 0.1, woodlots: 0.0 }
+  landuse: { agriculture: 0.05, towns: 0.2 }
+  layers:
+    # boulder fields
+    - slot: azonal
+      kernel: scatter
+      mask: { sand: [null, null, 0.15, 0.3], slope: [null, null, 0.5, 0.7] }
+      params: { cell: 3.2, density: 0.65, shape: dome, radius: [0.5, 1.2], height: [0.3, 0.9], colour: [38, 36, 36], colour2: [58, 54, 52], second: 0.4, colour_var: 0.3, shade: 0.4 }
+      class: rock
+      height: add
+    # pale silt pans between the lava flows (qa)
+    - slot: azonal
+      kernel: patches
+      mask: { sand: [null, null, 0.15, 0.3], slope: [null, null, 0.08, 0.15] }
+      params: { scale: 260, fraction: 0.2, octaves: 2, roughness: 0.45, colour: [182, 168, 146], colour2: [168, 154, 134], colour_var: 0.1 }
+      class: bare
+      clear: 1.0
+    - slot: canopy
+      kernel: scatter
+      mask: { river_dist: [-15, 0, 20, 50], veg: [0.4, 0.7, 2, 3] }
+      params: { cell: 14, density: 0.4, shape: dome, radius: [1.5, 3], height: [1.5, 4], colour: [84, 92, 58], colour_var: 0.3 }
+      class: desert_scrub
+
+# white gypsum dune fields on evaporites
+- id: gypsum_desert
+  group: bare
+  koppen: [BWh, BWk]
+  lithology: [carbonate]
+  weight: 0.25
+  palette:
+    soil: [[210, 200, 180], [196, 184, 164], [184, 176, 162], [222, 214, 196]]
+    sand: [[240, 238, 230], [232, 228, 218], [246, 244, 238]]
+    rock: [[190, 180, 162], [206, 196, 176], [150, 140, 126]]
+  vegetation: { trees: 0.1, shrubs: 0.6, savanna: 0.3, meadow: 0.1, woodlots: 0.0 }
+  landuse: { agriculture: 0.05, towns: 0.3 }
+  layers:
+    - slot: canopy
+      kernel: scatter
+      mask: { sand: [null, null, 0.6, 0.9], moist: [0.0, 0.15, 2, 3], veg: [0.4, 0.7, 2, 3] }
+      params: { cell: 12, density: 0.18, shape: dome, radius: [0.8, 1.6], height: [0.6, 1.5], colour: [98, 104, 70], colour_var: 0.3 }
+      class: desert_scrub
+
+# scrub deserts of the subtropical margins (creosote, acacia, cacti): a shrub-dotted ground
+- id: desert_scrubland
+  group: vegetation
+  koppen: [BWh, BSh]
+  envelope: { precip_mm: [90, 420] }
+  weight: 0.5
+  palette:
+    soil: [[184, 150, 112], [170, 132, 98], [156, 138, 116], [196, 166, 128]]
+    sand: [[220, 184, 136], [206, 164, 116], [228, 204, 160]]
+    shrub: [92, 94, 60]
+    grass_dry: [182, 162, 118]
+  vegetation: { trees: 0.3, shrubs: 1.4, savanna: 0.8, meadow: 0.4, woodlots: 0.0 }
+  landuse: { agriculture: 0.3, towns: 0.6 }
+  layers:
+    - slot: azonal
+      kernel: patches
+      mask: { sand: [null, null, 0.1, 0.25], slope: [null, null, 0.3, 0.45] }
+      params: { scale: 300, fraction: 0.25, octaves: 3, roughness: 0.55, colour: [146, 114, 86], colour2: [132, 104, 80], colour_var: 0.2 }
+      class: gravel
+    - slot: canopy
+      kernel: scatter
+      mask: { sand: [null, null, 0.4, 0.7], veg: [0.4, 0.7, 2, 3] }
+      params: { cell: 6, density: 0.45, shape: dome, radius: [0.8, 1.7], height: [0.7, 1.8], colour: [84, 90, 56], colour2: [110, 106, 66], second: 0.35, colour_var: 0.35 }
+      class: desert_scrub
+    - slot: canopy
+      kernel: scatter
+      mask: { sand: [null, null, 0.4, 0.7], veg: [0.4, 0.7, 2, 3] }
+      params: { cell: 22, density: 0.3, shape: umbrella, radius: [2, 3.5], height: [3, 6], colour: [80, 88, 52], colour_var: 0.3 }
+      class: desert_scrub
+    - slot: canopy
+      kernel: scatter
+      mask: { river_dist: [-15, 0, 30, 70], veg: [0.4, 0.7, 2, 3] }
+      params: { cell: 12, density: 0.6, shape: umbrella, radius: [2, 4.2], height: [3, 8], colour: [74, 88, 50], colour_var: 0.3 }
+      class: desert_scrub
+
+# ---- cold deserts
+# Gobi: grey-tan gravel plains, black varnished gravel, saxaul scrub, grey-yellow sands
+- id: cold_desert_gobi
+  group: bare
+  koppen: [BWk]
+  weight: 1.0
+  palette:
+    soil: [[170, 158, 136], [156, 144, 124], [140, 134, 124], [184, 172, 148]]
+    sand: [[208, 190, 152], [196, 176, 138], [218, 204, 172]]
+    rock: [[120, 108, 96], [142, 128, 112], [84, 78, 74]]
+    shrub: [100, 102, 74]
+    grass_dry: [176, 164, 128]
+  vegetation: { trees: 0.1, shrubs: 0.8, savanna: 0.3, meadow: 0.3, woodlots: 0.0 }
+  landuse: { agriculture: 0.05, towns: 0.3 }
+  layers:
+    - slot: azonal
+      kernel: patches
+      mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.3, 0.45] }
+      params: { scale: 600, fraction: 0.35, octaves: 3, roughness: 0.6, colour: [74, 70, 66], colour2: [94, 88, 80], colour_var: 0.2 }
+      class: gravel
+    - slot: azonal
+      kernel: patches
+      mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.25, 0.4] }
+      params: { scale: 22, fraction: 0.4, octaves: 2, roughness: 0.5, colour: [192, 182, 160], colour2: [176, 168, 150], colour_var: 0.15 }
+    - slot: canopy
+      kernel: scatter
+      mask: { sand: [null, null, 0.5, 0.8], moist: [0.02, 0.15, 2, 3], veg: [0.4, 0.7, 2, 3] }
+      params: { cell: 10, density: 0.22, shape: dome, radius: [0.9, 2.0], height: [0.8, 2.2], colour: [92, 96, 70], colour2: [118, 116, 82], second: 0.4, colour_var: 0.3 }
+      class: desert_scrub
+    - slot: canopy
+      kernel: scatter
+      mask: { river_dist: [-15, 0, 25, 60], veg: [0.4, 0.7, 2, 3] }
+      params: { cell: 12, density: 0.45, shape: dome, radius: [1.5, 3.2], height: [2, 5], colour: [90, 100, 64], colour_var: 0.3 }
+      class: desert_scrub

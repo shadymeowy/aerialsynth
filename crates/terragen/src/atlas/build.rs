@@ -648,7 +648,6 @@ pub(super) fn build(world: &World) -> Atlas {
     .unzip();
     let wind_ann = upsample3(&g2, &g, &par(n2, |k| 0.5 * (wind(ac, &wind2[k], 1.0) + wind(ac, &wind2[k], -1.0))));
 
-
     // ---- glaciation (ice at the last glacial maximum: ~6 °C colder, more towards the poles)
     let glaciation: Vec<f64> = par(n, |k| {
         let lat = geos[k].lat.to_radians();

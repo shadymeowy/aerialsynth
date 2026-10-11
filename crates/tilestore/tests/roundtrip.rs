@@ -137,3 +137,21 @@ fn a_partial_level_is_skipped_and_completed() {
     assert_eq!(t.emission, tile(TileId::new(5, 1, 1), 5).emission);
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn a_directory_or_another_file_is_not_a_store() {
+    let dir = test_dir("notastore");
+    let text = dir.join("notes.txt");
+    std::fs::write(&text, "not a tile store, but long enough to be checked at offset 512 too ".repeat(20)).unwrap();
+    let empty = dir.join("empty.h5");
+    std::fs::write(&empty, b"").unwrap();
+    for (p, want) in [(&dir, "is a directory"), (&text, "is not an HDF5 file"), (&empty, "is empty")] {
+        for e in [TileStore::open(p).err(), TileStore::open_rw(p).err()] {
+            let e = format!("{:#}", e.expect("not a store, opened"));
+            // leads with the reason, no HDF5 error stack
+            assert!(e.starts_with(&format!("{} {want}", p.display())), "{e}");
+            assert!(!e.contains("H5F") && e.lines().count() == 1, "{e}");
+        }
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}

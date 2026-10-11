@@ -10,7 +10,18 @@ impl SurfaceModel {
     /// Agricultural field at rotated local coords. Returns (colour, extra height, coverage, kind)
     /// where kind 0 = crop, 1 = hedge, 2 = track.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn field(&self, cache: &mut Caches, r: &RegionInfo, t: &Terrain, agri: f64, q: DVec2, p: DVec3, gsd: f64, fw: f64, pf: &PixFields) -> Option<(DVec3, f64, f64, u8)> {
+    pub(crate) fn field(
+        &self,
+        cache: &mut Caches,
+        r: &RegionInfo,
+        t: &Terrain,
+        agri: f64,
+        q: DVec2,
+        p: DVec3,
+        gsd: f64,
+        fw: f64,
+        pf: &PixFields,
+    ) -> Option<(DVec3, f64, f64, u8)> {
         let pal = &self.pal;
         let cult = smoothstep(0.02, 0.45, agri);
         let tint = DVec3::new(1.0 + 0.08 * (r.palette - 0.5), 1.0, 1.0 - 0.06 * (r.palette - 0.5));

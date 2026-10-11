@@ -489,7 +489,10 @@ pub(crate) fn kernel_parity(cases: &[(&str, &str)]) -> Option<Vec<(String, f64, 
     }
     // the tile module with the test entry; group 0 with the test layers
     let (_, tile, _) = sources();
-    let module = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("kernel test"), source: wgpu::ShaderSource::Wgsl(format!("{tile}{KERNEL_TEST}").into()) });
+    let module = d.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("kernel test"),
+        source: wgpu::ShaderSource::Wgsl(format!("{tile}{KERNEL_TEST}").into()),
+    });
     let l_test = layout(d, "kernel test", &[Bind::Ro, Bind::Rw]);
     let pl = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("kernel test"),
@@ -571,6 +574,5 @@ fn kernels_match_the_cpu() {
     for (name, bad, mx) in &res {
         eprintln!("  {name:10} off {:.3}% max coverage difference {mx:.3}", bad * 100.0);
         assert!(*bad < 0.005, "{name}: {:.2}% of the samples differ", bad * 100.0);
-
     }
 }

@@ -48,7 +48,7 @@ def test_frame(world, cam, ground):
     assert f.landcover.dtype == np.uint8 and f.landcover.shape == (48, 64)
     # 60 degrees down from 3 km: terrain everywhere, a few km away
     assert np.isfinite(f.depth).all() and (f.depth > 500).all() and (f.depth < 20_000).all()
-    assert (f.landcover < 18).all()
+    assert (f.landcover < 128).all()  # land-cover classes v2; no sky in this view
     assert 20 < f.rgb.mean() < 235
     t, gain, ev = f.exposure
     assert t > 0 and gain >= 1
