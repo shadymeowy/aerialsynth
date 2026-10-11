@@ -147,7 +147,7 @@ pub fn lists(w: &World, p: DVec3, r: f64, relief_only: bool) -> Vec<Vec<Instance
 /// parameters and the existence dispatch (`<name>_exists` lives in the kit's relief WGSL).
 pub fn wgsl() -> String {
     let fams: Vec<&Family> = families().collect();
-    let mut s = format!("const NFAM: u32 = {}u;\n", fams.len());
+    let mut s = format!("const NFAM: u32 = {}u;\n// (at least 1: array sizes)\nconst NFAM_1: u32 = {}u;\n", fams.len(), fams.len().max(1));
     for (i, f) in fams.iter().enumerate() {
         s.push_str(&format!("const FAM_{}: u32 = {i}u;\n", f.name.to_uppercase()));
     }
