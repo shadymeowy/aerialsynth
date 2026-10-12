@@ -26,7 +26,7 @@
 //!   stripes keep their phase at any zoom (R-wave); a 38 km noise bends them, a 26 km noise
 //!   makes the ridges plunge. Folds: triangle crests, λ 6–12 km, 520 m; blocks: tilted
 //!   sawtooth, λ 11–21 km, 900 m, a scarp on a fifth of the period.
-//! * *Badlands*: two octaves of creased noise (260 and 90 m) on soft sediment × arid.
+//! * *Badlands*: three octaves of creased noise (300, 130 and 55 m) on soft sediment × arid.
 //! * *Alluvial fans*: family `mountains_fans` at mountain fronts in dry climates (the atlas'
 //!   uplift falling at least 0.03 per 24 km: the fan points down the gradient): a
 //!   conical apron `H(1 − r/R)^1.3` over a 70 % blend to the smooth elevation in a ±60° sector.
@@ -246,15 +246,15 @@ fn ridges(p: DVec3, kind: u32, nw: f64, pl: f64) -> f64 {
 /// Mean of `|perlin3|^0.7` (a test recomputes it).
 const CREASE_MEAN: f64 = 0.2698;
 
-/// Creased gullies (m per unit amplitude): 260 and 90 m octaves, zero mean, band-limited.
+/// Creased gullies (m per unit amplitude): 300, 130 and 55 m octaves (weights 1, 0.6, 0.35: the
+/// finer creases branch off the coarser ones), zero mean, band-limited.
 fn badlands(p: DVec3, gsd: f64) -> f64 {
-    let (b1, b2) = (band(260.0, gsd), band(90.0, gsd));
     let mut v = 0.0;
-    if b1 > 0.0 {
-        v += (perlin3(SEED + 20, p / 260.0).abs().powf(0.7) - CREASE_MEAN) * b1;
-    }
-    if b2 > 0.0 {
-        v += 0.45 * (perlin3(SEED + 21, p / 90.0).abs().powf(0.7) - CREASE_MEAN) * b2;
+    for (k, (lam, wt)) in [(300.0, 1.0), (130.0, 0.6), (55.0, 0.35)].into_iter().enumerate() {
+        let b = band(lam, gsd);
+        if b > 0.0 {
+            v += wt * (perlin3(SEED + 20 + k as u64, p / lam).abs().powf(0.7) - CREASE_MEAN) * b;
+        }
     }
     v
 }
@@ -355,7 +355,7 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
     }
     // ---- badlands
     if z.badland > 0.0 {
-        *h += z.badland * (14.0 + 14.0 * smoothstep(-0.3, 0.5, n1)) * 3.5 * badlands(c.p, gsd);
+        *h += z.badland * (14.0 + 14.0 * smoothstep(-0.3, 0.5, n1)) * 2.4 * badlands(c.p, gsd);
     }
     // ---- alluvial fans
     for it in r.instances(w, fam_fans()).iter() {
@@ -479,7 +479,7 @@ pub fn linear(s: &mut Stack) {
             srgb(204.0, 194.0, 176.0),
             srgb(168.0, 112.0, 84.0),
             srgb(216.0, 198.0, 160.0),
-            srgb(138.0, 108.0, 90.0),
+            srgb(168.0, 140.0, 118.0),
             srgb(184.0, 132.0, 108.0),
             srgb(188.0, 172.0, 148.0),
         ];

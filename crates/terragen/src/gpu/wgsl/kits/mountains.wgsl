@@ -6,7 +6,7 @@ fn mt_strata_col(i: u32) -> vec3<f32> {
         case 0u: { return srgb(204.0, 194.0, 176.0); }
         case 1u: { return srgb(168.0, 112.0, 84.0); }
         case 2u: { return srgb(216.0, 198.0, 160.0); }
-        case 3u: { return srgb(138.0, 108.0, 90.0); }
+        case 3u: { return srgb(168.0, 140.0, 118.0); }
         case 4u: { return srgb(184.0, 132.0, 108.0); }
         default: { return srgb(188.0, 172.0, 148.0); }
     }

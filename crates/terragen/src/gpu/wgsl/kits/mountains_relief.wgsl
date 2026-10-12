@@ -181,14 +181,18 @@ fn mt_ridges(p: vec3<f64>, kind: u32, nw: f32, pl: f32) -> f32 {
 
 /// `mountains::badlands`.
 fn mt_badlands(p: vec3<f64>, gsd: f32) -> f32 {
-    let b1 = band(260.0, gsd);
-    let b2 = band(90.0, gsd);
     var v = 0.0;
-    if (b1 > 0.0) {
-        v += (pow(abs(perlin3(MT_SEED + 20lu, p / 260.0lf)), 0.7) - MT_CREASE_MEAN) * b1;
+    let b0 = band(300.0, gsd);
+    if (b0 > 0.0) {
+        v += (pow(abs(perlin3(MT_SEED + 20lu, p / 300.0lf)), 0.7) - MT_CREASE_MEAN) * b0;
     }
+    let b1 = band(130.0, gsd);
+    if (b1 > 0.0) {
+        v += 0.6 * (pow(abs(perlin3(MT_SEED + 21lu, p / 130.0lf)), 0.7) - MT_CREASE_MEAN) * b1;
+    }
+    let b2 = band(55.0, gsd);
     if (b2 > 0.0) {
-        v += 0.45 * (pow(abs(perlin3(MT_SEED + 21lu, p / 90.0lf)), 0.7) - MT_CREASE_MEAN) * b2;
+        v += 0.35 * (pow(abs(perlin3(MT_SEED + 22lu, p / 55.0lf)), 0.7) - MT_CREASE_MEAN) * b2;
     }
     return v;
 }
@@ -316,7 +320,7 @@ fn mountains_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
         }
     }
     if (z.badland > 0.0) {
-        *h += z.badland * (14.0 + 14.0 * smoothstep1(-0.3, 0.5, fl.n1)) * 3.5 * mt_badlands(c.p, gsd);
+        *h += z.badland * (14.0 + 14.0 * smoothstep1(-0.3, 0.5, fl.n1)) * 2.4 * mt_badlands(c.p, gsd);
     }
     let fans = inst_list(FAM_MOUNTAINS_FANS, r.blk, c.p);
     for (var k = 0u; k < fans.n; k++) {
