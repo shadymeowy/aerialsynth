@@ -3,7 +3,8 @@
 //! §6.3, §6.4, P2/P3; `docs/kits/transport.md`).
 //!
 //! * [`net`]: the graph (relative-neighbourhood graphs of places per network, track ends).
-//! * [`route`]: routing an edge over the analytic relief (corridor DP, smoothing, switchbacks).
+//! * [`route`]: routing an edge through its scene (the relief with the valleys carved in, lakes,
+//!   reservoirs, the sea, river crossings, site footprints; corridor DP, smoothing, switchbacks).
 //! * [`build`]: the features of an area: engineered profiles (cut and fill, bridges, tunnels),
 //!   segments, interchanges, roundabouts, stations, yards, roads and lines to the sites.
 //! * [`px`]: the looks per sample (shared by slot 6 and slot 8).

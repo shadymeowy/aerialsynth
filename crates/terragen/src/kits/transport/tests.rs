@@ -1313,6 +1313,23 @@ fn stamps_near() {
         let g = geodesy::ecef2geodetic(st.center, &w.ell);
         eprintln!("stamp {} at ({:.5}, {:.5})", st.template, g.lat.to_degrees(), g.lon.to_degrees());
     }
+    // the segments near the point
+    let c = ecef(&w, v[0], v[1]);
+    for sg in f.segs.iter().filter(|sg| net::chord_dist(sg.a, sg.b, c) < 120.0) {
+        let g = geodesy::ecef2geodetic(c, &w.ell);
+        let t = w.terrain(&crate::world::Ctx::new(g.lat, g.lon, 5.0, &w.ell));
+        eprintln!(
+            "seg kind {} flags {:#x} deck {:.1} {:.1} at {:.0} m; ground {:.1} water {:.1} kind {}",
+            sg.kind - cls::KIND0,
+            sg.flags,
+            sg.deck_a,
+            sg.deck_b,
+            net::chord_dist(sg.a, sg.b, c),
+            t.ground,
+            t.water,
+            t.water_kind
+        );
+    }
     // interchange ramps: their centroids, in clusters of 1.5 km
     let mut cl: Vec<(DVec3, usize)> = Vec::new();
     for sg in f.segs.iter().filter(|s| s.kind == cls::KIND0 + cls::RAMP as u32) {

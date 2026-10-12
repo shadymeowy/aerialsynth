@@ -47,8 +47,9 @@ edge has a *scene* of host knowledge along its corridor, the same on both backen
   basins of the streams, level 2, for minor roads); the cold kit's kettle and thermokarst lakes
   of its large lattice (its `lake_mask` estimated from pass A's values and the relief's slope);
   the settlements kit's reservoirs (below). Standing water costs 25–60 per metre on top of the
-  length, the sea 10–40; each step also measures its chord inside the lakes' outlines, so a
-  coarse step does not jump a lake between two dry nodes.
+  length, the sea 10–40; each step also measures its chord inside the lakes' outlines and,
+  where it is ≥ 300 m long and near a lake or reservoir, probes points along it, so a coarse
+  step does not jump a lake between two dry nodes.
 * **River crossings** (levels 0–1, in each level's meander-warped space): a cost per crossing
   of 100 m (tracks) … 600 m (motorways, railways) plus 12 per metre of bridge (the channel's
   width over the sine of the crossing angle, ≥ 0.25): few crossings, near perpendicular, and no
@@ -210,7 +211,13 @@ slot 7, the stamp look in the stamp loop, the deck look (`tr_deck_px`) in slot 8
 transport segment or stamp in the bin; per segment the distance to it before any look; slot 8
 only on rivers and water. The host routes an edge once (memoized per edge, per edge pair, per
 deck sample); a city's 25 km disc at 30 m pixels (some 100 k segments of all classes, profiles,
-crossings) takes 10–17 s on one CPU core the first time.
+crossings) takes 10–17 s on one CPU core the first time. Routing (`routing_time`: every edge
+near 8 regions, 10 km discs at 30 m pixels, cold caches, one farm core, both runs side by side):
+3480 routes in 22.8 s (6.5 ms each) before the water and sites, 4029 routes in 44.9 s (11.1 ms)
+now — 1.7× per route, and 16 % more edges per area from the wider deviation bound (the second
+try's 600 m, entries 600 m off the chord). Of it, the scenes (drainage, lakes) take 10–25 %, the
+analytic routes (probes with the carved valleys and the lakes, the check, the sampled steps
+near water) ~70 %, the sites stage 5–25 %.
 
 ## Stills
 
@@ -218,16 +225,24 @@ GPU-generated (`terrain survey --places`, default world, 10:30 local on the equi
 close views straight down, oblique from 1.5 km at 25°; the night view is the emission layer of
 `render_tiles`, square-root scale).
 
-**Road network** (−7.657, −16.630): motorway, trunk and secondary roads, local roads and tracks,
-a yard at the city's edge; **mountain motorway** (−23.754, −33.832): cuttings, a trumpet, winding
-secondary roads, a quarry.
+**Road network** (−7.657, −16.630): the motorway along the valley floor, trunk and secondary
+roads, local roads and tracks, a yard at the city's edge; **mountain motorway** (−23.720,
+−33.812): the motorway in cuttings, secondary roads keeping to the shores of a dendritic
+reservoir.
 ![network 1.5 km](images/transport_network_1500m.jpg)
 ![mountain motorway 1.5 km](images/transport_mountain_motorway_1500m.jpg)
 
-**Partial cloverleaf** in forest (−7.657, −16.630), cleared embankments; **switchbacks** on a
-snowy slope (−24.187, −33.361).
-![interchange 1.5 km](images/transport_interchange_1500m.jpg)
+**Interchange** (−7.648, −16.632): a motorway × trunk crossing at a shallow angle, the ramps
+running alongside, cleared verges; **switchbacks** on a snowy slope (−24.187, −33.361).
+![interchange 800 m](images/transport_interchange_800m.jpg)
 ![switchbacks 400 m](images/transport_switchbacks_400m.jpg)
+
+**Around a lake** (−7.486, −18.715): a major road bends round the lake's southern shore,
+local roads end on the shore where a hamlet's centre lies in the water; **river crossing**
+(−7.547, −18.796): two secondary roads cross a 134 m river side by side at the narrowest,
+square-on reach.
+![lake 800 m](images/transport_lake_800m.jpg)
+![river crossing 500 m](images/transport_river_crossing_500m.jpg)
 
 **River bridges** (−7.578, −18.746): a trunk road and a railway on decks over a 120 m river;
 **power line** through forest (−7.832, −18.800): the cleared corridor and pylons.
@@ -235,13 +250,14 @@ snowy slope (−24.187, −33.361).
 ![power line 800 m](images/transport_power_800m.jpg)
 
 **Yard** (−7.746, −18.797): the ladder, wagons, a motorway through the city; **station**
-(−7.730, −18.797): platforms with canopies next to a stadium.
+(−7.730, −18.797): platforms with canopies next to a stadium (earlier renders, as the power
+line and the night view).
 ![yard 800 m](images/transport_yard_800m.jpg)
 ![station 300 m](images/transport_station_300m.jpg)
 
-**Town edge** (−7.619, −16.609): two roundabouts where trunk and secondary roads enter, cars;
-the same roads through forest from 500 m.
-![roundabouts 250 m](images/transport_roundabouts_250m.jpg)
+**Town edge** (−7.623, −16.605): a roundabout where a secondary road enters, cars; a trunk
+road and a track through forest nearby (−7.619, −16.609) from 500 m.
+![roundabout 250 m](images/transport_roundabout_250m.jpg)
 ![forest roads 500 m](images/transport_forest_roads_500m.jpg)
 
 **Night** (emission, z13 near −7.70, −18.76): lit streets of the town and the lit road leaving it.
