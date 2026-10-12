@@ -1110,7 +1110,7 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                 // (kits: U-shaped walls and stepped walls)
                 if (cv.u > 0.0 || cv.step_mix > 0.0) {
                     let tt = clamp((ad - cv.fp_w) / max(valley - cv.fp_w, 1e-6), 0.0, 1.0);
-                    var w = lerp(wall, pow(tt, 1.8), cv.u);
+                    var w = lerp(wall, pow(tt, 1.5), cv.u);
                     if (cv.step_mix > 0.0) {
                         let k = max(floor((h0 - fpl) / max(cv.steps, 1.0) + 0.5), 1.0);
                         let x = w * k;

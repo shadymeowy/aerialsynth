@@ -1176,7 +1176,7 @@ impl World {
                     // (kits: U-shaped walls and stepped walls)
                     let wall = if cv.u > 0.0 || cv.step_mix > 0.0 {
                         let t = ((ad - fp_w) / (valley - fp_w).max(1e-6)).clamp(0.0, 1.0);
-                        let mut w = lerp(wall, t.powf(1.8), cv.u);
+                        let mut w = lerp(wall, t.powf(1.5), cv.u);
                         if cv.step_mix > 0.0 {
                             let k = ((h0 - fp) / cv.steps.max(1.0) + 0.5).floor().max(1.0);
                             let x = w * k;

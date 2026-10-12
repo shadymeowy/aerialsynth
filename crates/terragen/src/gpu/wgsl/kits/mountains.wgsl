@@ -41,7 +41,7 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
         var bandh = 14.0;
         var cl = LC_CLIFF;
         if (z.badland > 0.2) {
-            bandh = 3.4;
+            bandh = 5.0;
             cl = LC_BADLANDS;
         }
         let kb = floor(ground / bandh + 0.6 * rn);
@@ -54,7 +54,7 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
         (*s).m.natural_ok *= 1.0 - cb;
     }
     let kz = min(z.tower + z.cockpit, 1.0);
-    let ck = kz * smoothstep1(0.7, 1.1, slope);
+    let ck = kz * smoothstep1(0.8, 1.4, slope + 0.2 * rn);
     if (ck > 0.0) {
         let col = mixc(srgb(168.0, 164.0, 150.0), srgb(120.0, 118.0, 108.0), 0.5 + 0.5 * rn) * (1.0 + 0.06 * (*s).pf.f[PF_DETAIL]);
         var ly = layer_paint(ck, col, LC_CLIFF);

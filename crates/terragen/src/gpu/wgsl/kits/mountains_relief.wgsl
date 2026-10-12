@@ -88,17 +88,19 @@ fn mt_zones(z: MtZIn, lit: u32, n1: f32, n2: f32) -> MtZones {
 }
 
 /// `mountains::tower_h`.
-fn mt_tower_h(c: Cell3) -> f32 {
+fn mt_tower_h(c: Cell3, p: vec3<f64>, east: vec3<f32>, north: vec3<f32>) -> f32 {
     if (u01k(c.id, 1lu) >= MT_TOWER_DENS) {
         return 0.0;
     }
-    let hh = 70.0 + 170.0 * u01k(c.id, 2lu);
-    let rad = 0.5 * MT_KARST_CELL * (0.8 + 0.6 * u01k(c.id, 3lu));
+    let hh = 90.0 + 170.0 * u01k(c.id, 2lu);
+    let d = vec3<f32>(p - c.point);
+    let th = atan2(dot(d, north), dot(d, east));
+    let rad = 0.5 * MT_KARST_CELL * (0.75 + 0.5 * u01k(c.id, 3lu)) * (1.0 + 0.2 * sin(2.0 * th + TAU * u01k(c.id, 5lu)) + 0.1 * sin(5.0 * th + TAU * u01k(c.id, 6lu)));
     let x = c.f1 / min(rad, 0.9 * c.f2);
     if (x >= 1.0) {
         return 0.0;
     }
-    return hh * pow(1.0 - x, 0.4);
+    return hh * pow(1.0 - x, 0.6);
 }
 
 /// `mountains::cockpit_h`.
@@ -205,15 +207,21 @@ fn mt_fan_at(it: Inst, p: vec3<f64>, east: vec3<f32>, north: vec3<f32>) -> MtFan
     let y = dot(rel, north);
     let r = sqrt(x * x + y * y);
     let rr = it.v[0];
-    if (r >= rr) {
+    if (r >= 1.25 * rr) {
+        return o;
+    }
+    let th = atan2(y, x);
+    let k = 1.0 + 0.15 * sin(3.0 * th + TAU * u01k(it.id, 7lu)) + 0.08 * sin(7.0 * th + TAU * u01k(it.id, 8lu));
+    let rn = r / (rr * k);
+    if (rn >= 1.0) {
         return o;
     }
     o.ok = true;
-    o.rn = r / rr;
+    o.rn = rn;
     let cs = (x * it.v[1] + y * it.v[2]) / max(r, 1.0);
-    let sector = lerp(1.0, smoothstep1(0.0, 0.5, cs), smoothstep1(0.0, 0.05, o.rn));
-    o.sec = sector * smoothstep1(0.0, 0.1, 1.0 - o.rn);
-    o.th = atan2(y, x);
+    let sector = lerp(1.0, smoothstep1(0.0, 0.5, cs), smoothstep1(0.0, 0.05, rn));
+    o.sec = sector * smoothstep1(0.0, 0.1, 1.0 - rn);
+    o.th = th;
     return o;
 }
 
@@ -281,7 +289,7 @@ fn mountains_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
         var cp = MT_COCKPIT_MEAN;
         if (e > 0.0) {
             let wc = worley3(MT_SEED + 30lu, c.p, f64(MT_KARST_CELL), 0.85);
-            tw = lerp(MT_TOWER_MEAN, mt_tower_h(wc), e);
+            tw = lerp(MT_TOWER_MEAN, mt_tower_h(wc, c.p, c.east, c.north), e);
             cp = lerp(MT_COCKPIT_MEAN, mt_cockpit_h(wc), e);
         }
         *h += z.tower * tw + z.cockpit * (cp - MT_COCKPIT_MEAN);
@@ -290,15 +298,15 @@ fn mountains_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
         var kind = 0u;
         var zz = z.fold;
         var lam_min = 6300.0;
-        var amp = 240.0;
+        var amp = 520.0;
         if (z.fault > z.fold) {
             kind = 1u;
             zz = z.fault;
             lam_min = 7700.0;
-            amp = 520.0;
+            amp = 900.0;
         }
         let b = band(lam_min, gsd);
-        *h = lerp(*h, r.smooth_h, 0.6 * zz);
+        *h = lerp(*h, r.smooth_h, 0.85 * zz);
         if (b > 0.0) {
             let nw = perlin3(MT_SEED + 3lu, c.p / 38000.0lf);
             let pl = smoothstep1(-0.55, 0.3, perlin3(MT_SEED + 4lu, c.p / 26000.0lf));
@@ -306,7 +314,7 @@ fn mountains_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
         }
     }
     if (z.badland > 0.0) {
-        *h += z.badland * (14.0 + 14.0 * smoothstep1(-0.3, 0.5, fl.n1)) * 2.0 * mt_badlands(c.p, gsd);
+        *h += z.badland * (14.0 + 14.0 * smoothstep1(-0.3, 0.5, fl.n1)) * 3.5 * mt_badlands(c.p, gsd);
     }
     let fans = inst_list(FAM_MOUNTAINS_FANS, r.blk, c.p);
     for (var k = 0u; k < fans.n; k++) {
@@ -319,6 +327,15 @@ fn mountains_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
     }
 }
 
+/// `mountains::fjord`: (weight, floor depth).
+fn mt_fjord(m: Macro, mountain: f32, glac: f32) -> vec2<f32> {
+    let ck = m.coast_km;
+    let head = 45.0 + 25.0 * m.style.w;
+    let fj = glac * smoothstep1(0.2, 0.45, mountain) * (1.0 - smoothstep1(head - 6.0, head, ck)) * smoothstep1(-6.0, 0.0, ck);
+    let prof = smoothstep1(0.0, 12.0, ck) * (1.0 - smoothstep1(head - 30.0, head, ck));
+    return vec2<f32>(fj, 70.0 + (260.0 + 200.0 * max(m.style.x, 0.0)) * prof);
+}
+
 /// `mountains::carve`.
 fn mountains_carve(c: Ctx, m: Macro, ci: CarveIn, cv: ptr<function, Carve>) {
     if (ci.level > 1u) {
@@ -329,9 +346,9 @@ fn mountains_carve(c: Ctx, m: Macro, ci: CarveIn, cv: ptr<function, Carve>) {
     let glac = smoothstep1(0.3, 0.6, m.glaciation) * smoothstep1(0.25, 0.55, ci.mountain);
     if (glac > 0.0) {
         (*cv).u = max((*cv).u, glac);
-        (*cv).wall_k *= lerp(1.0, 0.5, glac);
+        (*cv).wall_k *= lerp(1.0, 0.75, glac);
         (*cv).fp_w *= lerp(1.0, 1.5, glac);
-        var dmul = 2.6;
+        var dmul = 2.0;
         var over = 90.0;
         if (lvl1) {
             dmul = 8.0;
@@ -351,17 +368,14 @@ fn mountains_carve(c: Ctx, m: Macro, ci: CarveIn, cv: ptr<function, Carve>) {
             }
         }
     }
-    let ck = m.coast_km;
-    let head = 45.0 + 25.0 * m.style.w;
+    let fjw = mt_fjord(m, ci.mountain, glac);
     var lv = 1.0;
     if (lvl1) {
         lv = 0.45;
     }
-    let fj = glac * smoothstep1(0.2, 0.45, ci.mountain) * (1.0 - smoothstep1(head - 6.0, head, ck)) * smoothstep1(-6.0, 0.0, ck) * lv;
+    let fj = fjw.x * lv;
     if (fj > 0.0) {
-        let prof = smoothstep1(0.0, 12.0, ck) * (1.0 - smoothstep1(head - 30.0, head, ck));
-        let dep = 70.0 + (260.0 + 200.0 * max(m.style.x, 0.0)) * prof;
-        (*cv).floor = lerp((*cv).floor, -dep, fj);
+        (*cv).floor = lerp((*cv).floor, -fjw.y, fj);
         (*cv).depth_cap = lerp((*cv).depth_cap, 1500.0, fj);
         (*cv).fp_min = 0.5 - 2000.0 * fj;
         (*cv).fp_w *= 1.0 + 1.5 * fj;
@@ -378,7 +392,7 @@ fn mountains_carve(c: Ctx, m: Macro, ci: CarveIn, cv: ptr<function, Carve>) {
         }
         let cz = arid * rock * smoothstep1(150.0, 450.0, ci.h0) * (1.0 - smoothstep1(0.3, 0.6, ci.mountain)) * smoothstep1(-0.15, 0.25, ci.mesa) * l1;
         if (cz > 0.0) {
-            let dm = lerp(250.0, 1000.0, saturate1(0.5 + 0.6 * m.style.y));
+            let dm = lerp(350.0, 1200.0, saturate1(0.5 + 0.6 * m.style.y));
             let dc = max(min(dm, 0.85 * (ci.h0 - 40.0)), 0.0);
             (*cv).floor = lerp((*cv).floor, max((*cv).floor - dc, min((*cv).floor, 30.0)), cz);
             (*cv).depth_cap = lerp((*cv).depth_cap, 1500.0, cz);

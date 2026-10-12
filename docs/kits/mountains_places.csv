@@ -1,0 +1,20 @@
+# places of the default world where the mountains kit draws (lat, lon in degrees): `terrain survey --places docs/kits/mountains_places.csv`
+index,lat,lon,theme
+0,-0.714,-96.231,tower_karst
+1,4.857,-93.234,karst_islands
+2,9.345,-12.558,karst_islands
+3,43.011,128.036,cockpit_karst
+4,51.411,-28.424,folded_ridges
+5,27.899,42.870,folded_ridges
+6,27.174,134.125,fault_blocks
+7,-25.622,53.928,fault_blocks
+8,-12.209,-151.434,badlands
+9,23.361,51.888,badlands
+10,21.245,-121.297,canyon
+11,-19.455,40.396,canyon
+12,49.423,-162.365,u_valley
+13,40.874,174.741,u_valley
+14,56.509,162.085,fjord
+15,-49.096,120.169,fjord
+16,-28.392,45.461,fan
+17,21.563,131.318,fan
