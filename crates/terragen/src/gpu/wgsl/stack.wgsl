@@ -659,7 +659,7 @@ fn layer_linear(s: ptr<function, Stack>) {
     let habit = smoothstep1(-0.005, 0.005, t.habit - 0.03 - 0.05 * (1.0 - t.development)) * steep * (1.0 - (*s).m.snow) * (1.0 - t.sand * 0.7);
     var road_cov = 0.0;
     var road_col = pal3(PAL_ASPHALT);
-    if (habit > 0.0) {
+    if (habit > 0.0 && KITS_LEGACY_ROADS) {
         let w_major = 12.0;
         let c1 = band_cov(l.road_major, w_major * 0.5, max(fw, gsd * 0.5));
         if (c1 > 0.0) {

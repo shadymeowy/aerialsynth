@@ -1063,7 +1063,7 @@ impl GpuGenerator {
                 if g_m <= 100.0 {
                     flags |= TF_GULLY_GRID;
                 }
-                if g_m <= 400.0 {
+                if g_m <= 400.0 && crate::kits::legacy_roads() {
                     flags |= TF_ROADS_GRID;
                 }
             }

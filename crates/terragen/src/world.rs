@@ -1326,7 +1326,7 @@ impl World {
         t.road_major = f64::MAX;
         t.road_minor = f64::MAX;
         // (roads are drawn by pixel coverage: 12 m at 400 m/px or 6 m at 200 m/px is ~3%)
-        if mode != Mode::Relief && self.cfg.landuse.roads > 0.0 && habit > 0.02 && gsd < 400.0 {
+        if mode != Mode::Relief && self.cfg.landuse.roads > 0.0 && habit > 0.02 && gsd < 400.0 && crate::kits::legacy_roads() {
             let dist = |v: [f64; 3]| v[0] / DVec2::new(v[1], v[2]).length().max(1e-12);
             match m.pre.and_then(|p| p.road_major.zip(p.road_minor)) {
                 Some((major, minor)) => {

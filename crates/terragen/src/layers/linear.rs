@@ -1,5 +1,6 @@
-//! Slot 6, linear infrastructure (core): the iso-line road networks where people live and farm
-//! tracks along the borders of land-use regions.
+//! Slot 6, linear infrastructure (core): the iso-line road networks where people live (off where
+//! a kit replaces them: `kits::legacy_roads`) and farm tracks along the borders of land-use
+//! regions.
 
 use crate::landcover as lc;
 use crate::noise::*;
@@ -25,7 +26,8 @@ pub fn layer(s: &mut Stack) {
     let habit = smoothstep(-0.005, 0.005, t.habit - 0.03 - 0.05 * (1.0 - t.development)) * steep * (1.0 - s.m.snow) * (1.0 - t.sand * 0.7);
     let mut road_cov: f64 = 0.0;
     let mut road_col = pal.asphalt;
-    if habit > 0.0 {
+    // (the iso-line networks are off where a kit draws the roads: `kits::legacy_roads`)
+    if habit > 0.0 && crate::kits::legacy_roads() {
         let w_major = 12.0;
         let c1 = band_cov(l.road_major, w_major * 0.5, fw.max(gsd * 0.5));
         if c1 > 0.0 {

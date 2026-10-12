@@ -36,7 +36,7 @@ mod agriculture;
 
 pub mod settlements;
 
-// mod transport;
+pub mod transport;
 
 /// The kits, in evaluation order within a slot. Kernel kind ids: each kit owns 16 from
 /// `kernels::KIT_BASE` (64) on, by its line here: desert 64, volcanic 80, mountains 96,
@@ -63,7 +63,7 @@ pub static KITS: &[&Kit] = &[
 
     &settlements::KIT,
 
-    // &transport::KIT,
+    &transport::KIT,
     #[cfg(test)]
     &example::KIT,
 ];
@@ -126,17 +126,37 @@ pub struct Kit {
     pub host: Option<crate::features::HostFn>,
     /// the kit draws the settlements: the core's grid towns are off ([`legacy_towns`])
     pub replaces_towns: bool,
+    /// the kit draws the road network: the core's noise-network roads are off ([`legacy_roads`];
+    /// the farm tracks along land-use region borders stay)
+    pub replaces_roads: bool,
 }
 
 impl Kit {
-    pub const EMPTY: Kit =
-        Kit { name: "", biomes_yaml: "", wgsl: "", layers: &[], kernels: &[], relief: None, relief_wgsl: "", families: &[], host: None, replaces_towns: false };
+    pub const EMPTY: Kit = Kit {
+        name: "",
+        biomes_yaml: "",
+        wgsl: "",
+        layers: &[],
+        kernels: &[],
+        relief: None,
+        relief_wgsl: "",
+        families: &[],
+        host: None,
+        replaces_towns: false,
+        replaces_roads: false,
+    };
 }
 
 /// Does the core draw its grid towns (`layers::built`, the town lattice of pass A)? Off when a
 /// kit replaces them (the settlements kit).
 pub fn legacy_towns() -> bool {
     !KITS.iter().any(|k| k.replaces_towns)
+}
+
+/// Does the core draw its noise-network roads (pass A's iso-line distances, `layers::linear`)?
+/// Off when a kit replaces them (the transport kit).
+pub fn legacy_roads() -> bool {
+    !KITS.iter().any(|k| k.replaces_roads)
 }
 
 /// Run the kits' layers of `slot`.
@@ -199,6 +219,7 @@ pub fn wgsl_relief() -> String {
         s.push('\n');
     }
     s.push_str(&format!("const KITS_LEGACY_TOWNS: bool = {};\n", legacy_towns()));
+    s.push_str(&format!("const KITS_LEGACY_ROADS: bool = {};\n", legacy_roads()));
     s.push_str("fn kits_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {\n");
     // (the module's instance lists of the point: `relief_lists`, gpu::sources)
     s.push_str("    relief_lists(c.p, r.blk);\n");

@@ -436,7 +436,7 @@ fn side_width(ctx: &mut HostCtx, m: DVec3, n: DVec3, dir: DVec3, crest: f64, sg:
 // ---------------------------------------------------------------- lattice sites (quarries, wind, flares)
 
 /// The candidate of a lattice cell of `cell` m (seed `key`): its id and surface point.
-fn lattice_site(w: &World, key: u64, cell: f64, c: (i64, i64, i64)) -> Option<(u64, DVec3)> {
+pub(crate) fn lattice_site(w: &World, key: u64, cell: f64, c: (i64, i64, i64)) -> Option<(u64, DVec3)> {
     let h = hash3(w.seed() ^ key, c.0, c.1, c.2);
     let pt = DVec3::new(c.0 as f64 + 0.5 + 0.8 * (u01k(h, 1) - 0.5), c.1 as f64 + 0.5 + 0.8 * (u01k(h, 2) - 0.5), c.2 as f64 + 0.5 + 0.8 * (u01k(h, 3) - 0.5))
         * cell;
@@ -449,7 +449,7 @@ fn lattice_site(w: &World, key: u64, cell: f64, c: (i64, i64, i64)) -> Option<(u
 }
 
 /// The lattice cells of `cell` whose sites can lie within `r` of `p`.
-fn lattice_cells(w: &World, cell: f64, p: DVec3, r: f64) -> Vec<(i64, i64, i64)> {
+pub(crate) fn lattice_cells(w: &World, cell: f64, p: DVec3, r: f64) -> Vec<(i64, i64, i64)> {
     let rr = r + 0.5 * cell;
     let lo = ((p - DVec3::splat(rr)) / cell).floor();
     let hi = ((p + DVec3::splat(rr)) / cell).floor();
@@ -877,6 +877,8 @@ pub fn airport_px(st: &FStamp, p: DVec3, ground: f64, gsd: f64, fw: f64) -> Site
     }
     if park > 0.0 {
         o.col = mixc(o.col, srgb(70.0, 70.0, 74.0), park);
+        let (pc, pcol) = crate::kits::transport::px::parked(seed ^ 0xA1C, q.x + 0.6 * ah.x, q.y - term_c.y, fw, gsd);
+        o.col = mixc(o.col, pcol, pc * park);
         o.cls = crate::landcover::PARKING;
     }
     if tw > 0.0 {

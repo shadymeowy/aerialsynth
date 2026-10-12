@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **Transport kit** (`kits/transport.rs`, `transport/{net,route,build,px}.rs`,
+  `docs/kits/transport.md`): a host-built road, rail and power network over the settlements kit's
+  places and sites — relative-neighbourhood graphs per network (motorways and trunk roads between
+  cities, trunk roads between towns, secondary roads between villages, local roads to hamlets,
+  farm and forest tracks, railways between cities and large towns, a high-voltage grid), spurs
+  from towns to passing motorways, roads to airports, ports, dams, quarries, solar and wind farms,
+  rail spurs and yards at ports, power lines from dams, solar and wind farms; routing on corridor
+  grids over the analytic relief (refined per piece, smoothed, switchbacks on steep minor roads);
+  engineered profiles from point samples (cut and fill with 1:2 slopes in the DSM, bridges with
+  parapets and shadows, tunnels with portals); interchanges (cloverleaf, partial cloverleaf,
+  diamond, trumpet), overpasses, roundabouts by culture and at town entries; per-pixel decks over
+  rivers, reservoirs, lakes and the sea; motorway, trunk, secondary, local and track
+  cross-sections with markings, cars and their shadows, lamps (thinned with their energy kept);
+  railways with sleepers, rails, masts, trains, stations and yards; power lines with cleared
+  corridors, pylons, wires and their shadows; parked cars in the settlements kit's parking lots
+  and airport car parks. Core: `Kit::replaces_roads` / `kits::legacy_roads()` switch the
+  noise-network roads off (pass A distances, the road pre-pass, WGSL `KITS_LEGACY_ROADS`); the
+  farm tracks along region borders stay.
+
 - **Settlements kit** (`kits/settlements.rs`, `settlements/{places,town,sites}.rs`,
   `docs/kits/settlements.md`): a central-place hierarchy (hamlet, village, town, city,
   metropolis; host-side and analytic, `kits::settlements::places::settlements_near` for the
