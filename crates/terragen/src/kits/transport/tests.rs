@@ -813,7 +813,7 @@ fn truth(ctx: &mut HostCtx, c: DVec3, r: f64) -> Truth {
     }
 }
 
-/// What lies at `p`: 0 dry land, 1 a river, 2 a lake (the core's, a kettle lake of the cold kit's
+/// What lies at `p`: 0 dry land, 1 a stream (half width < 6 m), 6 a river, 2 a lake (the core's, a kettle lake of the cold kit's
 /// large lattice), 3 a pond of its small lattice, 4 the sea, 5 a reservoir, 10 + template: a
 /// site.
 fn what_at(w: &World, tr: &Truth, p: DVec3) -> u32 {
@@ -858,9 +858,21 @@ fn what_at(w: &World, tr: &Truth, p: DVec3) -> u32 {
         }
     }
     if t.river_hw > 0.0 && t.river_d.abs() < t.river_hw {
-        return 1;
+        return if t.river_hw >= 6.0 { 6 } else { 1 };
     }
     0
+}
+
+/// The sine of the angle between a route's direction `dir` at `p` and the river there (1:
+/// perpendicular), from the gradient of the signed distance to the channel.
+fn crossing_sin(w: &World, p: DVec3, dir: DVec3) -> f64 {
+    let (_, _, e, n) = crate::kits::settlements::places::frame_at(w, p);
+    let d = |q: DVec3| {
+        let g = geodesy::ecef2geodetic(q, &w.ell);
+        w.terrain(&crate::world::Ctx::new(g.lat, g.lon, 2.0, &w.ell)).river_d
+    };
+    let gr = e * (d(p + e * 5.0) - d(p - e * 5.0)) + n * (d(p + n * 5.0) - d(p - n * 5.0));
+    dir.dot(gr.normalize_or_zero()).abs()
 }
 
 /// Roads and railways keep out of lakes, reservoirs and the sea (except narrow crossings,
@@ -874,7 +886,8 @@ fn routes_avoid_water_and_sites() {
     let mut pts = CpuPoints(&w);
     let mut ctx = HostCtx { world: &w, points: &mut pts };
     let only = std::env::var("TR_REGION").ok();
-    let (mut n_route, mut n_seg, mut n_river, mut n_narrow, mut n_pond, mut n_xing) = (0, 0, 0, 0, 0, 0);
+    let (mut n_route, mut n_seg, mut n_river, mut n_narrow, mut n_pond, mut n_xing, mut n_oblique) = (0, 0, 0, 0, 0, 0, 0);
+    let mut sin_sum = 0.0;
     let mut bad: Vec<String> = Vec::new();
     let mut sites_bad = 0;
     let (mut br_wet, mut br_dry) = (0, 0);
@@ -920,12 +933,17 @@ fn routes_avoid_water_and_sites() {
                     finish_run(&w, name, class, &run, &mut bad, &mut n_narrow);
                     run = (wet, if wet != 0 { ds } else { 0.0 }, if wet != 0 { vec![p] } else { vec![] });
                 }
-                if kind == 1 && !in_river {
+                if kind == 6 && !in_river {
                     n_xing += 1;
+                    let sin = crossing_sin(&w, p, l.at(s).1);
+                    sin_sum += sin;
+                    if sin < 0.5 {
+                        n_oblique += 1;
+                    }
                 }
-                in_river = kind == 1;
+                in_river = kind == 6;
                 match kind {
-                    1 => n_river += 1,
+                    1 | 6 => n_river += 1,
                     3 => n_pond += 1,
                     k if k >= 10 => {
                         // (a route ending at or in the site keeps it)
@@ -954,7 +972,7 @@ fn routes_avoid_water_and_sites() {
             let m = (s.a + s.b) * 0.5;
             let g = geodesy::ecef2geodetic(m, &w.ell);
             let t = w.terrain(&crate::world::Ctx::new(g.lat, g.lon, 5.0, &w.ell));
-            if t.water_kind != crate::world::water::NONE || (t.river_hw > 0.0 && t.river_d.abs() < t.river_hw + 20.0) || matches!(what_at(&w, &tr, m), 2 | 4 | 5) {
+            if t.water_kind != crate::world::water::NONE || (t.river_hw > 0.0 && t.river_d.abs() < t.river_hw + 20.0) || matches!(what_at(&w, &tr, m), 2 | 4 | 5 | 6) {
                 br_wet += 1;
             } else {
                 br_dry += 1;
@@ -966,9 +984,10 @@ fn routes_avoid_water_and_sites() {
         eprintln!("{b}");
     }
     eprintln!(
-        "{n_route} routes, {n_seg} sampled 25 m pieces: {} in water or sites ({sites_bad} in sites), {n_narrow} narrow crossings, {n_river} points over rivers ({n_xing} crossings, {:.1} per 100 km), {n_pond} over ponds; bridges over water {br_wet}, over dry valleys {br_dry}",
+        "{n_route} routes, {n_seg} sampled 25 m pieces: {} in water or sites ({sites_bad} in sites), {n_narrow} narrow crossings, {n_river} points over rivers and streams; {n_xing} river crossings ({:.1} per 100 km, mean sin {:.2}, {n_oblique} under 30°); {n_pond} points over ponds; bridges over water {br_wet}, over dry valleys {br_dry}",
         bad.len(),
-        n_xing as f64 / (n_seg as f64 * 25.0 / 1e5)
+        n_xing as f64 / (n_seg as f64 * 25.0 / 1e5),
+        sin_sum / n_xing.max(1) as f64
     );
     if only.is_none() {
         assert!(n_route >= 200, "{n_route} routes");
@@ -1083,7 +1102,7 @@ fn roads_end_at_town_arterials() {
     let w = world();
     let mut pts = CpuPoints(&w);
     let mut ctx = HostCtx { world: &w, points: &mut pts };
-    let (mut n, mut n_rail) = (0, 0);
+    let (mut n, mut n_rail, mut central) = (0, 0, 0);
     for &(lat, lon) in &[(-7.7302, -18.7965), (30.35, 128.8487), (-7.6185, -16.6091), (-23.7536, -33.8316)] {
         let (routes, _, _) = build::area_routes(&mut ctx, &Area { center: ecef(&w, lat, lon), radius: 8_000.0, gsd: 30.0 });
         for r in &routes {
@@ -1097,13 +1116,17 @@ fn roads_end_at_town_arterials() {
                     assert!(d < 0.3, "a railway ends at {d:.2} R");
                 } else if r.e.class != cls::POWER {
                     n += 1;
-                    assert!(d > 0.35, "a road of class {} ends at {d:.2} R of a level {} place", r.e.class, nd.level);
+                    if d <= 0.35 {
+                        eprintln!("a road of class {} ends at {d:.2} R of a level {} place", r.e.class, nd.level);
+                        central += 1;
+                    }
                 }
             }
         }
     }
-    eprintln!("{n} road ends and {n_rail} railway ends at towns");
+    eprintln!("{n} road ends ({central} within 0.35 R of the centre) and {n_rail} railway ends at towns");
     assert!(n > 20);
+    assert_eq!(central, 0);
 }
 
 /// The route of an edge (settled: the CPU's point evaluations are immediate).
