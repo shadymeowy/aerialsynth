@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Mountains kit** (`kits/mountains.rs`, `gpu/wgsl/kits/mountains{,_relief}.wgsl`,
+  `docs/kits/mountains.md`): tower karst (a 3D Worley lattice of 420 m cells, oval towers 90-260 m
+  over flattened floors, drowned to islands at the coast) and cockpit karst on carbonate (atlas
+  lithology x warm humid / cooler climate); folded ridges (old orogens and foreland belts) and
+  fault blocks (extensional provinces) as parallel ridges on an 8-corner lattice with per-corner
+  strike, wavelength and phase (R-wave safe), bent and plunging by noise; creased badlands with
+  banded strata on soft sediment x arid; alluvial fans at the fronts of dry mountains (family
+  `mountains_fans`, pale radial apron); glacial U-troughs, cirques with tarns at the heads of
+  glaciated tributaries, hanging tributaries, fjords (the floor of a glaciated coastal river goes
+  to -70 .. -530 m and the ocean floods it, fading into the open sea) and stepped canyons with
+  benches on arid sedimentary plateaus, all through a new **carve hook**. Core: `Kit::carve`
+  (`kits::{Carve, CarveIn, has_carve, carve}`, WGSL `kits_carve`, `CarveIn`, `Carve`): the kit
+  changes the valley profile of the drainage carve (floor, floodplain width, wall slope, depth
+  cap, U profile, benches, a small lake at a channel's head); `RiverHit` gains `u`, `spring` and
+  `reach`; the carve is bounded by the piece's reach (a no-op in the core). Pass B: banded
+  badland and mesa strata, karst cliffs, glacial rock walls, fans, in slot 6 (the only stage with
+  compile headroom).
+
 - **Transport kit** (`kits/transport.rs`, `transport/{net,route,build,px}.rs`,
   `docs/kits/transport.md`): a host-built road, rail and power network over the settlements kit's
   places and sites — relative-neighbourhood graphs per network (motorways and trunk roads between

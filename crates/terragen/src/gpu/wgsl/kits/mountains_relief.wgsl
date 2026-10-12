@@ -15,8 +15,8 @@ const MT_WARP_A: f32 = 4000.0;
 
 const MT_KARST_CELL: f32 = 420.0;
 const MT_TOWER_DENS: f32 = 0.7;
-const MT_TOWER_MEAN: f32 = 24.4;
-const MT_COCKPIT_MEAN: f32 = 34.68;
+const MT_TOWER_MEAN: f32 = 16.85;
+const MT_COCKPIT_MEAN: f32 = 15.24;
 const MT_RIDGE_CELL: f64 = 140000.0lf;
 const MT_CREASE_MEAN: f32 = 0.2698;
 
@@ -87,26 +87,28 @@ fn mt_zones(z: MtZIn, lit: u32, n1: f32, n2: f32) -> MtZones {
     return o;
 }
 
-/// `mountains::tower_h`.
-fn mt_tower_h(c: Cell3, p: vec3<f64>, east: vec3<f32>, north: vec3<f32>) -> f32 {
-    if (u01k(c.id, 1lu) >= MT_TOWER_DENS) {
+/// `mountains::cone_h`.
+fn mt_cone_h(c: Cell3, p: vec3<f64>, east: vec3<f32>, north: vec3<f32>, kind: u32) -> f32 {
+    let tower = kind == 0u;
+    if (tower && u01k(c.id, 1lu) >= MT_TOWER_DENS) {
         return 0.0;
     }
-    let hh = 90.0 + 170.0 * u01k(c.id, 2lu);
+    var hh = 60.0 + 100.0 * u01k(c.id, 4lu);
+    var r0 = 1.1 + 0.4 * u01k(c.id, 3lu);
+    var ex = 1.0;
+    if (tower) {
+        hh = 90.0 + 170.0 * u01k(c.id, 2lu);
+        r0 = 0.75 + 0.5 * u01k(c.id, 3lu);
+        ex = 0.6;
+    }
     let d = vec3<f32>(p - c.point);
     let th = atan2(dot(d, north), dot(d, east));
-    let rad = 0.5 * MT_KARST_CELL * (0.75 + 0.5 * u01k(c.id, 3lu)) * (1.0 + 0.2 * sin(2.0 * th + TAU * u01k(c.id, 5lu)) + 0.1 * sin(5.0 * th + TAU * u01k(c.id, 6lu)));
+    let rad = 0.5 * MT_KARST_CELL * r0 * (1.0 + 0.2 * sin(2.0 * th + TAU * u01k(c.id, 5lu)) + 0.1 * sin(5.0 * th + TAU * u01k(c.id, 6lu)));
     let x = c.f1 / min(rad, 0.9 * c.f2);
     if (x >= 1.0) {
         return 0.0;
     }
-    return hh * pow(1.0 - x, 0.6);
-}
-
-/// `mountains::cockpit_h`.
-fn mt_cockpit_h(c: Cell3) -> f32 {
-    let hc = 35.0 + 45.0 * u01k(c.id, 4lu);
-    return hc * (1.0 - smoothstep1(0.0, 0.4, (c.f2 - c.f1) / MT_KARST_CELL));
+    return hh * pow(1.0 - x, ex);
 }
 
 /// `mountains::ridges`: parallel ridges of the 8 lattice corners around `p`.
@@ -289,8 +291,8 @@ fn mountains_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
         var cp = MT_COCKPIT_MEAN;
         if (e > 0.0) {
             let wc = worley3(MT_SEED + 30lu, c.p, f64(MT_KARST_CELL), 0.85);
-            tw = lerp(MT_TOWER_MEAN, mt_tower_h(wc, c.p, c.east, c.north), e);
-            cp = lerp(MT_COCKPIT_MEAN, mt_cockpit_h(wc), e);
+            tw = lerp(MT_TOWER_MEAN, mt_cone_h(wc, c.p, c.east, c.north, 0u), e);
+            cp = lerp(MT_COCKPIT_MEAN, mt_cone_h(wc, c.p, c.east, c.north, 1u), e);
         }
         *h += z.tower * tw + z.cockpit * (cp - MT_COCKPIT_MEAN);
     }

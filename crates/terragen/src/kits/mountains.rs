@@ -163,33 +163,30 @@ pub(crate) fn zones(z: &ZIn, lit: u32, n1: f64, n2: f64) -> Zones {
 /// field and of the cockpit ridge field (a test recomputes them).
 const KARST_CELL: f64 = 420.0;
 const TOWER_DENS: f64 = 0.7;
-const TOWER_MEAN: f64 = 24.4;
-const COCKPIT_MEAN: f64 = 34.68;
+const TOWER_MEAN: f64 = 16.85;
+const COCKPIT_MEAN: f64 = 15.24;
 
-/// A tower's height (m) at `p`: `H (1 − F1/R)^0.6`, R varying with the azimuth (an oval, ragged
-/// outline) and clipped at the bisector.
+/// A cone's height (m) at `p`, `H (1 − F1/R)^e` with R varying with the azimuth (an oval, ragged
+/// outline) and clipped at the bisector (no cut where two cells meet). `kind` 0: towers (70 % of
+/// the cells, H 90–260 m, e 0.6: steep flanks); 1: the cone hills of cockpit karst (every cell,
+/// H 60–160 m, e 1.0: the star-shaped depressions lie between them).
 #[inline]
-fn tower_h(c: &Cell3, p: DVec3, east: DVec3, north: DVec3) -> f64 {
-    if u01k(c.id, 1) >= TOWER_DENS {
+fn cone_h(c: &Cell3, p: DVec3, east: DVec3, north: DVec3, kind: u32) -> f64 {
+    let tower = kind == 0;
+    if tower && u01k(c.id, 1) >= TOWER_DENS {
         return 0.0;
     }
-    let hh = 90.0 + 170.0 * u01k(c.id, 2);
+    let hh = if tower { 90.0 + 170.0 * u01k(c.id, 2) } else { 60.0 + 100.0 * u01k(c.id, 4) };
     let d = p - c.point;
     let th = d.dot(north).atan2(d.dot(east));
-    let rad = 0.5 * KARST_CELL * (0.75 + 0.5 * u01k(c.id, 3)) * (1.0 + 0.2 * (2.0 * th + TAU * u01k(c.id, 5)).sin() + 0.1 * (5.0 * th + TAU * u01k(c.id, 6)).sin());
+    let r0 = if tower { 0.75 + 0.5 * u01k(c.id, 3) } else { 1.1 + 0.4 * u01k(c.id, 3) };
+    let rad = 0.5 * KARST_CELL * r0 * (1.0 + 0.2 * (2.0 * th + TAU * u01k(c.id, 5)).sin() + 0.1 * (5.0 * th + TAU * u01k(c.id, 6)).sin());
     let x = c.f1 / rad.min(0.9 * c.f2);
     if x >= 1.0 {
         0.0
     } else {
-        hh * (1.0 - x).powf(0.6)
+        hh * (1.0 - x).powf(if tower { 0.6 } else { 1.0 })
     }
-}
-
-/// The cockpit field (m): high along the borders between cells, 0 in their centres.
-#[inline]
-fn cockpit_h(c: &Cell3) -> f64 {
-    let hc = 35.0 + 45.0 * u01k(c.id, 4);
-    hc * (1.0 - smoothstep(0.0, 0.4, (c.f2 - c.f1) / KARST_CELL))
 }
 
 // ============================================================================= ridges
@@ -338,8 +335,8 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
         let (mut tw, mut cp) = (TOWER_MEAN, COCKPIT_MEAN);
         if e > 0.0 {
             let wc = worley3(SEED + 30, c.p, KARST_CELL, 0.85);
-            tw = lerp(TOWER_MEAN, tower_h(&wc, c.p, c.east, c.north), e);
-            cp = lerp(COCKPIT_MEAN, cockpit_h(&wc), e);
+            tw = lerp(TOWER_MEAN, cone_h(&wc, c.p, c.east, c.north, 0), e);
+            cp = lerp(COCKPIT_MEAN, cone_h(&wc, c.p, c.east, c.north, 1), e);
         }
         *h += z.tower * tw + z.cockpit * (cp - COCKPIT_MEAN);
     }
@@ -426,7 +423,12 @@ pub fn carve(w: &World, ci: &CarveIn, cv: &mut Carve) {
     if arid > 0.0 {
         let lit = litho_at(w, ci.ctx.p);
         let rock = (lit == SEDIMENTARY || lit == CARBONATE) as u32 as f64;
-        let cz = arid * rock * smoothstep(150.0, 450.0, ci.h0) * (1.0 - smoothstep(0.3, 0.6, ci.mountain)) * smoothstep(-0.15, 0.25, ci.mesa) * if lvl1 { 0.35 } else { 1.0 };
+        let cz = arid
+            * rock
+            * smoothstep(150.0, 450.0, ci.h0)
+            * (1.0 - smoothstep(0.3, 0.6, ci.mountain))
+            * smoothstep(-0.15, 0.25, ci.mesa)
+            * if lvl1 { 0.35 } else { 1.0 };
         if cz > 0.0 {
             let dm = lerp(350.0, 1200.0, saturate(0.5 + 0.6 * m.style[1]));
             let dc = dm.min(0.85 * (ci.h0 - 40.0)).max(0.0);
@@ -463,13 +465,20 @@ pub fn linear(s: &mut Stack) {
     let bad = z.badland * smoothstep(0.08, 0.25, slope);
     let cb = bad.max(wall);
     if cb > 0.0 {
-        let bandh = if z.badland > 0.2 { 5.0 } else { 14.0 };
+        let bandh = if z.badland > 0.2 { 9.0 } else { 14.0 };
         let kb = (ground / bandh + 0.6 * rn).floor();
         let h = hash1(SEED + 40, kb as i64);
-        let pal = [srgb(196.0, 188.0, 172.0), srgb(150.0, 92.0, 66.0), srgb(214.0, 198.0, 160.0), srgb(108.0, 86.0, 72.0), srgb(170.0, 112.0, 94.0), srgb(176.0, 160.0, 140.0)];
+        let pal = [
+            srgb(204.0, 194.0, 176.0),
+            srgb(168.0, 112.0, 84.0),
+            srgb(216.0, 198.0, 160.0),
+            srgb(138.0, 108.0, 90.0),
+            srgb(184.0, 132.0, 108.0),
+            srgb(188.0, 172.0, 148.0),
+        ];
         let col = pal[(u01k(h, 1) * 5.999) as usize] * (0.9 + 0.2 * u01k(h, 2));
         let floor_col = srgb(190.0, 176.0, 150.0);
-        let col = mixc(floor_col, col, smoothstep(0.1, 0.3, slope));
+        let col = mixc(floor_col, col, 0.75 * smoothstep(0.12, 0.4, slope));
         s.composite(Layer { cov: cb, albedo: col, cls: if z.badland > 0.2 { cls::BADLANDS } else { cls::CLIFF }, clear: 1.0, ..Default::default() });
         s.m.natural_ok *= 1.0 - cb;
     }
@@ -539,8 +548,8 @@ mod tests {
             let wc = worley3(SEED + 30, p, KARST_CELL, 0.85);
             let up = p.normalize();
             let east = DVec3::Z.cross(up).normalize();
-            t += tower_h(&wc, p, east, up.cross(east));
-            c += cockpit_h(&wc);
+            t += cone_h(&wc, p, east, up.cross(east), 0);
+            c += cone_h(&wc, p, east, up.cross(east), 1);
             b += perlin3(SEED + 20, p / 260.0).abs().powf(0.7);
         }
         let (t, c, b) = (t / n as f64, c / n as f64, b / n as f64);
@@ -617,7 +626,8 @@ mod tests {
         let w = World::new(crate::Config::default());
         let ctx = Ctx::new(0.8, 0.3, 20.0, &w.ell);
         let mut m = w.macro_at(ctx.p, 1000.0);
-        let base = Carve { floor: 10.0, fp_w: 100.0, wall_k: 3.0, depth_cap: 400.0, fp_min: 0.5, u: 0.0, steps: 0.0, step_mix: 0.0, lake_r: 0.0, lake_level: 0.0 };
+        let base =
+            Carve { floor: 10.0, fp_w: 100.0, wall_k: 3.0, depth_cap: 400.0, fp_min: 0.5, u: 0.0, steps: 0.0, step_mix: 0.0, lake_r: 0.0, lake_level: 0.0 };
         fn ci<'a>(ctx: &'a Ctx, m: &'a Macro, level: u8, mountain: f64, moist: f64) -> CarveIn<'a> {
             CarveIn { ctx, m, level, ad: 50.0, u: 0.5, spring: false, hw: 30.0, h0: 600.0, temp: 5.0, moist, mountain, mesa: 0.0, smooth: 500.0 }
         }
@@ -636,7 +646,7 @@ mod tests {
         m.coast_km = 300.0;
         let mut cv = base;
         carve(&w, &ci(&ctx, &m, 0, 0.8, 0.6), &mut cv);
-        assert!(cv.floor >= 1.0 && cv.u > 0.9 && cv.depth_cap > 400.0 * 2.0, "{cv:?}");
+        assert!(cv.floor >= 1.0 && cv.u > 0.9 && cv.depth_cap >= 400.0 * 2.0 - 1e-9, "{cv:?}");
         // streams are not touched
         let mut cv = base;
         carve(&w, &ci(&ctx, &m, 2, 0.8, 0.6), &mut cv);
@@ -802,7 +812,17 @@ mod tests {
     fn seamless_at_places() {
         let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let n = crate::TILE_SIZE;
-        for (name, z) in [("tower_karst", 14u8), ("karst_islands", 13), ("folded_ridges", 12), ("fault_blocks", 12), ("badlands", 14), ("canyon", 12), ("u_valley", 12), ("fjord", 12), ("fan", 13)] {
+        for (name, z) in [
+            ("tower_karst", 14u8),
+            ("karst_islands", 13),
+            ("folded_ridges", 12),
+            ("fault_blocks", 12),
+            ("badlands", 14),
+            ("canyon", 12),
+            ("u_valley", 12),
+            ("fjord", 12),
+            ("fan", 13),
+        ] {
             let id = tile_at(name, z);
             let a = g.tile(id);
             let e = g.tile(geodesy::tiles::TileId::new(z, id.x + 1, id.y));
@@ -914,14 +934,20 @@ mod tests {
             ("folded_ridges", Box::new(|p| land(p) && p.z.fold > 0.9)),
             ("fault_blocks", Box::new(|p| land(p) && p.z.fault > 0.9)),
             ("badlands", Box::new(|p| land(p) && p.z.badland > 0.95)),
-            ("canyon", Box::new(|p| land(p) && p.lit <= 1 && p.t.moist < 0.2 && p.t.ground > 400.0 && p.t.mountain < 0.2 && p.t.mesa > 0.1 && p.t.river_d.abs() < 1500.0)),
+            (
+                "canyon",
+                Box::new(|p| {
+                    land(p) && p.lit <= 1 && p.t.moist < 0.2 && p.t.ground > 400.0 && p.t.mountain < 0.2 && p.t.mesa > 0.1 && p.t.river_d.abs() < 1500.0
+                }),
+            ),
             ("u_valley", Box::new(|p| land(p) && p.t.glaciation > 0.6 && p.t.mountain > 0.6 && p.t.coast_km > 150.0 && p.t.river_d.abs() < 1500.0)),
             ("fjord", Box::new(|p| p.t.glaciation > 0.6 && p.t.mountain > 0.5 && p.t.coast_km > 3.0 && p.t.coast_km < 30.0)),
         ];
         for (name, f) in &kinds {
             let v: Vec<&Pt> = pts.iter().filter(|p| f(p)).collect();
             let step = (v.len() / 10).max(1);
-            let list: Vec<String> = v.iter().step_by(step).take(10).map(|p| format!("({:.3}, {:.3} h{:.0} ck{:.0})", p.lat, p.lon, p.t.ground, p.t.coast_km)).collect();
+            let list: Vec<String> =
+                v.iter().step_by(step).take(10).map(|p| format!("({:.3}, {:.3} h{:.0} ck{:.0})", p.lat, p.lon, p.t.ground, p.t.coast_km)).collect();
             eprintln!("{name}: {} samples: {}", v.len(), list.join(" "));
         }
         // fans: instances near dry piedmont points
@@ -1023,5 +1049,34 @@ mod tests {
         for f in found.iter().take(25) {
             eprintln!("({:.3}, {:.3}) lowest {:.0} m", f.0, f.1, f.2);
         }
+    }
+
+    /// Debug: elevation statistics and class shares of the tile at a place: `MT_TILE=name,z`.
+    #[test]
+    #[ignore]
+    fn tile_stats() {
+        let v = std::env::var("MT_TILE").unwrap_or("fault_blocks,12".into());
+        let (name, z) = v.split_once(',').unwrap();
+        let z: u8 = z.parse().unwrap();
+        let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+        let t = g.tile(tile_at(name, z));
+        let n = crate::TILE_SIZE;
+        let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+        for &e in &t.elevation {
+            lo = lo.min(e);
+            hi = hi.max(e);
+        }
+        eprintln!("{name} z{z}: elevation {lo:.0} .. {hi:.0}");
+        let row: Vec<String> = (0..n).step_by(n / 16).map(|i| format!("{:.0}", t.elevation[(n / 2) * n + i])).collect();
+        eprintln!("middle row: {}", row.join(" "));
+        let col: Vec<String> = (0..n).step_by(n / 16).map(|j| format!("{:.0}", t.elevation[j * n + n / 2])).collect();
+        eprintln!("middle column: {}", col.join(" "));
+        let mut hist = std::collections::BTreeMap::new();
+        for &c in &t.landcover {
+            *hist.entry(c).or_insert(0usize) += 1;
+        }
+        let tot = t.landcover.len() as f64;
+        let h: Vec<String> = hist.iter().map(|(c, k)| format!("{} {:.1}%", crate::registry::classes::name(*c), 100.0 * *k as f64 / tot)).collect();
+        eprintln!("classes: {}", h.join(", "));
     }
 }

@@ -3,12 +3,12 @@
 
 fn mt_strata_col(i: u32) -> vec3<f32> {
     switch i {
-        case 0u: { return srgb(196.0, 188.0, 172.0); }
-        case 1u: { return srgb(150.0, 92.0, 66.0); }
-        case 2u: { return srgb(214.0, 198.0, 160.0); }
-        case 3u: { return srgb(108.0, 86.0, 72.0); }
-        case 4u: { return srgb(170.0, 112.0, 94.0); }
-        default: { return srgb(176.0, 160.0, 140.0); }
+        case 0u: { return srgb(204.0, 194.0, 176.0); }
+        case 1u: { return srgb(168.0, 112.0, 84.0); }
+        case 2u: { return srgb(216.0, 198.0, 160.0); }
+        case 3u: { return srgb(138.0, 108.0, 90.0); }
+        case 4u: { return srgb(184.0, 132.0, 108.0); }
+        default: { return srgb(188.0, 172.0, 148.0); }
     }
 }
 
@@ -41,13 +41,13 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
         var bandh = 14.0;
         var cl = LC_CLIFF;
         if (z.badland > 0.2) {
-            bandh = 5.0;
+            bandh = 9.0;
             cl = LC_BADLANDS;
         }
         let kb = floor(ground / bandh + 0.6 * rn);
         let h = hash1(MT_SEED + 40lu, i64(kb));
         let col0 = mt_strata_col(u32(u01k(h, 1lu) * 5.999)) * (0.9 + 0.2 * u01k(h, 2lu));
-        let col = mixc(srgb(190.0, 176.0, 150.0), col0, smoothstep1(0.1, 0.3, slope));
+        let col = mixc(srgb(190.0, 176.0, 150.0), col0, 0.75 * smoothstep1(0.12, 0.4, slope));
         var ly = layer_paint(cb, col, cl);
         ly.clear = 1.0;
         composite(s, ly);

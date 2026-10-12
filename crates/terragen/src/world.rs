@@ -1156,9 +1156,21 @@ impl World {
                 // along the floodplains of big lowland rivers)
                 let wall_k = lerp(6.0, 2.2, mountain);
                 // the kits' carve hook (glacial troughs, fjords, canyons): the profile's parameters
-                let mut cv = crate::kits::Carve { floor, fp_w, wall_k, depth_cap: lc.max_depth_m, fp_min: 0.5, u: 0.0, steps: 0.0, step_mix: 0.0, lake_r: 0.0, lake_level: 0.0 };
+                let mut cv = crate::kits::Carve {
+                    floor,
+                    fp_w,
+                    wall_k,
+                    depth_cap: lc.max_depth_m,
+                    fp_min: 0.5,
+                    u: 0.0,
+                    steps: 0.0,
+                    step_mix: 0.0,
+                    lake_r: 0.0,
+                    lake_level: 0.0,
+                };
                 if crate::kits::has_carve() {
-                    let ci = crate::kits::CarveIn { ctx, m, level: rh.level, ad, u: rh.u, spring: rh.spring, hw, h0, temp: temp0, moist, mountain, mesa, smooth };
+                    let ci =
+                        crate::kits::CarveIn { ctx, m, level: rh.level, ad, u: rh.u, spring: rh.spring, hw, h0, temp: temp0, moist, mountain, mesa, smooth };
                     crate::kits::carve(self, &ci, &mut cv);
                 }
                 let (floor, fp_w, wall_k) = (cv.floor, cv.fp_w, cv.wall_k);

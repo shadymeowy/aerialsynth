@@ -433,7 +433,16 @@ impl World {
                 continue;
             }
             let sign = if ab.cross(dv).dot(ctx.up) >= 0.0 { 1.0 } else { -1.0 };
-            hits.push(RiverHit { d: sign * dist, hw: s.hw + (s.hw_b - s.hw) * u, valley: s.valley, floor, level: s.level, u, spring: s.hw < 0.2 * s.hw_b, reach });
+            hits.push(RiverHit {
+                d: sign * dist,
+                hw: s.hw + (s.hw_b - s.hw) * u,
+                valley: s.valley,
+                floor,
+                level: s.level,
+                u,
+                spring: s.hw < 0.2 * s.hw_b,
+                reach,
+            });
         }
         hits
     }
