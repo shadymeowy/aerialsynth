@@ -34,8 +34,16 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
     let rn = (*s).pf.f[PF_PATCH];
     let arid = 1.0 - smoothstep1(0.16, 0.34, t.moist);
     let soft = f32(fl.lit == MT_SEDIMENTARY || fl.lit == MT_CARBONATE || fl.lit == MT_UNCONSOLIDATED);
+    let clay = z.badland * (1.0 - smoothstep1(0.12, 0.3, slope)) * 0.85;
+    if (clay > 0.0) {
+        let col = mixc(srgb(196.0, 184.0, 164.0), srgb(176.0, 160.0, 138.0), 0.5 + 0.5 * rn) * (1.0 + 0.05 * (*s).pf.f[PF_DETAIL]);
+        var ly = layer_paint(clay, col, LC_BADLANDS);
+        ly.clear = 1.0;
+        composite(s, ly);
+        (*s).m.natural_ok *= 1.0 - clay;
+    }
     let wall = smoothstep1(0.42, 0.7, slope) * arid * soft;
-    let bad = z.badland * smoothstep1(0.08, 0.25, slope);
+    let bad = z.badland * smoothstep1(0.2, 0.45, slope);
     let cb = max(bad, wall);
     if (cb > 0.0) {
         var bandh = 14.0;
@@ -47,7 +55,7 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
         let kb = floor(ground / bandh + 0.6 * rn);
         let h = hash1(MT_SEED + 40lu, i64(kb));
         let col0 = mt_strata_col(u32(u01k(h, 1lu) * 5.999)) * (0.9 + 0.2 * u01k(h, 2lu));
-        let col = mixc(srgb(190.0, 176.0, 150.0), col0, 0.75 * smoothstep1(0.12, 0.4, slope));
+        let col = mixc(srgb(190.0, 176.0, 150.0), col0, 0.8 * smoothstep1(0.25, 0.6, slope));
         var ly = layer_paint(cb, col, cl);
         ly.clear = 1.0;
         composite(s, ly);

@@ -14,10 +14,11 @@
 //! **Relief (pass A, [`relief`]).**
 //! * *Tower and cockpit karst* on carbonate (humid and warm: towers; humid and cooler: cockpits):
 //!   one 3D Worley lattice of 420 m cells. Towers: the floor is flattened towards the 5 km smooth
-//!   elevation, 70 % of the cells carry a tower `H·(1 − F1/R)^0.4` (H 70–240 m, R 0.4–0.7 cell,
-//!   clipped at the bisector so it never meets a neighbour's cut); cockpits: dolines where `F2 − F1`
-//!   is large, cone-like ridges along the cell borders. Unresolved cells show the calibrated mean.
-//!   Near the coast the plain is drowned (down to −11 m): the towers are islands.
+//!   elevation, 70 % of the cells carry a tower `H·(1 − F1/R)^0.6` (H 90–260 m, R 0.4–0.7 cell, an
+//!   oval ragged outline, clipped at the bisector so it never meets a neighbour's cut); cockpits:
+//!   a cone hill in every cell (H 60–160 m) with the star-shaped depressions between them.
+//!   Unresolved cells show the calibrated mean. Near the coast the plain is drowned (down to
+//!   −11 m): the towers are islands.
 //! * *Folded ridges* (old orogens and foreland belts: the mountain mask with little tectonic
 //!   uplift, or a modest positive uplift beside it) and *fault blocks* (extensional provinces:
 //!   negative uplift): parallel ridges `dot(p − corner, N)/λ` on an 8-corner lattice of 140 km
@@ -458,11 +459,17 @@ pub fn linear(s: &mut Stack) {
     let zi = ZIn { moist: t.moist, temp: t.temp, mountain: t.mountain, uplift: t.uplift, cont: t.cont, coast_km: t.coast_km, sand: t.sand };
     let z = zones(&zi, lit, n1, n2);
     let rn = s.pf.patch;
-    // ---- banded badlands (and the strata of arid sedimentary walls)
+    // ---- badlands: pale clay floors, banded gully walls (and the strata of arid sedimentary walls)
     let arid = 1.0 - smoothstep(0.16, 0.34, t.moist);
     let soft = (lit == SEDIMENTARY || lit == CARBONATE || lit == UNCONSOLIDATED) as u32 as f64;
+    let clay = z.badland * (1.0 - smoothstep(0.12, 0.3, slope)) * 0.85;
+    if clay > 0.0 {
+        let col = mixc(srgb(196.0, 184.0, 164.0), srgb(176.0, 160.0, 138.0), 0.5 + 0.5 * rn) * (1.0 + 0.05 * s.pf.detail);
+        s.composite(Layer { cov: clay, albedo: col, cls: cls::BADLANDS, clear: 1.0, ..Default::default() });
+        s.m.natural_ok *= 1.0 - clay;
+    }
     let wall = smoothstep(0.42, 0.7, slope) * arid * soft;
-    let bad = z.badland * smoothstep(0.08, 0.25, slope);
+    let bad = z.badland * smoothstep(0.2, 0.45, slope);
     let cb = bad.max(wall);
     if cb > 0.0 {
         let bandh = if z.badland > 0.2 { 9.0 } else { 14.0 };
@@ -478,7 +485,7 @@ pub fn linear(s: &mut Stack) {
         ];
         let col = pal[(u01k(h, 1) * 5.999) as usize] * (0.9 + 0.2 * u01k(h, 2));
         let floor_col = srgb(190.0, 176.0, 150.0);
-        let col = mixc(floor_col, col, 0.75 * smoothstep(0.12, 0.4, slope));
+        let col = mixc(floor_col, col, 0.8 * smoothstep(0.25, 0.6, slope));
         s.composite(Layer { cov: cb, albedo: col, cls: if z.badland > 0.2 { cls::BADLANDS } else { cls::CLIFF }, clear: 1.0, ..Default::default() });
         s.m.natural_ok *= 1.0 - cb;
     }
