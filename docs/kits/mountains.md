@@ -54,10 +54,9 @@ kit sets it.
 
 **Places** (default world; `PLACES` in the tests, `docs/kits/mountains_places.csv`): tower karst
 (-0.714, -96.231), karst islands (4.857, -93.234), cockpit karst (41.958, -21.188), folded ridges
-(27.899, 42.870), fault blocks (27.174, 134.125), badlands (-12.209, -151.434),
-(23.361, 51.888), canyon (21.245, -121.297), glacial trough with a tarn (40.874, 174.741),
-glacial troughs (49.423, -162.365), fjords (63.382, -81.127), (56.253, 161.268), (58.510, -76.433),
-alluvial fans (28.597, 67.059; the stills 3 km south-east). Find more with the ignored tests `find_places` (zones and fan
+(27.899, 42.870), fault blocks (31.739, 137.721), badlands (-21.410, 36.504), canyon (21.245,
+-121.297), glacial troughs (49.423, -162.365), cirque and tarn (40.874, 174.741), fjords (63.382,
+-81.127), (56.253, 161.268), alluvial fans (28.597, 67.059; the stills 3 km south-east). Find more with the ignored tests `find_places` (zones and fan
 instances over 200 k points), `find_fjords` and `probe` (zones and ground along a line;
 `MT_PROBE=lat,lon MT_STEP=km`), `tile_stats` (`MT_TILE=name,z`).
 
@@ -103,7 +102,9 @@ octaves); the tests run at the same speed as before. No with / without-kit bench
 
 GPU-generated (`terrain survey --places docs/kits/mountains_places.csv`, default world, 10:30
 local on the equinox except the folds and the fault blocks, which need a low sun (08:00 / 16:30);
-oblique views 1.5 km above the ground, 25° down; `cruise` 4 km, 30° down; `high` 10 km, 30° down).
+oblique views 1.5 km above the ground, 25° down; `cruise` 4 km, 30° down; `high` 10 km, 30° down;
+the stills come from the build before the last relief edit (the plains' flattening target moved
+to the atlas' smooth elevation: the same looks at slightly different heights)).
 
 **Tower karst** (-0.714, -96.231, 1.5 km): forest-clad oval towers over a flat floor; **karst
 islands** (4.857, -93.234, 1.5 km): the same drowned (turquoise shoals, beaches).
