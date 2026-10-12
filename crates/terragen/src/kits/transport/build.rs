@@ -170,9 +170,9 @@ impl Profile {
 /// Smoothing half window and grade-limit radius (samples), grade limit of a profiled class.
 fn deck_params(class: usize) -> (i64, i64, f64) {
     match class {
-        cls::MOTORWAY => (5, 60, 0.045),
-        cls::TRUNK => (4, 60, 0.065),
-        _ => (10, 60, 0.02),
+        cls::MOTORWAY => (5, 30, 0.045),
+        cls::TRUNK => (4, 30, 0.065),
+        _ => (10, 45, 0.02),
     }
 }
 
@@ -184,8 +184,8 @@ pub fn profile(ctx: &mut HostCtx, e: &Edge, line: &Line, s_lo: f64, s_hi: f64) -
     let nmax = (line.len() / DS).ceil() as i64;
     let j0 = ((s_lo / DS).floor() as i64 - 3).max(0);
     let j1 = ((s_hi / DS).ceil() as i64 + 3).min(nmax);
-    let f0 = (j0 - wn - rn - 3).max(0);
-    let f1 = (j1 + wn + rn + 3).min(nmax);
+    let f0 = (j0 - wn - rn - 16).max(0);
+    let f1 = (j1 + wn + rn + 16).min(nmax);
     let smp = samples(ctx, e.key, line, f0, f1)?;
     let at = |j: i64| &smp[(j.clamp(f0, f1) - f0) as usize];
     let sj = |j: i64| (j as f64 * DS).min(line.len());
@@ -203,7 +203,7 @@ pub fn profile(ctx: &mut HostCtx, e: &Edge, line: &Line, s_lo: f64, s_hi: f64) -
         })
         .collect();
     let mm = |j: i64| m[(j.clamp(f0, f1) - f0) as usize];
-    let (e0, e1) = ((j0 - 3).max(0), (j1 + 3).min(nmax));
+    let (e0, e1) = ((j0 - 6).max(0), (j1 + 6).min(nmax));
     let deck_of = |j: i64| -> f64 {
         let (mut up, mut lo) = (f64::MAX, f64::MIN);
         for i in (j - rn).max(0)..=(j + rn).min(nmax) {
@@ -211,21 +211,30 @@ pub fn profile(ctx: &mut HostCtx, e: &Edge, line: &Line, s_lo: f64, s_hi: f64) -
             up = up.min(mm(i) + ds);
             lo = lo.max(mm(i) - ds);
         }
-        0.5 * (up + lo)
+        let d = 0.5 * (up + lo);
+        // over water and next to it the deck clears the water (a bridge, approach ramps at
+        // the grade limit: never a tunnel under a river)
+        let mut lift = f64::MIN;
+        for i in (j - 8).max(0)..=(j + 8).min(nmax) {
+            let t = at(i);
+            if t.water_kind != water::NONE {
+                lift = lift.max(lifted(t) - (sj(i) - sj(j)).abs() * g);
+            }
+        }
+        d.max(lift)
     };
     let decks: Vec<f64> = (e0..=e1).map(deck_of).collect();
     let dk = |j: i64| decks[(j.clamp(e0, e1) - e0) as usize];
     let gr = |j: i64| at(j).ground;
     let wet = |j: i64| at(j).water_kind != water::NONE;
-    let raw_tunnel = |j: i64| j >= 0 && j < nmax && !wet(j) && !wet(j + 1) && gr(j) - dk(j) > 25.0 && gr(j + 1) - dk(j + 1) > 25.0;
+    let raw_tunnel = |j: i64| j >= 0 && j < nmax && !wet(j) && !wet(j + 1) && gr(j) - dk(j) > 30.0 && gr(j + 1) - dk(j + 1) > 30.0;
     let mut p = Profile { j0, ..Default::default() };
     for j in j0..=j1 {
         p.deck.push(dk(j));
         p.ground.push(gr(j));
         let br = j < nmax && ((dk(j) - gr(j) > 6.0 && dk(j + 1) - gr(j + 1) > 6.0) || wet(j) || wet(j + 1));
-        // tunnels of at least three pieces (a shorter one stays a cutting)
-        let tn =
-            raw_tunnel(j) && ((raw_tunnel(j - 1) && raw_tunnel(j + 1)) || (raw_tunnel(j + 1) && raw_tunnel(j + 2)) || (raw_tunnel(j - 1) && raw_tunnel(j - 2)));
+        // tunnels of at least five pieces (200 m; a shorter one stays a deep cutting)
+        let tn = raw_tunnel(j) && (-4..=0).any(|o| (o..o + 5).all(|i| raw_tunnel(j + i)));
         p.bridge.push(br && !tn);
         p.tunnel.push(tn);
     }
@@ -339,7 +348,7 @@ mod ix {
 }
 
 /// Is `p` inside a town or larger (its built-up radius)?
-fn in_town(w: &World, p: DVec3) -> bool {
+pub(crate) fn in_town(w: &World, p: DVec3) -> bool {
     (places::TOWN as usize..places::NLEVELS)
         .any(|l| places::places_near(w, l, p, places::LEVELS[l].radius[1] * 1.15).iter().any(|pl| (pl.center - p).length() < pl.radius))
 }
@@ -552,10 +561,12 @@ fn seed24(h: u64) -> f32 {
     (h & 0xFF_FFFF) as f32
 }
 
-/// Car density 0..1 and lamp spacing (m; 0: unlit) of a stretch.
-fn traffic(class: usize, urban: bool, dev: f64, near_city: bool) -> (f64, f64) {
+/// Car density 0..1 and lamp spacing (m; 0: unlit) of a stretch: by class and development,
+/// more in towns, the more the larger the town (`size`: its level 0–4).
+fn traffic(class: usize, urban: bool, size: u8, dev: f64, near_city: bool) -> (f64, f64) {
     let base = [0.24, 0.18, 0.1, 0.04, 0.0, 0.12, 0.0, 0.0][class];
-    let dens = (base * (0.45 + 0.8 * dev) * if urban { 1.8 } else { 1.0 }).min(0.9);
+    let town = if urban { 1.2 + 0.3 * size as f64 } else { 1.0 };
+    let dens = (base * (0.45 + 0.8 * dev) * town).min(0.9);
     let lit = match class {
         cls::MOTORWAY => dev > 0.75 || near_city || urban,
         cls::RAMP => dev > 0.3,
@@ -700,7 +711,8 @@ fn emit(ctx: &mut HostCtx, area: &Area, e: &Edge, line: &Line, prof_area: bool, 
         }
         let over = mods.iter().any(|m| (mid - m.s).abs() < m.hw + 15.0);
         let urban = urban_at(0.5 * (pa + pb));
-        let (dens, lamp) = traffic(class, urban, dev, near_city);
+        let size = [e.a, e.b].iter().filter(|nd| nd.level <= places::METRO).map(|nd| nd.level).max().unwrap_or(0);
+        let (dens, lamp) = traffic(class, urban, size, dev, near_city);
         let (da, fa) = deck_at(s0);
         let (db, fb) = deck_at(s1);
         let mut fl = 0u32;
@@ -803,7 +815,7 @@ fn ramp(area: &Area, pts: &[DVec3], x: DVec3, over: f64, lit: bool, dev: f64, h:
         if da.is_finite() {
             fl |= flag::FILL;
         }
-        let (dens, lamp) = traffic(cls::RAMP, false, dev, lit);
+        let (dens, lamp) = traffic(cls::RAMP, false, 0, dev, lit);
         f.segs.push(FSeg {
             a: pts[k],
             b: pts[k + 1],

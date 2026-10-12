@@ -158,8 +158,9 @@ const LAMP_LED: DVec3 = DVec3::new(0.86, 0.92, 1.0);
 fn lamps(f: &Frame, s0: f64, sp: f64, off: f64, median: bool, seed: u64, fw: f64) -> DVec3 {
     let m = (2.0 * fw / sp).max(1.0).log2().ceil().exp2();
     let sp_eff = sp * m;
-    let k = (f.ar / sp_eff).round();
-    let sk = k * sp_eff;
+    // (lamps half a spacing off the profile's 40 m vertices: never on a segment's end)
+    let k = (f.ar / sp_eff).floor();
+    let sk = (k + 0.5) * sp_eff;
     if sk < s0 || sk >= s0 + f.len {
         return DVec3::ZERO;
     }
@@ -284,12 +285,12 @@ fn road_px(sg: &FSeg, f: &Frame, e: &Env, class: usize) -> Px {
     if has_deck && !bridge && dd > edge - fw {
         let sl = (dd - edge).max(0.0) * 0.5;
         if raised > 0.0 {
-            let toe = edge + 2.0 * raised.min(20.0);
-            over(&mut o, aa(toe - dd, fw), mixc(e.below, srgb(112.0, 124.0, 74.0), 0.55), hs - sl);
+            let toe = edge + 2.0 * raised.min(15.0);
+            over(&mut o, aa(toe - dd, fw), mixc(e.below, srgb(112.0, 124.0, 74.0), 0.35), hs - sl);
         } else {
-            let toe = edge + 2.0 * (-raised).min(20.0);
+            let toe = edge + 2.0 * (-raised).min(15.0);
             let strata = 0.9 + 0.1 * ((hs + sl) / 3.0).sin();
-            over(&mut o, aa(toe - dd, fw), mixc(e.below, srgb(146.0, 132.0, 112.0) * strata, 0.6), hs + sl);
+            over(&mut o, aa(toe - dd, fw), mixc(e.below, srgb(140.0, 128.0, 100.0) * strata, 0.4), hs + sl);
         }
         o.z = hs - sl;
         o.clear = o.cov;

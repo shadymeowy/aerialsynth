@@ -181,8 +181,8 @@ fn tr_frame(sg: FSeg, p: vec3<f64>, sun: vec3<f32>) -> TrFrame {
 fn tr_lamps(f: TrFrame, s0: f32, sp: f32, off: f32, median: bool, seed: u64, fw: f32) -> vec3<f32> {
     let m = exp2(ceil(log2(max(2.0 * fw / sp, 1.0))));
     let sp_eff = sp * m;
-    let k = round(f.ar / sp_eff);
-    let sk = k * sp_eff;
+    let k = floor(f.ar / sp_eff);
+    let sk = (k + 0.5) * sp_eff;
     if (sk < s0 || sk >= s0 + f.len) {
         return vec3<f32>(0.0);
     }
@@ -304,12 +304,12 @@ fn tr_road_px(sg: FSeg, f: TrFrame, e: TrEnv, kc: u32) -> TrPx {
     if (has_deck && !bridge && dd > edge - fw) {
         let sl = max(dd - edge, 0.0) * 0.5;
         if (raised > 0.0) {
-            let toe = edge + 2.0 * min(raised, 20.0);
-            tr_over(&o, tr_aa(toe - dd, fw), mixc(e.below, srgb(112.0, 124.0, 74.0), 0.55), hs - sl);
+            let toe = edge + 2.0 * min(raised, 15.0);
+            tr_over(&o, tr_aa(toe - dd, fw), mixc(e.below, srgb(112.0, 124.0, 74.0), 0.35), hs - sl);
         } else {
-            let toe = edge + 2.0 * min(-raised, 20.0);
+            let toe = edge + 2.0 * min(-raised, 15.0);
             let strata = 0.9 + 0.1 * sin((hs + sl) / 3.0);
-            tr_over(&o, tr_aa(toe - dd, fw), mixc(e.below, srgb(146.0, 132.0, 112.0) * strata, 0.6), hs + sl);
+            tr_over(&o, tr_aa(toe - dd, fw), mixc(e.below, srgb(140.0, 128.0, 100.0) * strata, 0.4), hs + sl);
         }
         o.z = hs - sl;
         o.clear = o.cov;
