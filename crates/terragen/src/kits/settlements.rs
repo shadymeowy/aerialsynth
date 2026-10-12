@@ -67,6 +67,10 @@ fn host(ctx: &mut HostCtx, area: &Area) -> Features {
     if w.cfg.landuse.towns <= 0.0 || area.gsd >= GSD_MAX[4] {
         return f;
     }
+    // hamlets and villages drowned by a reservoir are not drawn (a dam never floods a town):
+    // the reservoirs that can reach any of their centres listed here
+    let ext_v = places::LEVELS[1].radius[1] * 1.15 * 1.62 * 1.62 + places::WALDHUFEN_STRIP;
+    let mut res: Option<Vec<crate::features::FSeg>> = None;
     for (level, &gmax) in GSD_MAX.iter().enumerate() {
         if area.gsd >= gmax {
             continue;
@@ -74,6 +78,20 @@ fn host(ctx: &mut HostCtx, area: &Area) -> Features {
         let ext = places::LEVELS[level].radius[1] * 1.15 * 1.62 * 1.62 + if level <= 1 { places::WALDHUFEN_STRIP } else { 0.0 };
         for pl in places::places_near(w, level, area.center, area.radius + 1.42 * ext) {
             if (pl.center - area.center).length() <= area.radius + 1.42 * pl.extent() + 2.0 {
+                if level <= places::VILLAGE as usize {
+                    let res = res.get_or_insert_with(|| {
+                        let r = area.radius + 1.42 * ext_v + 2.0;
+                        let mut towns = Vec::new();
+                        for l in places::TOWN as usize..places::NLEVELS {
+                            towns.extend(places::places_near(w, l, area.center, r + 32_000.0));
+                        }
+                        sites::dams_near(ctx, area.center, r, area.gsd, &towns).into_iter().flat_map(|s| s.segs).collect()
+                    });
+                    // (pending point evaluations: the host is run again once they are in)
+                    if sites::drowned(ctx, res, pl.center) == Some(true) {
+                        continue;
+                    }
+                }
                 f.stamps.push(place_stamp(w, &pl));
             }
         }
@@ -349,6 +367,127 @@ mod tests {
     fn tile_at(name: &str, z: u8) -> geodesy::tiles::TileId {
         let &(_, lat, lon) = PLACES.iter().find(|p| p.0 == name).unwrap();
         geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)
+    }
+
+    /// A point source of GPU point evaluations in rounds (as the GPU generator's settle rounds):
+    /// unknown points are pending, evaluated in one batch between runs of the host.
+    #[cfg(feature = "gpu")]
+    struct GpuRounds<'g> {
+        gen: &'g crate::gpu::GpuGenerator,
+        done: crate::noise::FxHashMap<(u64, u64, u64), crate::tile::PointTerrain>,
+        missing: Vec<(f64, f64, f64)>,
+    }
+
+    #[cfg(feature = "gpu")]
+    impl crate::features::PointSource for GpuRounds<'_> {
+        fn terrain(&mut self, c: &crate::world::Ctx) -> Option<crate::tile::PointTerrain> {
+            let key = (c.lat.to_bits(), c.lon.to_bits(), c.gsd.to_bits());
+            if let Some(t) = self.done.get(&key) {
+                return Some(*t);
+            }
+            self.missing.push((c.lat, c.lon, c.gsd));
+            None
+        }
+    }
+
+    #[cfg(feature = "gpu")]
+    impl GpuRounds<'_> {
+        /// The kits' host features of an area, its point evaluations on the GPU.
+        fn features(&mut self, w: &crate::world::World, area: &crate::features::Area) -> crate::features::Features {
+            for _ in 0..64 {
+                self.missing.clear();
+                let f = crate::features::build(w, self, area);
+                if self.missing.is_empty() {
+                    return f;
+                }
+                let mut pts = std::mem::take(&mut self.missing);
+                pts.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                pts.dedup();
+                let ts = self.gen.terrain_points(&pts).unwrap();
+                for (p, t) in pts.iter().zip(ts) {
+                    let t = crate::tile::PointTerrain {
+                        ground: t.ground as f64,
+                        water: if t.water_kind != 0 { t.water as f64 } else { f64::NEG_INFINITY },
+                        water_kind: t.water_kind as u8,
+                    };
+                    self.done.insert((p.0.to_bits(), p.1.to_bits(), p.2.to_bits()), t);
+                }
+            }
+            panic!("host features did not settle");
+        }
+    }
+
+    /// The sites (airports, ports, dams, quarries, solar, wind, flares) and the transport
+    /// network the kits build from GPU point evaluations are the CPU's, bit for bit: close
+    /// decisions are re-taken with exact samples (`sites::TIE_H`). Run alone (it clears the
+    /// shared caches).
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn sites_and_routes_match_the_cpu() {
+        let cfg = crate::Config::default();
+        let gen = match crate::gpu::GpuGenerator::new(cfg.clone()) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("no GPU generator ({e}): skipped");
+                return;
+            }
+        };
+        let w = crate::world::World::new(cfg);
+        let clear = || {
+            sites::clear_cache();
+            crate::kits::transport::net::clear_cache();
+            crate::kits::transport::build::clear_cache();
+        };
+        let key_st = |st: &FStamp| (st.template, st.center.to_array().map(f64::to_bits), st.half.map(f32::to_bits), st.h.to_bits(), st.v.map(f32::to_bits));
+        let key_sg = |sg: &crate::features::FSeg| {
+            (
+                sg.kind,
+                sg.class,
+                sg.a.to_array().map(f64::to_bits),
+                sg.b.to_array().map(f64::to_bits),
+                sg.hw.to_bits(),
+                sg.ha.to_bits(),
+                sg.hb.to_bits(),
+                sg.v.map(f32::to_bits),
+            )
+        };
+        let (mut nst, mut nsg) = (0, 0);
+        for &(name, lat, lon) in PLACES.iter().filter(|p| ["airport", "port", "dam", "solar", "flare", "survey_city"].contains(&p.0)) {
+            let center = geodesy::geodetic2ecef(geodesy::Geodetic::new(lat.to_radians(), lon.to_radians(), 0.0), &w.ell);
+            let area = crate::features::Area { center, radius: 4_000.0, gsd: 20.0 };
+            clear();
+            let g = GpuRounds { gen: &gen, done: Default::default(), missing: Vec::new() }.features(&w, &area);
+            clear();
+            let c = crate::features::build(&w, &mut crate::features::CpuPoints(&w), &area);
+            // (tunnel portals come from the engineered profiles' point samples)
+            let portal = |st: &&FStamp| st.template != crate::kits::transport::tpl::PORTAL;
+            let mut gs: Vec<_> = g.stamps.iter().filter(portal).map(key_st).collect();
+            let mut cs: Vec<_> = c.stamps.iter().filter(portal).map(key_st).collect();
+            gs.sort();
+            cs.sort();
+            assert_eq!(gs.len(), cs.len(), "{name}: {} stamps on the GPU, {} on the CPU", gs.len(), cs.len());
+            assert!(gs == cs, "{name}: stamps differ");
+            // (sites' segments and the routes' polylines; the decks of engineered profiles come
+            // from point samples and may differ by centimetres)
+            let mut gg: Vec<_> = g.segs.iter().map(key_sg).collect();
+            let mut cg: Vec<_> = c.segs.iter().map(key_sg).collect();
+            let deckless = |v: &mut Vec<(u32, u8, [u64; 3], [u64; 3], u32, u32, u32, [u32; 4])>| {
+                for x in v.iter_mut() {
+                    if x.0 >= crate::kits::transport::cls::KIND0 {
+                        (x.5, x.6, x.7) = (0, 0, [0; 4]);
+                    }
+                }
+                v.sort();
+            };
+            deckless(&mut gg);
+            deckless(&mut cg);
+            assert_eq!(gg.len(), cg.len(), "{name}: {} segments on the GPU, {} on the CPU", gg.len(), cg.len());
+            assert!(gg == cg, "{name}: segments differ");
+            eprintln!("{name}: {} stamps, {} segments identical", gs.len(), gg.len());
+            nst += gs.len();
+            nsg += gg.len();
+        }
+        assert!(nst > 0 && nsg > 0);
     }
 
     /// Share of samples differing by more than `tol`.

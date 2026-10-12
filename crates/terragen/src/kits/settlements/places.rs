@@ -4,8 +4,11 @@
 //! (90 km), town (25 km), village (6 km), hamlet (1.6 km). Every lattice cell has K hashed
 //! candidate positions; their score is the atlas' population potential × climate × coast access
 //! (all candidates), then × flatness (a ring of smooth-elevation samples; Mediterranean and
-//! highland villages prefer hilltops instead) for the best three. Scores are quantized to 1/64
-//! with the candidate hash as the tie-breaker. The best candidate exists with a probability by
+//! highland villages prefer hilltops instead) × water for the best three (villages, hamlets): a
+//! candidate whose centre lies in open water (pass A at the point: the sea, a lake, a level 0–1
+//! river channel) is dropped, water on a ring around it lowers its score, a river within 2.5 km
+//! raises it. Scores are quantized to 1/64 with the candidate hash as the
+//! tie-breaker. The best candidate exists with a probability by
 //! level, population potential, culture (archetype) and `landuse.towns`.
 //!
 //! Suppression is deterministic and bounded, top-down: a site is removed when a site of a
@@ -395,7 +398,15 @@ fn base_place(w: &World, level: usize, c: (i64, i64, i64)) -> Option<Place> {
         }
         let t_here = a.temp_c - lapse * h0 / 1000.0;
         let elev = smoothstep(-12.0, 2.0, t_here) * (1.0 - 0.8 * smoothstep(2_500.0, 4_500.0, h0)) * (1.0 - 0.6 * smoothstep(400.0, 1_800.0, amp));
-        let s = s1q as f64 / 64.0 * flat * elev;
+        // water: no centre in open water; water in the footprint lowers the score, a river
+        // nearby raises it (water access: crossings, mills, river ports)
+        // (hamlets and villages: larger places are visited over thousands of kilometres by the
+        // transport kit's trunk networks, where pass A at points costs too much; their
+        // smooth-relief test keeps them off the sea)
+        let wa = if level as u8 <= VILLAGE { water_access(w, level as u8, p, 0.8 * spec.radius[0]) } else { Some((1.0, f64::MAX)) };
+        let Some((dry, river_d)) = wa else { continue };
+        let water = (0.3 + 0.7 * dry) * (1.0 + RIVER_BONUS * (1.0 - smoothstep(150.0, 2_500.0, river_d)));
+        let s = s1q as f64 / 64.0 * flat * elev * water;
         let q = quant(s);
         if q == 0 {
             continue;
@@ -461,6 +472,40 @@ fn base_place(w: &World, level: usize, c: (i64, i64, i64)) -> Option<Place> {
         elev: h0,
         litho: a.litho as u8,
     })
+}
+
+/// Score bonus of a site at a river's bank (level 0–1; fading out by 2.5 km).
+const RIVER_BONUS: f64 = 0.3;
+
+/// Open water at a candidate site and its access to rivers, by pass A at points
+/// (`World::terrain`: the sea, the core's lattice and closed-basin lakes, the kits' lakes, the
+/// channels): None where the centre is in water (a river of levels 0–1, half width > 5.5 m);
+/// else the dry share of a ring of 4 points at `ring` m (pass A there for hamlets and villages,
+/// the relief's sea for larger levels) and the distance (m) from the centre to the nearest level 0–1 channel's bank
+/// within the carve's reach. Analytic (host Rust), the same for both backends.
+fn water_access(w: &World, level: u8, p: DVec3, ring: f64) -> Option<(f64, f64)> {
+    let at = |q: DVec3| {
+        let (lat, lon, _, _) = frame_at(w, q);
+        crate::world::Ctx::new(lat, lon, 20.0, &w.ell)
+    };
+    let wet =
+        |t: &crate::world::Terrain| (t.water_kind != crate::world::water::NONE && t.water > t.ground) || (t.river_hw > 5.5 && t.river_d.abs() < t.river_hw);
+    let tc = w.terrain(&at(p));
+    if wet(&tc) {
+        return None;
+    }
+    let (_, _, east, north) = frame_at(w, p);
+    let mut dry = 0.0;
+    for k in 0..4 {
+        let (s, co) = (k as f64 * std::f64::consts::FRAC_PI_2 + 0.4).sin_cos();
+        let c = at(p + (east * co + north * s) * ring);
+        let ok = if level <= VILLAGE { !wet(&w.terrain(&c)) } else { w.relief_height(&c, &w.macro_at(c.p, 20.0)) >= 0.5 };
+        if ok {
+            dry += 0.25;
+        }
+    }
+    let river = if tc.river_hw > 5.5 { (tc.river_d.abs() - tc.river_hw).max(0.0) } else { f64::MAX };
+    Some((dry, river))
 }
 
 fn quant(s: f64) -> u32 {
@@ -655,6 +700,28 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Places keep their centres out of open water (pass A at the centre: the sea, lakes,
+    /// rivers), and their scores prefer river banks.
+    #[test]
+    fn places_avoid_open_water() {
+        let w = world();
+        let (mut n, mut wet) = (0, 0);
+        for p in land_points(&w, 6, 0.15) {
+            for s in settlements_near(&w, p, 12_000.0) {
+                let g = geodesy::ecef2geodetic(s.ecef, &w.ell);
+                let t = w.terrain(&crate::world::Ctx::new(g.lat, g.lon, 20.0, &w.ell));
+                n += 1;
+                // (rivers of levels 0–1: half widths from 6 m)
+                if (t.water_kind != crate::world::water::NONE && t.water > t.ground) || (t.river_hw > 5.5 && t.river_d.abs() < t.river_hw) {
+                    wet += 1;
+                    eprintln!("in water: level {} at ({:.4}, {:.4}) kind {}", s.level, s.lat_deg, s.lon_deg, t.water_kind);
+                }
+            }
+        }
+        eprintln!("{wet} of {n} place centres in water");
+        assert!(n > 50 && wet * 100 <= n, "{wet} of {n}");
     }
 
     /// Debug: places of each level and form in the default world:
