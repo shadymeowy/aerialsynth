@@ -18,7 +18,7 @@ const MT_TOWER_DENS: f32 = 0.7;
 const MT_TOWER_MEAN: f32 = 16.85;
 const MT_COCKPIT_MEAN: f32 = 15.24;
 const MT_RIDGE_CELL: f64 = 140000.0lf;
-const MT_CREASE_MEAN: f32 = 0.3400;
+const MT_CREASE_MEAN: f32 = 0.4097;
 
 /// `mountains::litho_at`: the atlas' dominant lithology at the texel nearest to `p`.
 fn mt_litho(p: vec3<f64>) -> u32 {
@@ -124,8 +124,8 @@ fn mt_cone_h(c: Cell3, p: vec3<f64>, east: vec3<f32>, north: vec3<f32>, kind: u3
     return hh * pow(1.0 - x, ex);
 }
 
-/// `mountains::ridges`: parallel ridges of the 8 lattice corners around `p`.
-fn mt_ridges(p: vec3<f64>, kind: u32, nw: f32, pl: f32) -> f32 {
+/// `mountains::ridges`.
+fn mt_ridges(p: vec3<f64>, wf: f32, nw: f32, pl: f32) -> f32 {
     let q = p / MT_RIDGE_CELL;
     let i = floor(q);
     let f = vec3<f32>(q - i);
@@ -135,10 +135,6 @@ fn mt_ridges(p: vec3<f64>, kind: u32, nw: f32, pl: f32) -> f32 {
     let sx = f.x * f.x * (3.0 - 2.0 * f.x);
     let sy = f.y * f.y * (3.0 - 2.0 * f.y);
     let sz = f.z * f.z * (3.0 - 2.0 * f.z);
-    var lam0 = 9000.0;
-    if (kind == 1u) {
-        lam0 = 16000.0;
-    }
     var v = 0.0;
     var sw = 0.0;
     for (var dz = 0; dz < 2; dz++) {
@@ -170,21 +166,24 @@ fn mt_ridges(p: vec3<f64>, kind: u32, nw: f32, pl: f32) -> f32 {
                 let n = cross(d, e);
                 let th = TAU * u01k(h, 1lu);
                 let nn = e * cos(th) + n * sin(th);
-                let lam = lam0 * (0.7 + 0.6 * u01k(h, 2lu));
-                var x = dot(vec3<f32>(p - corner), nn) / lam + u01k(h, 3lu) + 1.4 * nw;
-                x = x - floor(x);
-                var prof = 0.0;
-                if (kind == 0u) {
-                    let t = 1.0 - abs(2.0 * x - 1.0);
-                    prof = pow(t, 1.6) - 1.0 / 2.6;
-                } else if (x < 0.8) {
-                    let s = x / 0.8;
-                    prof = s * s * (3.0 - 2.0 * s) - 0.5;
+                let lamk = 0.7 + 0.6 * u01k(h, 2lu);
+                let along = dot(vec3<f32>(p - corner), nn);
+                let ph = u01k(h, 3lu) + 1.4 * nw;
+                var xf = along / (9000.0 * lamk) + ph;
+                var xk = along / (16000.0 * lamk) + ph;
+                xf = xf - floor(xf);
+                xk = xk - floor(xk);
+                let t = 1.0 - abs(2.0 * xf - 1.0);
+                let pf = 520.0 * (pow(t, 1.6) - 1.0 / 2.6);
+                var pk = 0.0;
+                if (xk < 0.8) {
+                    let s = xk / 0.8;
+                    pk = 900.0 * (s * s * (3.0 - 2.0 * s) - 0.5);
                 } else {
-                    let s = (1.0 - x) / 0.2;
-                    prof = s * s * (3.0 - 2.0 * s) - 0.5;
+                    let s = (1.0 - xk) / 0.2;
+                    pk = 900.0 * (s * s * (3.0 - 2.0 * s) - 0.5);
                 }
-                v += w * (0.7 + 0.6 * u01k(h, 4lu)) * prof;
+                v += w * (0.7 + 0.6 * u01k(h, 4lu)) * lerp(pf, pk, wf);
                 sw += w;
             }
         }
@@ -194,7 +193,7 @@ fn mt_ridges(p: vec3<f64>, kind: u32, nw: f32, pl: f32) -> f32 {
 
 /// `mountains::crease`.
 fn mt_crease(n: f32) -> f32 {
-    return pow(n * n + 0.012, 0.35);
+    return pow(n * n + 0.04, 0.35);
 }
 
 /// `mountains::badlands`.
@@ -206,11 +205,11 @@ fn mt_badlands(p: vec3<f64>, gsd: f32) -> f32 {
     }
     let b1 = band(130.0, gsd);
     if (b1 > 0.0) {
-        v += 0.6 * (mt_crease(perlin3(MT_SEED + 21lu, p / 130.0lf)) - MT_CREASE_MEAN) * b1;
+        v += 0.55 * (mt_crease(perlin3(MT_SEED + 21lu, p / 130.0lf)) - MT_CREASE_MEAN) * b1;
     }
-    let b2 = band(55.0, gsd);
+    let b2 = band(60.0, gsd);
     if (b2 > 0.0) {
-        v += 0.35 * (mt_crease(perlin3(MT_SEED + 22lu, p / 55.0lf)) - MT_CREASE_MEAN) * b2;
+        v += 0.25 * (mt_crease(perlin3(MT_SEED + 22lu, p / 60.0lf)) - MT_CREASE_MEAN) * b2;
     }
     return v;
 }
@@ -316,8 +315,13 @@ fn mountains_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
     zi.sand = r.sand;
     zi.style = perlin3(MT_SEED + 5lu, c.p / 180000.0lf);
     let z = mt_zones(zi, fl.lit, fl.n1, fl.n2);
+    let fans = inst_list(FAM_MOUNTAINS_FANS, r.blk, c.p);
+    var ae = 0.0;
+    if (z.tower + z.cockpit + z.fold + z.fault > 0.0 || fans.n > 0u) {
+        ae = atlas_sample(vec3<f32>(normalize(c.p))).elevation;
+    }
     if (z.tower + z.cockpit > 0.0) {
-        let plain = lerp(r.smooth_h, min(-11.0, r.smooth_h), z.drown);
+        let plain = lerp(ae, min(-11.0, ae), z.drown);
         *h = lerp(*h, plain, 0.88 * z.tower);
         let e = smoothstep1(1.2 * gsd, 3.0 * gsd, 0.45 * MT_KARST_CELL);
         var tw = MT_TOWER_MEAN;
@@ -329,35 +333,26 @@ fn mountains_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
         }
         *h += z.tower * tw + z.cockpit * (cp - MT_COCKPIT_MEAN);
     }
+    let zt = min(z.fold + z.fault, 1.0);
     if (z.fold + z.fault > 0.0) {
-        var kind = 0u;
-        var zz = z.fold;
-        var lam_min = 6300.0;
-        var amp = 520.0;
-        if (z.fault > z.fold) {
-            kind = 1u;
-            zz = z.fault;
-            lam_min = 7700.0;
-            amp = 900.0;
-        }
-        let b = band(lam_min, gsd);
-        *h = lerp(*h, r.smooth_h, 0.85 * zz);
+        let wf = z.fault / (z.fold + z.fault);
+        let b = lerp(band(6300.0, gsd), band(7700.0, gsd), wf);
+        *h = lerp(*h, ae, 0.85 * zt);
         if (b > 0.0) {
             let nw = perlin3(MT_SEED + 3lu, c.p / 38000.0lf);
             let pl = smoothstep1(-0.55, 0.3, perlin3(MT_SEED + 4lu, c.p / 26000.0lf));
-            *h += zz * amp * mt_ridges(c.p, kind, nw, pl) * b;
+            *h += zt * mt_ridges(c.p, wf, nw, pl) * b;
         }
     }
     if (z.badland > 0.0) {
         *h += z.badland * (14.0 + 14.0 * smoothstep1(-0.3, 0.5, fl.n1)) * 2.4 * mt_badlands(c.p, gsd);
     }
-    let fans = inst_list(FAM_MOUNTAINS_FANS, r.blk, c.p);
     for (var k = 0u; k < fans.n; k++) {
         let it = fans.items[k];
         let fa = mt_fan_at(it, c.p, c.east, c.north);
         if (fa.ok) {
             let cone = it.v[3] * pow(1.0 - fa.rn, 1.3);
-            *h = lerp(*h, r.smooth_h + cone, 0.7 * fa.sec);
+            *h = lerp(*h, ae + cone, 0.7 * fa.sec);
         }
     }
 }

@@ -1048,11 +1048,11 @@ mod tests {
                     ei += (e.albedo[3 * (j * n) + c] as f64 - e.albedo[3 * (j * n + 1) + c] as f64).abs();
                     ni += (s.albedo[3 * j + c] as f64 - s.albedo[3 * (n + j) + c] as f64).abs();
                 }
-                // elevation: the step across the seam is no larger than the slope inside
+                // elevation: the step across the seam is no larger than the slope inside (+ a cinder cone: 12 m)
                 let (h0, h1, h2) = (a.elevation[j * n + n - 2] as f64, a.elevation[j * n + n - 1] as f64, e.elevation[j * n] as f64);
-                assert!((h2 - h1).abs() < 3.0 * (h1 - h0).abs() + 8.0, "{name}: E-W elevation seam {h0} {h1} {h2}");
+                assert!((h2 - h1).abs() < 3.0 * (h1 - h0).abs() + 16.0, "{name}: E-W elevation seam {h0} {h1} {h2}");
                 let (v0, v1, v2) = (a.elevation[(n - 2) * n + j] as f64, a.elevation[(n - 1) * n + j] as f64, s.elevation[j] as f64);
-                assert!((v2 - v1).abs() < 3.0 * (v1 - v0).abs() + 8.0, "{name}: N-S elevation seam {v0} {v1} {v2}");
+                assert!((v2 - v1).abs() < 3.0 * (v1 - v0).abs() + 16.0, "{name}: N-S elevation seam {v0} {v1} {v2}");
             }
             eprintln!("{name} z{z}: albedo E-W across {ea:.0} inside {ei:.0}; N-S across {na:.0} inside {ni:.0}");
             assert!(ea < 2.0 * ei + 2.0 * n as f64, "{name}: E-W across {ea} inside {ei}");

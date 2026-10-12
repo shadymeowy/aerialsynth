@@ -26,7 +26,7 @@
 //!   stripes keep their phase at any zoom (R-wave); a 38 km noise bends them, a 26 km noise
 //!   makes the ridges plunge. Folds: triangle crests, λ 6–12 km, 520 m; blocks: tilted
 //!   sawtooth, λ 11–21 km, 900 m, a scarp on a fifth of the period.
-//! * *Badlands*: three octaves of creased noise (300, 130 and 55 m) on soft sediment × arid.
+//! * *Badlands*: three octaves of creased noise (300, 130 and 60 m) on soft sediment × arid.
 //! * *Alluvial fans*: family `mountains_fans` at mountain fronts in dry climates (the atlas'
 //!   uplift falling at least 0.03 per 24 km: the fan points down the gradient): a
 //!   conical apron `H(1 − r/R)^1.3` over a 70 % blend to the smooth elevation in a ±60° sector.
@@ -204,18 +204,18 @@ fn cone_h(c: &Cell3, p: DVec3, east: DVec3, north: DVec3, kind: u32) -> f64 {
 
 const RIDGE_CELL: f64 = 140_000.0;
 
-/// Parallel ridges of the 8 lattice corners around `p`, blended by their (sharpened) trilinear
-/// weights: `kind` 0 folds (crest `t^1.6`, λ 6–12 km), 1 fault blocks (a tilted sawtooth, λ
-/// 11–21 km). Zero mean, about −0.4 .. 0.6; `nw` bends the stripes (cycles), `pl` is the
-/// plunge amplitude 0..1.
-fn ridges(p: DVec3, kind: u32, nw: f64, pl: f64) -> f64 {
+/// Parallel ridges (m) of the 8 lattice corners around `p`, blended by their (sharpened)
+/// trilinear weights: folds (crest `t^1.6`, λ 6-12 km, 520 m) and fault blocks (a tilted sawtooth,
+/// λ 11-21 km, 900 m) mixed by the share `wf` of fault blocks (continuous: where both zones
+/// overlap the profiles blend). Zero mean; `nw` bends the stripes (cycles), `pl` is the plunge
+/// amplitude 0..1.
+fn ridges(p: DVec3, wf: f64, nw: f64, pl: f64) -> f64 {
     let q = p / RIDGE_CELL;
     let i = q.floor();
     let f = q - i;
     let (ix, iy, iz) = (i.x as i64, i.y as i64, i.z as i64);
     let sm = |x: f64| x * x * (3.0 - 2.0 * x);
     let (sx, sy, sz) = (sm(f.x), sm(f.y), sm(f.z));
-    let lam0 = if kind == 0 { 9000.0 } else { 16000.0 };
     let (mut v, mut sw) = (0.0, 0.0);
     for dz in 0..2i64 {
         for dy in 0..2i64 {
@@ -230,20 +230,24 @@ fn ridges(p: DVec3, kind: u32, nw: f64, pl: f64) -> f64 {
                 let n = d.cross(e);
                 let th = TAU * u01k(h, 1);
                 let nn = e * th.cos() + n * th.sin();
-                let lam = lam0 * (0.7 + 0.6 * u01k(h, 2));
-                let x = (p - corner).dot(nn) / lam + u01k(h, 3) + 1.4 * nw;
-                let x = x - x.floor();
-                let prof = if kind == 0 {
-                    let t = 1.0 - (2.0 * x - 1.0).abs();
-                    t.powf(1.6) - 1.0 / 2.6
-                } else if x < 0.8 {
-                    let s = x / 0.8;
-                    s * s * (3.0 - 2.0 * s) - 0.5
-                } else {
-                    let s = (1.0 - x) / 0.2;
-                    s * s * (3.0 - 2.0 * s) - 0.5
-                };
-                v += w * (0.7 + 0.6 * u01k(h, 4)) * prof;
+                let lamk = 0.7 + 0.6 * u01k(h, 2);
+                let along = (p - corner).dot(nn);
+                let ph = u01k(h, 3) + 1.4 * nw;
+                let xf = along / (9000.0 * lamk) + ph;
+                let xk = along / (16000.0 * lamk) + ph;
+                let xf = xf - xf.floor();
+                let xk = xk - xk.floor();
+                let t = 1.0 - (2.0 * xf - 1.0).abs();
+                let pf = 520.0 * (t.powf(1.6) - 1.0 / 2.6);
+                let pk = 900.0
+                    * if xk < 0.8 {
+                        let s = xk / 0.8;
+                        s * s * (3.0 - 2.0 * s) - 0.5
+                    } else {
+                        let s = (1.0 - xk) / 0.2;
+                        s * s * (3.0 - 2.0 * s) - 0.5
+                    };
+                v += w * (0.7 + 0.6 * u01k(h, 4)) * lerp(pf, pk, wf);
                 sw += w;
             }
         }
@@ -253,20 +257,20 @@ fn ridges(p: DVec3, kind: u32, nw: f64, pl: f64) -> f64 {
 
 // ============================================================================= badlands
 
-/// A smooth crease of a noise value: `|n|^0.7` with the V rounded off (`(n² + 0.012)^0.35`): a pit
+/// A smooth crease of a noise value: `|n|^0.7` with the V rounded off (`(n² + 0.04)^0.35`): a pit
 /// at a crease would alias at a few metres per pixel. Its mean (a test recomputes it).
 #[inline]
 fn crease(n: f64) -> f64 {
-    (n * n + 0.012).powf(0.35)
+    (n * n + 0.04).powf(0.35)
 }
 
-const CREASE_MEAN: f64 = 0.3400;
+const CREASE_MEAN: f64 = 0.4097;
 
-/// Creased gullies (m per unit amplitude): 300, 130 and 55 m octaves (weights 1, 0.6, 0.35: the
+/// Creased gullies (m per unit amplitude): 300, 130 and 60 m octaves (weights 1, 0.55, 0.25: the
 /// finer creases branch off the coarser ones), zero mean, band-limited.
 fn badlands(p: DVec3, gsd: f64) -> f64 {
     let mut v = 0.0;
-    for (k, (lam, wt)) in [(300.0, 1.0), (130.0, 0.6), (55.0, 0.35)].into_iter().enumerate() {
+    for (k, (lam, wt)) in [(300.0, 1.0), (130.0, 0.55), (60.0, 0.25)].into_iter().enumerate() {
         let b = band(lam, gsd);
         if b > 0.0 {
             v += wt * (crease(perlin3(SEED + 20 + k as u64, p / lam)) - CREASE_MEAN) * b;
@@ -358,9 +362,17 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
         style: perlin3(SEED + 5, c.p / 180_000.0),
     };
     let z = zones(&zi, lit, n1, n2);
+    // the flattening target: the atlas' smooth elevation (exact and the same in every tile; the
+    // pixel's own low-passed relief carries the tile grid's interpolation error: steps of ~10 m
+    // between tiles once it is the target of a 85 % blend)
+    let ae = if z.tower + z.cockpit + z.fold + z.fault > 0.0 || r.instances(w, fam_fans()).iter().any(|_| true) {
+        w.atlas().sample(c.p.normalize()).elevation_m
+    } else {
+        0.0
+    };
     // ---- karst: flattened floors, towers, dolines; drowned near the coast
     if z.tower + z.cockpit > 0.0 {
-        let plain = lerp(r.smooth, (-11.0f64).min(r.smooth), z.drown);
+        let plain = lerp(ae, (-11.0f64).min(ae), z.drown);
         *h = lerp(*h, plain, 0.88 * z.tower);
         let e = smoothstep(1.2 * gsd, 3.0 * gsd, 0.45 * KARST_CELL);
         let (mut tw, mut cp) = (TOWER_MEAN, COCKPIT_MEAN);
@@ -372,15 +384,15 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
         *h += z.tower * tw + z.cockpit * (cp - COCKPIT_MEAN);
     }
     // ---- folded ridges and fault blocks
+    let zt = (z.fold + z.fault).min(1.0);
     if z.fold + z.fault > 0.0 {
-        let kind = (z.fault > z.fold) as u32;
-        let zz = if kind == 1 { z.fault } else { z.fold };
-        let b = band(if kind == 1 { 7700.0 } else { 6300.0 }, gsd);
-        *h = lerp(*h, r.smooth, 0.85 * zz);
+        let wf = z.fault / (z.fold + z.fault);
+        let b = lerp(band(6300.0, gsd), band(7700.0, gsd), wf);
+        *h = lerp(*h, ae, 0.85 * zt);
         if b > 0.0 {
             let nw = perlin3(SEED + 3, c.p / 38_000.0);
             let pl = smoothstep(-0.55, 0.3, perlin3(SEED + 4, c.p / 26_000.0));
-            *h += zz * (if kind == 1 { 900.0 } else { 520.0 }) * ridges(c.p, kind, nw, pl) * b;
+            *h += zt * ridges(c.p, wf, nw, pl) * b;
         }
     }
     // ---- badlands
@@ -391,7 +403,7 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
     for it in r.instances(w, fam_fans()).iter() {
         if let Some((sec, rn, _)) = fan_at(it, c.p, c.east, c.north) {
             let cone = it.v[3] as f64 * (1.0 - rn).powf(1.3);
-            *h = lerp(*h, r.smooth + cone, 0.7 * sec);
+            *h = lerp(*h, ae + cone, 0.7 * sec);
         }
     }
 }
@@ -605,7 +617,7 @@ mod tests {
             let (mut sum, mut lo, mut hi) = (0.0, f64::MAX, f64::MIN);
             for i in 0..n {
                 let p = plane(i, 900_000.0);
-                let v = ridges(p, kind, 0.0, 1.0);
+                let v = ridges(p, kind as f64, 0.0, 1.0) / [520.0, 900.0][kind as usize];
                 sum += v;
                 lo = lo.min(v);
                 hi = hi.max(v);
@@ -616,9 +628,10 @@ mod tests {
             // a line across several lattice cells: the largest step between points 20 m apart
             let mut worst: f64 = 0.0;
             let a = DVec3::new(6_371_000.0, 0.0, 0.0);
-            let mut prev = ridges(a, kind, 0.0, 1.0);
+            let amp = [520.0, 900.0][kind as usize];
+            let mut prev = ridges(a, kind as f64, 0.0, 1.0) / amp;
             for j in 1..30_000 {
-                let v = ridges(a + DVec3::new(0.0, 20.0 * j as f64, 0.0), kind, 0.0, 1.0);
+                let v = ridges(a + DVec3::new(0.0, 20.0 * j as f64, 0.0), kind as f64, 0.0, 1.0) / amp;
                 worst = worst.max((v - prev).abs());
                 prev = v;
             }
@@ -750,7 +763,7 @@ mod tests {
         ("u_valley", 49.423, -162.365),
         ("tarn", 40.874, 174.741),
         ("fjord", 63.382, -81.127),
-        ("fan", -26.972, 51.625),
+        ("fan", 28.597, 67.059),
     ];
 
     fn tile_at(name: &str, z: u8) -> geodesy::tiles::TileId {
@@ -1014,9 +1027,9 @@ mod tests {
             }
         }
         eprintln!("{} fans", seen.len());
-        for it in seen.values().filter(|it| it.v[0] > 4300.0).take(14) {
+        for it in seen.values().filter(|it| it.v[0] > 4300.0).take(40) {
             let g = geodesy::ecef2geodetic(it.center, &w.ell);
-            eprintln!("fan ({:.3}, {:.3}) R{:.0} H{:.0}", g.lat.to_degrees(), g.lon.to_degrees(), it.v[0], it.v[3]);
+            eprintln!("fan ({:.3}, {:.3}) R{:.0} H{:.0} dir ({:.2}, {:.2})", g.lat.to_degrees(), g.lon.to_degrees(), it.v[0], it.v[3], it.v[1], it.v[2]);
         }
     }
 
@@ -1173,7 +1186,7 @@ mod tests {
         let a = g.tile(id);
         let b = g.tile(geodesy::tiles::TileId::new(z, id.x + 1, id.y));
         let n = crate::TILE_SIZE;
-        for j in (0..n).step_by(n / 16) {
+        for j in (0..n).filter(|j| j % (n / 16) == 0 || (b.elevation[j * n] - a.elevation[j * n + n - 1]).abs() > 5.0) {
             let r = |t: &[f32], i: usize| t[j * n + i];
             eprintln!(
                 "row {j:3}: a[n-3..n-1] {:.1} {:.1} {:.1} | b[0..2] {:.1} {:.1} {:.1}",
