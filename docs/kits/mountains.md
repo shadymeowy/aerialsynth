@@ -132,9 +132,10 @@ steep walls, scoured rock above the water).
 ![fjord 4 km](images/mountains_fjord_4km.jpg)
 ![fjord 1.5 km](images/mountains_fjord_1500m.jpg)
 
-**Alluvial fans** (-26.972, 51.625, 1.5 km): pale gravel aprons with radial streaks at a
-mountain front, a lake in the basin.
-![fans](images/mountains_fan_1500m.jpg)
+**Alluvial fans** (28.575, 67.085, 3 km above the ground, 30° down; the fan's apex is 3 km
+north-west of the camera): a pale gravel apron with a straight flank and drainage lines across
+it, a lake at its foot, the old relief blended into a smooth cone.
+![fans](images/mountains_fan_3km.jpg)
 
 ## Decisions
 
