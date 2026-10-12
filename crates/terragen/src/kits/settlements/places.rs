@@ -112,11 +112,11 @@ pub const LEVELS: [LevelSpec; NLEVELS] = [
 
 /// Town density by archetype (a settlement's existence multiplier), by level group: hamlets
 /// (dispersed cultures have many), villages, towns and larger.
-const ARCH_HAMLETS: [f64; 12] = [1.5, 0.8, 1.3, 0.3, 0.7, 0.5, 0.8, 1.2, 0.6, 1.0, 0.3, 1.2];
-const ARCH_VILLAGES: [f64; 12] = [1.0, 0.9, 0.7, 0.8, 0.5, 1.25, 1.15, 0.6, 1.4, 0.55, 0.25, 0.9];
-const ARCH_TOWNS: [f64; 12] = [1.0, 0.85, 0.7, 0.8, 0.6, 1.2, 1.05, 0.9, 1.25, 0.6, 0.25, 0.85];
+pub(crate) const ARCH_HAMLETS: [f64; 12] = [1.5, 0.8, 1.3, 0.3, 0.7, 0.5, 0.8, 1.2, 0.6, 1.0, 0.3, 1.2];
+pub(crate) const ARCH_VILLAGES: [f64; 12] = [1.0, 0.9, 0.7, 0.8, 0.5, 1.25, 1.15, 0.6, 1.4, 0.55, 0.25, 0.9];
+pub(crate) const ARCH_TOWNS: [f64; 12] = [1.0, 0.85, 0.7, 0.8, 0.6, 1.2, 1.05, 0.9, 1.25, 0.6, 0.25, 0.85];
 /// Built-up radius multiplier by archetype (dense cores vs sprawl).
-const ARCH_SPRAWL: [f64; 12] = [0.95, 0.9, 0.9, 0.8, 0.95, 0.82, 0.92, 1.3, 0.85, 1.05, 0.85, 0.85];
+pub(crate) const ARCH_SPRAWL: [f64; 12] = [0.95, 0.9, 0.9, 0.8, 0.95, 0.82, 0.92, 1.3, 0.85, 1.05, 0.85, 0.85];
 
 /// A settlement with what the kit draws from.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -508,6 +508,46 @@ fn water_access(w: &World, level: u8, p: DVec3, ring: f64) -> Option<(f64, f64)>
     Some((dry, river))
 }
 
+// ---------------------------------------------------------------- expected places (glow)
+
+/// Measured ratio of the final places' Σ r² to the expectation's (`expected_places`) per level:
+/// the existence draws' survival (suppression by neighbours and higher levels, cells without a
+/// scoring candidate, water) and the radius draw's clamp; `calibrate_glow` (ignored test).
+pub const GLOW_CAL: [f64; NLEVELS] = [0.76, 1.19, 1.24, 1.28, 1.43];
+
+/// The places of `level` expected per m² at a point of population potential `pop`, culture
+/// archetype `arch` (towns: `landuse.towns`), and their mean squared built-up radius (m²) by
+/// the development `dev`: the existence and population draws of `base_place` integrated over
+/// their hashes. The settlements kit's low-zoom glow where a level's places are not listed.
+pub fn expected_places(level: usize, pop: f64, arch: usize, dev: f64, towns: f64) -> (f64, f64) {
+    let spec = &LEVELS[level];
+    let arch = arch.min(11);
+    let culture_w = match level as u8 {
+        HAMLET => ARCH_HAMLETS[arch],
+        VILLAGE => ARCH_VILLAGES[arch],
+        _ => ARCH_TOWNS[arch],
+    };
+    let pe = (spec.base * smoothstep(spec.pop_window[0], spec.pop_window[1], pop) * culture_w * towns).min(0.97);
+    let n = pe / (spec.cell * spec.cell);
+    (n, mean_r2(level, pop, arch, dev))
+}
+
+/// E[r²] of a place of `level` (`base_place`: t = 0.55 u₁^2.2 + 0.45 s (0.6 + 0.4 u₂),
+/// r = r₀ (r₁/r₀)^t × sprawl; the clamp left out): r₀² · C(level) · e^{0.27 a s} ·
+/// (e^{0.18 a s} − 1) / (0.18 a s) · E[sprawl²], a = 2 ln(r₁/r₀).
+pub fn mean_r2(level: usize, pop: f64, arch: usize, dev: f64) -> f64 {
+    let spec = &LEVELS[level];
+    let a = 2.0 * (spec.radius[1] / spec.radius[0]).ln();
+    let s = smoothstep(spec.pop_window[0], 1.0, pop);
+    let x = 0.18 * a * s;
+    let g = if x > 1e-6 { (x.exp() - 1.0) / x } else { 1.0 };
+    let sprawl2 = (ARCH_SPRAWL[arch.min(11)] * (0.85 + 0.3 * dev)).powi(2) * (1.0 + 0.04 / 12.0);
+    spec.radius[0] * spec.radius[0] * GLOW_C1[level] * (0.27 * a * s).exp() * g * sprawl2
+}
+
+/// E[e^{0.55 a u^2.2}] over u in [0, 1] per level (test `glow_constants`).
+pub const GLOW_C1: [f64; NLEVELS] = [1.6437, 1.9004, 1.707, 1.7338, 1.4268];
+
 fn quant(s: f64) -> u32 {
     (s * 64.0).floor().clamp(0.0, 1e9) as u32
 }
@@ -699,6 +739,66 @@ mod tests {
                     assert!(d > 0.9 * (a.radius + b.radius), "{} (level {}) and {} (level {}) overlap: {d:.0} m", a.id, a.level, b.id, b.level);
                 }
             }
+        }
+    }
+
+    /// The glow's integral constants are current (`GLOW_C1`).
+    #[test]
+    fn glow_constants() {
+        for (l, spec) in LEVELS.iter().enumerate() {
+            let a = 2.0 * (spec.radius[1] / spec.radius[0]).ln();
+            let m = 20_000;
+            let c: f64 = (0..m).map(|i| (0.55 * a * ((i as f64 + 0.5) / m as f64).powf(2.2)).exp()).sum::<f64>() / m as f64;
+            assert!((c - GLOW_C1[l]).abs() < 1e-3, "GLOW_C1[{l}] = {c:.4}");
+        }
+    }
+
+    /// Debug: calibrate the low-zoom glow (`GLOW_CAL`): the final places per level within
+    /// discs of populated land against `expected_places` integrated over the discs (count and
+    /// Σ r²): `calibrate_glow -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn calibrate_glow() {
+        let w = world();
+        let radius = [5_000.0, 20_000.0, 70_000.0, 250_000.0, 900_000.0];
+        let pts = land_points(&w, 24, 0.05);
+        for l in 0..NLEVELS {
+            let (mut n_act, mut r2_act, mut n_exp, mut r2_exp) = (0.0, 0.0, 0.0, 0.0);
+            for (k, p) in pts.iter().enumerate() {
+                if l >= 3 && k >= 8 {
+                    break;
+                }
+                let r = radius[l];
+                for pl in places_near(&w, l, *p, r) {
+                    n_act += 1.0;
+                    r2_act += pl.radius * pl.radius;
+                }
+                // the expectation over the disc (a 24 × 24 grid of atlas samples)
+                let (_, _, east, north) = frame_at(&w, *p);
+                let g = 24;
+                let da = (2.0 * r / g as f64).powi(2);
+                for i in 0..g {
+                    for j in 0..g {
+                        let (u, v) = ((i as f64 + 0.5) / g as f64 * 2.0 - 1.0, (j as f64 + 0.5) / g as f64 * 2.0 - 1.0);
+                        if u * u + v * v > 1.0 {
+                            continue;
+                        }
+                        let q = crate::kits::transport::route::surface(&w, *p + (east * u + north * v) * r);
+                        let a = w.atlas().sample(q.normalize());
+                        if a.coast_km < 0.3 {
+                            continue;
+                        }
+                        let (n, r2) = expected_places(l, a.population, a.archetype as usize, a.development, w.cfg.landuse.towns);
+                        n_exp += n * da;
+                        r2_exp += n * r2 * da;
+                    }
+                }
+            }
+            eprintln!(
+                "level {l}: {n_act} places (expected {n_exp:.1}: survival {:.3}), Σr² {r2_act:.3e} (expected {r2_exp:.3e}: ratio {:.3})",
+                n_act / n_exp.max(1e-9),
+                r2_act / r2_exp.max(1e-9)
+            );
         }
     }
 

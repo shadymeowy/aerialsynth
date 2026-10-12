@@ -105,11 +105,61 @@ fn crown(s: &Stack) -> DVec3 {
     s.pal(crate::registry::pal::CROWN_DECID) * 0.9
 }
 
+/// The place model's mean over a place's footprint per R² (its radius squared), per level:
+/// street-light emission of the CBD and of the other zones (before the development factors),
+/// built cover (`town::lamps`, `town::density`, `town::zone_of` at unresolved blocks, the
+/// district density factor averaged; `glow_integrals`).
+pub const GLOW_K_CBD: [f64; 5] = [0.0, 0.0, 0.00024, 0.00035, 0.00064];
+pub const GLOW_K: [f64; 5] = [0.03597, 0.03597, 0.01737, 0.01728, 0.01706];
+pub const GLOW_J: [f64; 5] = [1.8895, 1.8895, 1.5689, 1.5689, 1.5689];
+
+/// The low-zoom glow: where a level's places are no longer listed (pixels ≥ `GSD_MAX[level]`:
+/// hamlets below z11, villages below z8, towns below z6 …), the pixel shows their expected
+/// built cover and street lights — the places expected there ([`places::expected_places`],
+/// calibrated against the final places by `GLOW_CAL`) times the place model's mean over a
+/// footprint — so the mean of a coarse pixel matches the finer zooms' and night views from
+/// altitude keep their city lights.
+fn glow(s: &mut Stack) {
+    let gsd = s.ctx.gsd;
+    let towns = s.world.cfg.landuse.towns;
+    if gsd < GSD_MAX[0] || s.is_water || towns <= 0.0 {
+        return;
+    }
+    let t = s.t;
+    // (no places on ice sheets or where it is too cold for any: `base_place`'s candidates)
+    let habitable = (1.0 - smoothstep(0.5, 0.6, t.glaciation)) * smoothstep(-16.0, -12.0, t.temp);
+    if habitable <= 0.0 {
+        return;
+    }
+    let (pop, dev) = (t.population, t.development);
+    let arch = s.bio.style.archetype as usize;
+    const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.48, 0.12), DVec3::new(1.0, 0.72, 0.38), DVec3::new(0.86, 0.92, 1.0)];
+    let sodium = 0.25 + 0.25 * (1.0 - dev);
+    let lamp = mixc3(LAMPS[1], LAMPS[0], sodium);
+    let devm = (0.5 + 0.45 * dev.min(1.0)) * (0.55 + 0.9 * dev);
+    let (mut cover, mut emit) = (0.0, DVec3::ZERO);
+    for l in 0..places::NLEVELS {
+        if gsd < GSD_MAX[l] {
+            continue;
+        }
+        let (n, r2) = places::expected_places(l, pop, arch, dev, towns);
+        let a = n * r2 * places::GLOW_CAL[l] * habitable;
+        cover += a * GLOW_J[l];
+        emit += (LAMPS[2] * GLOW_K_CBD[l] + lamp * GLOW_K[l]) * (a * devm);
+    }
+    if cover <= 0.0 {
+        return;
+    }
+    let col = srgb3(128.0, 122.0, 112.0) * (0.92 + 0.1 * s.pf.detail);
+    s.composite(Layer { cov: cover.min(0.9), albedo: col, emit, clear: 1.0, ..Default::default() });
+}
+
 /// Slot 7: the land sites and the place at the sample.
 fn built(s: &mut Stack) {
     if s.no_town {
         return;
     }
+    glow(s);
     let stamps: Vec<FStamp> = s.stamps().copied().collect();
     if stamps.is_empty() {
         return;
@@ -488,6 +538,54 @@ mod tests {
             nsg += gg.len();
         }
         assert!(nst > 0 && nsg > 0);
+    }
+
+    /// The glow's WGSL constants are the Rust ones (`places::GLOW_C1`, `GLOW_CAL`).
+    #[test]
+    fn glow_wgsl_constants() {
+        let w = include_str!("../gpu/wgsl/kits/settlements.wgsl");
+        let arr = |v: &[f64; 5]| format!("array<f32, 5>({})", v.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>().join(", "));
+        assert!(w.contains(&format!("var c1 = {};", arr(&places::GLOW_C1))), "c1: {}", arr(&places::GLOW_C1));
+        assert!(w.contains(&format!("var cal = {};", arr(&places::GLOW_CAL))), "cal: {}", arr(&places::GLOW_CAL));
+        assert!(w.contains(&format!("var kc = {};", arr(&GLOW_K_CBD).replace("0.0,", "0.0,"))));
+        assert!(w.contains(&format!("var kr = {};", arr(&GLOW_K))));
+        assert!(w.contains(&format!("var kj = {};", arr(&GLOW_J))));
+    }
+
+    /// The low-zoom glow keeps the mean light: at each zoom where a level's places stop being
+    /// listed, the parent tile's mean emission against its four children's (which draw the
+    /// places), summed over populated places. Without the glow the parents lost the level's light.
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn glow_keeps_the_mean() {
+        let gen = match crate::gpu::GpuGenerator::new(crate::Config::default()) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("no GPU generator ({e}): skipped");
+                return;
+            }
+        };
+        let mean = |t: &tilestore::TileData| t.emission.iter().map(|&b| 16.0 * (b as f64 / 255.0).powi(3)).sum::<f64>() / t.emission.len() as f64;
+        let names = ["metro", "survey_city", "poor_city", "desert_town", "airport", "linear", "waldhufen", "kraal"];
+        // (parent zooms: hamlets drop below z11, villages below z8, towns below z6, cities below z4)
+        for zp in [10u8, 7, 5, 3] {
+            let (mut sp, mut sc) = (0.0, 0.0);
+            for name in names {
+                let pid = tile_at(name, zp);
+                let kids: Vec<_> = (0..4).map(|k| geodesy::tiles::TileId { z: zp + 1, x: 2 * pid.x + k % 2, y: 2 * pid.y + k / 2 }).collect();
+                let mut ids = vec![pid];
+                ids.extend(kids);
+                let t = gen.tiles(&ids).unwrap();
+                let p = mean(&t[0]);
+                let c = t[1..].iter().map(mean).sum::<f64>() / 4.0;
+                eprintln!("z{zp} {name}: parent {p:.3e} children {c:.3e}");
+                sp += p;
+                sc += c;
+            }
+            let r = sp / sc.max(1e-12);
+            eprintln!("z{zp}: parent / children mean emission {r:.3}");
+            assert!((0.6..=1.6).contains(&r), "z{zp}: ratio {r:.3}");
+        }
     }
 
     /// Share of samples differing by more than `tol`.

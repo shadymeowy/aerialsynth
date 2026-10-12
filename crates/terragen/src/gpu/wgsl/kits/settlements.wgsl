@@ -2344,10 +2344,82 @@ fn st_dam_at(sg: FSeg, p: vec3<f64>, ground: f32, fw: f32) -> vec3<f32> {
 // ---------------------------------------------------------------- the slots (`settlements.rs`)
 
 /// Slot 7: the land sites and the place at the sample (`settlements::built`).
+/// `settlements::glow`: the expected built cover and street lights of the levels whose places
+/// are not listed at this pixel size.
+fn st_glow(s: ptr<function, Stack>) {
+    let gsd = (*s).c.gsd;
+    if (gsd < 150.0 || (*s).is_water || cfg.towns <= 0.0) {
+        return;
+    }
+    let t = (*s).t;
+    let habitable = (1.0 - smoothstep1(0.5, 0.6, t.glaciation)) * smoothstep1(-16.0, -12.0, t.temp);
+    if (habitable <= 0.0) {
+        return;
+    }
+    let pop = t.population;
+    let dev = t.development;
+    let arch = min((*s).bio.st.arch, 11u);
+    var gmax = array<f32, 5>(150.0, 800.0, 3000.0, 12000.0, 50000.0);
+    var cell = array<f32, 5>(1600.0, 6000.0, 25000.0, 90000.0, 300000.0);
+    var base = array<f32, 5>(0.42, 0.62, 0.72, 0.72, 0.75);
+    var pw0 = array<f32, 5>(-0.05, -0.02, 0.02, 0.06, 0.15);
+    var pw1 = array<f32, 5>(0.3, 0.35, 0.45, 0.55, 0.75);
+    var r0 = array<f32, 5>(45.0, 180.0, 1000.0, 3500.0, 13000.0);
+    var r1 = array<f32, 5>(150.0, 800.0, 3600.0, 13000.0, 32000.0);
+    var c1 = array<f32, 5>(1.6437, 1.9004, 1.707, 1.7338, 1.4268);
+    var cal = array<f32, 5>(0.76, 1.19, 1.24, 1.28, 1.43);
+    var kc = array<f32, 5>(0.0, 0.0, 0.00024, 0.00035, 0.00064);
+    var kr = array<f32, 5>(0.03597, 0.03597, 0.01737, 0.01728, 0.01706);
+    var kj = array<f32, 5>(1.8895, 1.8895, 1.5689, 1.5689, 1.5689);
+    var aw_h = array<f32, 12>(1.5, 0.8, 1.3, 0.3, 0.7, 0.5, 0.8, 1.2, 0.6, 1.0, 0.3, 1.2);
+    var aw_v = array<f32, 12>(1.0, 0.9, 0.7, 0.8, 0.5, 1.25, 1.15, 0.6, 1.4, 0.55, 0.25, 0.9);
+    var aw_t = array<f32, 12>(1.0, 0.85, 0.7, 0.8, 0.6, 1.2, 1.05, 0.9, 1.25, 0.6, 0.25, 0.85);
+    var spr = array<f32, 12>(0.95, 0.9, 0.9, 0.8, 0.95, 0.82, 0.92, 1.3, 0.85, 1.05, 0.85, 0.85);
+    let sodium = 0.25 + 0.25 * (1.0 - dev);
+    let lamp = mixc(vec3<f32>(1.0, 0.72, 0.38), vec3<f32>(1.0, 0.48, 0.12), sodium);
+    let devm = (0.5 + 0.45 * min(dev, 1.0)) * (0.55 + 0.9 * dev);
+    let sprawl2 = pow(spr[arch] * (0.85 + 0.3 * dev), 2.0) * (1.0 + 0.04 / 12.0);
+    var cover = 0.0;
+    var emit = vec3<f32>(0.0);
+    for (var l = 0u; l < 5u; l++) {
+        if (gsd < gmax[l]) {
+            continue;
+        }
+        var cw = aw_t[arch];
+        if (l == 0u) {
+            cw = aw_h[arch];
+        } else if (l == 1u) {
+            cw = aw_v[arch];
+        }
+        let pe = min(base[l] * smoothstep1(pw0[l], pw1[l], pop) * cw * cfg.towns, 0.97);
+        let n = pe / (cell[l] * cell[l]);
+        let a = 2.0 * log(r1[l] / r0[l]);
+        let sv = smoothstep1(pw0[l], 1.0, pop);
+        let x = 0.18 * a * sv;
+        var g = 1.0;
+        if (x > 1e-6) {
+            g = (exp(x) - 1.0) / x;
+        }
+        let r2 = r0[l] * r0[l] * c1[l] * exp(0.27 * a * sv) * g * sprawl2;
+        let ar = n * r2 * cal[l] * habitable;
+        cover += ar * kj[l];
+        emit += (vec3<f32>(0.86, 0.92, 1.0) * kc[l] + lamp * kr[l]) * (ar * devm);
+    }
+    if (cover <= 0.0) {
+        return;
+    }
+    let col = srgb(128.0, 122.0, 112.0) * (0.92 + 0.1 * (*s).pf.f[PF_DETAIL]);
+    var ly = layer_paint(min(cover, 0.9), col, 0u);
+    ly.emit = emit;
+    ly.clear = 1.0;
+    composite(s, ly);
+}
+
 fn settlements_slot_built(s: ptr<function, Stack>) {
     if ((*s).no_town) {
         return;
     }
+    st_glow(s);
     let blk = (*s).l.blk;
     let ns = feat_stamp_n(blk);
     if (ns == 0u) {
