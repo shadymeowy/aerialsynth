@@ -30,11 +30,12 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
     zi.cont = t.cont;
     zi.coast_km = t.coast_km;
     zi.sand = t.sand;
+    zi.style = 0.0;
     let z = mt_zones(zi, fl.lit, fl.n1, fl.n2);
     let rn = (*s).pf.f[PF_PATCH];
     let arid = 1.0 - smoothstep1(0.16, 0.34, t.moist);
     let soft = f32(fl.lit == MT_SEDIMENTARY || fl.lit == MT_CARBONATE || fl.lit == MT_UNCONSOLIDATED);
-    let clay = z.badland * (1.0 - smoothstep1(0.12, 0.3, slope)) * 0.85;
+    let clay = z.badland * 0.85;
     if (clay > 0.0) {
         let col = mixc(srgb(196.0, 184.0, 164.0), srgb(176.0, 160.0, 138.0), 0.5 + 0.5 * rn) * (1.0 + 0.05 * (*s).pf.f[PF_DETAIL]);
         var ly = layer_paint(clay, col, LC_BADLANDS);

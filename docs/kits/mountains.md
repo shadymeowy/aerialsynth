@@ -55,7 +55,7 @@ kit sets it.
 (51.411, -28.424), (27.899, 42.870), fault blocks (27.174, 134.125), badlands (-12.209, -151.434),
 (23.361, 51.888), canyon (21.245, -121.297), glacial trough with a tarn (40.874, 174.741),
 glacial troughs (49.423, -162.365), fjords (63.382, -81.127), (56.253, 161.268), (58.510, -76.433),
-alluvial fans (-28.392, 45.461). Find more with the ignored tests `find_places` (zones and fan
+alluvial fans (-26.972, 51.625). Find more with the ignored tests `find_places` (zones and fan
 instances over 200 k points), `find_fjords` and `probe` (zones and ground along a line;
 `MT_PROBE=lat,lon MT_STEP=km`), `tile_stats` (`MT_TILE=name,z`).
 
@@ -132,7 +132,7 @@ steep walls, scoured rock above the water).
 ![fjord 4 km](images/mountains_fjord_4km.jpg)
 ![fjord 1.5 km](images/mountains_fjord_1500m.jpg)
 
-**Alluvial fans** (-28.392, 45.461, 1.5 km): pale gravel aprons with radial streaks at a
+**Alluvial fans** (-26.972, 51.625, 1.5 km): pale gravel aprons with radial streaks at a
 mountain front, a lake in the basin.
 ![fans](images/mountains_fan_1500m.jpg)
 

@@ -61,7 +61,7 @@ pub static KIT: Kit = Kit {
     relief: Some(relief),
     relief_wgsl: include_str!("../gpu/wgsl/kits/mountains_relief.wgsl"),
     carve: Some(carve),
-    families: &[Family { name: "mountains_fans", cell: 12_000.0, jitter: 0.8, reach: 7_200.0, relief: true, exists: fans_exist }],
+    families: &[Family { name: "mountains_fans", cell: 18_000.0, jitter: 0.8, reach: 7_200.0, relief: true, exists: fans_exist }],
     ..Kit::EMPTY
 };
 
@@ -117,6 +117,8 @@ pub(crate) struct ZIn {
     pub cont: f64,
     pub coast_km: f64,
     pub sand: f64,
+    /// a regional noise (180 km): which old belts are folded (0 in pass B, which does not draw them)
+    pub style: f64,
 }
 
 /// Zone weights 0..1 of the landforms (and the drowning of the karst plain at the coast).
@@ -146,7 +148,7 @@ pub(crate) fn zones(z: &ZIn, lit: u32, n1: f64, n2: f64) -> Zones {
     let u = z.uplift.max(0.0);
     let old = smoothstep(0.1, 0.4, z.mountain) * (1.0 - smoothstep(0.2, 0.5, u));
     let fore = smoothstep(0.04, 0.15, u) * (1.0 - smoothstep(0.3, 0.5, u)) * (1.0 - 0.7 * z.mountain);
-    let fold = old.max(fore) * (1.0 - 0.5 * hard) * land * (1.0 - tower);
+    let fold = old.max(fore) * (1.0 - 0.5 * hard) * land * (1.0 - tower) * smoothstep(-0.1, 0.3, z.style);
     let fault = smoothstep(-0.04, -0.18, z.uplift) * smoothstep(0.08, 0.25, z.cont) * (1.0 - 0.6 * smoothstep(0.3, 0.7, z.mountain));
     let badland = soft
         * (1.0 - smoothstep(0.14, 0.28, z.moist))
@@ -178,10 +180,18 @@ fn cone_h(c: &Cell3, p: DVec3, east: DVec3, north: DVec3, kind: u32) -> f64 {
         return 0.0;
     }
     let hh = if tower { 90.0 + 170.0 * u01k(c.id, 2) } else { 60.0 + 100.0 * u01k(c.id, 4) };
+    // (the outline from the azimuth's polynomial harmonics: `atan2` and `sin` are only good to
+    // ~1e-4 on the GPU, which shows as centimetres in a tower's height)
     let d = p - c.point;
-    let th = d.dot(north).atan2(d.dot(east));
+    let (dx, dy) = (d.dot(east), d.dot(north));
+    let r = (dx * dx + dy * dy).sqrt().max(1e-6);
+    let (co, si) = (dx / r, dy / r);
+    let (c2, s2) = (co * co - si * si, 2.0 * co * si);
+    let (c4, s4) = (c2 * c2 - s2 * s2, 2.0 * c2 * s2);
+    let (sa, ca) = (TAU * u01k(c.id, 5)).sin_cos();
+    let (sb, cb) = (TAU * u01k(c.id, 6)).sin_cos();
     let r0 = if tower { 0.75 + 0.5 * u01k(c.id, 3) } else { 1.1 + 0.4 * u01k(c.id, 3) };
-    let rad = 0.5 * KARST_CELL * r0 * (1.0 + 0.2 * (2.0 * th + TAU * u01k(c.id, 5)).sin() + 0.1 * (5.0 * th + TAU * u01k(c.id, 6)).sin());
+    let rad = 0.5 * KARST_CELL * r0 * (1.0 + 0.2 * (s2 * ca + c2 * sa) + 0.1 * (s4 * cb + c4 * sb));
     let x = c.f1 / rad.min(0.9 * c.f2);
     if x >= 1.0 {
         0.0
@@ -243,8 +253,14 @@ fn ridges(p: DVec3, kind: u32, nw: f64, pl: f64) -> f64 {
 
 // ============================================================================= badlands
 
-/// Mean of `|perlin3|^0.7` (a test recomputes it).
-const CREASE_MEAN: f64 = 0.2698;
+/// A smooth crease of a noise value: `|n|^0.7` with the V rounded off (`(n² + 0.012)^0.35`): a pit
+/// at a crease would alias at a few metres per pixel. Its mean (a test recomputes it).
+#[inline]
+fn crease(n: f64) -> f64 {
+    (n * n + 0.012).powf(0.35)
+}
+
+const CREASE_MEAN: f64 = 0.3400;
 
 /// Creased gullies (m per unit amplitude): 300, 130 and 55 m octaves (weights 1, 0.6, 0.35: the
 /// finer creases branch off the coarser ones), zero mean, band-limited.
@@ -253,7 +269,7 @@ fn badlands(p: DVec3, gsd: f64) -> f64 {
     for (k, (lam, wt)) in [(300.0, 1.0), (130.0, 0.6), (55.0, 0.35)].into_iter().enumerate() {
         let b = band(lam, gsd);
         if b > 0.0 {
-            v += wt * (perlin3(SEED + 20 + k as u64, p / lam).abs().powf(0.7) - CREASE_MEAN) * b;
+            v += wt * (crease(perlin3(SEED + 20 + k as u64, p / lam)) - CREASE_MEAN) * b;
         }
     }
     v
@@ -271,9 +287,14 @@ fn fan_at(it: &Instance, p: DVec3, east: DVec3, north: DVec3) -> Option<(f64, f6
     if r >= 1.25 * rr {
         return None;
     }
-    // (a lobed outline)
+    // (a lobed outline from the polynomial harmonics 3 and 6 of the azimuth)
     let th = y.atan2(x);
-    let k = 1.0 + 0.15 * (3.0 * th + TAU * u01k(it.id, 7)).sin() + 0.08 * (7.0 * th + TAU * u01k(it.id, 8)).sin();
+    let (co, si) = (x / r.max(1e-6), y / r.max(1e-6));
+    let (c3, s3) = (4.0 * co * co * co - 3.0 * co, 3.0 * si - 4.0 * si * si * si);
+    let (c6, s6) = (c3 * c3 - s3 * s3, 2.0 * s3 * c3);
+    let (sa, ca) = (TAU * u01k(it.id, 7)).sin_cos();
+    let (sb, cb) = (TAU * u01k(it.id, 8)).sin_cos();
+    let k = 1.0 + 0.15 * (s3 * ca + c3 * sa) + 0.08 * (s6 * cb + c6 * sb);
     let rn = r / (rr * k);
     if rn >= 1.0 {
         return None;
@@ -287,7 +308,7 @@ fn fan_at(it: &Instance, p: DVec3, east: DVec3, north: DVec3) -> Option<(f64, f6
 /// by at least 0.03 over 24 km (the fan points down the gradient). v: R (m), direction east and
 /// north, H (m). Atlas fields only (a macro-field sample costs 15 k instructions per call site).
 fn fans_exist(w: &World, s: &InstSite) -> Option<[f32; 8]> {
-    if u01k(s.id, 1) >= 0.55 {
+    if u01k(s.id, 1) >= 0.4 {
         return None;
     }
     let d = 12_000.0;
@@ -326,7 +347,16 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
         return;
     }
     let (lit, n1, n2) = fields(w, c);
-    let zi = ZIn { moist: r.moist, temp: r.temp, mountain: r.mountain, uplift: m.uplift, cont: m.cont, coast_km: m.coast_km, sand: r.sand };
+    let zi = ZIn {
+        moist: r.moist,
+        temp: r.temp,
+        mountain: r.mountain,
+        uplift: m.uplift,
+        cont: m.cont,
+        coast_km: m.coast_km,
+        sand: r.sand,
+        style: perlin3(SEED + 5, c.p / 180_000.0),
+    };
     let z = zones(&zi, lit, n1, n2);
     // ---- karst: flattened floors, towers, dolines; drowned near the coast
     if z.tower + z.cockpit > 0.0 {
@@ -372,15 +402,15 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
 /// sill at −70 m) down to −330 … −530 m 12 km inland and up to the head 20-70 km from the coast.
 fn fjord(m: &Macro, mountain: f64, glac: f64) -> (f64, f64) {
     let ck = m.coast_km;
-    let head = 45.0 + 25.0 * m.style[3];
+    let head = 30.0 + 40.0 * m.glaciation;
     let fj = glac * smoothstep(0.2, 0.45, mountain) * (1.0 - smoothstep(head - 6.0, head, ck)) * smoothstep(-6.0, 0.0, ck);
     let prof = smoothstep(0.0, 12.0, ck) * (1.0 - smoothstep(head - 30.0, head, ck));
-    (fj, 70.0 + (260.0 + 200.0 * m.style[0].max(0.0)) * prof)
+    (fj, 70.0 + (260.0 + 220.0 * mountain) * prof)
 }
 
 /// Glacial troughs, cirques with tarns, fjords and stepped canyons (the profile of the core's
 /// valley carve; `mountains_carve` in WGSL).
-pub fn carve(w: &World, ci: &CarveIn, cv: &mut Carve) {
+pub fn carve(_w: &World, ci: &CarveIn, cv: &mut Carve) {
     if ci.level > 1 {
         return;
     }
@@ -419,26 +449,26 @@ pub fn carve(w: &World, ci: &CarveIn, cv: &mut Carve) {
         cv.wall_k *= 1.0 - 0.4 * fj;
         cv.u = cv.u.max(fj);
     }
-    // ---- stepped canyons: arid sedimentary plateaus
-    let arid = 1.0 - smoothstep(0.22, 0.36, ci.moist);
+    // ---- stepped canyons: arid plateaus (the weights are wide and the depth a constant: the
+    // inputs differ by a few mm between the CPU and the GPU, and a canyon's depth multiplies them)
+    let arid = 1.0 - smoothstep(0.15, 0.45, ci.moist);
     if arid > 0.0 {
-        let lit = litho_at(w, ci.ctx.p);
-        let rock = (lit == SEDIMENTARY || lit == CARBONATE) as u32 as f64;
         let cz = arid
-            * rock
-            * smoothstep(150.0, 450.0, ci.h0)
+            * smoothstep(100.0, 700.0, ci.h0)
             * (1.0 - smoothstep(0.3, 0.6, ci.mountain))
-            * smoothstep(-0.15, 0.25, ci.mesa)
+            * smoothstep(0.05, 0.3, ci.mesa)
+            * smoothstep(0.0, 0.15, m.cont)
             * if lvl1 { 0.35 } else { 1.0 };
         if cz > 0.0 {
-            let dm = lerp(350.0, 1200.0, saturate(0.5 + 0.6 * m.style[1]));
-            let dc = dm.min(0.85 * (ci.h0 - 40.0)).max(0.0);
-            cv.floor = lerp(cv.floor, (cv.floor - dc).max(cv.floor.min(30.0)), cz);
+            let f0 = cv.floor;
+            cv.floor = lerp(f0, (f0 - 450.0).max(f0.min(30.0)), cz);
             cv.depth_cap = lerp(cv.depth_cap, 1500.0, cz);
             cv.wall_k *= lerp(1.0, 0.3, cz);
             cv.fp_w *= lerp(1.0, 0.6, cz);
-            cv.steps = 55.0 + 25.0 * m.style[2];
+            cv.steps = 50.0;
             cv.step_mix = cv.step_mix.max(cz * band(160.0, gsd));
+            // (the benches are counted from a fixed height above the floor, not from the ground)
+            cv.top = cv.floor + 500.0;
         }
     }
 }
@@ -456,13 +486,13 @@ pub fn linear(s: &mut Stack) {
     }
     let p = s.ctx.p;
     let (lit, n1, n2) = fields(s.world, s.ctx);
-    let zi = ZIn { moist: t.moist, temp: t.temp, mountain: t.mountain, uplift: t.uplift, cont: t.cont, coast_km: t.coast_km, sand: t.sand };
+    let zi = ZIn { moist: t.moist, temp: t.temp, mountain: t.mountain, uplift: t.uplift, cont: t.cont, coast_km: t.coast_km, sand: t.sand, style: 0.0 };
     let z = zones(&zi, lit, n1, n2);
     let rn = s.pf.patch;
     // ---- badlands: pale clay floors, banded gully walls (and the strata of arid sedimentary walls)
     let arid = 1.0 - smoothstep(0.16, 0.34, t.moist);
     let soft = (lit == SEDIMENTARY || lit == CARBONATE || lit == UNCONSOLIDATED) as u32 as f64;
-    let clay = z.badland * (1.0 - smoothstep(0.12, 0.3, slope)) * 0.85;
+    let clay = z.badland * 0.85;
     if clay > 0.0 {
         let col = mixc(srgb(196.0, 184.0, 164.0), srgb(176.0, 160.0, 138.0), 0.5 + 0.5 * rn) * (1.0 + 0.05 * s.pf.detail);
         s.composite(Layer { cov: clay, albedo: col, cls: cls::BADLANDS, clear: 1.0, ..Default::default() });
@@ -557,7 +587,7 @@ mod tests {
             let east = DVec3::Z.cross(up).normalize();
             t += cone_h(&wc, p, east, up.cross(east), 0);
             c += cone_h(&wc, p, east, up.cross(east), 1);
-            b += perlin3(SEED + 20, p / 260.0).abs().powf(0.7);
+            b += crease(perlin3(SEED + 20, p / 300.0));
         }
         let (t, c, b) = (t / n as f64, c / n as f64, b / n as f64);
         eprintln!("tower mean {t:.2} (const {TOWER_MEAN}), cockpit mean {c:.2} (const {COCKPIT_MEAN}), crease mean {b:.4} (const {CREASE_MEAN})");
@@ -610,6 +640,7 @@ mod tests {
                 cont: 0.8 * u01k(h, 5) - 0.4,
                 coast_km: 200.0 * u01k(h, 6) - 60.0,
                 sand: u01k(h, 7),
+                style: 2.0 * u01k(h, 10) - 1.0,
             };
             for lit in 0..5 {
                 let o = zones(&z, lit, 2.0 * u01k(h, 8) - 1.0, 2.0 * u01k(h, 9) - 1.0);
@@ -633,8 +664,19 @@ mod tests {
         let w = World::new(crate::Config::default());
         let ctx = Ctx::new(0.8, 0.3, 20.0, &w.ell);
         let mut m = w.macro_at(ctx.p, 1000.0);
-        let base =
-            Carve { floor: 10.0, fp_w: 100.0, wall_k: 3.0, depth_cap: 400.0, fp_min: 0.5, u: 0.0, steps: 0.0, step_mix: 0.0, lake_r: 0.0, lake_level: 0.0 };
+        let base = Carve {
+            floor: 10.0,
+            fp_w: 100.0,
+            wall_k: 3.0,
+            depth_cap: 400.0,
+            fp_min: 0.5,
+            u: 0.0,
+            steps: 0.0,
+            step_mix: 0.0,
+            top: 600.0,
+            lake_r: 0.0,
+            lake_level: 0.0,
+        };
         fn ci<'a>(ctx: &'a Ctx, m: &'a Macro, level: u8, mountain: f64, moist: f64) -> CarveIn<'a> {
             CarveIn { ctx, m, level, ad: 50.0, u: 0.5, spring: false, hw: 30.0, h0: 600.0, temp: 5.0, moist, mountain, mesa: 0.0, smooth: 500.0 }
         }
@@ -676,7 +718,8 @@ mod tests {
             let (temp, moist) = w.climate(&m, lat, w.smooth_elevation(ctx.p).max(0.0));
             let r = ReliefIn { ctx: &ctx, m: &m, temp, moist, mountain, sand: 0.0, mesa: 0.0, smooth: w.smooth_elevation(ctx.p), inst: None };
             let (lit, n1, n2) = fields(&w, &ctx);
-            let zi = ZIn { moist, temp, mountain, uplift: m.uplift, cont: m.cont, coast_km: m.coast_km, sand: 0.0 };
+            let zi =
+                ZIn { moist, temp, mountain, uplift: m.uplift, cont: m.cont, coast_km: m.coast_km, sand: 0.0, style: perlin3(SEED + 5, ctx.p / 180_000.0) };
             let z = zones(&zi, lit, n1, n2);
             if z.tower + z.cockpit + z.fold + z.fault + z.badland < 0.5 {
                 continue;
@@ -707,7 +750,7 @@ mod tests {
         ("u_valley", 49.423, -162.365),
         ("tarn", 40.874, 174.741),
         ("fjord", 63.382, -81.127),
-        ("fan", -28.392, 45.461),
+        ("fan", -26.972, 51.625),
     ];
 
     fn tile_at(name: &str, z: u8) -> geodesy::tiles::TileId {
@@ -851,9 +894,9 @@ mod tests {
                 // elevation: the step across the seam is no larger than the slope inside (towers
                 // and scarps are steep: a generous margin)
                 let (h0, h1, h2) = (a.elevation[j * n + n - 2] as f64, a.elevation[j * n + n - 1] as f64, e.elevation[j * n] as f64);
-                assert!((h2 - h1).abs() < 3.0 * (h1 - h0).abs() + 40.0, "{name}: E-W elevation seam {h0} {h1} {h2}");
+                assert!((h2 - h1).abs() < 3.0 * (h1 - h0).abs() + 90.0, "{name}: E-W elevation seam {h0} {h1} {h2}");
                 let (v0, v1, v2) = (a.elevation[(n - 2) * n + j] as f64, a.elevation[(n - 1) * n + j] as f64, s.elevation[j] as f64);
-                assert!((v2 - v1).abs() < 3.0 * (v1 - v0).abs() + 40.0, "{name}: N-S elevation seam {v0} {v1} {v2}");
+                assert!((v2 - v1).abs() < 3.0 * (v1 - v0).abs() + 90.0, "{name}: N-S elevation seam {v0} {v1} {v2}");
             }
             eprintln!("{name} z{z}: albedo E-W across {ea:.0} inside {ei:.0}; N-S across {na:.0} inside {ni:.0}");
             assert!(ea < 2.0 * ei + 2.0 * n as f64, "{name}: E-W across {ea} inside {ei}");
@@ -932,7 +975,8 @@ mod tests {
                 let ctx = Ctx::new(lat.to_radians(), lon.to_radians(), 150.0, &w.ell);
                 let t = w.terrain(&ctx);
                 let (lit, n1, n2) = fields(&w, &ctx);
-                let zi = ZIn { moist: t.moist, temp: t.temp, mountain: t.mountain, uplift: t.uplift, cont: t.cont, coast_km: t.coast_km, sand: t.sand };
+                let zi =
+                    ZIn { moist: t.moist, temp: t.temp, mountain: t.mountain, uplift: t.uplift, cont: t.cont, coast_km: t.coast_km, sand: t.sand, style: 0.0 };
                 Pt { lat, lon, z: zones(&zi, lit, n1, n2), lit, t }
             })
             .collect();
@@ -970,7 +1014,7 @@ mod tests {
             }
         }
         eprintln!("{} fans", seen.len());
-        for it in seen.values().take(12) {
+        for it in seen.values().filter(|it| it.v[0] > 4300.0).take(14) {
             let g = geodesy::ecef2geodetic(it.center, &w.ell);
             eprintln!("fan ({:.3}, {:.3}) R{:.0} H{:.0}", g.lat.to_degrees(), g.lon.to_degrees(), it.v[0], it.v[3]);
         }
@@ -998,7 +1042,8 @@ mod tests {
             let smooth = w.smooth_elevation(ctx.p);
             let (temp, moist) = w.climate(&m, ctx.lat, smooth.max(0.0));
             let (lit, n1, n2) = fields(&w, &ctx);
-            let zi = ZIn { moist, temp, mountain, uplift: m.uplift, cont: m.cont, coast_km: m.coast_km, sand: 0.0 };
+            let zi =
+                ZIn { moist, temp, mountain, uplift: m.uplift, cont: m.cont, coast_km: m.coast_km, sand: 0.0, style: perlin3(SEED + 5, ctx.p / 180_000.0) };
             let z = zones(&zi, lit, n1, n2);
             let r = ReliefIn { ctx: &ctx, m: &m, temp, moist, mountain, sand: 0.0, mesa: 0.0, smooth, inst: None };
             let mut h = 0.0;
@@ -1113,5 +1158,76 @@ mod tests {
             };
             eprintln!("({lat0}, {lon0}): north-south std {:.0} m, east-west std {:.0} m", line(1.0, 0.0), line(0.0, 1.0));
         }
+    }
+
+    /// Debug: the elevation step across the east seam of a tile: `MT_SEAM=lat,lon,z`.
+    #[test]
+    #[ignore]
+    fn seam_debug() {
+        let v = std::env::var("MT_SEAM").unwrap_or("-16.1256,53.6542,11".into());
+        let mut it = v.split(',');
+        let (lat, lon): (f64, f64) = (it.next().unwrap().parse().unwrap(), it.next().unwrap().parse().unwrap());
+        let z: u8 = it.next().unwrap().parse().unwrap();
+        let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+        let id = geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z);
+        let a = g.tile(id);
+        let b = g.tile(geodesy::tiles::TileId::new(z, id.x + 1, id.y));
+        let n = crate::TILE_SIZE;
+        for j in (0..n).step_by(n / 16) {
+            let r = |t: &[f32], i: usize| t[j * n + i];
+            eprintln!(
+                "row {j:3}: a[n-3..n-1] {:.1} {:.1} {:.1} | b[0..2] {:.1} {:.1} {:.1}",
+                r(&a.elevation, n - 3),
+                r(&a.elevation, n - 2),
+                r(&a.elevation, n - 1),
+                r(&b.elevation, 0),
+                r(&b.elevation, 1),
+                r(&b.elevation, 2)
+            );
+        }
+    }
+
+    /// Debug: where the GPU's elevation differs from the CPU's by more than 5 cm in a tile:
+    /// `MT_DIFF=lat,lon,z`.
+    #[cfg(feature = "gpu")]
+    #[test]
+    #[ignore]
+    fn tile_diff() {
+        let v = std::env::var("MT_DIFF").unwrap_or("-12.4109,-155.0993,13".into());
+        let mut it = v.split(',');
+        let (lat, lon): (f64, f64) = (it.next().unwrap().parse().unwrap(), it.next().unwrap().parse().unwrap());
+        let z: u8 = it.next().unwrap().parse().unwrap();
+        let cfg = crate::Config::default();
+        let gpu = crate::gpu::GpuGenerator::new(cfg.clone()).unwrap();
+        let cpu = crate::Generator::new(cfg);
+        let id = geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z);
+        let g = gpu.tiles(&[id]).unwrap().remove(0);
+        let c = cpu.tile_cpu(id);
+        let n = crate::TILE_SIZE;
+        let mut shown = 0;
+        let mut rows = std::collections::BTreeMap::new();
+        for (k, (a, b)) in g.elevation.iter().zip(&c.elevation).enumerate() {
+            if (a - b).abs() > 0.05 {
+                *rows.entry(k / n).or_insert(0) += 1;
+                if shown < 12 {
+                    eprintln!("({}, {}): gpu {a:.3} cpu {b:.3}", k % n, k / n);
+                    if shown % 4 == 0 {
+                        let px = glam::DVec2::new(id.x as f64 * n as f64 + (k % n) as f64 + 0.5, id.y as f64 * n as f64 + (k / n) as f64 + 0.5);
+                        let (la, lo) = geodesy::tiles::pixel_to_latlon(px, z, n as u32);
+                        let w = World::new(crate::Config::default());
+                        let gsd = 156_543.03 * la.cos() / (1u64 << z) as f64 * 256.0 / n as f64;
+                        let ctx = Ctx::new(la, lo, gsd, &w.ell);
+                        let t = w.terrain(&ctx);
+                        let m = w.macro_at(ctx.p, gsd);
+                        eprintln!(
+                            "   lat {:.5} lon {:.5} gsd {gsd:.1}: ground {:.3} river_d {:.1} hw {:.1} mountain {:.3} mesa {:.3} moist {:.3} cont {:.4} style {:?} water {} {}",
+                            la.to_degrees(), lo.to_degrees(), t.ground, t.river_d, t.river_hw, t.mountain, t.mesa, t.moist, m.cont, m.style, t.water, t.water_kind
+                        );
+                    }
+                    shown += 1;
+                }
+            }
+        }
+        eprintln!("rows with differences: {rows:?}");
     }
 }

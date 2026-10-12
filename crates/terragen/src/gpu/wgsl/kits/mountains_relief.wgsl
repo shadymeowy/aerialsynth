@@ -18,7 +18,7 @@ const MT_TOWER_DENS: f32 = 0.7;
 const MT_TOWER_MEAN: f32 = 16.85;
 const MT_COCKPIT_MEAN: f32 = 15.24;
 const MT_RIDGE_CELL: f64 = 140000.0lf;
-const MT_CREASE_MEAN: f32 = 0.2698;
+const MT_CREASE_MEAN: f32 = 0.3400;
 
 /// `mountains::litho_at`: the atlas' dominant lithology at the texel nearest to `p`.
 fn mt_litho(p: vec3<f64>) -> u32 {
@@ -53,6 +53,7 @@ struct MtZIn {
     cont: f32,
     coast_km: f32,
     sand: f32,
+    style: f32,
 }
 
 struct MtZones {
@@ -80,7 +81,7 @@ fn mt_zones(z: MtZIn, lit: u32, n1: f32, n2: f32) -> MtZones {
     let u = max(z.uplift, 0.0);
     let old = smoothstep1(0.1, 0.4, z.mountain) * (1.0 - smoothstep1(0.2, 0.5, u));
     let fore = smoothstep1(0.04, 0.15, u) * (1.0 - smoothstep1(0.3, 0.5, u)) * (1.0 - 0.7 * z.mountain);
-    o.fold = max(old, fore) * (1.0 - 0.5 * hard) * land * (1.0 - o.tower);
+    o.fold = max(old, fore) * (1.0 - 0.5 * hard) * land * (1.0 - o.tower) * smoothstep1(-0.1, 0.3, z.style);
     o.fault = smoothstep1(-0.04, -0.18, z.uplift) * smoothstep1(0.08, 0.25, z.cont) * (1.0 - 0.6 * smoothstep1(0.3, 0.7, z.mountain));
     o.badland = soft * (1.0 - smoothstep1(0.14, 0.28, z.moist)) * smoothstep1(2.0, 10.0, z.temp) * (1.0 - smoothstep1(0.3, 0.6, z.mountain)) * (1.0 - smoothstep1(0.05, 0.3, z.sand)) * patch_b * land;
     o.drown = 1.0 - smoothstep1(-1.0, 10.0, z.coast_km);
@@ -102,8 +103,20 @@ fn mt_cone_h(c: Cell3, p: vec3<f64>, east: vec3<f32>, north: vec3<f32>, kind: u3
         ex = 0.6;
     }
     let d = vec3<f32>(p - c.point);
-    let th = atan2(dot(d, north), dot(d, east));
-    let rad = 0.5 * MT_KARST_CELL * r0 * (1.0 + 0.2 * sin(2.0 * th + TAU * u01k(c.id, 5lu)) + 0.1 * sin(5.0 * th + TAU * u01k(c.id, 6lu)));
+    let dx = dot(d, east);
+    let dy = dot(d, north);
+    let r = max(sqrt(dx * dx + dy * dy), 1e-6);
+    let co = dx / r;
+    let si = dy / r;
+    let c2 = co * co - si * si;
+    let s2 = 2.0 * co * si;
+    let c4 = c2 * c2 - s2 * s2;
+    let s4 = 2.0 * c2 * s2;
+    let sa = sin(TAU * u01k(c.id, 5lu));
+    let ca = cos(TAU * u01k(c.id, 5lu));
+    let sb = sin(TAU * u01k(c.id, 6lu));
+    let cb = cos(TAU * u01k(c.id, 6lu));
+    let rad = 0.5 * MT_KARST_CELL * r0 * (1.0 + 0.2 * (s2 * ca + c2 * sa) + 0.1 * (s4 * cb + c4 * sb));
     let x = c.f1 / min(rad, 0.9 * c.f2);
     if (x >= 1.0) {
         return 0.0;
@@ -179,20 +192,25 @@ fn mt_ridges(p: vec3<f64>, kind: u32, nw: f32, pl: f32) -> f32 {
     return v / sw * (0.25 + 0.75 * pl);
 }
 
+/// `mountains::crease`.
+fn mt_crease(n: f32) -> f32 {
+    return pow(n * n + 0.012, 0.35);
+}
+
 /// `mountains::badlands`.
 fn mt_badlands(p: vec3<f64>, gsd: f32) -> f32 {
     var v = 0.0;
     let b0 = band(300.0, gsd);
     if (b0 > 0.0) {
-        v += (pow(abs(perlin3(MT_SEED + 20lu, p / 300.0lf)), 0.7) - MT_CREASE_MEAN) * b0;
+        v += (mt_crease(perlin3(MT_SEED + 20lu, p / 300.0lf)) - MT_CREASE_MEAN) * b0;
     }
     let b1 = band(130.0, gsd);
     if (b1 > 0.0) {
-        v += 0.6 * (pow(abs(perlin3(MT_SEED + 21lu, p / 130.0lf)), 0.7) - MT_CREASE_MEAN) * b1;
+        v += 0.6 * (mt_crease(perlin3(MT_SEED + 21lu, p / 130.0lf)) - MT_CREASE_MEAN) * b1;
     }
     let b2 = band(55.0, gsd);
     if (b2 > 0.0) {
-        v += 0.35 * (pow(abs(perlin3(MT_SEED + 22lu, p / 55.0lf)), 0.7) - MT_CREASE_MEAN) * b2;
+        v += 0.35 * (mt_crease(perlin3(MT_SEED + 22lu, p / 55.0lf)) - MT_CREASE_MEAN) * b2;
     }
     return v;
 }
@@ -217,7 +235,17 @@ fn mt_fan_at(it: Inst, p: vec3<f64>, east: vec3<f32>, north: vec3<f32>) -> MtFan
         return o;
     }
     let th = atan2(y, x);
-    let k = 1.0 + 0.15 * sin(3.0 * th + TAU * u01k(it.id, 7lu)) + 0.08 * sin(7.0 * th + TAU * u01k(it.id, 8lu));
+    let co = x / max(r, 1e-6);
+    let si = y / max(r, 1e-6);
+    let c3 = 4.0 * co * co * co - 3.0 * co;
+    let s3 = 3.0 * si - 4.0 * si * si * si;
+    let c6 = c3 * c3 - s3 * s3;
+    let s6 = 2.0 * s3 * c3;
+    let sa = sin(TAU * u01k(it.id, 7lu));
+    let ca = cos(TAU * u01k(it.id, 7lu));
+    let sb = sin(TAU * u01k(it.id, 8lu));
+    let cb = cos(TAU * u01k(it.id, 8lu));
+    let k = 1.0 + 0.15 * (s3 * ca + c3 * sa) + 0.08 * (s6 * cb + c6 * sb);
     let rn = r / (rr * k);
     if (rn >= 1.0) {
         return o;
@@ -235,7 +263,7 @@ fn mt_fan_at(it: Inst, p: vec3<f64>, east: vec3<f32>, north: vec3<f32>) -> MtFan
 fn mountains_fans_exists(s: InstSite) -> InstOut {
     var o: InstOut;
     o.ok = false;
-    if (u01k(s.id, 1lu) >= 0.55) {
+    if (u01k(s.id, 1lu) >= 0.4) {
         return o;
     }
     let d = 12000.0;
@@ -286,6 +314,7 @@ fn mountains_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
     zi.cont = m.cont;
     zi.coast_km = m.coast_km;
     zi.sand = r.sand;
+    zi.style = perlin3(MT_SEED + 5lu, c.p / 180000.0lf);
     let z = mt_zones(zi, fl.lit, fl.n1, fl.n2);
     if (z.tower + z.cockpit > 0.0) {
         let plain = lerp(r.smooth_h, min(-11.0, r.smooth_h), z.drown);
@@ -336,10 +365,10 @@ fn mountains_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
 /// `mountains::fjord`: (weight, floor depth).
 fn mt_fjord(m: Macro, mountain: f32, glac: f32) -> vec2<f32> {
     let ck = m.coast_km;
-    let head = 45.0 + 25.0 * m.style.w;
+    let head = 30.0 + 40.0 * m.glaciation;
     let fj = glac * smoothstep1(0.2, 0.45, mountain) * (1.0 - smoothstep1(head - 6.0, head, ck)) * smoothstep1(-6.0, 0.0, ck);
     let prof = smoothstep1(0.0, 12.0, ck) * (1.0 - smoothstep1(head - 30.0, head, ck));
-    return vec2<f32>(fj, 70.0 + (260.0 + 200.0 * max(m.style.x, 0.0)) * prof);
+    return vec2<f32>(fj, 70.0 + (260.0 + 220.0 * mountain) * prof);
 }
 
 /// `mountains::carve`.
@@ -388,24 +417,22 @@ fn mountains_carve(c: Ctx, m: Macro, ci: CarveIn, cv: ptr<function, Carve>) {
         (*cv).wall_k *= 1.0 - 0.4 * fj;
         (*cv).u = max((*cv).u, fj);
     }
-    let arid = 1.0 - smoothstep1(0.22, 0.36, ci.moist);
+    let arid = 1.0 - smoothstep1(0.15, 0.45, ci.moist);
     if (arid > 0.0) {
-        let lit = mt_litho(c.p);
-        let rock = f32(lit == MT_SEDIMENTARY || lit == MT_CARBONATE);
         var l1 = 1.0;
         if (lvl1) {
             l1 = 0.35;
         }
-        let cz = arid * rock * smoothstep1(150.0, 450.0, ci.h0) * (1.0 - smoothstep1(0.3, 0.6, ci.mountain)) * smoothstep1(-0.15, 0.25, ci.mesa) * l1;
+        let cz = arid * smoothstep1(100.0, 700.0, ci.h0) * (1.0 - smoothstep1(0.3, 0.6, ci.mountain)) * smoothstep1(0.05, 0.3, ci.mesa) * smoothstep1(0.0, 0.15, m.cont) * l1;
         if (cz > 0.0) {
-            let dm = lerp(350.0, 1200.0, saturate1(0.5 + 0.6 * m.style.y));
-            let dc = max(min(dm, 0.85 * (ci.h0 - 40.0)), 0.0);
-            (*cv).floor = lerp((*cv).floor, max((*cv).floor - dc, min((*cv).floor, 30.0)), cz);
+            let f0 = (*cv).floor;
+            (*cv).floor = lerp(f0, max(f0 - 450.0, min(f0, 30.0)), cz);
             (*cv).depth_cap = lerp((*cv).depth_cap, 1500.0, cz);
             (*cv).wall_k *= lerp(1.0, 0.3, cz);
             (*cv).fp_w *= lerp(1.0, 0.6, cz);
-            (*cv).steps = 55.0 + 25.0 * m.style.z;
+            (*cv).steps = 50.0;
             (*cv).step_mix = max((*cv).step_mix, cz * band(160.0, gsd));
+            (*cv).top = (*cv).floor + 500.0;
         }
     }
 }

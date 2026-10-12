@@ -796,6 +796,7 @@ struct Carve {
     u: f32,
     steps: f32,
     step_mix: f32,
+    top: f32,
     lake_r: f32,
     lake_level: f32,
 }
@@ -1083,6 +1084,7 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
             cv.u = 0.0;
             cv.steps = 0.0;
             cv.step_mix = 0.0;
+            cv.top = h0;
             cv.lake_r = 0.0;
             cv.lake_level = 0.0;
             var ci: CarveIn;
@@ -1112,10 +1114,10 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                     let tt = clamp((ad - cv.fp_w) / max(valley - cv.fp_w, 1e-6), 0.0, 1.0);
                     var w = lerp(wall, pow(tt, 1.5), cv.u);
                     if (cv.step_mix > 0.0) {
-                        let k = max(floor((h0 - fpl) / max(cv.steps, 1.0) + 0.5), 1.0);
+                        let k = max((cv.top - fpl) / max(cv.steps, 1.0), 1.0);
                         let x = w * k;
                         let i = floor(x);
-                        w = lerp(w, (i + smoothstep1(0.62, 0.97, x - i)) / k, cv.step_mix);
+                        w = lerp(w, (i + smoothstep1(0.4, 0.97, x - i)) / k, cv.step_mix * (1.0 - smoothstep1(0.8, 1.0, w)));
                     }
                     wall = w;
                 }

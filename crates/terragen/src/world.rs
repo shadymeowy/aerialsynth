@@ -1165,6 +1165,7 @@ impl World {
                     u: 0.0,
                     steps: 0.0,
                     step_mix: 0.0,
+                    top: h0,
                     lake_r: 0.0,
                     lake_level: 0.0,
                 };
@@ -1190,10 +1191,12 @@ impl World {
                         let t = ((ad - fp_w) / (valley - fp_w).max(1e-6)).clamp(0.0, 1.0);
                         let mut w = lerp(wall, t.powf(1.5), cv.u);
                         if cv.step_mix > 0.0 {
-                            let k = ((h0 - fp) / cv.steps.max(1.0) + 0.5).floor().max(1.0);
+                            // (a real number of benches: a rounded one jumps with the height; the
+                            // quantization fades out towards the rim, where the wall meets the ground)
+                            let k = ((cv.top - fp) / cv.steps.max(1.0)).max(1.0);
                             let x = w * k;
                             let i = x.floor();
-                            w = lerp(w, (i + smoothstep(0.62, 0.97, x - i)) / k, cv.step_mix);
+                            w = lerp(w, (i + smoothstep(0.4, 0.97, x - i)) / k, cv.step_mix * (1.0 - smoothstep(0.8, 1.0, w)));
                         }
                         w
                     } else {
