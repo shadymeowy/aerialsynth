@@ -947,6 +947,24 @@ impl World {
         lakes
     }
 
+    /// [`World::relief_height`] with the fields pass A derives before the drainage (climate,
+    /// mountain, style …): host routing (`kits::transport`).
+    pub fn relief_terrain(&self, ctx: &Ctx, m: &Macro) -> Terrain {
+        self.terrain_impl(ctx, m, Mode::Relief, None, None)
+    }
+
+    /// Radius and level of the lattice lake `id` (feature point `pt`), as pass A draws it
+    /// (`None`: on a slope or in the sea); its existence test is the caller's.
+    pub(crate) fn lattice_lake(&self, id: u64, pt: DVec3) -> Option<(f64, f64)> {
+        let rad = (300.0 * (u01k(id, 2) * 2.7).exp()).min(self.cfg.hydro.lake_cell_km * KM * 0.3);
+        self.lake_level(id, pt, rad).map(|l| (rad, l))
+    }
+
+    /// Level of the closed-basin lake (id, centre, radius) of [`World::sink_lakes`].
+    pub(crate) fn sink_lake_level(&self, id: u64, c: DVec3, rad: f64) -> Option<f64> {
+        self.lake_level_forced(id, c, rad)
+    }
+
     /// Ground height before rivers, lakes and the sea (cheap; for bounds).
     pub fn relief_height(&self, ctx: &Ctx, m: &Macro) -> f64 {
         self.terrain_impl(ctx, m, Mode::Relief, None, None).ground

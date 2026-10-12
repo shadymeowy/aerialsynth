@@ -33,17 +33,53 @@ trumpet); roads to the settlements kit's **airports** (trunk for cities, seconda
 from dams, solar and wind farms to the nearest town or city > 25 k within 55 km. Local roads and
 tracks do not cut through towns (their streets do); site roads stop at the site's edge.
 
-**Routing (host, analytic).** A dynamic programme on a corridor grid between the ends (≤ 41
+**Routing (host).** A dynamic programme on a corridor grid between the ends (≤ 41
 nodes along × 11 across, monotone along the edge, lateral steps ≤ 0.45 of the step along),
-refined piece by piece where the coarse grid is coarser than 260 m (≤ 41 × 7 per piece); cost
-= length × (1 + k g² + k₂ (g − g_lim)²₊) + sea + towns that are not ends (motorways, trunk roads,
-railways and power lines go around them) + turns; major roads and railways change their
-lateral step by at most one per node (no hairpins) and are smoothed by a moving average (400,
-250, 600 m) and Chaikin; minor roads by Chaikin ×3. Steeper than they may climb (secondary 11 %,
-local 13 %, tracks 16 %), minor roads get **switchbacks**: zigzag legs across the slope with
-rounded hairpins, long enough to keep the grade. Power lines run straight between angle points.
-Costs use the CPU-analytic relief (`World::relief_height`, no drainage): routes are the same on
-both backends, memoized per edge.
+refined piece by piece where the coarse grid is coarser than 260 m (≤ 41 × 7 per piece). Each
+edge has a *scene* of host knowledge along its corridor, the same on both backends:
+
+* **Ground:** the CPU-analytic relief (`World::relief_terrain`) with the valleys of drainage
+  levels 0–1 carved in by the core's valley profile (the pieces' meander warp, floor, floodplain
+  and walls; not the kits' carve hooks), so the grade cost sees the flat valley floors and routes
+  follow them instead of climbing over the spurs.
+* **Water:** the sea (relief < 0.5 m); the core's lattice lakes and closed-basin lakes (their
+  existence, radius, level and shore warp as in `World::terrain`, over the carved ground; the
+  basins of the streams, level 2, for minor roads); the cold kit's kettle and thermokarst lakes
+  of its large lattice (its `lake_mask` estimated from pass A's values and the relief's slope);
+  the settlements kit's reservoirs (below). Standing water costs 25–60 per metre on top of the
+  length, the sea 10–40; each step also measures its chord inside the lakes' outlines, so a
+  coarse step does not jump a lake between two dry nodes.
+* **River crossings** (levels 0–1, in each level's meander-warped space): a cost per crossing
+  of 150 m (tracks) … 2 km (motorways, railways) × (0.5 + half width / 40 m), up to ×3 when
+  oblique (`1 + 2 (1 − sin θ)`): few crossings, near perpendicular. Bridges over the water are
+  then drawn per pixel (slot 8) and from the profiles.
+* **Sites:** the settlements kit's airports, quarries (a disc of 1.6 pit radii), solar and wind
+  farms are no-go footprints (widened by the road: half width + verge + 15 m; power lines 30 m)
+  and its reservoirs are standing water. Sites need point samples, so they enter in a second
+  stage: the analytic route is checked against the sites within reach of it (towns' airports
+  and solar farms, dams of towns within 50 km, quarry, wind and mountain-dam lattice cells) and
+  routed again with them where it touches one (twice at most). A site containing a route's end
+  (a wind farm around a village, the dam at the end of its road) is not an obstacle to it.
+* **Towns:** towns that are not ends cost per metre inside them for motorways, trunk roads,
+  railways and power lines (they go around); plus turns.
+
+A route must then pass a check (probes every span / 6 along it): no site footprint, no
+stretch of standing water longer than its class's **span** (motorways, trunk roads, railways
+500 m, other roads 160 m: a bridge over a narrow neck; the sea × 3) — else it is tried once
+more in a corridor 600 m wider, then without its moving average (smoothing can cut a shore),
+and is dropped if it still fails (that edge is not built). Ponds of the cold kit's small
+lattice (≤ ~115 m) are crossed on the road's fill.
+
+Roads end at a **town's arterials**, not its centre: a road reaches a town or larger at 0.8
+(motorways 0.65) of its radius toward the other end, moved onto the nearest district edge of
+the settlements kit's town model (the bisector of the two nearest district sites, ≤ 600 m away),
+where the town's arterial streets take over; power lines end at the built-up edge; railways
+still run to the centre (the station). Major roads and railways change their lateral step by
+at most one per node (no hairpins) and are smoothed by a moving average (400, 250, 600 m) and
+Chaikin; minor roads by Chaikin ×3. Steeper than they may climb (secondary 11 %, local 13 %,
+tracks 16 %), minor roads get **switchbacks**: zigzag legs across the slope with rounded
+hairpins, long enough to keep the grade. Power lines run straight between angle points.
+Routes are memoized per edge (the analytic stage and the final route).
 
 **Engineered profiles (host, point samples).** Motorways, trunk roads and railways sample the
 full terrain every 40 m (one GPU round for all samples of an area; memoized per sample) and
