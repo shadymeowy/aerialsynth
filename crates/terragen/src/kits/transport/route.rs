@@ -200,7 +200,6 @@ pub fn relief_h(w: &World, p: DVec3, gsd: f64) -> f64 {
     w.relief_height(&ctx, &w.macro_at(ctx.p, gsd))
 }
 
-
 /// A lake a route goes around: a lattice lake (`pt` its 3D feature point) or a closed-basin lake
 /// (`sink`: `pt` its centre), its radius and level (`World::terrain`'s lakes).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -729,7 +728,17 @@ fn corridor(w: &World, a: DVec3, b: DVec3, na: usize, nc: usize, half: f64, pr: 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn corridor_dp(pos: &[DVec3], nodes: &[Option<Probe>], between: &[f64], na: usize, nc: usize, dy: f64, pr: &Params, sc: &Scene, smooth_turns: bool) -> Option<(Vec<DVec3>, f64)> {
+fn corridor_dp(
+    pos: &[DVec3],
+    nodes: &[Option<Probe>],
+    between: &[f64],
+    na: usize,
+    nc: usize,
+    dy: f64,
+    pr: &Params,
+    sc: &Scene,
+    smooth_turns: bool,
+) -> Option<(Vec<DVec3>, f64)> {
     let c = nc / 2;
     const DJ: i64 = 2;
     let nd = (2 * DJ + 1) as usize;
@@ -763,7 +772,10 @@ fn corridor_dp(pos: &[DVec3], nodes: &[Option<Probe>], between: &[f64], na: usiz
                 let over = (g - pr.glim).max(0.0);
                 let wet = if n0.sea || n1.sea { l } else { 0.0 };
                 let geo: f64 = sc.lakes.iter().map(|lk| lk.chord(p0, p1)).sum();
-                let stand = (((n0.stand || n0.res) as u32 + (n1.stand || n1.res) as u32) as f64 * 0.5 * l).max(0.85 * geo).max(between[(i * nc + j) * nd + (dj + DJ) as usize]).min(l);
+                let stand = (((n0.stand || n0.res) as u32 + (n1.stand || n1.res) as u32) as f64 * 0.5 * l)
+                    .max(0.85 * geo)
+                    .max(between[(i * nc + j) * nd + (dj + DJ) as usize])
+                    .min(l);
                 let inside = 0.5 * (n0.town as u32 + n1.town as u32) as f64 * l;
                 let base = l * (1.0 + pr.k * g * g + pr.k2 * over * over) + pr.wet * wet + pr.lake * stand + pr.town * inside + crossings(sc, pr, &n0, &n1);
                 for k in 0..nd {

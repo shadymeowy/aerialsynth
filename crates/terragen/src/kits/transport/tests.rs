@@ -820,11 +820,7 @@ fn what_at(w: &World, tr: &Truth, p: DVec3) -> u32 {
     use crate::kits::settlements::sites::{self, tpl as st};
     for s in &tr.stamps {
         let q = sites::uv(s, p);
-        let inside = if s.template == st::QUARRY {
-            q.length() < 1.5 * s.v[0] as f64
-        } else {
-            q.x.abs() < s.half[0] as f64 && q.y.abs() < s.half[1] as f64
-        };
+        let inside = if s.template == st::QUARRY { q.length() < 1.5 * s.v[0] as f64 } else { q.x.abs() < s.half[0] as f64 && q.y.abs() < s.half[1] as f64 };
         if inside {
             return 10 + s.template;
         }
@@ -903,7 +899,9 @@ fn routes_avoid_water_and_sites() {
         let tr = truth(&mut ctx, c, 4_000.0);
         let mut roads: Vec<_> = routes
             .iter()
-            .filter(|r| matches!(r.e.class, cls::MOTORWAY | cls::TRUNK | cls::SECONDARY | cls::LOCAL | cls::TRACK | cls::RAIL) && r.line.dist(c).0 < area.radius - 100.0)
+            .filter(|r| {
+                matches!(r.e.class, cls::MOTORWAY | cls::TRUNK | cls::SECONDARY | cls::LOCAL | cls::TRACK | cls::RAIL) && r.line.dist(c).0 < area.radius - 100.0
+            })
             .collect();
         roads.sort_by_key(|r| (r.e.class, r.e.key));
         // (every k-th route: ≤ 40 per region)
@@ -948,7 +946,11 @@ fn routes_avoid_water_and_sites() {
                     3 => n_pond += 1,
                     k if k >= 10 => {
                         // (a route ending at or in the site keeps it)
-                        let st = tr.stamps.iter().find(|st| st.template == k - 10 && crate::kits::settlements::sites::uv(st, p).length() < 2.0 * (st.half[0].max(st.half[1]) as f64)).unwrap();
+                        let st = tr
+                            .stamps
+                            .iter()
+                            .find(|st| st.template == k - 10 && crate::kits::settlements::sites::uv(st, p).length() < 2.0 * (st.half[0].max(st.half[1]) as f64))
+                            .unwrap();
                         let q = |e: DVec3| crate::kits::settlements::sites::uv(st, e);
                         let near_end = [ea, eb].iter().any(|&e| q(e).x.abs() < st.half[0] as f64 + 100.0 && q(e).y.abs() < st.half[1] as f64 + 100.0);
                         if !near_end {
@@ -974,13 +976,22 @@ fn routes_avoid_water_and_sites() {
             let m = (s.a + s.b) * 0.5;
             let g = geodesy::ecef2geodetic(m, &w.ell);
             let t = w.terrain(&crate::world::Ctx::new(g.lat, g.lon, 5.0, &w.ell));
-            if t.water_kind != crate::world::water::NONE || (t.river_hw > 0.0 && t.river_d.abs() < t.river_hw + 20.0) || matches!(what_at(&w, &tr, m), 2 | 4 | 5 | 6) {
+            if t.water_kind != crate::world::water::NONE
+                || (t.river_hw > 0.0 && t.river_d.abs() < t.river_hw + 20.0)
+                || matches!(what_at(&w, &tr, m), 2 | 4 | 5 | 6)
+            {
                 br_wet += 1;
             } else {
                 br_dry += 1;
             }
         }
-        eprintln!("{name}: {} routes, {seen} sampled, {} site stamps, {} reservoir pieces ({:.1} s)", roads.len(), tr.stamps.len(), tr.res.len(), t0.elapsed().as_secs_f64());
+        eprintln!(
+            "{name}: {} routes, {seen} sampled, {} site stamps, {} reservoir pieces ({:.1} s)",
+            roads.len(),
+            tr.stamps.len(),
+            tr.res.len(),
+            t0.elapsed().as_secs_f64()
+        );
     }
     for b in bad.iter().take(40) {
         eprintln!("{b}");
@@ -1145,7 +1156,9 @@ fn routing_time() {
     let mut pts = CpuPoints(&w);
     let mut ctx = HostCtx { world: &w, points: &mut pts };
     let (mut t_route, mut t_feat, mut n_routes) = (0.0, 0.0, 0);
-    for &(name, lat, lon) in ROUTE_REGIONS.iter().filter(|r| matches!(r.0, "parclo" | "trumpet" | "bridge" | "airport" | "dam" | "kettle_a" | "lakes_a" | "lakes_d")) {
+    for &(name, lat, lon) in
+        ROUTE_REGIONS.iter().filter(|r| matches!(r.0, "parclo" | "trumpet" | "bridge" | "airport" | "dam" | "kettle_a" | "lakes_a" | "lakes_d"))
+    {
         net::clear_cache();
         build::clear_cache();
         crate::kits::settlements::sites::clear_cache();
@@ -1245,7 +1258,14 @@ fn find_routing_places() {
                 let (d, _) = r.line.dist(c);
                 // (the chord through the lake's middle, away from the ends; the route round it)
                 let t = (c - a).dot(b - a) / (b - a).length_squared();
-                if lk.rad > 200.0 && lk.rad < 1_500.0 && (0.15..0.85).contains(&t) && net::chord_dist(a, b, c) < 0.6 * lk.rad && d > 0.9 * lk.rad && d < 2.0 * lk.rad && n_det < 12 {
+                if lk.rad > 200.0
+                    && lk.rad < 1_500.0
+                    && (0.15..0.85).contains(&t)
+                    && net::chord_dist(a, b, c) < 0.6 * lk.rad
+                    && d > 0.9 * lk.rad
+                    && d < 2.0 * lk.rad
+                    && n_det < 12
+                {
                     let (la, lo) = ll(c);
                     let (pa, po) = ll(r.line.at(r.line.dist(c).1).0);
                     eprintln!("{name}: class {} around a lake (r {:.0} m) at ({la:.4}, {lo:.4}), road at ({pa:.4}, {po:.4})", r.e.class, lk.rad);
@@ -1262,7 +1282,13 @@ fn find_routing_places() {
                     let t = w.terrain(&crate::world::Ctx::new(g.lat, g.lon, 5.0, &w.ell));
                     let now = t.river_hw > 25.0 && t.river_d.abs() < t.river_hw;
                     if now && !inr && n_x < 10 {
-                        eprintln!("{name}: class {} crosses a river (half width {:.0} m) at ({:.4}, {:.4})", r.e.class, t.river_hw, g.lat.to_degrees(), g.lon.to_degrees());
+                        eprintln!(
+                            "{name}: class {} crosses a river (half width {:.0} m) at ({:.4}, {:.4})",
+                            r.e.class,
+                            t.river_hw,
+                            g.lat.to_degrees(),
+                            g.lon.to_degrees()
+                        );
                         n_x += 1;
                     }
                     inr = now;

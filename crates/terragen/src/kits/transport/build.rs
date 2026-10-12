@@ -140,11 +140,7 @@ pub(crate) fn base(w: &World, e: &Edge) -> Base {
     let (mut a, mut b) = ends(w, e);
     let half = route::max_deviation(e.class, (b - a).length());
     let fine = route::PARAMS[e.class].span > 0.0 && route::PARAMS[e.class].span < 300.0;
-    let sc = if e.class == cls::POWER {
-        route::Scene { avoid, ..Default::default() }
-    } else {
-        route::Scene::of_corridor(w, a, b, half, fine, avoid)
-    };
+    let sc = if e.class == cls::POWER { route::Scene { avoid, ..Default::default() } } else { route::Scene::of_corridor(w, a, b, half, fine, avoid) };
     if e.class != cls::POWER {
         // (a node in a lake or by the shore: the road ends on the shore)
         let a0 = a;
