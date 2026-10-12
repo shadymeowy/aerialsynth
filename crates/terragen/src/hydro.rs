@@ -39,6 +39,13 @@ pub struct RiverHit {
     /// water surface / valley floor level at the closest point
     pub floor: f64,
     pub level: u8,
+    /// position along the piece (0 at its start, 1 at its end); where the piece is a source
+    /// (`spring`), 0 is the head of the channel
+    pub u: f64,
+    /// the piece is the first of a channel that starts at a spring
+    pub spring: bool,
+    /// the bound of the carve extent used to select the piece (m)
+    pub reach: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -426,7 +433,7 @@ impl World {
                 continue;
             }
             let sign = if ab.cross(dv).dot(ctx.up) >= 0.0 { 1.0 } else { -1.0 };
-            hits.push(RiverHit { d: sign * dist, hw: s.hw + (s.hw_b - s.hw) * u, valley: s.valley, floor, level: s.level });
+            hits.push(RiverHit { d: sign * dist, hw: s.hw + (s.hw_b - s.hw) * u, valley: s.valley, floor, level: s.level, u, spring: s.hw < 0.2 * s.hw_b, reach });
         }
         hits
     }

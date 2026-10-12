@@ -1,0 +1,516 @@
+//! The mountains kit (`docs/design/terrain-next.md` §5.3, §5.4, `docs/kits/mountains.md`): karst,
+//! folded and fault-block ranges, canyons, badlands, glacial troughs with cirques and tarns,
+//! fjords and alluvial fans. The WGSL twins are `gpu/wgsl/kits/mountains_relief.wgsl` (zones,
+//! relief, carve hook, fans) and `mountains.wgsl` (the layer): the same functions in the same
+//! order of operations.
+//!
+//! **Provinces.** Where a landform lives is a *zone* (0..1, [`zones`]) from smooth fields only:
+//! the atlas' lithology at the pixel's nearest texel (looked up at a position warped by two
+//! noises of 14 and 11 km, so the 20 km texel borders are ragged), climate (moisture,
+//! temperature at the smooth elevation), the mountain mask, the tectonic uplift, the continent
+//! value and the coast distance. A zone is crisp where it matters (a tower is there or not); only
+//! its extent is smooth.
+//!
+//! **Relief (pass A, [`relief`]).**
+//! * *Tower and cockpit karst* on carbonate (humid and warm: towers; humid and cooler: cockpits):
+//!   one 3D Worley lattice of 420 m cells. Towers: the floor is flattened towards the 5 km smooth
+//!   elevation, 55 % of the cells carry a tower `H·(1 − F1/R)^0.4` (H 70–240 m, R ≤ 0.5 cell,
+//!   clipped at the bisector so it never meets a neighbour's cut); cockpits: dolines where `F2 − F1`
+//!   is large, cone-like ridges along the cell borders. Unresolved cells show the calibrated mean.
+//!   Near the coast the plain is drowned (down to −11 m): the towers are islands.
+//! * *Folded ridges* (old orogens and foreland belts: the mountain mask with little tectonic
+//!   uplift, or a modest positive uplift beside it) and *fault blocks* (extensional provinces:
+//!   negative uplift): parallel ridges `dot(p − corner, N)/λ` on an 8-corner lattice of 140 km
+//!   cells (each corner its own strike, wavelength and phase; the weights sharpened), so the
+//!   stripes keep their phase at any zoom (R-wave); a 38 km noise bends them, a 26 km noise
+//!   makes the ridges plunge. Folds: triangle crests, λ 6–12 km, 240 m; blocks: tilted
+//!   sawtooth, λ 11–21 km, 520 m, a scarp on a fifth of the period.
+//! * *Badlands*: two octaves of creased noise (260 and 90 m) on soft sediment × arid.
+//! * *Alluvial fans*: family `mountains_fans` at mountain fronts in dry climates (the site's
+//!   mountain mask falling at least 0.012 per 16 km: the fan points down the gradient): a
+//!   conical apron `H(1 − r/R)^1.3` over a 70 % blend to the smooth elevation in a ±60° sector.
+//!
+//! **Carve hook ([`carve`], `kits::Carve`).** The core carves every channel's valley; the kit
+//! changes its profile where the ground says so, never the water rules: *glacial troughs* (U
+//! profile, deeper by 2.6 on rivers, 8 on tributaries, wider floors, over-deepened), *cirques*
+//! (a round floor at the head of a glaciated tributary, a *tarn* where the head is), *hanging
+//! tributaries* (the shallower side valleys end above the deeper trough), *fjords* (the floor
+//! of a glaciated coastal river goes to −70 … −530 m for 40–70 km inland and the ocean floods it;
+//! it fades with the land mask into the open sea), *stepped canyons* (arid sedimentary plateaus:
+//! floors lowered by up to 1.2 km along rivers, steep walls with benches of 40–70 m).
+//!
+//! **Pass B.** Slot 6 (it is the only stage with compile headroom; the layer is composited after
+//! the canopy, which suits rock and sediment): banded badland and mesa strata, karst cliffs,
+//! glacial rock walls, the pale radial fans.
+
+use crate::instances::{Family, InstSite, Instance};
+use crate::kits::{Carve, CarveIn, Kit, ReliefIn};
+use crate::noise::*;
+use crate::stack::{slot, Layer, Stack};
+use crate::surface::{mixc, srgb};
+use crate::world::{Ctx, Macro, World};
+use glam::DVec3;
+use std::f64::consts::TAU;
+
+pub static KIT: Kit = Kit {
+    name: "mountains",
+    biomes_yaml: "",
+    wgsl: include_str!("../gpu/wgsl/kits/mountains.wgsl"),
+    layers: &[(slot::LINEAR, linear)],
+    relief: Some(relief),
+    relief_wgsl: include_str!("../gpu/wgsl/kits/mountains_relief.wgsl"),
+    carve: Some(carve),
+    families: &[Family { name: "mountains_fans", cell: 12_000.0, jitter: 0.8, reach: 6_200.0, relief: true, exists: fans_exist }],
+    ..Kit::EMPTY
+};
+
+/// Land-cover v2 class ids (`registry::classes`; checked by a test).
+mod cls {
+    pub const ROCK: u8 = 6;
+    pub const GRAVEL: u8 = 33;
+    pub const BADLANDS: u8 = 34;
+    pub const CLIFF: u8 = 37;
+}
+
+const SEED: u64 = 0x4D54_5000;
+
+/// Lithology codes of the atlas (`atlas::Lithology`).
+const SEDIMENTARY: u32 = 0;
+const CARBONATE: u32 = 1;
+const CRYSTALLINE: u32 = 2;
+const VOLCANIC: u32 = 3;
+const UNCONSOLIDATED: u32 = 4;
+
+// ============================================================================= fields and zones
+
+/// Wavelengths (m) of the two noises that warp the lithology lookup, and the warp (m).
+const WARP_LAM: [f64; 2] = [14_000.0, 11_000.0];
+const WARP_A: f64 = 4_000.0;
+
+/// The atlas' dominant lithology at the texel nearest to `p` (one load; WGSL `mt_litho`).
+pub(crate) fn litho_at(w: &World, p: DVec3) -> u32 {
+    use crate::atlas::{slot, APRON};
+    let a = w.atlas();
+    let r = a.resolution();
+    let rf = r as f64;
+    let (f, x, y) = crate::atlas::geom::Grid::new(r).locate(p.normalize());
+    let near = |x: f64| ((x.clamp(-0.5, rf - 0.5) + 0.5).floor() as usize).min(r - 1);
+    (a.raw(f, near(x) + APRON, near(y) + APRON, slot::LITHO) & 7) as u32
+}
+
+/// The patch noises and the lithology at the warped position (WGSL `mt_fields`).
+pub(crate) fn fields(w: &World, c: &Ctx) -> (u32, f64, f64) {
+    let n1 = perlin3(SEED + 1, c.p / WARP_LAM[0]);
+    let n2 = perlin3(SEED + 2, c.p / WARP_LAM[1]);
+    let q = c.p + c.east * (WARP_A * n1) + c.north * (WARP_A * n2);
+    (litho_at(w, q), n1, n2)
+}
+
+/// What the zones read (smooth fields at a pixel).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct ZIn {
+    pub moist: f64,
+    pub temp: f64,
+    pub mountain: f64,
+    pub uplift: f64,
+    pub cont: f64,
+    pub coast_km: f64,
+    pub sand: f64,
+}
+
+/// Zone weights 0..1 of the landforms (and the drowning of the karst plain at the coast).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Zones {
+    pub tower: f64,
+    pub cockpit: f64,
+    pub fold: f64,
+    pub fault: f64,
+    pub badland: f64,
+    pub drown: f64,
+}
+
+/// The zones at a pixel: `lit` the lithology, `n1`, `n2` the patch noises.
+pub(crate) fn zones(z: &ZIn, lit: u32, n1: f64, n2: f64) -> Zones {
+    let carb = (lit == CARBONATE) as u32 as f64;
+    let soft = (lit == SEDIMENTARY || lit == UNCONSOLIDATED) as u32 as f64;
+    let hard = (lit == CRYSTALLINE || lit == VOLCANIC) as u32 as f64;
+    let land = smoothstep(0.0, 0.08, z.cont);
+    let shelf = smoothstep(-0.25, -0.1, z.cont) * smoothstep(-30.0, -12.0, z.coast_km);
+    let patch_a = smoothstep(-0.45, -0.05, n1);
+    let patch_b = smoothstep(-0.2, 0.2, n2);
+    let humid = smoothstep(0.42, 0.58, z.moist) * smoothstep(15.0, 21.0, z.temp);
+    let tower = carb * humid * (1.0 - smoothstep(0.35, 0.7, z.mountain)) * patch_a * shelf;
+    let cockpit =
+        carb * smoothstep(0.28, 0.42, z.moist) * smoothstep(4.0, 12.0, z.temp) * (1.0 - humid) * (1.0 - smoothstep(0.4, 0.7, z.mountain)) * patch_a * land;
+    let u = z.uplift.max(0.0);
+    let old = smoothstep(0.1, 0.4, z.mountain) * (1.0 - smoothstep(0.2, 0.5, u));
+    let fore = smoothstep(0.04, 0.15, u) * (1.0 - smoothstep(0.3, 0.5, u)) * (1.0 - 0.7 * z.mountain);
+    let fold = old.max(fore) * (1.0 - 0.5 * hard) * land * (1.0 - tower);
+    let fault = smoothstep(-0.04, -0.18, z.uplift) * smoothstep(0.08, 0.25, z.cont) * (1.0 - 0.6 * smoothstep(0.3, 0.7, z.mountain));
+    let badland = soft
+        * (1.0 - smoothstep(0.14, 0.28, z.moist))
+        * smoothstep(2.0, 10.0, z.temp)
+        * (1.0 - smoothstep(0.3, 0.6, z.mountain))
+        * (1.0 - smoothstep(0.05, 0.3, z.sand))
+        * patch_b
+        * land;
+    Zones { tower, cockpit, fold, fault, badland, drown: 1.0 - smoothstep(-1.0, 10.0, z.coast_km) }
+}
+
+// ============================================================================= karst
+
+/// Karst cell (m), the share of cells with a tower, and the calibrated means (m) of the tower
+/// field and of the cockpit ridge field (a test recomputes them).
+const KARST_CELL: f64 = 420.0;
+const TOWER_DENS: f64 = 0.55;
+const TOWER_MEAN: f64 = 33.4;
+const COCKPIT_MEAN: f64 = 24.1;
+
+/// A tower's height (m) at a point of its cell: `H (1 − F1/R)^0.4`, R clipped at the bisector.
+#[inline]
+fn tower_h(c: &Cell3) -> f64 {
+    if u01k(c.id, 1) >= TOWER_DENS {
+        return 0.0;
+    }
+    let hh = 70.0 + 170.0 * u01k(c.id, 2);
+    let rad = 0.5 * KARST_CELL * (0.55 + 0.4 * u01k(c.id, 3));
+    let x = c.f1 / rad.min(0.88 * c.f2);
+    if x >= 1.0 {
+        0.0
+    } else {
+        hh * (1.0 - x).powf(0.4)
+    }
+}
+
+/// The cockpit field (m): high along the borders between cells, 0 in their centres.
+#[inline]
+fn cockpit_h(c: &Cell3) -> f64 {
+    let hc = 35.0 + 45.0 * u01k(c.id, 4);
+    hc * (1.0 - smoothstep(0.0, 0.4, (c.f2 - c.f1) / KARST_CELL))
+}
+
+// ============================================================================= ridges
+
+const RIDGE_CELL: f64 = 140_000.0;
+
+/// Parallel ridges of the 8 lattice corners around `p`, blended by their (sharpened) trilinear
+/// weights: `kind` 0 folds (crest `t^1.6`, λ 6–12 km), 1 fault blocks (a tilted sawtooth, λ
+/// 11–21 km). Zero mean, about −0.4 .. 0.6; `nw` bends the stripes (cycles), `pl` is the
+/// plunge amplitude 0..1.
+fn ridges(p: DVec3, kind: u32, nw: f64, pl: f64) -> f64 {
+    let q = p / RIDGE_CELL;
+    let i = q.floor();
+    let f = q - i;
+    let (ix, iy, iz) = (i.x as i64, i.y as i64, i.z as i64);
+    let sm = |x: f64| x * x * (3.0 - 2.0 * x);
+    let (sx, sy, sz) = (sm(f.x), sm(f.y), sm(f.z));
+    let lam0 = if kind == 0 { 9000.0 } else { 16000.0 };
+    let (mut v, mut sw) = (0.0, 0.0);
+    for dz in 0..2i64 {
+        for dy in 0..2i64 {
+            for dx in 0..2i64 {
+                let wt = (if dx == 0 { 1.0 - sx } else { sx }) * (if dy == 0 { 1.0 - sy } else { sy }) * (if dz == 0 { 1.0 - sz } else { sz });
+                let w = wt * wt;
+                let h = hash3(SEED + 10, ix + dx, iy + dy, iz + dz);
+                let corner = DVec3::new((ix + dx) as f64, (iy + dy) as f64, (iz + dz) as f64) * RIDGE_CELL;
+                let d = corner.normalize();
+                let e = DVec3::Z.cross(d);
+                let e = if e.length() < 1e-6 { DVec3::X } else { e.normalize() };
+                let n = d.cross(e);
+                let th = TAU * u01k(h, 1);
+                let nn = e * th.cos() + n * th.sin();
+                let lam = lam0 * (0.7 + 0.6 * u01k(h, 2));
+                let x = (p - corner).dot(nn) / lam + u01k(h, 3) + 1.4 * nw;
+                let x = x - x.floor();
+                let prof = if kind == 0 {
+                    let t = 1.0 - (2.0 * x - 1.0).abs();
+                    t.powf(1.6) - 1.0 / 2.6
+                } else if x < 0.8 {
+                    let s = x / 0.8;
+                    s * s * (3.0 - 2.0 * s) - 0.5
+                } else {
+                    let s = (1.0 - x) / 0.2;
+                    s * s * (3.0 - 2.0 * s) - 0.5
+                };
+                v += w * (0.7 + 0.6 * u01k(h, 4)) * prof;
+                sw += w;
+            }
+        }
+    }
+    v / sw * (0.25 + 0.75 * pl)
+}
+
+// ============================================================================= badlands
+
+/// Mean of `|perlin3|^0.7` (a test recomputes it).
+const CREASE_MEAN: f64 = 0.4075;
+
+/// Creased gullies (m per unit amplitude): 260 and 90 m octaves, zero mean, band-limited.
+fn badlands(p: DVec3, gsd: f64) -> f64 {
+    let (b1, b2) = (band(260.0, gsd), band(90.0, gsd));
+    let mut v = 0.0;
+    if b1 > 0.0 {
+        v += (perlin3(SEED + 20, p / 260.0).abs().powf(0.7) - CREASE_MEAN) * b1;
+    }
+    if b2 > 0.0 {
+        v += 0.45 * (perlin3(SEED + 21, p / 90.0).abs().powf(0.7) - CREASE_MEAN) * b2;
+    }
+    v
+}
+
+// ============================================================================= fans
+
+/// An alluvial fan at `p`: (sector weight 0..1 × radial edge, r / R, the azimuth of `p` from the
+/// apex).
+fn fan_at(it: &Instance, p: DVec3, east: DVec3, north: DVec3) -> Option<(f64, f64, f64)> {
+    let rel = p - it.center;
+    let (x, y) = (rel.dot(east), rel.dot(north));
+    let r = (x * x + y * y).sqrt();
+    let rr = it.v[0] as f64;
+    if r >= rr {
+        return None;
+    }
+    let rn = r / rr;
+    let cs = (x * it.v[1] as f64 + y * it.v[2] as f64) / r.max(1.0);
+    let sector = lerp(1.0, smoothstep(0.0, 0.5, cs), smoothstep(0.0, 0.05, rn));
+    Some((sector * smoothstep(0.0, 0.1, 1.0 - rn), rn, y.atan2(x)))
+}
+
+/// The mountain mask, moisture and continent value of the macro fields at `c` (a family site;
+/// `mt_site_fields` in WGSL).
+fn site_fields(w: &World, c: DVec3) -> (f64, f64, f64) {
+    let m = w.macro_at(c, 20_000.0);
+    (w.mountain_mask(&m).0, m.moist.clamp(0.0, 1.0), m.cont)
+}
+
+/// Fans exist at the fronts of dry mountains: the mask is 0.2 … 0.6 and falls over 16 km (the
+/// fan points down the gradient). v: R (m), direction east and north, H (m).
+fn fans_exist(w: &World, s: &InstSite) -> Option<[f32; 8]> {
+    if u01k(s.id, 1) >= 0.55 {
+        return None;
+    }
+    let a = w.atlas().sample(s.center.normalize());
+    if a.coast_km < 5.0 || World::moisture_index(a.precip_mm, a.temp_c) > 0.36 || a.temp_c < 0.0 || a.uplift < 0.03 {
+        return None;
+    }
+    let (m0, moist, cont) = site_fields(w, s.center);
+    if m0 < 0.2 || m0 > 0.6 || moist > 0.34 || cont < 0.1 {
+        return None;
+    }
+    let d = 8_000.0;
+    let g = |k: usize| {
+        let (de, dn) = [(d, 0.0), (-d, 0.0), (0.0, d), (0.0, -d)][k];
+        site_fields(w, s.center + s.east * de + s.north * dn).0
+    };
+    let (gx, gy) = (g(0) - g(1), g(2) - g(3));
+    let gl = (gx * gx + gy * gy).sqrt();
+    if gl < 0.012 {
+        return None;
+    }
+    let rr = 2600.0 + 3000.0 * u01k(s.id, 2);
+    let hh = rr * (0.016 + 0.014 * u01k(s.id, 3));
+    Some([rr as f32, (-gx / gl) as f32, (-gy / gl) as f32, hh as f32, 0.0, 0.0, 0.0, 0.0])
+}
+
+fn fam_fans() -> usize {
+    static F: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *F.get_or_init(|| crate::instances::families().position(|f| f.name == "mountains_fans").expect("the fans family"))
+}
+
+// ============================================================================= relief
+
+/// The kit's relief: karst, folds, fault blocks, badlands, fans.
+pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
+    let c = r.ctx;
+    let m = r.m;
+    let gsd = c.gsd;
+    if m.cont < -0.3 {
+        return;
+    }
+    let (lit, n1, n2) = fields(w, c);
+    let zi = ZIn { moist: r.moist, temp: r.temp, mountain: r.mountain, uplift: m.uplift, cont: m.cont, coast_km: m.coast_km, sand: r.sand };
+    let z = zones(&zi, lit, n1, n2);
+    // ---- karst: flattened floors, towers, dolines; drowned near the coast
+    if z.tower + z.cockpit > 0.0 {
+        let plain = lerp(r.smooth, (-11.0f64).min(r.smooth), z.drown);
+        *h = lerp(*h, plain, 0.88 * z.tower);
+        let e = smoothstep(1.2 * gsd, 3.0 * gsd, 0.45 * KARST_CELL);
+        let (mut tw, mut cp) = (TOWER_MEAN, COCKPIT_MEAN);
+        if e > 0.0 {
+            let wc = worley3(SEED + 30, c.p, KARST_CELL, 0.85);
+            tw = lerp(TOWER_MEAN, tower_h(&wc), e);
+            cp = lerp(COCKPIT_MEAN, cockpit_h(&wc), e);
+        }
+        *h += z.tower * tw + z.cockpit * (cp - COCKPIT_MEAN);
+    }
+    // ---- folded ridges and fault blocks
+    if z.fold + z.fault > 0.0 {
+        let kind = (z.fault > z.fold) as u32;
+        let zz = if kind == 1 { z.fault } else { z.fold };
+        let b = band(if kind == 1 { 7700.0 } else { 6300.0 }, gsd);
+        *h = lerp(*h, r.smooth, 0.6 * zz);
+        if b > 0.0 {
+            let nw = perlin3(SEED + 3, c.p / 38_000.0);
+            let pl = smoothstep(-0.55, 0.3, perlin3(SEED + 4, c.p / 26_000.0));
+            *h += zz * (if kind == 1 { 520.0 } else { 240.0 }) * ridges(c.p, kind, nw, pl) * b;
+        }
+    }
+    // ---- badlands
+    if z.badland > 0.0 {
+        *h += z.badland * (14.0 + 14.0 * smoothstep(-0.3, 0.5, n1)) * 2.0 * badlands(c.p, gsd);
+    }
+    // ---- alluvial fans
+    for it in r.instances(w, fam_fans()).iter() {
+        if let Some((sec, rn, _)) = fan_at(it, c.p, c.east, c.north) {
+            let cone = it.v[3] as f64 * (1.0 - rn).powf(1.3);
+            *h = lerp(*h, r.smooth + cone, 0.7 * sec);
+        }
+    }
+}
+
+// ============================================================================= carve
+
+/// Glacial troughs, cirques with tarns, fjords and stepped canyons (the profile of the core's
+/// valley carve; `mountains_carve` in WGSL).
+pub fn carve(w: &World, ci: &CarveIn, cv: &mut Carve) {
+    if ci.level > 1 {
+        return;
+    }
+    let m = ci.m;
+    let lvl1 = ci.level == 1;
+    let gsd = ci.ctx.gsd;
+    // ---- glacial troughs: a U profile, wider floors, deeper (rivers 2.6, tributaries 8)
+    let glac = smoothstep(0.3, 0.6, m.glaciation) * smoothstep(0.25, 0.55, ci.mountain);
+    if glac > 0.0 {
+        cv.u = cv.u.max(glac);
+        cv.wall_k *= lerp(1.0, 0.5, glac);
+        cv.fp_w *= lerp(1.0, 1.5, glac);
+        cv.depth_cap *= lerp(1.0, if lvl1 { 8.0 } else { 2.6 }, glac);
+        cv.floor = lerp(cv.floor, cv.floor.min((cv.floor - if lvl1 { 40.0 } else { 90.0 }).max(1.0)), glac);
+        // cirques: a round floor at the head of a glaciated tributary, a tarn where the head is
+        if lvl1 && ci.spring {
+            let ch = glac * smoothstep(0.35, 0.7, ci.mountain);
+            let cz = 1.0 - smoothstep(0.0, 0.14, ci.u);
+            cv.fp_w = cv.fp_w.max(240.0 * ch * cz);
+            cv.wall_k *= lerp(1.0, 0.8, ch * cz);
+            let lr = 130.0 * ch * (1.0 - smoothstep(0.02, 0.06, ci.u));
+            if lr > 0.4 * gsd {
+                cv.lake_r = lr;
+                cv.lake_level = cv.floor + 1.4;
+            }
+        }
+    }
+    // ---- fjords: the floor of a glaciated coastal river below sea level, for 40-70 km inland
+    let ck = m.coast_km;
+    let head = 45.0 + 25.0 * m.style[3];
+    let fj = glac * smoothstep(0.2, 0.45, ci.mountain) * (1.0 - smoothstep(head - 6.0, head, ck)) * smoothstep(-6.0, 0.0, ck) * if lvl1 { 0.45 } else { 1.0 };
+    if fj > 0.0 {
+        let prof = smoothstep(0.0, 12.0, ck) * (1.0 - smoothstep(head - 30.0, head, ck));
+        let dep = 70.0 + (260.0 + 200.0 * m.style[0].max(0.0)) * prof;
+        cv.floor = lerp(cv.floor, -dep, fj);
+        cv.depth_cap = lerp(cv.depth_cap, 1500.0, fj);
+        cv.fp_min = 0.5 - 2000.0 * fj;
+        cv.fp_w *= 1.0 + 1.5 * fj;
+        cv.wall_k *= 1.0 - 0.4 * fj;
+        cv.u = cv.u.max(fj);
+    }
+    // ---- stepped canyons: arid sedimentary plateaus
+    let arid = 1.0 - smoothstep(0.22, 0.36, ci.moist);
+    if arid > 0.0 {
+        let lit = litho_at(w, ci.ctx.p);
+        let rock = (lit == SEDIMENTARY || lit == CARBONATE) as u32 as f64;
+        let cz = arid * rock * smoothstep(150.0, 450.0, ci.h0) * (1.0 - smoothstep(0.3, 0.6, ci.mountain)) * smoothstep(-0.15, 0.25, ci.mesa) * if lvl1 { 0.35 } else { 1.0 };
+        if cz > 0.0 {
+            let dm = lerp(250.0, 1000.0, saturate(0.5 + 0.6 * m.style[1]));
+            let dc = dm.min(0.85 * (ci.h0 - 40.0)).max(0.0);
+            cv.floor = lerp(cv.floor, (cv.floor - dc).max(cv.floor.min(30.0)), cz);
+            cv.depth_cap = lerp(cv.depth_cap, 1500.0, cz);
+            cv.wall_k *= lerp(1.0, 0.3, cz);
+            cv.fp_w *= lerp(1.0, 0.6, cz);
+            cv.steps = 55.0 + 25.0 * m.style[2];
+            cv.step_mix = cv.step_mix.max(cz * band(160.0, gsd));
+        }
+    }
+}
+
+// ============================================================================= pass B
+
+/// Slot 6: banded badlands and strata of arid sedimentary walls, karst cliffs, glacial rock
+/// walls, the pale aprons of the alluvial fans.
+pub fn linear(s: &mut Stack) {
+    let t = s.t;
+    let ground = s.l.ground;
+    let slope = s.l.slope;
+    if ground < 0.5 {
+        return;
+    }
+    let (p, gsd) = (s.ctx.p, s.ctx.gsd);
+    let (lit, n1, n2) = fields(s.world, s.ctx);
+    let zi = ZIn { moist: t.moist, temp: t.temp, mountain: t.mountain, uplift: t.uplift, cont: t.cont, coast_km: t.coast_km, sand: t.sand };
+    let z = zones(&zi, lit, n1, n2);
+    let rn = s.pf.patch;
+    // ---- banded badlands (and the strata of arid sedimentary walls)
+    let arid = 1.0 - smoothstep(0.16, 0.34, t.moist);
+    let soft = (lit == SEDIMENTARY || lit == CARBONATE || lit == UNCONSOLIDATED) as u32 as f64;
+    let wall = smoothstep(0.42, 0.7, slope) * arid * soft;
+    let bad = z.badland * smoothstep(0.08, 0.25, slope);
+    let cb = bad.max(wall);
+    if cb > 0.0 {
+        let bandh = if z.badland > 0.2 { 3.4 } else { 14.0 };
+        let kb = (ground / bandh + 0.6 * rn).floor();
+        let h = hash1(SEED + 40, kb as i64);
+        let pal = [srgb(196.0, 188.0, 172.0), srgb(150.0, 92.0, 66.0), srgb(214.0, 198.0, 160.0), srgb(108.0, 86.0, 72.0), srgb(170.0, 112.0, 94.0), srgb(176.0, 160.0, 140.0)];
+        let col = pal[(u01k(h, 1) * 5.999) as usize] * (0.9 + 0.2 * u01k(h, 2));
+        let floor_col = srgb(190.0, 176.0, 150.0);
+        let col = mixc(floor_col, col, smoothstep(0.1, 0.3, slope));
+        s.composite(Layer { cov: cb, albedo: col, cls: if z.badland > 0.2 { cls::BADLANDS } else { cls::CLIFF }, clear: 1.0, ..Default::default() });
+        s.m.natural_ok *= 1.0 - cb;
+    }
+    // ---- karst cliffs: pale grey rock on the steep flanks of towers and cones
+    let kz = (z.tower + z.cockpit).min(1.0);
+    let ck = kz * smoothstep(0.7, 1.1, slope);
+    if ck > 0.0 {
+        let col = mixc(srgb(168.0, 164.0, 150.0), srgb(120.0, 118.0, 108.0), 0.5 + 0.5 * rn) * (1.0 + 0.06 * s.pf.detail);
+        s.composite(Layer { cov: ck, albedo: col, cls: cls::CLIFF, clear: 1.0, ..Default::default() });
+        s.m.natural_ok *= 1.0 - ck;
+    }
+    // ---- glacial rock walls: scoured pale rock on the steep sides of glaciated mountains
+    let glac = smoothstep(0.3, 0.6, t.glaciation) * smoothstep(0.25, 0.55, t.mountain);
+    let cg = glac * smoothstep(0.75, 1.1, slope);
+    if cg > 0.0 {
+        let col = mixc(srgb(176.0, 174.0, 168.0), srgb(132.0, 130.0, 128.0), 0.5 + 0.5 * rn);
+        s.composite(Layer { cov: cg, albedo: col, cls: cls::ROCK, clear: 1.0, ..Default::default() });
+        s.m.natural_ok *= 1.0 - cg;
+    }
+    // ---- alluvial fans: pale gravel with radial streaks
+    let inst = s.instances(fam_fans()).into_owned();
+    for it in inst.iter() {
+        if let Some((sec, rr, th)) = fan_at(it, p, s.ctx.east, s.ctx.north) {
+            let streak = 0.5 + 0.5 * (18.0 * th + 6.0 * rn).sin();
+            let v = sec * (1.0 - rr).powf(0.5) - 0.1 + 0.05 * s.pf.detail;
+            let c = smoothstep(0.0, 0.05, v);
+            if c > 0.0 {
+                let col = mixc(srgb(206.0, 186.0, 152.0), srgb(176.0, 152.0, 122.0), 0.7 * streak + 0.2 * rr);
+                s.composite(Layer { cov: c, albedo: col, cls: cls::GRAVEL, clear: 0.85, ..Default::default() });
+                s.m.natural_ok *= 1.0 - c;
+            }
+            break;
+        }
+    }
+}
+
+// ============================================================================= tests
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn class_ids() {
+        use crate::registry::classes::id;
+        assert_eq!(id("rock"), Some(cls::ROCK));
+        assert_eq!(id("gravel_fan").or(id("gravel")), Some(cls::GRAVEL));
+        assert_eq!(id("badlands"), Some(cls::BADLANDS));
+        assert_eq!(id("cliff"), Some(cls::CLIFF));
+    }
+}
