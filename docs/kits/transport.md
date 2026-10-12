@@ -238,7 +238,7 @@ running alongside, cleared verges; **switchbacks** on a snowy slope (−24.187, 
 ![switchbacks 400 m](images/transport_switchbacks_400m.jpg)
 
 **Around a lake** (−7.486, −18.715): a major road bends round the lake's southern shore,
-local roads end on the shore where a hamlet's centre lies in the water; **river crossing**
+local roads end on the shore; **river crossing**
 (−7.547, −18.796): two secondary roads cross a 134 m river side by side at the narrowest,
 square-on reach.
 ![lake 800 m](images/transport_lake_800m.jpg)
@@ -276,9 +276,9 @@ road and a track through forest nearby (−7.619, −16.609) from 500 m.
   dropped (the graph adds no alternative): 2–5 % of the edges in lake districts and around
   reservoirs, 0–2 % elsewhere (`routing_time`, `TR_WHY=1` lists them). Ends in water (a hamlet in a
   reservoir, a track end in a lake) move to the shore, leaving the road short of the place.
-* Sites need point samples, so routes now depend on them too: within a process the site cache
-  makes both backends share them; across processes (GPU f32 vs CPU f64 samples) an airport whose
-  candidates score within a hair of each other could move and with it a route.
+* Sites need point samples, so routes depend on them too; the settlements kit re-takes close
+  site decisions with exact samples, so both backends build the same sites and routes
+  (`sites_and_routes_match_the_cpu`).
 * River crossings are counted in each drainage level's meander-warped space between the grid
   nodes, an approximation of the drawn channel: crossings are near perpendicular (mean sin 0.87
   at the verification's crossings), but their number is mostly set by the network (a road

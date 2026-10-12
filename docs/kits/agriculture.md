@@ -27,6 +27,14 @@ share for the core's fields. Systems change at region and ecoregion borders, nev
 | greenhouse seas | white plastic bays in different states, irrigation ponds |
 | pastures | paddocks, livestock trails to troughs, farm dams, hay meadows, savanna trees in warm climates |
 | irrigated pivots | centre pivots in the desert |
+| ranches | huge fenced paddocks (2.2 × 1.5 km), stock trails converging on troughs, farm dams, savanna trees where warm; feedlots |
+
+**Ranches and feedlots** (design §5.8, P2). Ranches weigh most in semi-arid steppe climates (BSh,
+BSk × 3), on tropical savannas, in the survey-grid, steppe and pastoral cultures; never in oceanic
+or polar ones. Some ranch regions (20–65 % by development) hold a **feedlot** (slot 6,
+`feedlot`, in the region frame): a lot of 440–960 × 280–600 m of pens (40 × 60 m) in double rows
+along 12 m feed alleys with concrete bunks, dark manure, cattle; a feed mill with silage bunkers,
+a shed and silos at one end; two manure lagoons in embankments beyond the other. No pivots.
 
 Parcels are crisp units with hashed ids; rows, furrows, crowns and trails are band-limited and
 blend to the system's mean at coarse pixels. Field tracks only: roads are the transport kit's.
@@ -65,6 +73,11 @@ equinox. Lat, lon in brackets.
 ![greenhouses](images/agriculture_greenhouse_1500m.jpg)
 ![pasture](images/agriculture_pasture_1500m_nadir.jpg)
 
+**Ranch with a feedlot** (16.294, 149.333), nadir 2.5 km: pens along feed alleys, the feed mill
+at the west end, two manure lagoons east of the lot; ranch paddocks with savanna trees around.
+
+![feedlot 2.5 km](images/agriculture_feedlot_2500m.jpg)
+
 ## Tests
 
 * `registry_compiles`, `wgsl_tables_are_current` (`AERIALSYNTH_BLESS=1` rewrites the tables),
@@ -87,3 +100,20 @@ kit's `KITS` entry commented out (mean of two runs, tiles/s; shared machine, +-3
 | z12 | 114.7 | 112.9 | 1.5 % |
 | z14 | 111.6 | 108.4 | 2.9 % |
 | z16 | 116.8 | 113.5 | 2.9 % |
+
+## Known limits
+
+* Smallholder mosaics read as a fine speckle at 10 km: their 20–60 m plots are just above the
+  pixel there, so each pixel takes one plot's colour (salt and pepper) instead of a smoother mean.
+* Bright parcels (greenhouses, fallow, fresh stubble) read as white quadrilaterals in high
+  oblique views (10 km and above) where the region's system has large parcels.
+* One field system per land-use region (~7 km): systems change at region and ecoregion borders,
+  along the region lattice's (warped) cell edges, not along roads or rivers.
+* Parcels are laid out in the region's frame and do not follow the transport kit's roads: field
+  edges and road verges cross at arbitrary angles; only the kit's own field tracks belong to
+  the parcels.
+* Crop states come from the ecoregion's season, not from a date (paddies flooded, green or ripe
+  per ecoregion); the renderer's seasons are not yet wired to the fields.
+* Terraces are contour stripes of pass B (colour and DSM height), not steps of the DTM.
+* Ranches and feedlots are drawn only in the semi-arid grazing systems (see *Ranches and
+  feedlots*); there is no aquaculture inland (salt and aquaculture ponds belong to the coast).

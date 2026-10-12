@@ -67,6 +67,35 @@ fn pt(ctx: &mut HostCtx, p: DVec3) -> Option<crate::tile::PointTerrain> {
     ctx.terrain(lat, lon, 20.0)
 }
 
+/// Point terrain evaluated exactly: the CPU's `World::terrain` (f64), which is also the CPU
+/// backend's point source. Site decisions use the backend's samples where they are clear by a
+/// margin ([`TIE_H`]) and re-take close ones with exact samples, so both backends choose the
+/// same sites (the GPU's f32 samples differ from the CPU's by millimetres to centimetres).
+fn pt_exact(w: &World, p: DVec3) -> crate::tile::PointTerrain {
+    let (lat, lon) = latlon(w, p);
+    let t = w.terrain(&crate::world::Ctx::new(lat, lon, 20.0, &w.ell));
+    crate::tile::PointTerrain { ground: t.ground, water: t.water, water_kind: t.water_kind }
+}
+
+/// The backend's sample `t` at `p`, or the exact one where its water decision is close.
+fn pt_exact_if(w: &World, p: DVec3, t: crate::tile::PointTerrain) -> crate::tile::PointTerrain {
+    if water_fragile(&t) {
+        pt_exact(w, p)
+    } else {
+        t
+    }
+}
+
+/// Heights within this of a decision threshold, or of a competitor, are re-evaluated exactly
+/// (m; far above the backends' differences).
+pub const TIE_H: f64 = 0.5;
+
+/// Can the backend's sample `t` be on the other side of a water decision than the exact one
+/// (ground near sea level or near its lake's level)?
+fn water_fragile(t: &crate::tile::PointTerrain) -> bool {
+    t.ground.abs() < TIE_H || (t.water_kind != crate::world::water::NONE && (t.water - t.ground).abs() < TIE_H)
+}
+
 // ---------------------------------------------------------------- the site cache
 
 #[derive(Clone, Debug, Default)]
@@ -121,7 +150,15 @@ pub fn airport(ctx: &mut HostCtx, pl: &Place) -> Option<Option<Site>> {
         };
         let spacing = if layout > 0 { 1300.0 + 400.0 * u01k(id, 2) } else { 0.0 };
         let heading = pl.wind[1].atan2(pl.wind[0]) + 0.5 * (u01k(id, 3) - 0.5);
-        let mut best: Option<(f64, DVec3, f64)> = None;
+        // a candidate's runway samples: (ok: dry land ≥ 2 m, height range + distance penalty,
+        // mean height)
+        let score = |ts: &[crate::tile::PointTerrain], dist: f64| {
+            let ok = ts.iter().all(|t| t.water_kind == crate::world::water::NONE && t.ground >= 2.0);
+            let lo = ts.iter().map(|t| t.ground).fold(f64::MAX, f64::min);
+            let hi = ts.iter().map(|t| t.ground).fold(f64::MIN, f64::max);
+            (ok, hi - lo + 0.002 * dist, ts.iter().map(|t| t.ground).sum::<f64>() / ts.len() as f64)
+        };
+        let mut cands: Vec<(f64, u32, DVec3, Vec<DVec3>, f64)> = Vec::new();
         let mut pending = false;
         for k in 0..16u32 {
             let b = (k % 8) as f64 * std::f64::consts::FRAC_PI_4 + 0.4 * u01k(id, 10 + k as u64);
@@ -129,35 +166,35 @@ pub fn airport(ctx: &mut HostCtx, pl: &Place) -> Option<Option<Site>> {
             let (ex0, ey0) = axes(w, pl.center, b);
             let c = offset(w, pl.center, ex0, ey0, dist, 0.0);
             let (ex, ey) = axes(w, c, heading);
-            let mut lo = f64::MAX;
-            let mut hi = f64::MIN;
-            let mut sum = 0.0;
-            let mut ok = true;
-            for (u, v) in [(0.0, 0.0), (0.5 * len, 0.0), (-0.5 * len, 0.0), (0.0, 0.5 * spacing + 450.0), (0.0, -0.5 * spacing - 450.0)] {
-                match pt(ctx, offset(w, c, ex, ey, u, v)) {
-                    Some(t) => {
-                        if t.water_kind != crate::world::water::NONE || t.ground < 2.0 {
-                            ok = false;
-                        }
-                        lo = lo.min(t.ground);
-                        hi = hi.max(t.ground);
-                        sum += t.ground;
-                    }
-                    None => pending = true,
-                }
-            }
-            if pending || !ok {
-                continue;
-            }
-            let range = hi - lo + 0.002 * dist;
-            if range < 30.0 && best.as_ref().is_none_or(|b| range < b.0) {
-                best = Some((range, c, sum / 5.0));
+            let ps: Vec<DVec3> = [(0.0, 0.0), (0.5 * len, 0.0), (-0.5 * len, 0.0), (0.0, 0.5 * spacing + 450.0), (0.0, -0.5 * spacing - 450.0)]
+                .iter()
+                .map(|&(u, v)| offset(w, c, ex, ey, u, v))
+                .collect();
+            let ts: Option<Vec<_>> = ps.iter().map(|&q| pt(ctx, q)).collect();
+            match ts {
+                // (the range of a wet candidate too: its water may be a hair's breadth away)
+                Some(ts) => cands.push((score(&ts, dist).1, k, c, ps, dist)),
+                None => pending = true,
             }
         }
         if pending {
             return None;
         }
-        let Some((_, c, h)) = best else { return Some(None) };
+        // the flattest (smallest range, then the first): candidates in the order of their
+        // backend range, re-evaluated exactly until the next cannot beat the best exact one
+        cands.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        let mut best: Option<(f64, u32, DVec3, f64)> = None;
+        for (rg, k, c, ps, dist) in cands {
+            if rg > best.as_ref().map_or(30.0, |b| b.0) + TIE_H {
+                break;
+            }
+            let ts: Vec<_> = ps.iter().map(|&q| pt_exact(w, q)).collect();
+            let (ok, range, mean) = score(&ts, dist);
+            if ok && range < 30.0 && best.as_ref().is_none_or(|b| (range, k) < (b.0, b.1)) {
+                best = Some((range, k, c, mean));
+            }
+        }
+        let Some((_, _, c, h)) = best else { return Some(None) };
         let (ex, ey) = axes(w, c, heading);
         let side = if u01k(id, 4) < 0.5 { 1.0 } else { -1.0 };
         let hv = if layout > 0 { 0.5 * spacing + 650.0 } else { 900.0 };
@@ -206,8 +243,15 @@ pub fn port(ctx: &mut HostCtx, pl: &Place) -> Option<Option<Site>> {
             if ts.iter().any(|t| t.is_none()) {
                 return None;
             }
+            // (samples whose water kind could differ between the backends: exactly)
+            let ts: Vec<crate::tile::PointTerrain> = ts
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(i, t)| if water_fragile(&t) { pt_exact(w, offset(w, start, ex, ey, i as f64 * step, 0.0)) } else { t })
+                .collect();
             let mut prev: Option<f64> = None;
-            for (i, t) in ts.iter().flatten().enumerate() {
+            for (i, t) in ts.iter().enumerate() {
                 let u = i as f64 * step;
                 if t.water_kind == crate::world::water::OCEAN {
                     return Some(prev.map(|pu| (i as u32, offset(w, start, ex, ey, 0.5 * (pu + u), 0.0))));
@@ -302,32 +346,19 @@ pub fn dam(ctx: &mut HostCtx, key: u64, center: DVec3, r_min: f64, r_max: f64) -
             .collect();
         cand.sort_unstable();
         cand.truncate(6);
-        let mut best: Option<(f64, usize, f64, f64, f64)> = None;
-        let mut pending = false;
-        for &(_, i) in &cand {
-            let s = &segs[i];
-            let m = 0.5 * (s.a + s.b);
-            let up = m.normalize();
-            let dir = (s.b - s.a).normalize();
-            let n = f32v(up.cross(dir).normalize());
-            // the floor and the banks at increasing distances on both sides (all requested at
-            // once): the first that rises 60 m
-            let tm = pt(ctx, m);
-            let banks: Vec<Option<crate::tile::PointTerrain>> = [1.0, -1.0]
-                .iter()
-                .flat_map(|sg| [200.0, 400.0, 700.0, 1100.0, 1600.0].map(|dd| (sg * dd, 0.0)))
-                .map(|(u, v)| pt(ctx, offset(w, m, n, dir, u, v)))
-                .collect();
-            let (Some(tm), true) = (tm, banks.iter().all(|b| b.is_some())) else {
-                pending = true;
-                continue;
-            };
+        // a candidate's cross-section from its samples (floor, then the banks at increasing
+        // distances on both sides: the first that rises 60 m): (score, floor, height; None:
+        // too low or at sea) and whether the samples are near a decision's threshold
+        const BANKS: [f64; 5] = [200.0, 400.0, 700.0, 1100.0, 1600.0];
+        let section = |tm: &crate::tile::PointTerrain, banks: &[crate::tile::PointTerrain]| {
             let floor = tm.ground;
             let mut side = [(0.0, 0.0); 2];
+            let mut fragile = water_fragile(tm);
             for k in 0..2 {
-                for (j, dd) in [200.0, 400.0, 700.0, 1100.0, 1600.0].iter().enumerate() {
-                    let g = banks[k * 5 + j].unwrap().ground;
+                for (j, dd) in BANKS.iter().enumerate() {
+                    let g = banks[k * 5 + j].ground;
                     side[k] = (*dd, g - floor);
+                    fragile |= (g - floor - 60.0).abs() < TIE_H;
                     if g - floor > 60.0 {
                         break;
                     }
@@ -335,17 +366,49 @@ pub fn dam(ctx: &mut HostCtx, key: u64, center: DVec3, r_min: f64, r_max: f64) -
             }
             let hgt = side[0].1.min(side[1].1) - 4.0;
             let width = side[0].0 + side[1].0;
-            if hgt < 25.0 || tm.water_kind == crate::world::water::OCEAN {
+            fragile |= (hgt - 25.0).abs() < TIE_H;
+            let v = (hgt >= 25.0 && tm.water_kind != crate::world::water::OCEAN).then(|| (hgt.min(150.0) / width, floor, hgt.min(150.0)));
+            (v, fragile)
+        };
+        let mut evals: Vec<(f64, bool, usize, Vec<DVec3>)> = Vec::new();
+        let mut pending = false;
+        for (ci, &(_, i)) in cand.iter().enumerate() {
+            let s = &segs[i];
+            let m = 0.5 * (s.a + s.b);
+            let up = m.normalize();
+            let dir = (s.b - s.a).normalize();
+            let n = f32v(up.cross(dir).normalize());
+            // (all requested at once)
+            let mut ps = vec![m];
+            ps.extend([1.0, -1.0].iter().flat_map(|sg| BANKS.map(|dd| offset(w, m, n, dir, sg * dd, 0.0))));
+            let ts: Option<Vec<_>> = ps.iter().map(|&q| pt(ctx, q)).collect();
+            let Some(ts) = ts else {
+                pending = true;
                 continue;
-            }
-            let score = hgt.min(150.0) / width;
-            if best.as_ref().is_none_or(|b| score > b.0) {
-                best = Some((score, i, floor, hgt.min(150.0), width));
-            }
+            };
+            let (v, fragile) = section(&ts[0], &ts[1..]);
+            evals.push((v.map_or(f64::NEG_INFINITY, |v| v.0), fragile, ci, ps));
         }
         if pending {
             return None;
         }
+        // the best score (then the first candidate): candidates near a threshold first, then by
+        // their backend score, re-evaluated exactly until the next cannot beat the best exact
+        // one (a height error moves a score by at most TIE_H / 400 m)
+        evals.sort_by(|a, b| b.1.cmp(&a.1).then(b.0.total_cmp(&a.0)).then(a.2.cmp(&b.2)));
+        let mut best: Option<(f64, usize, f64, f64)> = None;
+        for (sc, fragile, ci, ps) in evals {
+            if !fragile && best.as_ref().is_some_and(|b| sc < b.0 - TIE_H / 400.0) {
+                break;
+            }
+            let ts: Vec<_> = ps.iter().map(|&q| pt_exact(w, q)).collect();
+            if let (Some((score, floor, hgt)), _) = section(&ts[0], &ts[1..]) {
+                if best.as_ref().is_none_or(|b| score > b.0 || (score == b.0 && ci < b.1)) {
+                    best = Some((score, ci, floor, hgt));
+                }
+            }
+        }
+        let best = best.map(|(sc, ci, floor, hgt)| (sc, cand[ci].1, floor, hgt, 0.0));
         let Some((_, i0, floor, hgt, _)) = best else { return Some(None) };
         let crest = floor + hgt;
         let level = crest - 3.0 - 0.06 * hgt;
@@ -396,6 +459,15 @@ pub fn dam(ctx: &mut HostCtx, key: u64, center: DVec3, r_min: f64, r_max: f64) -
             });
             out.reach = out.reach.max((a - m).length() + reach).max((b - m).length() + reach);
         }
+        // a reservoir never drowns a town or a city (hamlets and villages under its water are
+        // drowned: not drawn, see `drowned`)
+        for l in TOWN as usize..places::NLEVELS {
+            for pl in places::places_near(w, l, m, out.reach) {
+                if out.segs.iter().any(|sg| reservoir_at(sg, pl.center, f64::NEG_INFINITY, 0.1).0 > 0.5) && pt_exact(w, pl.center).ground < level - 1.0 {
+                    return Some(None);
+                }
+            }
+        }
         // the wall across the valley: as wide as the cross-section at the crest
         let wl = side_width(ctx, m, n, dir, floor + hgt, 1.0);
         let wr = side_width(ctx, m, n, dir, floor + hgt, -1.0);
@@ -422,7 +494,8 @@ pub fn dam(ctx: &mut HostCtx, key: u64, center: DVec3, r_min: f64, r_max: f64) -
 fn side_width(ctx: &mut HostCtx, m: DVec3, n: DVec3, dir: DVec3, crest: f64, sg: f64) -> Option<f64> {
     let w = ctx.world;
     const D: [f64; 7] = [100.0, 200.0, 350.0, 550.0, 800.0, 1100.0, 1600.0];
-    let ts: Vec<Option<crate::tile::PointTerrain>> = D.iter().map(|dd| pt(ctx, offset(w, m, n, dir, sg * dd, 0.0))).collect();
+    // (exact samples: the crest threshold decides the wall's ends)
+    let ts: Vec<Option<crate::tile::PointTerrain>> = D.iter().map(|dd| Some(pt_exact(w, offset(w, m, n, dir, sg * dd, 0.0)))).collect();
     let mut last = 0.0;
     for (dd, t) in D.iter().zip(ts) {
         if t?.ground >= crest {
@@ -509,7 +582,8 @@ pub fn quarry(ctx: &mut HostCtx, c: (i64, i64, i64)) -> Option<Option<Site>> {
         let open_pit = hard && u01k(id, 2) < 0.3;
         let r = if open_pit { 600.0 + 1400.0 * u01k(id, 3) } else { 140.0 + 320.0 * u01k(id, 3) };
         let depth = if open_pit { 120.0 + 300.0 * u01k(id, 4) } else { 25.0 + 50.0 * u01k(id, 4) };
-        let t = pt(ctx, p)?;
+        // (exact: the stamp keeps its height, the same on both backends)
+        let t = pt_exact(w, p);
         if t.water_kind != crate::world::water::NONE {
             return Some(None);
         }
@@ -556,7 +630,7 @@ pub fn wind(ctx: &mut HostCtx, c: (i64, i64, i64)) -> Option<Option<Site>> {
         if h0 < 2.0 || amp > 700.0 || near_town(w, p, 4000.0) {
             return Some(None);
         }
-        let t = pt(ctx, p)?;
+        let t = pt_exact_if(w, p, pt(ctx, p)?);
         if t.water_kind != crate::world::water::NONE {
             return Some(None);
         }
@@ -602,7 +676,7 @@ pub fn flare(ctx: &mut HostCtx, c: (i64, i64, i64)) -> Option<Option<Site>> {
         if h0 < 2.0 || amp > 500.0 || near_town(w, p, 2000.0) {
             return Some(None);
         }
-        let t = pt(ctx, p)?;
+        let t = pt_exact_if(w, p, pt(ctx, p)?);
         if t.water_kind != crate::world::water::NONE {
             return Some(None);
         }
@@ -643,15 +717,29 @@ pub fn solar(ctx: &mut HostCtx, pl: &Place, k: u32) -> Option<Option<Site>> {
         let mut hi = f64::MIN;
         let ts: Vec<Option<crate::tile::PointTerrain>> =
             [(0.0, 0.0), (hx, hy), (-hx, hy), (hx, -hy), (-hx, -hy)].iter().map(|&(u, v)| pt(ctx, offset(w, c, ex, ey, u, v))).collect();
-        for t in ts {
-            let t = t?;
-            if t.water_kind != crate::world::water::NONE {
-                return Some(None);
-            }
+        let ts: Vec<crate::tile::PointTerrain> = ts.into_iter().collect::<Option<_>>()?;
+        let mut fragile = false;
+        for t in &ts {
+            fragile |= water_fragile(t);
             lo = lo.min(t.ground);
             hi = hi.max(t.ground);
         }
-        if hi - lo > 12.0 + 0.004 * hx {
+        let lim = 12.0 + 0.004 * hx;
+        // (close to a decision: exactly)
+        let ts = if fragile || (hi - lo - lim).abs() < 2.0 * TIE_H {
+            lo = f64::MAX;
+            hi = f64::MIN;
+            let ps = [(0.0, 0.0), (hx, hy), (-hx, hy), (hx, -hy), (-hx, -hy)].map(|(u, v)| offset(w, c, ex, ey, u, v));
+            let ts: Vec<_> = ps.iter().map(|&q| pt_exact(w, q)).collect();
+            for t in &ts {
+                lo = lo.min(t.ground);
+                hi = hi.max(t.ground);
+            }
+            ts
+        } else {
+            ts
+        };
+        if ts.iter().any(|t| t.water_kind != crate::world::water::NONE) || hi - lo > lim {
             return Some(None);
         }
         let (s0, s1) = seed_v(id);
@@ -697,19 +785,9 @@ pub fn sites_near(ctx: &mut HostCtx, center: DVec3, radius: f64, gsd: f64, out: 
                 push(solar(ctx, pl, k), out);
             }
         }
-        if gsd < 1200.0 && pl.parent == 0 && d < radius + 30_000.0 && u01k(pl.id, 50) < if pl.level >= CITY { 0.5 } else { 0.15 } {
-            push(dam(ctx, mix64(pl.id ^ 0xDA4), pl.center, pl.radius + 2500.0, 22_000.0), out);
-        }
     }
-    if gsd < 1200.0 {
-        // mountain dams
-        for c in lattice_cells(w, MTN_DAM_CELL, center, radius + 30_000.0) {
-            if let Some((id, p)) = lattice_site(w, 0xDA7, MTN_DAM_CELL, c) {
-                if u01k(id, 1) < 0.2 && w.smooth_relief(p, 3000.0).1 > 350.0 && w.atlas().sample(p.normalize()).glaciation < 0.4 {
-                    push(dam(ctx, id, p, 0.0, 20_000.0), out);
-                }
-            }
-        }
+    for s in dams_near(ctx, center, radius, gsd, &towns) {
+        push(Some(Some(s)), out);
     }
     if gsd < 300.0 {
         for c in lattice_cells(w, QUARRY_CELL, center, radius + 3_500.0) {
@@ -726,6 +804,55 @@ pub fn sites_near(ctx: &mut HostCtx, center: DVec3, radius: f64, gsd: f64, out: 
             push(flare(ctx, c), out);
         }
     }
+}
+
+/// The dams and reservoirs whose reach meets the area (`towns`: the places of levels ≥ town
+/// within its radius + 32 km).
+pub fn dams_near(ctx: &mut HostCtx, center: DVec3, radius: f64, gsd: f64, towns: &[Place]) -> Vec<Site> {
+    let w = ctx.world;
+    let mut out = Vec::new();
+    if gsd >= 1200.0 {
+        return out;
+    }
+    let mut push = |s: Option<Option<Site>>| {
+        if let Some(Some(s)) = s {
+            if (s.center - center).length() <= radius + s.reach {
+                out.push(s);
+            }
+        }
+    };
+    for pl in towns {
+        let d = (pl.center - center).length();
+        if pl.parent == 0 && d < radius + 30_000.0 && u01k(pl.id, 50) < if pl.level >= CITY { 0.5 } else { 0.15 } {
+            push(dam(ctx, mix64(pl.id ^ 0xDA4), pl.center, pl.radius + 2500.0, 22_000.0));
+        }
+    }
+    // mountain dams
+    for c in lattice_cells(w, MTN_DAM_CELL, center, radius + 30_000.0) {
+        if let Some((id, p)) = lattice_site(w, 0xDA7, MTN_DAM_CELL, c) {
+            if u01k(id, 1) < 0.2 && w.smooth_relief(p, 3000.0).1 > 350.0 && w.atlas().sample(p.normalize()).glaciation < 0.4 {
+                push(dam(ctx, id, p, 0.0, 20_000.0));
+            }
+        }
+    }
+    out
+}
+
+/// Is the place centre `p` drowned by one of the reservoir pieces `res` (its ground > 1 m below
+/// the water level)? None while a point evaluation is pending.
+pub fn drowned(ctx: &mut HostCtx, res: &[FSeg], p: DVec3) -> Option<bool> {
+    let mut level = f64::NEG_INFINITY;
+    for sg in res.iter().filter(|sg| sg.kind == tpl::RESERVOIR) {
+        if reservoir_at(sg, p, f64::NEG_INFINITY, 0.1).0 > 0.5 {
+            level = level.max(sg.ha as f64);
+        }
+    }
+    if level == f64::NEG_INFINITY {
+        return Some(false);
+    }
+    let g = pt(ctx, p)?.ground;
+    // (near the level: exactly, the same on both backends)
+    Some(if (g - (level - 1.0)).abs() < TIE_H { pt_exact(ctx.world, p).ground } else { g } < level - 1.0)
 }
 
 /// Clear the site cache (tests).

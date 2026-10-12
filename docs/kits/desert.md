@@ -59,6 +59,16 @@ outside the sand seas.
 braided threads of gravel and sand bars parallel to the banks that merge and split; acacia and
 tamarisk along them, oasis gardens and date palm groves on some stretches (biome layers).
 
+**Qanats.** Underground channels from a mother well at the foot of the mountains down to an
+oasis, seen as dotted lines of shaft mounds: rings of pale spoil 8–13 m across around a dark
+shaft every 30–55 m. Host-built (`qanat_group`, shared by both backends): a lattice of 9 km
+cells holds a group where the culture digs them (desert oasis, highland, steppe and
+Mediterranean archetypes, fewer with development), the climate is arid and warm and the ground
+a piedmont (the smooth relief's slope 0.8–6 % with mountains near); 1–3 lines fan out upslope
+from a common outlet, each 3–8 km long with a bend, as segments of kind 64. The layer (slot 6,
+`qanats`) draws the mounds, or their mean along the line where they are below the pixel; not
+in sand seas. Listed below 60 m pixels.
+
 **Colour and biomes.** Sand takes the biome's sand palette by the regional style, tinted by the
 ecoregion's lithology: iron-red on crystalline rock, pale on carbonate, yellow on unconsolidated
 sediment, dark grey to black (class `volcanic_ash`) on volcanic rock. Biomes (by Köppen class,
@@ -90,6 +100,7 @@ GPU renders of the default world (`terrain survey`, 10:30 local solar time, equi
 | ![linear dunes, 10 km](images/desert_linear_10km.jpg) linear (seif) dunes and dark corridors, 10 km (23.54, 43.23) | ![star dunes, 1.5 km](images/desert_star_1500m.jpg) star dunes, 1.5 km (−31.15, −166.35) |
 | ![barchans, 1.5 km](images/desert_barchans_1500m.jpg) barchans on the stony fringe of an erg, 1.5 km (20.84, −50.06) | ![barchans, 300 m](images/desert_barchans_300m.jpg) a barchan, varnish and sand streaks, 300 m |
 | ![playa, 300 m](images/desert_playa_300m.jpg) salt crust and cracks of a playa, 300 m (−11.86, −162.15) | ![dry lake, 1.5 km](images/desert_drylake_1500m.jpg) a lake dried into a salt pan with brine pools, 1.5 km (−12.41, −155.10) |
+| ![qanats, 800 m](images/desert_qanats_800m.jpg) two qanat lines of shaft mounds converging downslope, nadir 800 m (27.049, 34.401) | |
 
 ## Performance
 
@@ -123,3 +134,23 @@ so they cost little outside deserts.
 * ignored tools: `desert_places` (places of the default world by landform),
   `desert_previews` (`DESERT_PNG=dir`, nadir rgb and hillshade at the kit's places or
   `DESERT_AT="lat,lon;…"`, `DESERT_Z`, `DESERT_CPU`), `desert_probe`.
+
+## Known limits
+
+* Desert varnish and gravel mottling are noise patches (`patches` kernel layers): from 1.5 km up
+  they read as blotches of uniform size rather than varnish streaks following the slope.
+* The core's drainage still runs through the sand seas: where the sand mask is high the kit
+  takes the dunes over but not the channels, so a regular grid of straight washes can cross an
+  erg (the core does not yet skip drainage carving where `sand` > 0.5).
+* Lakes inside ergs are drawn as water in humid-enough cells (the dry-lake layer dries them
+  only where the climate is arid); an erg with an open lake can result at its wetter margin.
+* Playas and inselbergs are families of 36 km and 16 km cells: at zooms 8–9 a few blocks list
+  more than 8 instances and the generator warns (both backends keep the first 8 by id; deeper
+  zooms are unaffected).
+* Dunes are relief of pass A, barchans a height added in pass B (not in the DTM or the
+  drainage); yardangs are colour and pass-B height only.
+* Star dunes are 100–300 m high and up to 1.15 km in radius, smaller than the largest real
+  ones (Badain Jaran); linear dunes do not branch around obstacles (inselbergs, playas).
+* No stills yet of inselbergs, yardangs or the gypsum and basalt biomes.
+* Oases, palm groves and qanats are drawn by the agriculture kit (groves) and this kit
+  (qanats, below the oasis fields); see their sections.

@@ -19,20 +19,20 @@ struct AgMix {
 }
 
 // BEGIN GENERATED (kits::agriculture::wgsl_tables; AERIALSYNTH_BLESS=1 cargo test -p terragen --lib agriculture)
-fn agri_arch_w(a: u32) -> array<f32, 14> {
+fn agri_arch_w(a: u32) -> array<f32, 15> {
     switch a {
-        case 0u: { return array<f32, 14>(0.08, 0.0, 0.0, 0.0, 0.0, 0.5, 0.12, 0.06, 0.0, 0.04, 0.08, 0.0, 0.12, 0.0); }
-        case 1u: { return array<f32, 14>(0.1, 0.0, 0.0, 0.0, 0.0, 0.15, 0.1, 0.04, 0.0, 0.02, 0.5, 0.0, 0.09, 0.0); }
-        case 2u: { return array<f32, 14>(0.08, 0.0, 0.0, 0.0, 0.0, 0.32, 0.0, 0.02, 0.0, 0.0, 0.02, 0.0, 0.5, 0.06); }
-        case 3u: { return array<f32, 14>(0.08, 0.05, 0.0, 0.0, 0.0, 0.1, 0.0, 0.04, 0.02, 0.22, 0.0, 0.09, 0.05, 0.35); }
-        case 4u: { return array<f32, 14>(0.12, 0.04, 0.42, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.07); }
-        case 5u: { return array<f32, 14>(0.12, 0.0, 0.0, 0.04, 0.0, 0.06, 0.0, 0.16, 0.3, 0.25, 0.0, 0.08, 0.06, 0.03); }
-        case 6u: { return array<f32, 14>(0.28, 0.0, 0.02, 0.2, 0.2, 0.0, 0.0, 0.02, 0.08, 0.06, 0.0, 0.03, 0.14, 0.0); }
-        case 7u: { return array<f32, 14>(0.1, 0.66, 0.02, 0.0, 0.0, 0.0, 0.0, 0.0, 0.02, 0.05, 0.0, 0.02, 0.09, 0.04); }
-        case 8u: { return array<f32, 14>(0.1, 0.0, 0.0, 0.0, 0.0, 0.15, 0.6, 0.04, 0.0, 0.02, 0.05, 0.02, 0.02, 0.0); }
-        case 9u: { return array<f32, 14>(0.4, 0.0, 0.0, 0.08, 0.06, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.45, 0.0); }
-        case 10u: { return array<f32, 14>(0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.7, 0.0); }
-        default: { return array<f32, 14>(0.06, 0.0, 0.0, 0.06, 0.0, 0.24, 0.08, 0.38, 0.0, 0.02, 0.02, 0.0, 0.14, 0.0); }
+        case 0u: { return array<f32, 15>(0.08, 0.0, 0.0, 0.0, 0.0, 0.5, 0.12, 0.06, 0.0, 0.04, 0.08, 0.0, 0.12, 0.0, 0.02); }
+        case 1u: { return array<f32, 15>(0.1, 0.0, 0.0, 0.0, 0.0, 0.15, 0.1, 0.04, 0.0, 0.02, 0.5, 0.0, 0.09, 0.0, 0.04); }
+        case 2u: { return array<f32, 15>(0.08, 0.0, 0.0, 0.0, 0.0, 0.32, 0.0, 0.02, 0.0, 0.0, 0.02, 0.0, 0.5, 0.06, 0.15); }
+        case 3u: { return array<f32, 15>(0.08, 0.05, 0.0, 0.0, 0.0, 0.1, 0.0, 0.04, 0.02, 0.22, 0.0, 0.09, 0.05, 0.35, 0.06); }
+        case 4u: { return array<f32, 15>(0.12, 0.04, 0.42, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.07, 0.18); }
+        case 5u: { return array<f32, 15>(0.12, 0.0, 0.0, 0.04, 0.0, 0.06, 0.0, 0.16, 0.3, 0.25, 0.0, 0.08, 0.06, 0.03, 0.05); }
+        case 6u: { return array<f32, 15>(0.28, 0.0, 0.02, 0.2, 0.2, 0.0, 0.0, 0.02, 0.08, 0.06, 0.0, 0.03, 0.14, 0.0, 0.0); }
+        case 7u: { return array<f32, 15>(0.1, 0.66, 0.02, 0.0, 0.0, 0.0, 0.0, 0.0, 0.02, 0.05, 0.0, 0.02, 0.09, 0.04, 0.16); }
+        case 8u: { return array<f32, 15>(0.1, 0.0, 0.0, 0.0, 0.0, 0.15, 0.6, 0.04, 0.0, 0.02, 0.05, 0.02, 0.02, 0.0, 0.0); }
+        case 9u: { return array<f32, 15>(0.4, 0.0, 0.0, 0.08, 0.06, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.45, 0.0, 0.0); }
+        case 10u: { return array<f32, 15>(0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.7, 0.0, 0.0); }
+        default: { return array<f32, 15>(0.06, 0.0, 0.0, 0.06, 0.0, 0.24, 0.08, 0.38, 0.0, 0.02, 0.02, 0.0, 0.14, 0.0, 0.04); }
     }
 }
 fn agri_sys(i: u32) -> AgSys {
@@ -50,7 +50,8 @@ fn agri_sys(i: u32) -> AgSys {
         case 10u: { return AgSys(0u, vec2<f32>(480.0, 360.0), vec4<u32>(7u, 13u, 8u, 0u), vec4<f32>(0.45, 0.22, 0.15, 0.18), vec2<u32>(5u, 0u), vec2<f32>(0.9, 0.1), vec2<f32>(0.6, 0.8), 0.0, 0.0); }
         case 11u: { return AgSys(0u, vec2<f32>(95.0, 60.0), vec4<u32>(10u, 0u, 1u, 11u), vec4<f32>(0.76, 0.13, 0.09, 0.02), vec2<u32>(5u, 0u), vec2<f32>(0.25, 0.75), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
         case 12u: { return AgSys(0u, vec2<f32>(850.0, 650.0), vec4<u32>(2u, 3u, 1u, 11u), vec4<f32>(0.82, 0.12, 0.04, 0.02), vec2<u32>(0u, 1u), vec2<f32>(0.85, 0.15), vec2<f32>(0.38, 0.5), 0.0, 0.0); }
-        default: { return AgSys(3u, vec2<f32>(805.0, 805.0), vec4<u32>(0u, 1u, 0u, 0u), vec4<f32>(0.75, 0.25, 0.0, 0.0), vec2<u32>(6u, 6u), vec2<f32>(1.0, 0.0), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
+        case 13u: { return AgSys(3u, vec2<f32>(805.0, 805.0), vec4<u32>(0u, 1u, 0u, 0u), vec4<f32>(0.75, 0.25, 0.0, 0.0), vec2<u32>(6u, 6u), vec2<f32>(1.0, 0.0), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
+        default: { return AgSys(0u, vec2<f32>(2200.0, 1500.0), vec4<u32>(2u, 3u, 1u, 11u), vec4<f32>(0.86, 0.04, 0.08, 0.02), vec2<u32>(5u, 0u), vec2<f32>(0.4, 0.6), vec2<f32>(0.38, 0.5), 0.0, 0.0); }
     }
 }
 /// A crop: linear colours in spring, summer, autumn; (row spacing, contrast, height).
@@ -90,7 +91,8 @@ const AG_PADDY: u32 = 6u;
 const AG_TERRACE: u32 = 7u;
 const AG_GREENH: u32 = 11u;
 const AG_PASTURE: u32 = 12u;
-const AG_N: u32 = 14u;
+const AG_RANCH: u32 = 14u;
+const AG_N: u32 = 15u;
 
 const AK_CROP: u32 = 0u;
 const AK_FALLOW: u32 = 1u;
@@ -154,10 +156,10 @@ fn rotl64(x: u64, k: u32) -> u64 {
 }
 
 /// `weights`.
-fn agri_weights(e: EcoV) -> array<f32, 14> {
+fn agri_weights(e: EcoV) -> array<f32, 15> {
     var w = agri_arch_w(min(e.arch, 11u));
     let k = e.koppen;
-    var m = array<f32, 14>(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0);
+    var m = array<f32, 15>(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0);
     if (k >= 7u && k <= 9u) {
         m[8] = 3.0;
         m[9] = 3.0;
@@ -167,6 +169,7 @@ fn agri_weights(e: EcoV) -> array<f32, 14> {
         m[4] = 0.2;
         m[1] = 0.6;
         m[10] = 0.0;
+        m[14] = 0.6;
     } else if (k == 14u || k == 15u) {
         m[4] = 2.5;
         m[12] = 1.6;
@@ -174,9 +177,11 @@ fn agri_weights(e: EcoV) -> array<f32, 14> {
         m[9] = 0.5;
         m[6] = 0.1;
         m[13] = 0.0;
+        m[14] = 0.0;
     } else if (k == 10u || k == 13u) {
         m[6] = 1.8;
         m[10] = 1.2;
+        m[14] = 0.5;
     } else if (k <= 2u) {
         var wet = 1.0;
         if (k <= 1u) {
@@ -190,6 +195,7 @@ fn agri_weights(e: EcoV) -> array<f32, 14> {
         m[1] = 0.4;
         m[4] = 0.0;
         m[3] = 0.2;
+        m[14] = select(1.0, 0.3, k <= 1u);
     } else if (k >= 3u && k <= 6u) {
         let desert = k <= 4u;
         m[13] = select(2.0, 4.0, desert);
@@ -199,6 +205,7 @@ fn agri_weights(e: EcoV) -> array<f32, 14> {
         m[10] = 0.0;
         m[8] = 0.5;
         m[11] = select(1.0, 1.5, desert);
+        m[14] = select(3.0, 0.3, desert);
     } else if (k >= 16u && k <= 27u) {
         m[2] = 1.6;
         m[6] = 0.15;
@@ -206,6 +213,7 @@ fn agri_weights(e: EcoV) -> array<f32, 14> {
         m[9] = 0.4;
         m[8] = 0.4;
         m[4] = 0.6;
+        m[14] = 0.7;
     } else if (k >= 28u) {
         for (var i = 0u; i < AG_N; i++) {
             if (i != AG_CORE && i != AG_PASTURE) {
@@ -342,6 +350,10 @@ fn agriculture_slot_agriculture(s: ptr<function, Stack>) {
 
 fn agriculture_slot_linear(s: ptr<function, Stack>) {
     let pl = agri_plan(s);
+    if (pl.ok && pl.sys == AG_RANCH) {
+        agri_feedlot(s, pl);
+        return;
+    }
     if (!pl.ok || pl.sys != AG_SECTION) {
         return;
     }
@@ -361,6 +373,110 @@ fn agriculture_slot_linear(s: ptr<function, Stack>) {
     var ly = layer_paint(cov, col, cls);
     ly.hmode = HM_BLEND;
     ly.relit = 0.5;
+    ly.clear = 1.0;
+    composite(s, ly);
+}
+
+/// `feedlot`: pens, feed alleys and bunks, cattle, a feed mill, manure lagoons (ranches).
+fn agri_feedlot(s: ptr<function, Stack>, pl: Plan) {
+    let seed = pl.seed;
+    if (u01k(seed, 0xFEE0lu) >= 0.2 + 0.45 * pl.e.dev) {
+        return;
+    }
+    let c = vec2<f32>(1600.0 * (u01k(seed, 0xFEE1lu) - 0.5), 1000.0 * (u01k(seed, 0xFEE2lu) - 0.5));
+    let hx = 220.0 + 260.0 * u01k(seed, 0xFEE3lu);
+    let hy = 140.0 + 160.0 * u01k(seed, 0xFEE4lu);
+    let lag = 130.0 + 90.0 * u01k(seed, 0xFEE5lu);
+    let d = (*s).q_rot - c;
+    if (d.x < -hx - 30.0 || d.x > hx + lag + 30.0 || abs(d.y) > hy + 30.0 || (*s).l.slope > 0.15 || (*s).cls == LC_LAKE) {
+        return;
+    }
+    let gsd = (*s).c.gsd;
+    let p = (*s).c.p;
+    let fw = max((*s).l.fw, 0.5 * gsd);
+    let soil = spal(s, BP_SOIL + 1u);
+    var col: vec3<f32>;
+    var dh = 0.0;
+    var cls: u32;
+    var cov: f32;
+    if (d.x < hx + 20.0) {
+        cov = band_cov(d.x, hx, fw) * band_cov(d.y, hy, fw);
+        let pen_x = 60.0;
+        let pen_y = 40.0;
+        let alley = 12.0;
+        let per = 2.0 * pen_y + alley;
+        let yy = rem_euclid(d.y + hy, per);
+        let pid = hash2(seed ^ 0xFEE6lu, i64(floor(d.x / pen_x)), i64(floor((d.y + hy) / per)) * 2li + select(0li, 1li, yy > pen_y));
+        let manure = srgb(64.0, 52.0, 40.0) * (0.85 + 0.3 * u01k(pid, 1lu));
+        var c0 = manure * (1.0 + 0.1 * perlin3(seed ^ 0xFEE7lu, p * (1.0lf / 9.0lf)) * band(9.0, gsd));
+        let cell = 2.6;
+        let ci = i64(floor(d.x / cell));
+        let cj = i64(floor(d.y / cell));
+        let hc = hash2(seed ^ 0xFEE8lu, ci, cj);
+        if (u01k(hc, 1lu) < 0.22) {
+            let kc = u32(u01k(hc, 2lu) * 2.99);
+            var cc = srgb(30.0, 26.0, 22.0);
+            if (kc == 1u) {
+                cc = srgb(96.0, 60.0, 40.0);
+            } else if (kc == 2u) {
+                cc = srgb(196.0, 186.0, 170.0);
+            }
+            let off = vec2<f32>(d.x - (f32(ci) + 0.5) * cell, d.y - (f32(cj) + 0.5) * cell);
+            c0 = mixc(c0, cc, band_cov(length(off), 0.8, fw) * band(cell, gsd));
+        }
+        let alley_c = srgb(168.0, 160.0, 146.0);
+        let in_alley = band_cov(yy - (pen_y + 0.5 * alley), 0.5 * alley, fw);
+        let bunk = min(band_cov(yy - (pen_y - 1.5), 1.5, fw) + band_cov(yy - (pen_y + alley + 1.5), 1.5, fw), 1.0);
+        let fx = abs(d.x / pen_x - round(d.x / pen_x)) * pen_x;
+        let fence = max(band_cov(fx, 0.25, fw), band_cov(min(yy, per - yy), 0.25, fw)) * band(1.0, gsd);
+        col = mixc(c0, alley_c, in_alley * band(alley, gsd));
+        col = mixc(col, srgb(196.0, 194.0, 186.0), bunk * band(3.0, gsd));
+        col = mixc(col, srgb(150.0, 140.0, 126.0), fence * (1.0 - in_alley));
+        cls = LC_FARMYARD;
+        dh = 0.3 * bunk;
+        if (d.x < -hx + 80.0) {
+            let m = vec2<f32>(d.x + hx - 40.0, d.y - 0.45 * hy * (u01k(seed, 0xFEE9lu) - 0.5));
+            let pad = band_cov(m.x, 40.0, fw) * band_cov(m.y, 60.0, fw);
+            col = mixc(col, srgb(176.0, 172.0, 164.0), pad);
+            for (var k = 0u; k < 3u; k++) {
+                let b = band_cov(m.x - 10.0, 22.0, fw) * band_cov(m.y - 14.0 * f32(k) - 6.0, 5.0, fw);
+                col = mixc(col, select(srgb(222.0, 222.0, 216.0), srgb(40.0, 40.0, 42.0), k == 1u), b);
+                dh += 2.5 * b;
+            }
+            let shed = band_cov(m.x + 18.0, 14.0, fw) * band_cov(m.y + 30.0, 22.0, fw);
+            col = mixc(col, srgb(200.0, 204.0, 206.0), shed);
+            dh += 9.0 * shed;
+            for (var k = 0u; k < 2u; k++) {
+                let o = m - vec2<f32>(-24.0 + 12.0 * f32(k), -2.0);
+                let silo = band_cov(length(o), 4.5, fw);
+                col = mixc(col, srgb(216.0, 218.0, 220.0), silo);
+                dh += 22.0 * silo;
+            }
+            if (pad > 0.5) {
+                cls = LC_BUILDING;
+            }
+        }
+    } else {
+        let x0 = hx + 30.0 + 0.5 * (lag - 30.0);
+        let yc = select(-0.5 * hy, 0.5 * hy, d.y > 0.0);
+        let o = vec2<f32>(d.x - x0, d.y - yc);
+        let ax = 0.5 * (lag - 30.0) - 6.0;
+        let ay = 0.5 * hy - 14.0;
+        let q = vec2<f32>(abs(o.x) - ax + 12.0, abs(o.y) - ay + 12.0);
+        let dist = length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - 12.0;
+        let water = clamp(0.5 - dist / fw, 0.0, 1.0);
+        let bank = max(clamp(0.5 - (dist - 7.0) / fw, 0.0, 1.0) - water, 0.0);
+        cov = min(water + bank, 1.0);
+        col = mixc(soil * 0.9, srgb(58.0, 60.0, 42.0) * (1.0 + 0.08 * perlin3(seed ^ 0xFEEAlu, p * (1.0lf / 30.0lf)) * band(30.0, gsd)), water / max(cov, 1e-6));
+        dh = 1.2 * bank - 1.0 * water;
+        cls = select(LC_BARE, LC_LAKE, water > 0.5);
+    }
+    if (cov <= 0.0) {
+        return;
+    }
+    var ly = layer_paint(cov, col, cls);
+    ly.dh = dh;
+    ly.hmode = HM_BLEND;
     ly.clear = 1.0;
     composite(s, ly);
 }
@@ -1171,7 +1287,7 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
     }
     var trees = d.trees;
     var tcell = 30.0;
-    if (pl.sys == AG_PASTURE && pl.e.temp > 18.0) {
+    if ((pl.sys == AG_PASTURE || pl.sys == AG_RANCH) && pl.e.temp > 18.0) {
         trees = 0.12;
         tcell = 60.0;
     }
@@ -1215,7 +1331,7 @@ fn agri_pasture(pl: Plan, pc: Parcel, px: AgPx, id: u64, q: vec2<f32>) -> Shade 
     col *= 1.0 + 0.10 * tus + 0.12 * perlin3(id ^ 0x9A8lu, p * (1.0lf / 40.0lf)) * band(40.0, gsd);
     var cls = LC_PASTURE;
     var dh = 0.1;
-    if (pl.sys == AG_PASTURE || pl.sys == AG_SHELTER || pl.sys == AG_SECTION) {
+    if (pl.sys == AG_PASTURE || pl.sys == AG_SHELTER || pl.sys == AG_SECTION || pl.sys == AG_RANCH) {
         let half = 0.5 * pc.size;
         let t = vec2<f32>(0.4 * half * (u01k(id, 60lu) - 0.5), 0.4 * half * (u01k(id, 61lu) - 0.5));
         let rel = q - pc.fc - t;

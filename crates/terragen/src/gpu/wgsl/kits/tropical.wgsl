@@ -527,3 +527,120 @@ fn tropical_grass(li: u32, i: KIn) -> KOut {
     o.albedo = col;
     return o;
 }
+
+// ---------------------------------------------------------------- slot 8: river water
+
+/// `kits::tropical::rivers`: white-water (café au lait) and black-water tropical rivers.
+fn tropical_slot_water(s: ptr<function, Stack>) {
+    let l = (*s).l;
+    if (l.water > l.ground && l.water_kind != W_NONE) {
+        return;
+    }
+    let t = (*s).t;
+    if (l.river_hw <= 0.0 || t.river_wet < 0.5 || t.temp < 18.0 || l.ground > 900.0) {
+        return;
+    }
+    let fwr = max(l.fw, (*s).c.gsd * 0.35);
+    let cov = band_cov(l.river_d, l.river_hw, fwr);
+    if (cov <= 0.0) {
+        return;
+    }
+    let trop = smoothstep1(18.0, 21.0, t.temp) * (1.0 - smoothstep1(600.0, 900.0, l.ground));
+    let black = l.river_hw < 25.0 && t.moist > 0.62 && t.style.w > 0.55;
+    var col = mixc(srgb(128.0, 100.0, 68.0), srgb(158.0, 128.0, 88.0), smoothstep1(10.0, 120.0, l.river_hw));
+    if (black) {
+        col = srgb(36.0, 28.0, 21.0);
+    }
+    composite(s, layer_paint(cov, mixc((*s).col, col, trop), 0u));
+}
+
+// ---------------------------------------------------------------- canopy slot: fishbone
+
+/// `kits::tropical::fishbone`: colonization roads and lot clearings in the rainforest.
+fn tropical_slot_canopy(s: ptr<function, Stack>) {
+    let t = (*s).t;
+    let l = (*s).l;
+    if ((*s).is_water || t.temp < 21.0 || t.moist < 0.5 || l.ground > 700.0 || l.slope > 0.3 || t.development > 0.65) {
+        return;
+    }
+    let p = (*s).c.p;
+    let c = floor(p * (1.0lf / 200000.0lf));
+    let cc = (c + vec3<f64>(0.5lf)) * 200000.0lf;
+    let up = normalize(vec3<f32>(cc));
+    let o = vec3<f64>(up) * TROPICAL_R0;
+    let el = sqrt(up.x * up.x + up.y * up.y);
+    var east = vec3<f32>(1.0, 0.0, 0.0);
+    if (el > 1e-6) {
+        east = vec3<f32>(-up.y / el, up.x / el, 0.0);
+    }
+    let north = cross(up, east);
+    let d = vec3<f32>(p - o);
+    let q = vec2<f32>(dot(d, east), dot(d, north));
+    let ah = hash3(0xF15Blu, i64(c.x), i64(c.y), i64(c.z));
+    let bi = floor(q.x / 22000.0);
+    let bj = floor(q.y / 22000.0);
+    let bh = hash2(ah, i64(bi), i64(bj));
+    if (u01k(bh, 1lu) >= 0.3) {
+        return;
+    }
+    let gsd = (*s).c.gsd;
+    let fw = max(l.fw, 0.5 * gsd);
+    let y0 = (bj + 0.3 + 0.4 * u01k(bh, 2lu)) * 22000.0;
+    let off = u01k(bh, 3lu) * 4400.0;
+    let fi = round((q.x - off) / 4400.0);
+    let x0 = fi * 4400.0 + off;
+    let dx = q.x - x0;
+    let dy = q.y - y0;
+    let lj = floor(dy / 250.0);
+    let hl = hash3(bh, i64(fi), i64(lj), select(0li, 1li, dx > 0.0));
+    let age = 1.0 - min(abs(dy) / 11000.0, 1.0);
+    let depth = 3000.0 * (0.1 + 0.9 * u01k(hl, 1lu)) * (0.25 + 0.75 * sqrt(age));
+    let lk = floor(q.x / 250.0);
+    let ht = hash3(bh ^ 0x7Blu, i64(lk), 0li, select(0li, 1li, dy > 0.0));
+    let depth_t = 3000.0 * (0.2 + 0.6 * u01k(ht, 1lu));
+    let n = 80.0 * perlin3(bh ^ 0x7Clu, p * (1.0lf / 350.0lf));
+    let reach = abs(dy) < 11000.0 - 300.0;
+    let feeder_lot = reach && abs(dx) < depth + n;
+    let trunk_lot = abs(dy) < depth_t + n;
+    let cleared = trunk_lot || feeder_lot;
+    var h = 0lu;
+    if (trunk_lot) {
+        h = ht;
+    } else if (feeder_lot) {
+        h = hl;
+    }
+    let road = max(band_cov(dx, 3.0, fw) * select(0.0, 1.0, reach), band_cov(dy, 5.0, fw));
+    if (!cleared && road <= 0.0) {
+        return;
+    }
+    let laterite = spal(s, BP_LATERITE);
+    var col = (*s).col;
+    var cls = LC_TRACK;
+    if (cleared) {
+        let u = u01k(h, 2lu);
+        var cc2 = srgb(66.0, 92.0, 52.0);
+        cls = LC_CLEAR_CUT;
+        if (u < 0.55) {
+            cc2 = srgb(118.0, 124.0, 82.0);
+            cls = LC_PASTURE;
+        } else if (u < 0.62) {
+            cc2 = srgb(62.0, 58.0, 52.0);
+            cls = LC_BURN_SCAR;
+        } else if (u < 0.7) {
+            cc2 = laterite * 0.9;
+            cls = LC_BARE;
+        } else if (u < 0.85) {
+            cc2 = srgb(108.0, 118.0, 72.0);
+            cls = LC_CROP;
+        }
+        col = cc2 * (0.9 + 0.2 * u01k(h, 3lu)) * (1.0 + 0.08 * perlin3(h, p * (1.0lf / 60.0lf)) * band(60.0, gsd));
+    }
+    col = mixc(col, laterite * 1.1, road);
+    if (road > 0.5) {
+        cls = LC_TRACK;
+    }
+    var ly = layer_paint(select(road, 1.0, cleared), col, cls);
+    ly.hmode = HM_BLEND;
+    ly.relit = 1.0;
+    composite(s, ly);
+}

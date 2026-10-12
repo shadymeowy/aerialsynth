@@ -91,3 +91,22 @@ ponds.
   is ragged with fine noise and a snow net along ~18 m polygon troughs.
 * The temperate kit's `forestry` is zero where the biome's trees are below 0.6 (forest tundra,
   tundra, polar desert): no managed stands there.
+
+## Known limits
+
+* Snow-covered clear-cuts of the temperate kit's managed boreal forest read as crisp white
+  rectangles in the snowy taiga (kettle still); the cuts and the snow are both correct, but the
+  stands' straight edges are conspicuous under snow.
+* Glaciers, moraines and seasonal snow are pass-B surfaces (colour, class, height in the
+  seasonal slot): the DTM and the drainage keep the valley below them; troughs and cirques come
+  from the mountains kit's carve hook, not from the glaciers drawn here.
+* Sea ice is a function of the atlas' temperature at the ecoregion's date and of the depth: no
+  drift, no polynyas tied to winds or coasts; leads and pressure ridges are noise patterns.
+* Kettle and thermokarst lakes are lattices tested per pixel: their existence near a lattice
+  site's threshold is decided at the site (both backends agree), but the transport kit's routing
+  only estimates their mask from pass A's values and the relief's slope.
+* Drumlin fields take one ice-flow azimuth per field (no fanning around obstacles); eskers are
+  sinuous ridges independent of the drainage.
+* Pingos and polygons ignore the drainage: polygons continue across small streams.
+* The snow line uses the warmest-month temperature and aspect, not avalanche paths or wind
+  redistribution: snow fields have smooth edges on steep ground.

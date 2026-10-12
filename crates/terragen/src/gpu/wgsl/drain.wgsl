@@ -446,7 +446,8 @@ fn lat_target(s: u32) {
                 }
             }
         }
-        // no lower neighbour: look a little farther for an outlet
+        // no lower neighbour: look a little farther for an outlet to the sea (inland: a
+        // closed basin, which holds a lake)
         if (best == LAT_NONE) {
             for (var dz = -2; dz <= 2; dz++) {
                 for (var dy = -2; dy <= 2; dy++) {
@@ -459,7 +460,7 @@ fn lat_target(s: u32) {
                         if (st == 2u) {
                             return;
                         }
-                        if (st == 0u) {
+                        if (st == 0u || lat_h[o] >= 0.0) {
                             continue;
                         }
                         let d = dist64(lat_s[o].xyz, me_s);

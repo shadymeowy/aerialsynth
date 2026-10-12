@@ -310,3 +310,65 @@ fn desert_slot_water(s: ptr<function, Stack>) {
     ly.clear = 0.8;
     composite(s, ly);
 }
+
+// ---------------------------------------------------------------- qanats (slot 6)
+
+/// `kits::desert::qanats`: the shaft mounds of the qanats (host segments of kind 64).
+fn desert_slot_linear(s: ptr<function, Stack>) {
+    let gsd = (*s).c.gsd;
+    if (gsd >= 60.0 || (*s).t.sand > 0.5 || (*s).l.slope > 0.25) {
+        return;
+    }
+    let blk = (*s).l.blk;
+    let nsg = feat_seg_n(blk);
+    if (nsg == 0u) {
+        return;
+    }
+    let p = (*s).c.p;
+    let fw = max((*s).l.fw, 0.5 * gsd);
+    let spoil = mixc(spal(s, BP_SAND + 2u), spal(s, BP_SOIL + 1u), 0.4) * 1.22;
+    let hole = srgb(46.0, 38.0, 30.0);
+    var bcov = 0.0;
+    var bcol = vec3<f32>(0.0);
+    var bdh = 0.0;
+    for (var k = 0u; k < nsg; k++) {
+        let sg = feat_seg(blk, k);
+        if (sg.kind != 64u) {
+            continue;
+        }
+        let fr = seg_frame(sg, p);
+        let d = fr.x;
+        let along = fr.y;
+        let sp = sg.v.x;
+        let r = sg.v.y;
+        let hw_l = max(r, 0.5 * gsd);
+        if (abs(d) > hw_l + fw) {
+            continue;
+        }
+        let kk = round(along / sp);
+        let u = along - kk * sp;
+        let rr = sqrt(d * d + u * u);
+        let e = smoothstep1(1.2 * gsd, 3.0 * gsd, 2.0 * r);
+        let ring = band_cov(rr, r, fw);
+        let shaft = band_cov(rr, 0.9, fw) * band(1.8, gsd);
+        let col_e = mixc(spoil, hole, shaft / max(ring, 1e-6));
+        let m = (PI * r * r / sp) / (2.0 * hw_l);
+        let cov_m = band_cov(d, hw_l, fw) * min(m, 1.0);
+        let col_m = mixc(spoil, hole, 0.9 * 0.9 / (r * r));
+        let cov = cov_m + (ring - cov_m) * e;
+        if (cov > 0.0 && cov > bcov) {
+            let x = min(rr / r, 1.0);
+            let dh = 1.4 * (1.0 - x * x) - 2.0 * shaft;
+            bcov = cov;
+            bcol = mixc(col_m, col_e, e);
+            bdh = dh * e;
+        }
+    }
+    if (bcov > 0.0) {
+        var ly = layer_paint(bcov, bcol, LC_BARE);
+        ly.dh = bdh;
+        ly.hmode = HM_BLEND;
+        ly.clear = 0.6;
+        composite(s, ly);
+    }
+}

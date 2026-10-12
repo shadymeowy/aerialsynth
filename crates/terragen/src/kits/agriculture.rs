@@ -20,6 +20,7 @@
 //! | greenhouse seas | white plastic bays, irrigation ponds |
 //! | pastures | paddocks, livestock trails to troughs, farm dams, hay meadows |
 //! | irrigated pivots | centre pivots in the desert |
+//! | ranches | huge fenced paddocks, stock trails to troughs and dams; feedlots (pens, a feed mill, manure lagoons) |
 //!
 //! **How a system is chosen.** Each ecoregion (its culture's archetype, its Köppen class,
 //! development; [`EcoV`]) weighs the systems ([`weights`]), with a dominant one per ecoregion,
@@ -70,7 +71,8 @@ pub mod sys {
     pub const GREENH: u32 = 11;
     pub const PASTURE: u32 = 12;
     pub const PIVOT: u32 = 13;
-    pub const N: usize = 14;
+    pub const RANCH: u32 = 14;
+    pub const N: usize = 15;
     #[allow(dead_code)]
     pub const NAMES: [&str; N] = [
         "core",
@@ -87,6 +89,7 @@ pub mod sys {
         "greenhouse",
         "pasture",
         "pivot",
+        "ranch",
     ];
 }
 
@@ -166,25 +169,26 @@ const SYS: [SysDef; sys::N] = {
         SysDef { part: GRID, size: [95.0, 60.0], kinds: [GREENH, CROP, FALLOW, POND], kw: [0.76, 0.13, 0.09, 0.02], borders: [TRACK, MARGIN], bp: [0.25, 0.75], ..D },
         SysDef { part: GRID, size: [850.0, 650.0], kinds: [PASTURE, HAY, FALLOW, POND], kw: [0.82, 0.12, 0.04, 0.02], borders: [MARGIN, HEDGE], bp: [0.85, 0.15], slope: [0.38, 0.5], ..D },
         SysDef { part: PIVOT, size: [805.0, 805.0], kinds: [CROP, FALLOW, CROP, CROP], kw: [0.75, 0.25, 0.0, 0.0], borders: [NONE, NONE], bp: [1.0, 0.0], ..D },
+        SysDef { part: GRID, size: [2200.0, 1500.0], kinds: [PASTURE, HAY, FALLOW, POND], kw: [0.86, 0.04, 0.08, 0.02], borders: [TRACK, MARGIN], bp: [0.4, 0.6], slope: [0.38, 0.5], ..D },
     ]
 };
 
 /// Base weights of the systems (`sys` order) by culture archetype (`atlas::Archetype` order).
 #[rustfmt::skip]
 const ARCH_W: [[f64; sys::N]; 12] = [
-    //core  sect  shelt strip bocag small paddy terr  vine  grove plant green past  pivot
-    [0.08, 0.0,  0.0,  0.0,  0.0,  0.50, 0.12, 0.06, 0.0,  0.04, 0.08, 0.0,  0.12, 0.0 ], // tropical smallholder
-    [0.10, 0.0,  0.0,  0.0,  0.0,  0.15, 0.10, 0.04, 0.0,  0.02, 0.50, 0.0,  0.09, 0.0 ], // tropical plantation
-    [0.08, 0.0,  0.0,  0.0,  0.0,  0.32, 0.0,  0.02, 0.0,  0.0,  0.02, 0.0,  0.50, 0.06], // savanna pastoral
-    [0.08, 0.05, 0.0,  0.0,  0.0,  0.10, 0.0,  0.04, 0.02, 0.22, 0.0,  0.09, 0.05, 0.35], // desert oasis
-    [0.12, 0.04, 0.42, 0.10, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.25, 0.07], // steppe
-    [0.12, 0.0,  0.0,  0.04, 0.0,  0.06, 0.0,  0.16, 0.30, 0.25, 0.0,  0.08, 0.06, 0.03], // mediterranean
-    [0.28, 0.0,  0.02, 0.20, 0.20, 0.0,  0.0,  0.02, 0.08, 0.06, 0.0,  0.03, 0.14, 0.0 ], // temperate village
-    [0.10, 0.66, 0.02, 0.0,  0.0,  0.0,  0.0,  0.0,  0.02, 0.05, 0.0,  0.02, 0.09, 0.04], // survey grid
-    [0.10, 0.0,  0.0,  0.0,  0.0,  0.15, 0.60, 0.04, 0.0,  0.02, 0.05, 0.02, 0.02, 0.0 ], // monsoon paddy
-    [0.40, 0.0,  0.0,  0.08, 0.06, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.01, 0.45, 0.0 ], // boreal
-    [0.30, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.70, 0.0 ], // arctic
-    [0.06, 0.0,  0.0,  0.06, 0.0,  0.24, 0.08, 0.38, 0.0,  0.02, 0.02, 0.0,  0.14, 0.0 ], // highland
+    //core  sect  shelt strip bocag small paddy terr  vine  grove plant green past  pivot ranch
+    [0.08, 0.0,  0.0,  0.0,  0.0,  0.50, 0.12, 0.06, 0.0,  0.04, 0.08, 0.0,  0.12, 0.0,  0.02], // tropical smallholder
+    [0.10, 0.0,  0.0,  0.0,  0.0,  0.15, 0.10, 0.04, 0.0,  0.02, 0.50, 0.0,  0.09, 0.0,  0.04], // tropical plantation
+    [0.08, 0.0,  0.0,  0.0,  0.0,  0.32, 0.0,  0.02, 0.0,  0.0,  0.02, 0.0,  0.50, 0.06, 0.15], // savanna pastoral
+    [0.08, 0.05, 0.0,  0.0,  0.0,  0.10, 0.0,  0.04, 0.02, 0.22, 0.0,  0.09, 0.05, 0.35, 0.06], // desert oasis
+    [0.12, 0.04, 0.42, 0.10, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.25, 0.07, 0.18], // steppe
+    [0.12, 0.0,  0.0,  0.04, 0.0,  0.06, 0.0,  0.16, 0.30, 0.25, 0.0,  0.08, 0.06, 0.03, 0.05], // mediterranean
+    [0.28, 0.0,  0.02, 0.20, 0.20, 0.0,  0.0,  0.02, 0.08, 0.06, 0.0,  0.03, 0.14, 0.0,  0.0 ], // temperate village
+    [0.10, 0.66, 0.02, 0.0,  0.0,  0.0,  0.0,  0.0,  0.02, 0.05, 0.0,  0.02, 0.09, 0.04, 0.16], // survey grid
+    [0.10, 0.0,  0.0,  0.0,  0.0,  0.15, 0.60, 0.04, 0.0,  0.02, 0.05, 0.02, 0.02, 0.0,  0.0 ], // monsoon paddy
+    [0.40, 0.0,  0.0,  0.08, 0.06, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.01, 0.45, 0.0,  0.0 ], // boreal
+    [0.30, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.70, 0.0,  0.0 ], // arctic
+    [0.06, 0.0,  0.0,  0.06, 0.0,  0.24, 0.08, 0.38, 0.0,  0.02, 0.02, 0.0,  0.14, 0.0,  0.04], // highland
 ];
 
 /// Crops: colour (sRGB) in spring, summer, autumn; row spacing (m), row contrast, height (m).
@@ -269,6 +273,7 @@ pub fn weights(e: &EcoV) -> [f64; sys::N] {
         m[BOCAGE as usize] = 0.2;
         m[SECTION as usize] = 0.6;
         m[PLANT as usize] = 0.0;
+        m[RANCH as usize] = 0.6;
     } else if k == 14 || k == 15 {
         // oceanic: hedged pastures
         m[BOCAGE as usize] = 2.5;
@@ -277,10 +282,12 @@ pub fn weights(e: &EcoV) -> [f64; sys::N] {
         m[GROVE as usize] = 0.5;
         m[PADDY as usize] = 0.1;
         m[PIVOT as usize] = 0.0;
+        m[RANCH as usize] = 0.0;
     } else if k == 10 || k == 13 {
         // humid subtropical: rice
         m[PADDY as usize] = 1.8;
         m[PLANT as usize] = 1.2;
+        m[RANCH as usize] = 0.5;
     } else if k <= 2 {
         // tropical
         let wet = if k <= 1 { 1.5 } else { 1.0 };
@@ -292,6 +299,8 @@ pub fn weights(e: &EcoV) -> [f64; sys::N] {
         m[SECTION as usize] = 0.4;
         m[BOCAGE as usize] = 0.0;
         m[STRIPS as usize] = 0.2;
+        // cattle ranches on the savannas (cerrado, llanos), few in the rainforest
+        m[RANCH as usize] = if k <= 1 { 0.3 } else { 1.0 };
     } else if (3..=6).contains(&k) {
         // dry
         let desert = k <= 4;
@@ -302,6 +311,8 @@ pub fn weights(e: &EcoV) -> [f64; sys::N] {
         m[PLANT as usize] = 0.0;
         m[VINE as usize] = 0.5;
         m[GREENH as usize] = if desert { 1.5 } else { 1.0 };
+        // semi-arid grazing: ranches
+        m[RANCH as usize] = if desert { 0.3 } else { 3.0 };
     } else if (16..=27).contains(&k) {
         // continental
         m[SHELTER as usize] = 1.6;
@@ -310,6 +321,7 @@ pub fn weights(e: &EcoV) -> [f64; sys::N] {
         m[GROVE as usize] = 0.4;
         m[VINE as usize] = 0.4;
         m[BOCAGE as usize] = 0.6;
+        m[RANCH as usize] = 0.7;
     } else if k >= 28 {
         // polar: pastures and the core's clearings only
         for (i, mi) in m.iter_mut().enumerate() {
@@ -444,9 +456,13 @@ fn fields(s: &mut Stack) {
     draw(s, &pl);
 }
 
-/// Slot 6: section-line farm tracks (every mile, east / north).
+/// Slot 6: section-line farm tracks (every mile, east / north); the feedlots of ranches.
 fn roads(s: &mut Stack) {
     let Some(pl) = plan(s) else { return };
+    if pl.sys == sys::RANCH {
+        feedlot(s, &pl);
+        return;
+    }
     if pl.sys != sys::SECTION {
         return;
     }
@@ -468,6 +484,106 @@ fn roads(s: &mut Stack) {
 }
 
 const MILE: f64 = 1609.344;
+
+/// The feedlot of a ranch region (seed `seed` of its plan, development `dev`): None or its
+/// centre in the region frame (`q_rot`), half sizes of the pens' lot, the width of the lagoon
+/// strip beyond its +x side (m).
+pub fn feedlot_site(seed: u64, dev: f64) -> Option<(DVec2, f64, f64, f64)> {
+    if u01k(seed, 0xFEE0) >= 0.2 + 0.45 * dev {
+        return None;
+    }
+    let c = DVec2::new(1600.0 * (u01k(seed, 0xFEE1) - 0.5), 1000.0 * (u01k(seed, 0xFEE2) - 0.5));
+    Some((c, 220.0 + 260.0 * u01k(seed, 0xFEE3), 140.0 + 160.0 * u01k(seed, 0xFEE4), 130.0 + 90.0 * u01k(seed, 0xFEE5)))
+}
+
+/// A feedlot (slot 6, in ranch regions; `docs/design/terrain-next.md` §5.8): pens of dark
+/// manure in double rows along feed alleys with concrete bunks, cattle; a feed mill with silos
+/// and silage bunkers at its −x end; manure lagoons in embankments beyond its +x end. No pivots.
+fn feedlot(s: &mut Stack, pl: &Plan) {
+    let Some((c, hx, hy, lag)) = feedlot_site(pl.seed, pl.e.dev) else { return };
+    let d = s.q_rot - c;
+    if d.x < -hx - 30.0 || d.x > hx + lag + 30.0 || d.y.abs() > hy + 30.0 || s.l.slope > 0.15 || s.class == crate::landcover::LAKE {
+        return;
+    }
+    let (gsd, p) = (s.ctx.gsd, s.ctx.p);
+    let fw = s.l.fw.max(0.5 * gsd);
+    let seed = pl.seed;
+    let soil = s.pal(pal::SOIL + 1);
+    let (mut col, mut dh, mut cls, cov);
+    if d.x < hx + 20.0 {
+        // the lot: pens (40 × 60 m) in double rows along 12 m feed alleys
+        cov = band_cov(d.x, hx, fw) * band_cov(d.y, hy, fw);
+        let (pen_x, pen_y, alley) = (60.0, 40.0, 12.0);
+        let per = 2.0 * pen_y + alley;
+        let yy = (d.y + hy).rem_euclid(per);
+        let manure = srgb(64.0, 52.0, 40.0)
+            * (0.85 + 0.3 * u01k(hash2(seed ^ 0xFEE6, (d.x / pen_x).floor() as i64, ((d.y + hy) / per).floor() as i64 * 2 + (yy > pen_y) as i64), 1));
+        let mut c0 = manure * (1.0 + 0.1 * perlin3(seed ^ 0xFEE7, p / 9.0) * band(9.0, gsd));
+        // cattle: dark, brown and white dots
+        let cell = 2.6;
+        let (ci, cj) = ((d.x / cell).floor() as i64, (d.y / cell).floor() as i64);
+        let hc = hash2(seed ^ 0xFEE8, ci, cj);
+        if u01k(hc, 1) < 0.22 {
+            let cc = [srgb(30.0, 26.0, 22.0), srgb(96.0, 60.0, 40.0), srgb(196.0, 186.0, 170.0)][(u01k(hc, 2) * 2.99) as usize];
+            let off = DVec2::new(d.x - (ci as f64 + 0.5) * cell, d.y - (cj as f64 + 0.5) * cell);
+            c0 = mixc(c0, cc, band_cov(off.length(), 0.8, fw) * band(cell, gsd));
+        }
+        // alleys and bunks (concrete), pen fences
+        let alley_c = srgb(168.0, 160.0, 146.0);
+        let in_alley = band_cov(yy - (pen_y + 0.5 * alley), 0.5 * alley, fw);
+        let bunk = (band_cov(yy - (pen_y - 1.5), 1.5, fw) + band_cov(yy - (pen_y + alley + 1.5), 1.5, fw)).min(1.0);
+        let fx = (d.x / pen_x - (d.x / pen_x).round()).abs() * pen_x;
+        let fence = band_cov(fx, 0.25, fw).max(band_cov(yy.min(per - yy), 0.25, fw)) * band(1.0, gsd);
+        col = mixc(c0, alley_c, in_alley * band(alley, gsd));
+        col = mixc(col, srgb(196.0, 194.0, 186.0), bunk * band(3.0, gsd));
+        col = mixc(col, srgb(150.0, 140.0, 126.0), fence * (1.0 - in_alley));
+        cls = CLS_FARMYARD;
+        dh = 0.3 * bunk;
+        // the feed mill: a concrete pad, silage bunkers, a mill shed and silos
+        if d.x < -hx + 80.0 {
+            let m = DVec2::new(d.x + hx - 40.0, d.y - 0.45 * hy * (u01k(seed, 0xFEE9) - 0.5));
+            let pad = band_cov(m.x, 40.0, fw) * band_cov(m.y, 60.0, fw);
+            col = mixc(col, srgb(176.0, 172.0, 164.0), pad);
+            // three bunkers (white plastic, black tyres)
+            for k in 0..3 {
+                let b = band_cov(m.x - 10.0, 22.0, fw) * band_cov(m.y - 14.0 * k as f64 - 6.0, 5.0, fw);
+                col = mixc(col, if k == 1 { srgb(40.0, 40.0, 42.0) } else { srgb(222.0, 222.0, 216.0) }, b);
+                dh += 2.5 * b;
+            }
+            let shed = band_cov(m.x + 18.0, 14.0, fw) * band_cov(m.y + 30.0, 22.0, fw);
+            col = mixc(col, srgb(200.0, 204.0, 206.0), shed);
+            dh += 9.0 * shed;
+            for k in 0..2 {
+                let o = m - DVec2::new(-24.0 + 12.0 * k as f64, -2.0);
+                let silo = band_cov(o.length(), 4.5, fw);
+                col = mixc(col, srgb(216.0, 218.0, 220.0), silo);
+                dh += 22.0 * silo;
+            }
+            if pad > 0.5 {
+                cls = CLS_BUILDING;
+            }
+        }
+    } else {
+        // manure lagoons: two basins in embankments
+        let x0 = hx + 30.0 + 0.5 * (lag - 30.0);
+        let yc = if d.y > 0.0 { 0.5 * hy } else { -0.5 * hy };
+        let o = DVec2::new(d.x - x0, d.y - yc);
+        let (ax, ay) = (0.5 * (lag - 30.0) - 6.0, 0.5 * hy - 14.0);
+        // (a rounded rectangle's signed distance, m)
+        let q = DVec2::new(o.x.abs() - ax + 12.0, o.y.abs() - ay + 12.0);
+        let dist = q.max(DVec2::ZERO).length() + q.x.max(q.y).min(0.0) - 12.0;
+        let water = (0.5 - dist / fw).clamp(0.0, 1.0);
+        let bank = ((0.5 - (dist - 7.0) / fw).clamp(0.0, 1.0) - water).max(0.0);
+        cov = (water + bank).min(1.0);
+        col = mixc(soil * 0.9, srgb(58.0, 60.0, 42.0) * (1.0 + 0.08 * perlin3(seed ^ 0xFEEA, p / 30.0) * band(30.0, gsd)), water / cov.max(1e-6));
+        dh = 1.2 * bank - 1.0 * water;
+        cls = if water > 0.5 { crate::landcover::LAKE } else { crate::landcover::BARE };
+    }
+    if cov <= 0.0 {
+        return;
+    }
+    s.composite(Layer { cov, albedo: col, dh, hmode: hmode::BLEND, cls, clear: 1.0, ..Default::default() });
+}
 
 const CLS_CROP: u8 = crate::landcover::CROP;
 const CLS_RICE: u8 = crate::landcover::RICE_PADDY;
@@ -1185,7 +1301,7 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
     }
     // scattered trees (farmed parkland)
     // (and in warm pastures: savanna trees)
-    let (trees, tcell) = if pl.sys == sys::PASTURE && pl.e.temp > 18.0 { (0.12, 60.0) } else { (d.trees, 30.0) };
+    let (trees, tcell) = if (pl.sys == sys::PASTURE || pl.sys == sys::RANCH) && pl.e.temp > 18.0 { (0.12, 60.0) } else { (d.trees, 30.0) };
     if trees > 0.0 {
         let (tc, th) = scatter_tree(pl.seed, q, tcell, trees, gsd, fw);
         if tc > 0.0 {
@@ -1251,7 +1367,7 @@ fn pasture(pl: &Plan, pc: &Parcel, px: &Px, id: u64, q: DVec2) -> (DVec3, f64, u
     let mut cls = CLS_PASTURE;
     let mut dh = 0.1;
     // only paddocks big enough for trails (the big systems)
-    if pl.sys == sys::PASTURE || pl.sys == sys::SHELTER || pl.sys == sys::SECTION {
+    if pl.sys == sys::PASTURE || pl.sys == sys::SHELTER || pl.sys == sys::SECTION || pl.sys == sys::RANCH {
         let half = 0.5 * pc.size;
         let t = DVec2::new(0.4 * half * (u01k(id, 60) - 0.5), 0.4 * half * (u01k(id, 61) - 0.5));
         let rel = q - pc.fc - t;
@@ -1406,13 +1522,14 @@ pub fn wgsl_tables() -> String {
         }
     };
     let mut s = String::from("// BEGIN GENERATED (kits::agriculture::wgsl_tables; AERIALSYNTH_BLESS=1 cargo test -p terragen --lib agriculture)\n");
-    s.push_str("fn agri_arch_w(a: u32) -> array<f32, 14> {\n    switch a {\n");
+    let n = sys::N;
+    s.push_str(&format!("fn agri_arch_w(a: u32) -> array<f32, {n}> {{\n    switch a {{\n"));
     for (i, w) in ARCH_W.iter().enumerate() {
         let v: Vec<String> = w.iter().map(|x| f(*x)).collect();
         if i == 11 {
-            s.push_str(&format!("        default: {{ return array<f32, 14>({}); }}\n", v.join(", ")));
+            s.push_str(&format!("        default: {{ return array<f32, {n}>({}); }}\n", v.join(", ")));
         } else {
-            s.push_str(&format!("        case {i}u: {{ return array<f32, 14>({}); }}\n", v.join(", ")));
+            s.push_str(&format!("        case {i}u: {{ return array<f32, {n}>({}); }}\n", v.join(", ")));
         }
     }
     s.push_str("    }\n}\n");
@@ -1549,6 +1666,7 @@ mod tests {
         ("greenhouse", 27.7830, 172.0161),
         ("pasture", 34.4425, 147.2698),
         ("pivot", 16.3893, 120.3407),
+        ("feedlot", 16.2941, 149.3331),
     ];
 
     /// Per-pixel comparison of two tiles: (layer, share of pixels off) (rgb > 2 DN, elevation
@@ -1752,6 +1870,25 @@ mod tests {
                 ))
             })
             .collect();
+        // ranch regions with a feedlot: the feedlot's centre
+        let g = crate::Generator::new(crate::Config::default());
+        let mut nf = 0;
+        for x in hits.iter().filter(|x| x.0 == sys::RANCH) {
+            let ctx = crate::world::Ctx::new(x.1.to_radians(), x.2.to_radians(), 30.0, &w.ell);
+            let t = w.terrain(&ctx);
+            let r = g.surface.region_info(&g.world, &mut crate::surface::Caches::default(), &t);
+            let e = EcoV::of(&crate::eco::compute(&w, &reg, t.eco.id, t.eco.center));
+            let seed = mix64(r.split.to_bits() ^ 0xA6A6);
+            if let Some((c, ..)) = feedlot_site(seed, e.dev) {
+                let pc = r.center + r.ex * c.x + r.ey * c.y;
+                let gd = geodesy::ecef2geodetic(pc, &w.ell);
+                println!("feedlot ({:.4}, {:.4}) {}", gd.lat.to_degrees(), gd.lon.to_degrees(), x.3);
+                nf += 1;
+                if nf >= 8 {
+                    break;
+                }
+            }
+        }
         for sy in 0..sys::N as u32 {
             let v: Vec<_> = hits.iter().filter(|x| x.0 == sy).collect();
             println!("{} ({}):", sys::NAMES[sy as usize], v.len());

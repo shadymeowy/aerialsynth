@@ -35,8 +35,150 @@ pub static KIT: Kit = Kit {
     biomes_yaml: include_str!("../../biomes/tropical.yaml"),
     wgsl: include_str!("../gpu/wgsl/kits/tropical.wgsl"),
     kernels: KERNELS,
+    layers: &[(crate::stack::slot::CANOPY, fishbone), (crate::stack::slot::WATER, rivers)],
     ..Kit::EMPTY
 };
+
+/// Side of the cubes (m) whose anchor's tangent plane frames the fishbone grid.
+const FB_ANCHOR: f64 = 200_000.0;
+/// Colonization projects (m, the plane's blocks), feeder road spacing, lot width along a
+/// feeder, the deepest clearing from a road.
+const FB_BLOCK: f64 = 22_000.0;
+const FB_FEEDER: f64 = 4_400.0;
+const FB_LOT: f64 = 250.0;
+const FB_DEPTH: f64 = 3_000.0;
+
+/// The fishbone plane at `p`: (q east, q north in the tangent plane of the anchor of `p`'s
+/// 200 km cube, the anchor cube's hash). The anchor is the cube centre's direction (f32) on the
+/// reference sphere, so both backends share it to f32 precision.
+fn fishbone_plane(p: DVec3) -> (DVec2, u64) {
+    let c = (p / FB_ANCHOR).floor();
+    let cc = (c + 0.5) * FB_ANCHOR;
+    let up = cc.as_vec3().normalize().as_dvec3();
+    let o = up * R0;
+    let el = (up.x * up.x + up.y * up.y).sqrt();
+    let east = if el > 1e-6 { DVec3::new(-up.y / el, up.x / el, 0.0) } else { DVec3::X };
+    let north = up.cross(east);
+    let d = p - o;
+    (DVec2::new(d.dot(east), d.dot(north)), hash3(0xF15B, c.x as i64, c.y as i64, c.z as i64))
+}
+
+/// Canopy slot: fishbone deforestation (`docs/design/terrain-next.md` §5.6, P3). Colonization
+/// projects in the rainforest lowlands: a trunk road through a project (east–west in the plane
+/// of its 200 km anchor), feeder roads every 4.4 km at right angles, and along every road lots
+/// of 250 m, each cleared from the road to a depth of its own (deeper near the trunk road:
+/// older) — pasture, fresh burns, red soil, crops, regrowth — so the clearings form fishbones
+/// from altitude. Projects (22 km blocks of the plane) exist by a hash; the forest gate is the
+/// sample's climate. Drawn over the canopy (the clearings reset its height and shadows).
+pub fn fishbone(s: &mut crate::stack::Stack) {
+    let t = s.t;
+    let l = s.l;
+    if s.is_water || t.temp < 21.0 || t.moist < 0.5 || l.ground > 700.0 || l.slope > 0.3 || t.development > 0.65 {
+        return;
+    }
+    let (q, ah) = fishbone_plane(s.ctx.p);
+    let (bi, bj) = ((q.x / FB_BLOCK).floor(), (q.y / FB_BLOCK).floor());
+    let bh = hash2(ah, bi as i64, bj as i64);
+    if u01k(bh, 1) >= 0.3 {
+        return;
+    }
+    let gsd = s.ctx.gsd;
+    let fw = l.fw.max(0.5 * gsd);
+    // the trunk road (y = y0 in the block), the nearest feeder (x = x0)
+    let y0 = (bj + 0.3 + 0.4 * u01k(bh, 2)) * FB_BLOCK;
+    let off = u01k(bh, 3) * FB_FEEDER;
+    let fi = ((q.x - off) / FB_FEEDER).round();
+    let x0 = fi * FB_FEEDER + off;
+    let (dx, dy) = (q.x - x0, q.y - y0);
+    // the lot along the feeder (index along it, side) and along the trunk road
+    let lj = (dy / FB_LOT).floor();
+    let hl = hash3(bh, fi as i64, lj as i64, (dx > 0.0) as i64);
+    let age = 1.0 - (dy.abs() / (0.5 * FB_BLOCK)).min(1.0);
+    let depth = FB_DEPTH * (0.1 + 0.9 * u01k(hl, 1)) * (0.25 + 0.75 * age.sqrt());
+    let lk = (q.x / FB_LOT).floor();
+    let ht = hash3(bh ^ 0x7B, lk as i64, 0, (dy > 0.0) as i64);
+    let depth_t = FB_DEPTH * (0.2 + 0.6 * u01k(ht, 1));
+    // a lot is cleared up to its depth, with a ragged back edge
+    let n = 80.0 * perlin3(bh ^ 0x7C, s.ctx.p / 350.0);
+    let reach = dy.abs() < 0.5 * FB_BLOCK - 300.0;
+    let feeder_lot = reach && dx.abs() < depth + n;
+    let trunk_lot = dy.abs() < depth_t + n;
+    let (cleared, h) = if trunk_lot {
+        (true, ht)
+    } else if feeder_lot {
+        (true, hl)
+    } else {
+        (false, 0)
+    };
+    // roads: red laterite tracks (the feeders within the project, the trunk road)
+    let fwr = fw;
+    let road = (crate::surface::band_cov(dx, 3.0, fwr) * if reach { 1.0 } else { 0.0 }).max(crate::surface::band_cov(dy, 5.0, fwr));
+    if !cleared && road <= 0.0 {
+        return;
+    }
+    let srgb = crate::surface::srgb;
+    let laterite = s.pal(crate::registry::pal::LATERITE);
+    let (mut col, mut cls) = (s.col, crate::landcover::TRACK);
+    if cleared {
+        let u = u01k(h, 2);
+        let (c, k) = if u < 0.55 {
+            (srgb(118.0, 124.0, 82.0), crate::landcover::PASTURE)
+        } else if u < 0.62 {
+            (srgb(62.0, 58.0, 52.0), crate::landcover::BURN_SCAR)
+        } else if u < 0.7 {
+            (laterite * 0.9, crate::landcover::BARE)
+        } else if u < 0.85 {
+            (srgb(108.0, 118.0, 72.0), crate::landcover::CROP)
+        } else {
+            (srgb(66.0, 92.0, 52.0), crate::landcover::CLEAR_CUT)
+        };
+        col = c * (0.9 + 0.2 * u01k(h, 3)) * (1.0 + 0.08 * perlin3(h, s.ctx.p / 60.0) * band(60.0, gsd));
+        cls = k;
+    }
+    col = crate::surface::mixc(col, laterite * 1.1, road);
+    if road > 0.5 {
+        cls = crate::landcover::TRACK;
+    }
+    let cov = if cleared { 1.0 } else { road };
+    s.composite(crate::stack::Layer { cov, albedo: col, dh: 0.0, hmode: crate::stack::hmode::BLEND, cls, relit: 1.0, ..Default::default() });
+}
+
+/// Half width (m) above which a tropical river is a white-water river (a major river carrying
+/// the sediment of its mountains).
+const BIG_RIVER_HW: f64 = 25.0;
+
+/// Slot 8: the water of tropical lowland rivers (`docs/design/terrain-next.md` §5.6, P0).
+/// White-water rivers carry sediment (café au lait); black-water rivers of the wet rainforest
+/// lowlands are tea-black (humic acids), so a black tributary meets a muddy main stem. Major
+/// rivers (half width > 25 m) are white-water; the smaller ones are black-water in the very wet
+/// lowlands of a regional style channel's provinces, else muddy. The colour takes over from the
+/// core's river colour between 18 and 21 °C and below 600–900 m (a colour gradient: the river
+/// stays crisp).
+pub fn rivers(s: &mut crate::stack::Stack) {
+    let l = s.l;
+    // (not on standing water; `is_water` is also set by the river itself)
+    if l.water > l.ground && l.water_kind != crate::world::water::NONE {
+        return;
+    }
+    let t = s.t;
+    if l.river_hw <= 0.0 || t.river_wet < 0.5 || t.temp < 18.0 || l.ground > 900.0 {
+        return;
+    }
+    let fwr = l.fw.max(s.ctx.gsd * 0.35);
+    let cov = band_cov(l.river_d, l.river_hw, fwr);
+    if cov <= 0.0 {
+        return;
+    }
+    let trop = smoothstep(18.0, 21.0, t.temp) * (1.0 - smoothstep(600.0, 900.0, l.ground));
+    let black = l.river_hw < BIG_RIVER_HW && t.moist > 0.62 && t.style[3] > 0.55;
+    let col = if black {
+        crate::surface::srgb(36.0, 28.0, 21.0)
+    } else {
+        // (wide rivers a little lighter: more sediment in suspension at the surface)
+        crate::surface::mixc(crate::surface::srgb(128.0, 100.0, 68.0), crate::surface::srgb(158.0, 128.0, 88.0), smoothstep(10.0, 120.0, l.river_hw))
+    };
+    s.composite(crate::stack::Layer { cov, albedo: crate::surface::mixc(s.col, col, trop), ..Default::default() });
+}
 
 /// Kernel kinds of the kit (from `kernels::KIT_BASE` + 80).
 pub mod kind {
@@ -722,6 +864,50 @@ fn grass(k: &KParams, i: &KIn) -> KOut {
 
 #[cfg(test)]
 mod tests {
+    /// Debug: fishbone projects and black-water / white-water rivers of the default world:
+    /// `find_fishbone_and_rivers -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn find_fishbone_and_rivers() {
+        let w = crate::world::World::new(crate::Config::default());
+        let (mut nf, mut nb, mut nw) = (0, 0, 0);
+        for i in 0..2_000_000u64 {
+            let h = mix64(0xF15B ^ i);
+            let lat = (2.0 * u01k(h, 1) - 1.0).asin();
+            if lat.to_degrees().abs() > 25.0 {
+                continue;
+            }
+            let lon = (u01k(h, 2) - 0.5) * std::f64::consts::TAU;
+            let ctx = crate::world::Ctx::new(lat, lon, 20.0, &w.ell);
+            let t = w.terrain(&ctx);
+            if t.water_kind != 0 || t.temp < 21.0 || t.ground > 700.0 {
+                continue;
+            }
+            let (la, lo) = (lat.to_degrees(), lon.to_degrees());
+            if nf < 6 && t.moist >= 0.5 && t.development <= 0.65 {
+                let (q, ah) = fishbone_plane(ctx.p);
+                let bh = hash2(ah, (q.x / FB_BLOCK).floor() as i64, (q.y / FB_BLOCK).floor() as i64);
+                if u01k(bh, 1) < 0.3 {
+                    println!("fishbone ({la:.4}, {lo:.4}) moist {:.2} dev {:.2}", t.moist, t.development);
+                    nf += 1;
+                }
+            }
+            if t.river_hw > 0.0 && t.river_d.abs() < 3.0 * t.river_hw && t.river_wet > 0.5 {
+                let black = t.river_hw < BIG_RIVER_HW && t.moist > 0.62 && t.style[3] > 0.55;
+                if black && nb < 6 {
+                    println!("black-water river ({la:.4}, {lo:.4}) hw {:.1}", t.river_hw);
+                    nb += 1;
+                } else if !black && nw < 6 && t.river_hw > 30.0 {
+                    println!("white-water river ({la:.4}, {lo:.4}) hw {:.1} moist {:.2}", t.river_hw, t.moist);
+                    nw += 1;
+                }
+            }
+            if nf >= 6 && nb >= 6 && nw >= 6 {
+                break;
+            }
+        }
+    }
+
     use super::*;
     use crate::kernels;
 
@@ -863,6 +1049,9 @@ mod tests {
         ("mangrove_coast", 7.1584, -41.9711),
         ("savanna_river", 3.3011, -16.0396),
         ("baobab_savanna", 8.0571, 144.8028),
+        ("white_water", 21.2115, -20.2621),
+        ("fishbone", -5.5200, 111.7799),
+        ("black_water", 4.6276, 5.3377),
     ];
 
     /// Tiles where the kit draws agree between the backends (at most 0.5 % of the pixels off).

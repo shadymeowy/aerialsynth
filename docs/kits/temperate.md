@@ -113,3 +113,22 @@ kit's `KITS` entry commented out (mean of two runs, shared machine, so +-3 % noi
 | z12 | 120.3 | 117.5 | 2.3 % |
 | z14 | 116.5 | 112.4 | 3.5 % |
 | z16 | 123.4 | 116.8 | 5.4 % |
+
+## Known limits
+
+* Regrowth on clear-cuts is a uniform lime green (grass and fireweed, then young rows): from
+  1.5 km up a cut of a few years reads as a flat bright rectangle; there is no gradient of ages
+  within a stand.
+* Managed stands are a brick pattern of rectangles in the land-use region's frame: their edges
+  are straight and axis-aligned within a region, regardless of slope, streams and roads; under
+  seasonal snow the cuts read as white rectangles in the forest (the cold kit's kettle still).
+* Bogs, string bogs and fens are drawn by masks on the drainage and the relief (no peat
+  hydrology): a raised bog can sit on a gentle slope, and string-bog strings follow a slow flow
+  field rather than the real slope.
+* Autumn colours follow the ecoregion's season, not a date: two ecoregions with different
+  seasons meet in a 10 km mosaic band.
+* Windthrow and firebreaks are rare by design and never cross towns or fields; firebreaks are
+  straight in the region frame.
+* Heathland burning strips and moorland peat hags are colour only (no relief).
+* Cast shadows of the kit's crowns come from the renderer's DSM only (the core bakes `lit` for
+  its own crown layers).
