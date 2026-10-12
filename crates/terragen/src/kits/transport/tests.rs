@@ -564,3 +564,113 @@ fn debug_parity() {
         im.save(out.join(format!("parity_{name}_z{z}_{tag}_rgb.png"))).unwrap();
     }
 }
+
+/// Debug: switchbacks, interchanges by size, river bridges, power lines away from towns:
+/// `find_transport_places2 -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn find_transport_places2() {
+    let w = world();
+    let mut pts = CpuPoints(&w);
+    let mut ctx = HostCtx { world: &w, points: &mut pts };
+    let ll = |p: DVec3| {
+        let g = geodesy::ecef2geodetic(p, &w.ell);
+        (g.lat.to_degrees(), g.lon.to_degrees())
+    };
+    // switchbacks: minor routes in the mountains winding far more than their chord
+    let mut n_sw = 0;
+    for p in land_points(&w, 400, 0.04, 0x7A8) {
+        if w.smooth_relief(p, 3000.0).1 < 500.0 {
+            continue;
+        }
+        for n in [nw::LOCAL, nw::HAMLET] {
+            for e in net::edges_near(&w, n, p, 6_000.0) {
+                let Some(l) = build::routed(&w, &e) else { continue };
+                let k = l.pts.len();
+                let mut best = (0.0, 0usize);
+                for i in 12..k.saturating_sub(12) {
+                    let arc = l.s[i + 12] - l.s[i - 12];
+                    let ch = (l.pts[i + 12] - l.pts[i - 12]).length().max(1.0);
+                    if arc / ch > best.0 {
+                        best = (arc / ch, i);
+                    }
+                }
+                if best.0 > 2.5 && n_sw < 8 {
+                    eprintln!("switchbacks (class {}): {:?} winding {:.1}", e.class, ll(l.pts[best.1]), best.0);
+                    n_sw += 1;
+                }
+            }
+        }
+        if n_sw >= 8 {
+            break;
+        }
+    }
+    // interchanges, river bridges, power lines, tracks around cities
+    let mut cities: Vec<net::Node> = Vec::new();
+    for p in land_points(&w, 40, 0.2, 0x7A9) {
+        for c in net::nodes(&w, nw::ARTERIAL, p, 200_000.0) {
+            if c.dev > 0.45 && !cities.iter().any(|x| x.id == c.id) {
+                cities.push(c);
+            }
+        }
+        if cities.len() > 16 {
+            break;
+        }
+    }
+    let mut shown = std::collections::BTreeMap::<String, usize>::new();
+    let mut show = |what: String, p: (f64, f64)| {
+        let c = shown.entry(what.clone()).or_insert(0);
+        if *c < 5 {
+            eprintln!("{what}: ({:.4}, {:.4})", p.0, p.1);
+            *c += 1;
+        }
+    };
+    for c in &cities {
+        let f = build::features(&mut ctx, &Area { center: c.p, radius: 30_000.0, gsd: 100.0 });
+        let f2 = build::features(&mut ctx, &Area { center: c.p, radius: 12_000.0, gsd: 20.0 });
+        let ramps: Vec<DVec3> = f2.segs.iter().filter(|s| s.kind == cls::KIND0 + cls::RAMP as u32).map(|s| s.a).collect();
+        let mut done: Vec<DVec3> = Vec::new();
+        for r in &ramps {
+            if done.iter().any(|d| (*d - *r).length() < 1_500.0) {
+                continue;
+            }
+            let n = ramps.iter().filter(|q| (**q - *r).length() < 900.0).count();
+            done.push(*r);
+            show(
+                format!(
+                    "interchange_{}",
+                    if n > 150 {
+                        "cloverleaf"
+                    } else if n > 110 {
+                        "parclo"
+                    } else if n > 69 {
+                        "diamond"
+                    } else {
+                        "trumpet"
+                    }
+                ),
+                ll(*r),
+            );
+        }
+        for s in &f2.segs {
+            let k = (s.kind - cls::KIND0) as usize;
+            if s.flags & flag::BRIDGE != 0 && s.flags & flag::OVER == 0 && k <= cls::TRUNK {
+                show(format!("bridge_{k}"), ll(s.a));
+            }
+            if s.flags & flag::TUNNEL != 0 {
+                show(format!("tunnel_{k}"), ll(s.a));
+            }
+        }
+        for s in &f.segs {
+            if s.kind == cls::KIND0 + cls::POWER as u32 {
+                let a = w.atlas().sample(s.a.normalize());
+                if a.precip_mm > 1000.0 && (s.a - c.p).length() > 1.5 * c.radius + 4_000.0 {
+                    show("power_wet".into(), ll(s.a));
+                }
+            }
+        }
+        for st in &f2.stamps {
+            show(format!("stamp_{}", st.template), ll(st.center));
+        }
+    }
+}

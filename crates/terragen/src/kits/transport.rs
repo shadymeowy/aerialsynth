@@ -142,6 +142,10 @@ fn built(s: &mut Stack) {
     let mut emit = DVec3::ZERO;
     let (mut shade, mut clear, mut road): (f64, f64, f64) = (0.0, 0.0, 0.0);
     for sg in &segs {
+        // (on a volcano's cone and lava only motorways, trunk roads and railways)
+        if s.no_town && !matches!((sg.kind - cls::KIND0) as usize, cls::MOTORWAY | cls::TRUNK | cls::RAMP | cls::RAIL) {
+            continue;
+        }
         let o = px::seg_px(sg, &e);
         emit += o.emit;
         shade = shade.max(o.shade);

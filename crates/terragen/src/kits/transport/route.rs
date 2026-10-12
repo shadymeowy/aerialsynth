@@ -27,19 +27,23 @@ pub struct Params {
     pub town: f64,
     /// Chaikin rounds (0: straight between the grid nodes)
     pub smooth: u32,
+    /// at most one lateral step change per node
+    pub smooth_turns: bool,
+    /// moving-average window along the route (m; 0: none): wide curves for major roads
+    pub window: f64,
 }
 
 #[rustfmt::skip]
 pub const PARAMS: [Params; cls::N] = [
     // motorway, trunk, secondary, local, track, ramp, rail, power
-    Params { step: 2_500.0, width: 0.16, k: 300.0, k2: 30_000.0, glim: 0.05, gmax: 0.0, turn: 150.0, wet: 40.0, town: 6.0, smooth: 3 },
-    Params { step: 1_500.0, width: 0.18, k: 160.0, k2: 12_000.0, glim: 0.07, gmax: 0.0, turn: 60.0, wet: 25.0, town: 2.0, smooth: 3 },
-    Params { step: 400.0, width: 0.2, k: 100.0, k2: 6_000.0, glim: 0.10, gmax: 0.11, turn: 15.0, wet: 20.0, town: 0.0, smooth: 3 },
-    Params { step: 150.0, width: 0.22, k: 60.0, k2: 4_000.0, glim: 0.12, gmax: 0.13, turn: 6.0, wet: 15.0, town: 0.0, smooth: 3 },
-    Params { step: 100.0, width: 0.22, k: 40.0, k2: 3_000.0, glim: 0.16, gmax: 0.16, turn: 4.0, wet: 10.0, town: 0.0, smooth: 3 },
-    Params { step: 100.0, width: 0.0, k: 0.0, k2: 0.0, glim: 1.0, gmax: 0.0, turn: 0.0, wet: 0.0, town: 0.0, smooth: 0 },
-    Params { step: 2_500.0, width: 0.16, k: 2_500.0, k2: 80_000.0, glim: 0.022, gmax: 0.0, turn: 200.0, wet: 40.0, town: 6.0, smooth: 3 },
-    Params { step: 2_500.0, width: 0.08, k: 4.0, k2: 40.0, glim: 0.3, gmax: 0.0, turn: 30.0, wet: 0.5, town: 3.0, smooth: 0 },
+    Params { step: 2_500.0, width: 0.16, k: 300.0, k2: 30_000.0, glim: 0.05, gmax: 0.0, turn: 150.0, wet: 40.0, town: 6.0, smooth: 1, smooth_turns: true, window: 400.0 },
+    Params { step: 1_500.0, width: 0.18, k: 160.0, k2: 12_000.0, glim: 0.07, gmax: 0.0, turn: 60.0, wet: 25.0, town: 2.0, smooth: 1, smooth_turns: true, window: 250.0 },
+    Params { step: 400.0, width: 0.2, k: 100.0, k2: 6_000.0, glim: 0.10, gmax: 0.11, turn: 15.0, wet: 20.0, town: 0.0, smooth: 3, smooth_turns: false, window: 0.0 },
+    Params { step: 150.0, width: 0.22, k: 60.0, k2: 4_000.0, glim: 0.12, gmax: 0.13, turn: 6.0, wet: 15.0, town: 0.0, smooth: 3, smooth_turns: false, window: 0.0 },
+    Params { step: 100.0, width: 0.22, k: 40.0, k2: 3_000.0, glim: 0.16, gmax: 0.16, turn: 4.0, wet: 10.0, town: 0.0, smooth: 3, smooth_turns: false, window: 0.0 },
+    Params { step: 100.0, width: 0.0, k: 0.0, k2: 0.0, glim: 1.0, gmax: 0.0, turn: 0.0, wet: 0.0, town: 0.0, smooth: 0, smooth_turns: false, window: 0.0 },
+    Params { step: 2_500.0, width: 0.16, k: 2_500.0, k2: 80_000.0, glim: 0.022, gmax: 0.0, turn: 200.0, wet: 40.0, town: 6.0, smooth: 1, smooth_turns: true, window: 600.0 },
+    Params { step: 2_500.0, width: 0.08, k: 4.0, k2: 40.0, glim: 0.3, gmax: 0.0, turn: 30.0, wet: 0.5, town: 3.0, smooth: 0, smooth_turns: false, window: 0.0 },
 ];
 
 /// The largest lateral deviation of a route of length `d` from its chord (m).
@@ -136,8 +140,21 @@ pub type Avoid = [(DVec3, f64)];
 /// the edge; ties broken by node index (strict `<` in index order).
 #[allow(clippy::too_many_arguments)]
 fn corridor(w: &World, a: DVec3, b: DVec3, na: usize, nc: usize, half: f64, pr: &Params, avoid: &Avoid) -> Option<(Vec<DVec3>, f64)> {
+    corridor_turns(w, a, b, na, nc, half, pr, avoid, pr.smooth_turns).or_else(|| {
+        if pr.smooth_turns {
+            corridor_turns(w, a, b, na, nc, half, pr, avoid, false)
+        } else {
+            None
+        }
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn corridor_turns(w: &World, a: DVec3, b: DVec3, na: usize, nc: usize, half: f64, pr: &Params, avoid: &Avoid, smooth_turns: bool) -> Option<(Vec<DVec3>, f64)> {
     let c = nc / 2;
-    let dy = if c > 0 { half / c as f64 } else { 0.0 };
+    // (a lateral step at most ~0.45 of the step along: a node-to-node bend of ≤ 24°)
+    let step_a = (b - a).length() / (na - 1) as f64;
+    let dy = if c > 0 { (half / c as f64).min(0.45 * step_a) } else { 0.0 };
     let lat = (a + b).normalize().cross(b - a).normalize_or_zero();
     let gsd = 0.5 * (b - a).length() / (na - 1) as f64;
     let mut pos = vec![DVec3::ZERO; na * nc];
@@ -191,7 +208,13 @@ fn corridor(w: &World, a: DVec3, b: DVec3, na: usize, nc: usize, half: f64, pr: 
                     let g = (h1 - h0).abs() / l;
                     let over = (g - pr.glim).max(0.0);
                     let wet = if h0 < 0.5 || h1 < 0.5 { l } else { 0.0 };
-                    let turn = pr.turn * dy / 100.0 * (dj - (k as i64 - DJ)).abs() as f64;
+                    let dturn = (dj - (k as i64 - DJ)).abs();
+                    // (major roads and railways turn by at most one lateral step per node: no
+                    // hairpins)
+                    if smooth_turns && dturn > 1 && i > 0 {
+                        continue;
+                    }
+                    let turn = pr.turn * dy / 100.0 * dturn as f64;
                     let inside = 0.5 * (town[i * nc + j] + town[n1]) * l;
                     let step = l * (1.0 + pr.k * g * g + pr.k2 * over * over) + pr.wet * wet + pr.town * inside + turn;
                     let k1 = (dj + DJ) as usize;
@@ -251,7 +274,9 @@ pub fn route(w: &World, a: DVec3, b: DVec3, class: usize, avoid: &Avoid) -> Opti
             let (p, q) = (coarse[k], coarse[k + 1]);
             let l = (q - p).length();
             let nf = ((l / 120.0).ceil() as usize).clamp(3, 40) + 1;
-            let hf = (0.5 * half / 5.0).min(0.25 * l) + 60.0;
+            // (fine lateral steps of 0.45 of the fine step: the local adaptation of the coarse
+            // route)
+            let hf = 3.0 * 0.45 * l / (nf - 1) as f64;
             match corridor(w, p, q, nf, 7, hf, pr, avoid) {
                 Some((f, _)) => v.extend_from_slice(&f[1..]),
                 None => v.push(q),
@@ -261,6 +286,9 @@ pub fn route(w: &World, a: DVec3, b: DVec3, class: usize, avoid: &Avoid) -> Opti
     } else {
         coarse
     };
+    if pr.window > 0.0 {
+        pts = average(w, &pts, pr.window);
+    }
     if pr.smooth > 0 {
         pts = chaikin(w, &pts, pr.smooth as usize);
     }
@@ -268,6 +296,31 @@ pub fn route(w: &World, a: DVec3, b: DVec3, class: usize, avoid: &Avoid) -> Opti
         pts = switchbacks(w, &pts, pr);
     }
     Some(Line::new(pts))
+}
+
+/// A moving average of the polyline resampled every 40 m over `window` m (the window shrinks
+/// toward the ends, which stay), points back on the surface.
+fn average(w: &World, pts: &[DVec3], window: f64) -> Vec<DVec3> {
+    let l = Line::new(pts.to_vec());
+    let len = l.len();
+    let n = ((len / 40.0).ceil() as usize).max(2);
+    let r: Vec<DVec3> = (0..=n).map(|k| l.at(len * k as f64 / n as f64).0).collect();
+    let hk = ((0.5 * window / (len / n as f64)).round() as usize).max(1);
+    // prefix sums for the window means
+    let mut acc = vec![DVec3::ZERO; r.len() + 1];
+    for k in 0..r.len() {
+        acc[k + 1] = acc[k] + r[k];
+    }
+    (0..r.len())
+        .map(|k| {
+            let h = hk.min(k).min(r.len() - 1 - k);
+            if h == 0 {
+                r[k]
+            } else {
+                surface(w, (acc[k + h + 1] - acc[k - h]) / (2 * h + 1) as f64)
+            }
+        })
+        .collect()
 }
 
 /// Corner cutting (Chaikin), ends kept, points back on the surface.

@@ -302,9 +302,9 @@ pub fn crossings(w: &World, ka: u64, a: &Line, kb: u64, b: &Line) -> Arc<Vec<Cro
         }
         ca = ea;
     }
-    // (a route crossing another several times within 500 m: keep the first)
+    // (a route crossing another several times within 2.5 km: keep the first)
     out.sort_by(|x, y| x.sa.total_cmp(&y.sa));
-    out.dedup_by(|y, x| (y.sa - x.sa).abs() < 500.0);
+    out.dedup_by(|y, x| (y.sa - x.sa).abs() < 2_500.0);
     let v = Arc::new(out);
     let mut g = CROSS.write().unwrap();
     let m = g.get_or_insert_with(FxHashMap::default);
@@ -336,6 +336,12 @@ mod ix {
     pub const CLOVERLEAF: u32 = 3;
     pub const TRUMPET: u32 = 4;
     pub const ROUNDABOUT: u32 = 5;
+}
+
+/// Is `p` inside a town or larger (its built-up radius)?
+fn in_town(w: &World, p: DVec3) -> bool {
+    (places::TOWN as usize..places::NLEVELS)
+        .any(|l| places::places_near(w, l, p, places::LEVELS[l].radius[1] * 1.15).iter().any(|pl| (pl.center - p).length() < pl.radius))
 }
 
 /// Roundabout culture: European-type archetypes, some developed others.
@@ -456,7 +462,8 @@ pub fn features(ctx: &mut HostCtx, area: &Area) -> Features {
                     } else {
                         ix::NONE
                     };
-                    if t != ix::NONE && vis(cls::RAMP) {
+                    // (no ramps inside towns: their streets are the junctions)
+                    if t != ix::NONE && vis(cls::RAMP) && !in_town(w, x.p) {
                         ixs.push((t, i, j, *x));
                     }
                 } else if roundabouts(a.e.a.arch, a.e.a.dev.min(a.e.b.dev), a.e.key ^ b.e.key) {
@@ -966,6 +973,14 @@ fn stations(ctx: &mut HostCtx, area: &Area, routes: &[Routed], f: &mut Features)
                 let (p, d) = r.line.at(sy);
                 f.stamps.push(yard(p, d, nd.level, nd.id));
             }
+        }
+        // a port's rail spur ends in a yard by the quay
+        if r.e.a.level == net::TRACK_END {
+            let (p, d) = r.line.at((0.4 * r.line.len()).min(700.0));
+            if (p - area.center).length() < area.radius + 1_500.0 {
+                f.stamps.push(yard(p, d, places::CITY, r.e.key));
+            }
+            continue;
         }
         // through stations: towns within half their radius of the line
         if r.line.len() < 2.0 {

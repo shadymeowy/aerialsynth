@@ -690,6 +690,10 @@ fn transport_slot_built(s: ptr<function, Stack>) {
             continue;
         }
         any = true;
+        let kc = sg.kind - TR_KIND0;
+        if ((*s).no_town && !(kc == TR_MOTORWAY || kc == TR_TRUNK || kc == TR_RAMP || kc == TR_RAIL)) {
+            continue;
+        }
         let o = tr_seg_px(sg, e);
         emit += o.emit;
         shade = max(shade, o.shade);

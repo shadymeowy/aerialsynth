@@ -65,8 +65,28 @@ pub fn net_class_max_gsd(n: usize) -> f64 {
 /// Track-end lattice cell (m).
 pub const TRACK_CELL: f64 = 1_300.0;
 
-/// The track end of a lattice cell (rural land with people; none in the sea or on ice).
+type TKey = (u64, i64, i64, i64);
+static TRACK_ENDS: RwLock<Option<FxHashMap<TKey, Option<Node>>>> = RwLock::new(None);
+
+/// The track end of a lattice cell (memoized).
 fn track_end(w: &World, c: (i64, i64, i64)) -> Option<Node> {
+    let key = (w.cache_key, c.0, c.1, c.2);
+    if let Some(v) = TRACK_ENDS.read().unwrap().as_ref().and_then(|m| m.get(&key)) {
+        return *v;
+    }
+    let v = track_end_at(w, c);
+    let mut g = TRACK_ENDS.write().unwrap();
+    let m = g.get_or_insert_with(FxHashMap::default);
+    if m.len() > 1_000_000 {
+        m.clear();
+    }
+    m.insert(key, v);
+    v
+}
+
+/// The track end of a lattice cell (rural land with people outside places; none in the sea or
+/// on ice).
+fn track_end_at(w: &World, c: (i64, i64, i64)) -> Option<Node> {
     let h = hash3(w.seed() ^ 0x7AC4, c.0, c.1, c.2);
     let q = DVec3::new(c.0 as f64 + 0.5 + 0.8 * (u01k(h, 1) - 0.5), c.1 as f64 + 0.5 + 0.8 * (u01k(h, 2) - 0.5), c.2 as f64 + 0.5 + 0.8 * (u01k(h, 3) - 0.5))
         * TRACK_CELL;
@@ -79,10 +99,27 @@ fn track_end(w: &World, c: (i64, i64, i64)) -> Option<Node> {
     if a.coast_km < 0.5 || u01k(h, 4) >= pe {
         return None;
     }
-    if w.smooth_relief(s, 1_000.0).0 < 2.0 {
+    if w.smooth_relief(s, 1_000.0).0 < 2.0 || in_place(w, s, places::VILLAGE, 1.2) {
         return None;
     }
     Some(Node { id: h | 1, p: s, level: TRACK_END, pop: 0.0, radius: 0.0, dev: a.development, arch: a.archetype as u8 })
+}
+
+/// Is `p` within `k` radii of a place of level `l0` or larger?
+fn in_place(w: &World, p: DVec3, l0: u8, k: f64) -> bool {
+    (l0 as usize..places::NLEVELS)
+        .any(|l| places::places_near(w, l, p, places::LEVELS[l].radius[1] * 1.15 * k).iter().any(|pl| (pl.center - p).length() < k * pl.radius))
+}
+
+/// Does the chord a–b pass through a town (level ≥ 2) that is not one of its ends?
+fn crosses_town(w: &World, a: &Node, b: &Node) -> bool {
+    let mid = (a.p + b.p) * 0.5;
+    let half = 0.5 * (a.p - b.p).length();
+    (places::TOWN as usize..places::NLEVELS).any(|l| {
+        places::places_near(w, l, mid, half + places::LEVELS[l].radius[1] * 1.15)
+            .iter()
+            .any(|pl| pl.id != a.id && pl.id != b.id && chord_dist(a.p, b.p, pl.center) < 0.9 * pl.radius)
+    })
 }
 
 fn track_ends(w: &World, center: DVec3, radius: f64) -> Vec<Node> {
@@ -228,7 +265,8 @@ pub fn neighbours(w: &World, n: usize, a: &Node) -> Arc<Vec<Node>> {
         }
         // blockers lie within d of a: all are candidates
         let blocked = cands.iter().any(|c| c.id != a.id && c.id != b.id && (c.p - a.p).length() < d && (c.p - b.p).length() < d);
-        if !blocked {
+        // (local roads and tracks do not cut through towns: the town's streets do)
+        if !blocked && !(matches!(n, network::HAMLET | network::TRACK) && crosses_town(w, a, b)) {
             out.push(*b);
         }
     }
@@ -280,4 +318,5 @@ pub fn edges_near(w: &World, n: usize, center: DVec3, radius: f64) -> Vec<Edge> 
 #[cfg(test)]
 pub fn clear_cache() {
     *NB.write().unwrap() = None;
+    *TRACK_ENDS.write().unwrap() = None;
 }
