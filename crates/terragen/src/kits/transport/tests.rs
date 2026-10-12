@@ -14,13 +14,13 @@ fn world() -> World {
 /// Places of the default world where the kit draws: (name, lat, lon), for the tests and stills
 /// (`find_transport_places`).
 pub(crate) const PLACES: &[(&str, f64, f64)] = &[
-    ("parclo", -7.6570, -16.6301),
+    ("parclo", -7.6475, -16.6320),
     ("diamond", -7.6988, -18.7191),
-    ("trumpet", -23.7536, -33.8316),
+    ("trumpet", -23.7203, -33.8120),
     ("switchbacks", -24.1868, -33.3606),
     ("station", -7.7302, -18.7965),
     ("yard", -7.7461, -18.7972),
-    ("roundabout", -7.6185, -16.6091),
+    ("roundabout", -7.6230, -16.6053),
     ("power", -7.8316, -18.8000),
     ("portal", 29.3400, 179.4257),
     ("bridge", -7.5782, -18.7463),
@@ -143,17 +143,20 @@ fn edges_are_tile_independent() {
 #[test]
 fn routes_are_deterministic() {
     let w = world();
+    let mut pts = CpuPoints(&w);
+    let mut ctx = HostCtx { world: &w, points: &mut pts };
     let p = land_points(&w, 1, 0.2, 0x7A3)[0];
     let edges = net::edges_near(&w, nw::LOCAL, p, 10_000.0);
     assert!(!edges.is_empty());
-    let a: Vec<_> = edges.iter().take(4).map(|e| build::routed(&w, e)).collect();
+    let a: Vec<_> = edges.iter().take(4).map(|e| route_of(&mut ctx, e)).collect();
     build::clear_cache();
     for (e, ra) in edges.iter().take(4).zip(&a) {
-        let rb = build::routed(&w, e);
+        let rb = route_of(&mut ctx, e);
         match (ra, &rb) {
             (Some(x), Some(y)) => {
                 assert_eq!(x.pts, y.pts);
-                assert!((x.pts[0] - e.a.p).length() < 1.0 && (x.pts.last().unwrap() - e.b.p).length() < 1.0);
+                let [ea, eb] = build::base(&w, e).ends;
+                assert!((x.pts[0] - ea).length() < 1.0 && (x.pts.last().unwrap() - eb).length() < 1.0);
             }
             (None, None) => {}
             _ => panic!("route existence differs"),
@@ -172,7 +175,7 @@ fn profiles_are_local_and_grade_limited() {
     for p in land_points(&w, 12, 0.2, 0x7A4) {
         let edges = net::edges_near(&w, nw::REGIONAL, p, 5_000.0);
         let Some(e) = edges.iter().find(|e| e.class == cls::TRUNK) else { continue };
-        let Some(line) = build::routed(&w, e) else { continue };
+        let Some(line) = route_of(&mut ctx, e) else { continue };
         let s_mid = 0.5 * line.len();
         let a = build::profile(&mut ctx, e, &line, s_mid - 600.0, s_mid + 600.0).unwrap();
         let b = build::profile(&mut ctx, e, &line, s_mid - 3_000.0, s_mid + 3_000.0).unwrap();
@@ -616,7 +619,7 @@ fn find_transport_places2() {
         }
         for n in [nw::LOCAL, nw::HAMLET] {
             for e in net::edges_near(&w, n, p, 6_000.0) {
-                let Some(l) = build::routed(&w, &e) else { continue };
+                let Some(l) = route_of(&mut ctx, &e) else { continue };
                 let k = l.pts.len();
                 let mut best = (0.0, 0usize);
                 for i in 12..k.saturating_sub(12) {
@@ -764,5 +767,582 @@ fn find_river_bridges() {
                 }
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------- routing: water and sites
+
+/// Regions of the routing verification: the kit's places, the settlements kit's site places
+/// (airport, quarry, solar and wind farms, a dam's reservoir), the cold kit's kettle lakes and
+/// lake districts of the default world.
+const ROUTE_REGIONS: &[(&str, f64, f64)] = &[
+    ("parclo", -7.6570, -16.6301),
+    ("trumpet", -23.7536, -33.8316),
+    ("switchbacks", -24.1868, -33.3606),
+    ("station", -7.7302, -18.7965),
+    ("bridge", -7.5782, -18.7463),
+    ("tracks", -7.64, -16.66),
+    ("portal", 29.3400, 179.4257),
+    ("airport", -10.5390, 115.3568),
+    ("quarry", -20.4582, -152.1378),
+    ("solar", 40.4972, 46.9202),
+    ("wind", 42.4183, 33.3454),
+    ("dam", -0.6990, -17.6874),
+    ("kettle_a", 65.2726, -28.7446),
+    ("kettle_b", 63.0479, 13.4909),
+    ("lakes_a", 16.2337, -96.5839),
+    ("lakes_b", 20.4996, -30.0929),
+    ("lakes_c", 30.2156, -89.0182),
+    ("lakes_d", 46.0667, 2.2438),
+    ("lakes_e", -2.4905, -123.2721),
+];
+
+/// The sites and reservoirs near an area (the verification's truth).
+struct Truth {
+    stamps: Vec<FStamp>,
+    res: Vec<FSeg>,
+}
+
+fn truth(ctx: &mut HostCtx, c: DVec3, r: f64) -> Truth {
+    use crate::kits::settlements::sites::{self, tpl as st};
+    let mut f = Features::default();
+    sites::sites_near(ctx, c, r, 10.0, &mut f);
+    Truth {
+        stamps: f.stamps.into_iter().filter(|s| matches!(s.template, st::AIRPORT | st::QUARRY | st::SOLAR | st::WIND)).collect(),
+        res: f.segs.into_iter().filter(|s| s.kind == st::RESERVOIR).collect(),
+    }
+}
+
+/// What lies at `p`: 0 dry land, 1 a stream (half width < 6 m), 6 a river, 2 a lake (the core's, a kettle lake of the cold kit's
+/// large lattice), 3 a pond of its small lattice, 4 the sea, 5 a reservoir, 10 + template: a
+/// site.
+fn what_at(w: &World, tr: &Truth, p: DVec3) -> u32 {
+    use crate::kits::settlements::sites::{self, tpl as st};
+    for s in &tr.stamps {
+        let q = sites::uv(s, p);
+        let inside = if s.template == st::QUARRY { q.length() < 1.5 * s.v[0] as f64 } else { q.x.abs() < s.half[0] as f64 && q.y.abs() < s.half[1] as f64 };
+        if inside {
+            return 10 + s.template;
+        }
+    }
+    let g = geodesy::ecef2geodetic(p, &w.ell);
+    let t = w.terrain(&crate::world::Ctx::new(g.lat, g.lon, 2.0, &w.ell));
+    if t.water_kind == crate::world::water::OCEAN {
+        return 4;
+    }
+    if t.water_kind == crate::world::water::LAKE && t.water > t.ground {
+        return 2;
+    }
+    if tr.res.iter().any(|sg| crate::kits::settlements::sites::reservoir_at(sg, p, t.ground, 0.1).0 > 0.5) {
+        return 5;
+    }
+    let sc = if t.ground < 700.0 && (t.temp < -1.0 || (t.glaciation > 0.0 && t.temp < 9.0)) {
+        // (the slope over ±40 m, as the routing estimates it)
+        let (_, _, e, n) = crate::kits::settlements::places::frame_at(w, p);
+        let r = |d: DVec3| route::relief_h(w, route::surface(w, p + d), 30.0);
+        let slope = glam::DVec2::new(r(e * 40.0) - r(-e * 40.0), r(n * 40.0) - r(-n * 40.0)).length() / 80.0;
+        route::cold_lake_scale(&t, slope)
+    } else {
+        0.0
+    };
+    if sc > 0.0 {
+        for (k, lat) in crate::kits::cold::LAKE_LATS.iter().enumerate() {
+            let h = crate::kits::cold::lake_at(lat, p, sc, 0.5);
+            if h.cov > 0.5 && h.kind == 0 {
+                return if k == 0 { 2 } else { 3 };
+            }
+        }
+    }
+    if t.river_hw > 0.0 && t.river_d.abs() < t.river_hw {
+        return if t.river_hw >= 6.0 { 6 } else { 1 };
+    }
+    0
+}
+
+/// The sine of the angle between a route's direction `dir` at `p` and the river there (1:
+/// perpendicular), from the gradient of the signed distance to the channel.
+fn crossing_sin(w: &World, p: DVec3, dir: DVec3) -> f64 {
+    let (_, _, e, n) = crate::kits::settlements::places::frame_at(w, p);
+    let d = |q: DVec3| {
+        let g = geodesy::ecef2geodetic(q, &w.ell);
+        w.terrain(&crate::world::Ctx::new(g.lat, g.lon, 2.0, &w.ell)).river_d
+    };
+    let gr = e * (d(p + e * 5.0) - d(p - e * 5.0)) + n * (d(p + n * 5.0) - d(p - n * 5.0));
+    dir.dot(gr.normalize_or_zero()).abs()
+}
+
+/// Roads and railways keep out of lakes, reservoirs and the sea (except narrow crossings,
+/// [`route::span`]) and out of airports, quarries, solar and wind farms (except where they end
+/// there): the routes near varied regions sampled every 25 m against pass A's water (CPU), the
+/// sites' footprints and reservoirs, the cold kit's kettle lakes; bridges lie over water or
+/// valleys. `TR_REGION=name` one region.
+#[test]
+fn routes_avoid_water_and_sites() {
+    let w = world();
+    let mut pts = CpuPoints(&w);
+    let mut ctx = HostCtx { world: &w, points: &mut pts };
+    let only = std::env::var("TR_REGION").ok();
+    let (mut n_route, mut n_seg, mut n_river, mut n_narrow, mut n_pond, mut n_xing, mut n_oblique) = (0, 0, 0, 0, 0, 0, 0);
+    let mut sin_sum = 0.0;
+    let mut n_tunnel = 0;
+    let mut bad: Vec<String> = Vec::new();
+    let mut sites_bad = 0;
+    let (mut br_wet, mut br_dry) = (0, 0);
+    for &(name, lat, lon) in ROUTE_REGIONS {
+        if only.as_deref().is_some_and(|o| o != name) {
+            continue;
+        }
+        let c = ecef(&w, lat, lon);
+        let area = Area { center: c, radius: 3_000.0, gsd: 10.0 };
+        let t0 = std::time::Instant::now();
+        let (routes, _, _) = build::area_routes(&mut ctx, &area);
+        let tr = truth(&mut ctx, c, 4_000.0);
+        let mut roads: Vec<_> = routes
+            .iter()
+            .filter(|r| {
+                matches!(r.e.class, cls::MOTORWAY | cls::TRUNK | cls::SECONDARY | cls::LOCAL | cls::TRACK | cls::RAIL) && r.line.dist(c).0 < area.radius - 100.0
+            })
+            .collect();
+        roads.sort_by_key(|r| (r.e.class, r.e.key));
+        // (every k-th route: ≤ 40 per region)
+        let step = (roads.len() / 40).max(1);
+        let mut seen = 0;
+        for r in roads.iter().step_by(step) {
+            let (l, class) = (&r.line, r.e.class);
+            let (ea, eb) = (l.pts[0], *l.pts.last().unwrap());
+            let mut run = (0u32, 0.0f64, Vec::new());
+            let mut in_river = false;
+            let mut segs = 0;
+            let ds = 25.0;
+            let n = (l.len() / ds).ceil() as usize;
+            for k in 0..=n {
+                let s = l.len() * k as f64 / n.max(1) as f64;
+                let p = l.at(s).0;
+                let inside = (p - c).length() < area.radius && s > 60.0 && l.len() - s > 60.0;
+                let kind = if inside { what_at(&w, &tr, p) } else { 0 };
+                if inside {
+                    segs += 1;
+                }
+                // runs of a lake (2), the sea (4), a reservoir (5)
+                let wet = if matches!(kind, 2 | 4 | 5) { kind } else { 0 };
+                if wet != 0 && wet == run.0 {
+                    run.1 += ds;
+                    run.2.push(p);
+                } else {
+                    finish_run(&w, name, class, &run, &mut bad, &mut n_narrow);
+                    run = (wet, if wet != 0 { ds } else { 0.0 }, if wet != 0 { vec![p] } else { vec![] });
+                }
+                if kind == 6 && !in_river {
+                    n_xing += 1;
+                    let sin = crossing_sin(&w, p, l.at(s).1);
+                    sin_sum += sin;
+                    if sin < 0.5 {
+                        n_oblique += 1;
+                    }
+                }
+                in_river = kind == 6;
+                match kind {
+                    1 | 6 => n_river += 1,
+                    3 => n_pond += 1,
+                    k if k >= 10 => {
+                        // (a route ending at or in the site keeps it)
+                        let st = tr
+                            .stamps
+                            .iter()
+                            .find(|st| st.template == k - 10 && crate::kits::settlements::sites::uv(st, p).length() < 2.0 * (st.half[0].max(st.half[1]) as f64))
+                            .unwrap();
+                        let q = |e: DVec3| crate::kits::settlements::sites::uv(st, e);
+                        let near_end = [ea, eb].iter().any(|&e| q(e).x.abs() < st.half[0] as f64 + 100.0 && q(e).y.abs() < st.half[1] as f64 + 100.0);
+                        if !near_end {
+                            sites_bad += 1;
+                            let g = geodesy::ecef2geodetic(p, &w.ell);
+                            bad.push(format!("{name}: class {class} in site {} at ({:.5}, {:.5})", k - 10, g.lat.to_degrees(), g.lon.to_degrees()));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            finish_run(&w, name, class, &run, &mut bad, &mut n_narrow);
+            if segs > 0 {
+                seen += 1;
+                n_seg += segs;
+            }
+        }
+        n_route += seen;
+        // bridges (not overpasses): over water or a valley
+        let f = build::features(&mut ctx, &area);
+        n_tunnel += f.segs.iter().filter(|s| s.flags & flag::TUNNEL != 0).count();
+        for s in f.segs.iter().filter(|s| s.flags & flag::BRIDGE != 0 && s.flags & flag::OVER == 0 && s.kind != cls::KIND0 + cls::RAMP as u32) {
+            let m = (s.a + s.b) * 0.5;
+            let g = geodesy::ecef2geodetic(m, &w.ell);
+            let t = w.terrain(&crate::world::Ctx::new(g.lat, g.lon, 5.0, &w.ell));
+            if t.water_kind != crate::world::water::NONE
+                || (t.river_hw > 0.0 && t.river_d.abs() < t.river_hw + 20.0)
+                || matches!(what_at(&w, &tr, m), 2 | 4 | 5 | 6)
+            {
+                br_wet += 1;
+            } else {
+                br_dry += 1;
+            }
+        }
+        eprintln!(
+            "{name}: {} routes, {seen} sampled, {} site stamps, {} reservoir pieces ({:.1} s)",
+            roads.len(),
+            tr.stamps.len(),
+            tr.res.len(),
+            t0.elapsed().as_secs_f64()
+        );
+    }
+    for b in bad.iter().take(40) {
+        eprintln!("{b}");
+    }
+    eprintln!(
+        "{n_route} routes, {n_seg} sampled 25 m pieces: {} in water or sites ({sites_bad} in sites), {n_narrow} narrow crossings, {n_river} points over rivers and streams; {n_xing} river crossings ({:.1} per 100 km, mean sin {:.2}, {n_oblique} under 30°); {n_pond} points over ponds; bridges over water {br_wet}, over dry valleys {br_dry}; {n_tunnel} tunnel segments",
+        bad.len(),
+        n_xing as f64 / (n_seg as f64 * 25.0 / 1e5),
+        sin_sum / n_xing.max(1) as f64
+    );
+    if only.is_none() {
+        assert!(n_route >= 200, "{n_route} routes");
+    }
+    assert!(bad.is_empty(), "{} in water or sites", bad.len());
+}
+
+/// A run of water along a route: a narrow crossing (≤ the class's span + a sample) or too wide.
+fn finish_run(w: &World, name: &str, class: usize, run: &(u32, f64, Vec<DVec3>), bad: &mut Vec<String>, narrow: &mut usize) {
+    if run.0 == 0 {
+        return;
+    }
+    if run.1 <= route::span(class, run.0 != 2) + 25.0 {
+        *narrow += 1;
+    } else {
+        let g = geodesy::ecef2geodetic(run.2[run.2.len() / 2], &w.ell);
+        bad.push(format!(
+            "{name}: class {class} over {:.0} m of {} at ({:.5}, {:.5})",
+            run.1,
+            ["", "", "a lake", "", "the sea", "a reservoir"][run.0 as usize],
+            g.lat.to_degrees(),
+            g.lon.to_degrees()
+        ));
+    }
+}
+
+/// Debug: kettle-lake lowlands with roads (glaciated or permafrost lowlands with people whose
+/// 9 × 9 km grid has 8–45 % kettle lakes): `find_cold_lake_regions -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn find_cold_lake_regions() {
+    let w = world();
+    let mut n_cold = 0;
+    for i in 0..4_000_000u64 {
+        let h = mix64(0x7AC ^ i);
+        let lat = (2.0 * u01k(h, 1) - 1.0).asin();
+        let lon = (u01k(h, 2) - 0.5) * std::f64::consts::TAU;
+        let p = geodesy::geodetic2ecef(geodesy::Geodetic::new(lat, lon, 0.0), &w.ell);
+        let a = w.atlas().sample(p.normalize());
+        if a.coast_km < 5.0 || a.population < 0.05 || !(a.temp_c < 0.0 || (a.glaciation > 0.3 && a.temp_c < 10.0)) {
+            continue;
+        }
+        if net::nodes(&w, nw::HAMLET, p, 5_000.0).len() < 3 {
+            continue;
+        }
+        let (_, _, east, north) = crate::kits::settlements::places::frame_at(&w, p);
+        let mut cold = 0;
+        for j in -4..=4 {
+            for i in -4..=4 {
+                let q = route::surface(&w, p + east * (i as f64 * 1_000.0) + north * (j as f64 * 1_000.0));
+                let g = geodesy::ecef2geodetic(q, &w.ell);
+                let t = w.terrain(&crate::world::Ctx::new(g.lat, g.lon, 20.0, &w.ell));
+                if route::in_cold_lake(&t, 0.0, q) {
+                    cold += 1;
+                }
+            }
+        }
+        if cold >= 6 {
+            eprintln!("kettle lakes {cold}/81: ({:.4}, {:.4})", lat.to_degrees(), lon.to_degrees());
+            n_cold += 1;
+            if n_cold >= 6 {
+                break;
+            }
+        }
+    }
+}
+
+/// Debug: lake districts and kettle-lake lowlands with roads (populated land whose 9 × 9 km
+/// grid has 8–45 % lake): `find_lake_regions -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn find_lake_regions() {
+    let w = world();
+    let (mut n_lake, mut n_cold) = (0, 0);
+    for p in land_points(&w, 3000, 0.08, 0x7AB) {
+        let (_, _, east, north) = crate::kits::settlements::places::frame_at(&w, p);
+        let (mut lake, mut cold, mut n) = (0, 0, 0);
+        for j in -4..=4 {
+            for i in -4..=4 {
+                let q = route::surface(&w, p + east * (i as f64 * 1_000.0) + north * (j as f64 * 1_000.0));
+                let g = geodesy::ecef2geodetic(q, &w.ell);
+                let t = w.terrain(&crate::world::Ctx::new(g.lat, g.lon, 20.0, &w.ell));
+                n += 1;
+                if t.water_kind == crate::world::water::LAKE {
+                    lake += 1;
+                }
+                if route::in_cold_lake(&t, 0.0, q) {
+                    cold += 1;
+                }
+            }
+        }
+        let g = geodesy::ecef2geodetic(p, &w.ell);
+        let ll = (g.lat.to_degrees(), g.lon.to_degrees());
+        if n_lake < 8 && (8..=36).contains(&lake) {
+            eprintln!("lakes {lake}/{n}: ({:.4}, {:.4})", ll.0, ll.1);
+            n_lake += 1;
+        }
+        if n_cold < 6 && (8..=36).contains(&cold) {
+            eprintln!("kettle lakes {cold}/{n}: ({:.4}, {:.4})", ll.0, ll.1);
+            n_cold += 1;
+        }
+        if n_lake >= 8 && n_cold >= 6 {
+            break;
+        }
+    }
+}
+
+/// Roads end at a town's arterials, not its centre: no road route of a town, city or
+/// metropolis ends within 0.35 of its radius from the centre (railways still do: stations).
+#[test]
+fn roads_end_at_town_arterials() {
+    let w = world();
+    let mut pts = CpuPoints(&w);
+    let mut ctx = HostCtx { world: &w, points: &mut pts };
+    let (mut n, mut n_rail, mut central) = (0, 0, 0);
+    for &(lat, lon) in &[(-7.7302, -18.7965), (30.35, 128.8487), (-7.6185, -16.6091), (-23.7536, -33.8316)] {
+        let (routes, _, _) = build::area_routes(&mut ctx, &Area { center: ecef(&w, lat, lon), radius: 8_000.0, gsd: 30.0 });
+        for r in &routes {
+            for (nd, p) in [(r.e.a, r.line.pts[0]), (r.e.b, *r.line.pts.last().unwrap())] {
+                if nd.level < crate::kits::settlements::places::TOWN || nd.level > crate::kits::settlements::places::METRO {
+                    continue;
+                }
+                let d = (p - nd.p).length() / nd.radius;
+                if r.e.class == cls::RAIL {
+                    n_rail += 1;
+                    assert!(d < 0.3, "a railway ends at {d:.2} R");
+                } else if r.e.class != cls::POWER {
+                    n += 1;
+                    if d <= 0.35 {
+                        eprintln!("a road of class {} ends at {d:.2} R of a level {} place", r.e.class, nd.level);
+                        central += 1;
+                    }
+                }
+            }
+        }
+    }
+    eprintln!("{n} road ends ({central} within 0.35 R of the centre) and {n_rail} railway ends at towns");
+    assert!(n > 20);
+    assert_eq!(central, 0);
+}
+
+/// The route of an edge (settled: the CPU's point evaluations are immediate).
+fn route_of(ctx: &mut HostCtx, e: &net::Edge) -> Option<std::sync::Arc<route::Line>> {
+    build::routed(ctx, e).expect("the CPU's points are immediate")
+}
+
+/// Timing: routing every edge near some regions from cold caches, then their features (10 km
+/// discs at 30 m pixels): `routing_time -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn routing_time() {
+    let w = world();
+    let mut pts = CpuPoints(&w);
+    let mut ctx = HostCtx { world: &w, points: &mut pts };
+    let (mut t_route, mut t_feat, mut n_routes) = (0.0, 0.0, 0);
+    for &(name, lat, lon) in
+        ROUTE_REGIONS.iter().filter(|r| matches!(r.0, "parclo" | "trumpet" | "bridge" | "airport" | "dam" | "kettle_a" | "lakes_a" | "lakes_d"))
+    {
+        net::clear_cache();
+        build::clear_cache();
+        crate::kits::settlements::sites::clear_cache();
+        let c = ecef(&w, lat, lon);
+        let mut edges = Vec::new();
+        for n in 0..nw::N {
+            if 30.0 < net::net_class_max_gsd(n) {
+                edges.extend(net::edges_near(&w, n, c, 10_000.0 + 1_500.0).into_iter().filter(|e| 30.0 < cls::GSD_MAX[e.class]));
+            }
+        }
+        // (the parts: the scenes, the analytic routes, the sites)
+        let t0 = std::time::Instant::now();
+        for e in &edges {
+            let (a, b) = build::ends(&w, e);
+            if e.class != cls::POWER {
+                let sp = route::PARAMS[e.class].span;
+                std::hint::black_box(route::Scene::of_corridor(&w, a, b, route::max_deviation(e.class, (b - a).length()), sp > 0.0 && sp < 300.0, Vec::new()));
+            }
+        }
+        let ts = t0.elapsed().as_secs_f64();
+        let t1 = std::time::Instant::now();
+        let nb = edges.iter().filter(|e| build::base(&w, e).line.is_some()).count();
+        let tb = t1.elapsed().as_secs_f64();
+        let t2 = std::time::Instant::now();
+        let n = edges.iter().filter(|e| route_of(&mut ctx, e).is_some()).count();
+        let tr = ts + tb + t2.elapsed().as_secs_f64();
+        eprintln!("{name}: scenes {ts:.2} s, analytic routes {tb:.2} s ({nb} routes), sites {:.2} s", t2.elapsed().as_secs_f64());
+        if std::env::var("TR_WHY").is_ok() {
+            let dropped: Vec<net::Edge> = edges.iter().filter(|e| route_of(&mut ctx, e).is_none()).copied().collect();
+            for e in dropped.iter().take(12) {
+                let bs = build::base(&w, e);
+                let Some(l) = bs.line.clone() else { continue };
+                let (blocks, res) = build::obstacles(&mut ctx, &l, e.class, bs.ends).unwrap();
+                let mut sc = (*bs.scene).clone();
+                sc.blocks = blocks.clone();
+                sc.res = res.clone();
+                let g = geodesy::ecef2geodetic(bs.ends[0], &w.ell);
+                eprintln!(
+                    "  dropped by sites: class {} {:.1} km from ({:.4}, {:.4}): {} blocks, {} reservoir pieces: {}",
+                    e.class,
+                    l.len() / 1e3,
+                    g.lat.to_degrees(),
+                    g.lon.to_degrees(),
+                    blocks.len(),
+                    res.len(),
+                    route::diagnose(&w, bs.ends[0], bs.ends[1], e.class, &sc)
+                );
+            }
+            for e in edges.iter().filter(|e| build::base(&w, e).line.is_none()).take(12) {
+                let bs = build::base(&w, e);
+                let ([a, b], sc) = (bs.ends, &bs.scene);
+                let g = geodesy::ecef2geodetic(a, &w.ell);
+                eprintln!(
+                    "  dropped class {} {:.1} km from ({:.4}, {:.4}), levels {} {}: {}",
+                    e.class,
+                    (b - a).length() / 1e3,
+                    g.lat.to_degrees(),
+                    g.lon.to_degrees(),
+                    e.a.level,
+                    e.b.level,
+                    route::diagnose(&w, a, b, e.class, sc)
+                );
+            }
+        }
+        let t1 = std::time::Instant::now();
+        let f = build::features(&mut ctx, &Area { center: c, radius: 10_000.0, gsd: 30.0 });
+        let tf = t1.elapsed().as_secs_f64();
+        eprintln!("{name}: {} edges, {n} routed in {tr:.2} s; features {} segs in {tf:.2} s", edges.len(), f.segs.len());
+        t_route += tr;
+        t_feat += tf;
+        n_routes += n;
+    }
+    eprintln!("total: {n_routes} routes in {t_route:.2} s ({:.1} ms per route); features {t_feat:.2} s", 1e3 * t_route / n_routes.max(1) as f64);
+}
+
+/// Debug: roads going around a lake (the edge's chord crosses the lake, the route skirts it)
+/// and minor roads crossing wide rivers, in the lake regions: `find_routing_places -- --ignored
+/// --nocapture`.
+#[test]
+#[ignore]
+fn find_routing_places() {
+    let w = world();
+    let mut pts = CpuPoints(&w);
+    let mut ctx = HostCtx { world: &w, points: &mut pts };
+    let ll = |p: DVec3| {
+        let g = geodesy::ecef2geodetic(p, &w.ell);
+        (g.lat.to_degrees(), g.lon.to_degrees())
+    };
+    let (mut n_det, mut n_x) = (0, 0);
+    for &(name, lat, lon) in ROUTE_REGIONS.iter().filter(|r| r.0.starts_with("lakes") || matches!(r.0, "dam" | "bridge" | "parclo")) {
+        let (routes, _, _) = build::area_routes(&mut ctx, &Area { center: ecef(&w, lat, lon), radius: 8_000.0, gsd: 30.0 });
+        for r in routes.iter().filter(|r| r.e.class <= cls::LOCAL) {
+            let bs = build::base(&w, &r.e);
+            let [a, b] = bs.ends;
+            for lk in &bs.scene.lakes {
+                let c = route::surface(&w, lk.pt);
+                let (d, _) = r.line.dist(c);
+                // (the chord through the lake's middle, away from the ends; the route round it)
+                let t = (c - a).dot(b - a) / (b - a).length_squared();
+                if lk.rad > 200.0
+                    && lk.rad < 1_500.0
+                    && (0.15..0.85).contains(&t)
+                    && net::chord_dist(a, b, c) < 0.6 * lk.rad
+                    && d > 0.9 * lk.rad
+                    && d < 2.0 * lk.rad
+                    && n_det < 12
+                {
+                    let (la, lo) = ll(c);
+                    let (pa, po) = ll(r.line.at(r.line.dist(c).1).0);
+                    eprintln!("{name}: class {} around a lake (r {:.0} m) at ({la:.4}, {lo:.4}), road at ({pa:.4}, {po:.4})", r.e.class, lk.rad);
+                    n_det += 1;
+                }
+            }
+            // wide river crossings
+            if n_x < 10 && r.e.class >= cls::SECONDARY && std::env::var("TR_RIVERS").is_ok() {
+                let n = (r.line.len() / 20.0) as usize;
+                let mut inr = false;
+                for k in 0..n {
+                    let p = r.line.at(k as f64 * 20.0).0;
+                    let g = geodesy::ecef2geodetic(p, &w.ell);
+                    let t = w.terrain(&crate::world::Ctx::new(g.lat, g.lon, 5.0, &w.ell));
+                    let now = t.river_hw > 25.0 && t.river_d.abs() < t.river_hw;
+                    if now && !inr && n_x < 10 {
+                        eprintln!(
+                            "{name}: class {} crosses a river (half width {:.0} m) at ({:.4}, {:.4})",
+                            r.e.class,
+                            t.river_hw,
+                            g.lat.to_degrees(),
+                            g.lon.to_degrees()
+                        );
+                        n_x += 1;
+                    }
+                    inr = now;
+                }
+            }
+        }
+    }
+}
+
+/// Debug: the kit's stamps near a point (`TR_SPEC` "lat,lon,radius"):
+/// `stamps_near -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn stamps_near() {
+    let spec = std::env::var("TR_SPEC").unwrap_or("-7.6185,-16.6091,2000".into());
+    let v: Vec<f64> = spec.split(',').map(|x| x.trim().parse().unwrap()).collect();
+    let w = world();
+    let mut pts = CpuPoints(&w);
+    let mut ctx = HostCtx { world: &w, points: &mut pts };
+    let f = build::features(&mut ctx, &Area { center: ecef(&w, v[0], v[1]), radius: v[2], gsd: 2.0 });
+    for st in &f.stamps {
+        let g = geodesy::ecef2geodetic(st.center, &w.ell);
+        eprintln!("stamp {} at ({:.5}, {:.5})", st.template, g.lat.to_degrees(), g.lon.to_degrees());
+    }
+    // the segments near the point
+    let c = ecef(&w, v[0], v[1]);
+    for sg in f.segs.iter().filter(|sg| net::chord_dist(sg.a, sg.b, c) < 120.0) {
+        let g = geodesy::ecef2geodetic(c, &w.ell);
+        let t = w.terrain(&crate::world::Ctx::new(g.lat, g.lon, 5.0, &w.ell));
+        eprintln!(
+            "seg kind {} flags {:#x} deck {:.1} {:.1} at {:.0} m; ground {:.1} water {:.1} kind {}",
+            sg.kind - cls::KIND0,
+            sg.flags,
+            sg.deck_a,
+            sg.deck_b,
+            net::chord_dist(sg.a, sg.b, c),
+            t.ground,
+            t.water,
+            t.water_kind
+        );
+    }
+    // interchange ramps: their centroids, in clusters of 1.5 km
+    let mut cl: Vec<(DVec3, usize)> = Vec::new();
+    for sg in f.segs.iter().filter(|s| s.kind == cls::KIND0 + cls::RAMP as u32) {
+        match cl.iter_mut().find(|c| (c.0 / c.1 as f64 - sg.a).length() < 1_500.0) {
+            Some(c) => {
+                c.0 += sg.a;
+                c.1 += 1;
+            }
+            None => cl.push((sg.a, 1)),
+        }
+    }
+    for (c, n) in cl {
+        let g = geodesy::ecef2geodetic(c / n as f64, &w.ell);
+        eprintln!("ramps: {n} segments around ({:.5}, {:.5})", g.lat.to_degrees(), g.lon.to_degrees());
     }
 }

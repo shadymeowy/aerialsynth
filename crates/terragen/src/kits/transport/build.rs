@@ -67,12 +67,59 @@ fn rank(class: usize) -> u32 {
 // ---------------------------------------------------------------- routes
 
 type RKey = (u64, u64);
+/// Analytic routes (no sites) and their scenes; the final routes.
+#[derive(Clone)]
+pub(crate) struct Base {
+    pub line: Option<Arc<Line>>,
+    pub scene: Arc<route::Scene>,
+    /// the route's ends (on dry land)
+    pub ends: [DVec3; 2],
+}
+static BASE: RwLock<Option<FxHashMap<RKey, Base>>> = RwLock::new(None);
 static ROUTES: RwLock<Option<FxHashMap<RKey, Option<Arc<Line>>>>> = RwLock::new(None);
 
-/// The route of an edge (memoized; None: no route, e.g. across the sea).
-pub fn routed(w: &World, e: &Edge) -> Option<Arc<Line>> {
+/// Where a route of `class` ends at node `n` (coming from `toward`): a road enters a town or
+/// larger at the nearest arterial (a district edge of the settlements kit's town model) on its
+/// way to the centre, a power line ends at the built-up edge; railways run to the centre (the
+/// station), other nodes are points.
+pub fn end_point(w: &World, n: &Node, toward: DVec3, class: usize) -> DVec3 {
+    if n.level < places::TOWN || n.level > places::METRO || class == cls::RAIL || class == cls::RAMP {
+        return n.p;
+    }
+    let Some(pl) = places::places_near(w, n.level as usize, n.p, 1.0).into_iter().find(|p| p.id == n.id) else { return n.p };
+    let tp = crate::kits::settlements::town::decode(&crate::kits::settlements::place_stamp(w, &pl));
+    let d = toward - tp.c;
+    let dir = DVec2::new(d.dot(tp.ex), d.dot(tp.ey)).normalize_or_zero();
+    let se = tp.elong.sqrt();
+    let k = DVec2::new(dir.x / se, dir.y * se).length().max(1e-9);
+    let rel = match class {
+        cls::POWER => 1.0,
+        cls::MOTORWAY => 0.65,
+        _ => 0.8,
+    };
+    let mut q = dir * (rel * tp.r / k);
+    if class != cls::POWER && tp.form == places::form::CITY as u32 {
+        // the bisector of the two nearest district sites (as `town::district`), within reach
+        let dcell = [400.0, 400.0, 600.0, 1000.0, 1400.0][tp.level as usize];
+        let dc = worley2(tp.seed ^ 0xD15, q, dcell, 0.85);
+        let nn = (dc.point2 - dc.point).normalize_or_zero();
+        let off = (q - (dc.point + dc.point2) * 0.5).dot(nn);
+        let lim = route::ENTRY.min(0.25 * tp.r);
+        q -= nn * off.clamp(-lim, lim);
+    }
+    route::surface(w, tp.c + tp.ex * q.x + tp.ey * q.y)
+}
+
+/// The ends of an edge's route.
+pub(crate) fn ends(w: &World, e: &Edge) -> (DVec3, DVec3) {
+    (end_point(w, &e.a, e.b.p, e.class), end_point(w, &e.b, e.a.p, e.class))
+}
+
+/// The analytic part of an edge's route (memoized): its scene (towns to go around, drainage,
+/// lakes) and the route through it.
+pub(crate) fn base(w: &World, e: &Edge) -> Base {
     let key = (w.cache_key, e.key);
-    if let Some(v) = ROUTES.read().unwrap().as_ref().and_then(|m| m.get(&key)) {
+    if let Some(v) = BASE.read().unwrap().as_ref().and_then(|m| m.get(&key)) {
         return v.clone();
     }
     let avoid: Vec<(DVec3, f64)> = if matches!(e.class, cls::MOTORWAY | cls::TRUNK | cls::RAIL | cls::POWER) {
@@ -90,14 +137,209 @@ pub fn routed(w: &World, e: &Edge) -> Option<Arc<Line>> {
     } else {
         Vec::new()
     };
-    let r = route::route(w, e.a.p, e.b.p, e.class, &avoid).map(Arc::new);
+    let (mut a, mut b) = ends(w, e);
+    let half = route::max_deviation(e.class, (b - a).length());
+    let fine = route::PARAMS[e.class].span > 0.0 && route::PARAMS[e.class].span < 300.0;
+    let sc = if e.class == cls::POWER { route::Scene { avoid, ..Default::default() } } else { route::Scene::of_corridor(w, a, b, half, fine, avoid) };
+    if e.class != cls::POWER {
+        // (a node in a lake or by the shore: the road ends on the shore)
+        let a0 = a;
+        a = route::dry_end(w, &sc, a0, b);
+        b = route::dry_end(w, &sc, b, a0);
+    }
+    let r = route::route(w, a, b, e.class, &sc).map(Arc::new);
+    let v = Base { line: r, scene: Arc::new(sc), ends: [a, b] };
+    let mut g = BASE.write().unwrap();
+    let m = g.get_or_insert_with(FxHashMap::default);
+    if m.len() > 50_000 {
+        m.clear();
+    }
+    m.insert(key, v.clone());
+    v
+}
+
+/// The route of an edge (memoized): the analytic route, routed again around the sites near it
+/// (no-go footprints, reservoirs) where it touches any. None: pending point evaluations (the
+/// sites'); Some(None): no route (e.g. across the sea).
+pub fn routed(ctx: &mut HostCtx, e: &Edge) -> Option<Option<Arc<Line>>> {
+    let w = ctx.world;
+    let key = (w.cache_key, e.key);
+    if let Some(v) = ROUTES.read().unwrap().as_ref().and_then(|m| m.get(&key)) {
+        return Some(v.clone());
+    }
+    let Base { line: r0, scene: sc0, ends: [mut a, mut b] } = base(w, e);
+    let mut line = r0;
+    let mut sc: Option<route::Scene> = None;
+    let mut tries = 0;
+    while let Some(l) = line.clone() {
+        let (blocks, res) = obstacles(ctx, &l, e.class, [a, b])?;
+        if blocks.is_empty() && res.is_empty() {
+            break;
+        }
+        let sc = sc.get_or_insert_with(|| (*sc0).clone());
+        let mut more = false;
+        for k in blocks {
+            if !sc.blocks.contains(&k) {
+                sc.blocks.push(k);
+                more = true;
+            }
+        }
+        for r in res {
+            if !sc.res.iter().any(|x| x.a == r.a && x.b == r.b && x.ha == r.ha) {
+                sc.res.push(r);
+                more = true;
+            }
+        }
+        if !more || route::check(w, sc, &l, e.class, false) {
+            break;
+        }
+        tries += 1;
+        if tries > 2 {
+            line = None;
+            break;
+        }
+        if e.class != cls::POWER {
+            // (an end in a reservoir: on its shore)
+            let a0 = a;
+            a = route::dry_end(w, sc, a0, b);
+            b = route::dry_end(w, sc, b, a0);
+        }
+        line = route::route(w, a, b, e.class, sc).map(Arc::new);
+    }
     let mut g = ROUTES.write().unwrap();
     let m = g.get_or_insert_with(FxHashMap::default);
     if m.len() > 100_000 {
         m.clear();
     }
-    m.insert(key, r.clone());
-    r
+    m.insert(key, line.clone());
+    // (the scene served its purpose)
+    if let Some(m) = BASE.write().unwrap().as_mut() {
+        m.remove(&key);
+    }
+    Some(line)
+}
+
+/// The sites near a route of `class` (its ends excepted): footprints of airports, quarries,
+/// solar and wind farms (widened by the road), and reservoir pieces. None: pending.
+pub(crate) fn obstacles(ctx: &mut HostCtx, line: &Line, class: usize, ends: [DVec3; 2]) -> Option<(Vec<route::Block>, Vec<FSeg>)> {
+    let w = ctx.world;
+    let margin = if class == cls::POWER { 30.0 } else { half_width(class, 2) + verge(class) + 15.0 };
+    // the line in chunks of ≤ 15 km: centre and radius
+    let mut chunks: Vec<(DVec3, f64)> = Vec::new();
+    let n = line.pts.len();
+    let mut k0 = 0;
+    while k0 + 1 < n {
+        let mut k1 = k0 + 1;
+        while k1 + 1 < n && line.s[k1] - line.s[k0] < 15_000.0 {
+            k1 += 1;
+        }
+        let c = (line.pts[k0] + line.pts[k1]) * 0.5;
+        let r = line.pts[k0..=k1].iter().map(|p| (*p - c).length()).fold(0.0, f64::max);
+        chunks.push((c, r));
+        k0 = k1;
+    }
+    let near = |c: DVec3, r: f64| chunks.iter().any(|&(q, rq)| (q - c).length() < rq + r);
+    let mut towns: Vec<places::Place> = Vec::new();
+    let mut qc: Vec<(i64, i64, i64)> = Vec::new();
+    let mut wc: Vec<(i64, i64, i64)> = Vec::new();
+    let mut mc: Vec<(i64, i64, i64)> = Vec::new();
+    for &(c, r) in &chunks {
+        for l in places::TOWN as usize..places::NLEVELS {
+            towns.extend(places::places_near(w, l, c, r + 50_000.0));
+        }
+        qc.extend(sites::lattice_cells(w, sites::QUARRY_CELL, c, r + 8_000.0));
+        wc.extend(sites::lattice_cells(w, sites::WIND_CELL, c, r + 8_000.0));
+        mc.extend(sites::lattice_cells(w, sites::MTN_DAM_CELL, c, r + 45_000.0));
+    }
+    towns.sort_unstable_by_key(|p| p.id);
+    towns.dedup_by_key(|p| p.id);
+    for v in [&mut qc, &mut wc, &mut mc] {
+        v.sort_unstable();
+        v.dedup();
+    }
+    let mut pending = false;
+    let mut blocks: Vec<route::Block> = Vec::new();
+    let mut res: Vec<FSeg> = Vec::new();
+    let add = |s: &sites::Site, blocks: &mut Vec<route::Block>, res: &mut Vec<FSeg>| {
+        for st in &s.stamps {
+            let b = match st.template {
+                sites::tpl::QUARRY => route::Block { c: st.center, ex: st.ex, ey: st.ey, half: DVec2::splat(1.6 * st.v[0] as f64 + margin), round: true },
+                sites::tpl::AIRPORT | sites::tpl::SOLAR | sites::tpl::WIND => {
+                    route::Block { c: st.center, ex: st.ex, ey: st.ey, half: DVec2::new(st.half[0] as f64, st.half[1] as f64) + margin, round: false }
+                }
+                _ => continue,
+            };
+            // (a route ending at or in the site keeps it)
+            let grown = route::Block { half: b.half + 60.0, ..b };
+            if near(b.c, b.half.length() + 100.0) && !ends.iter().any(|&p| grown.inside(p)) {
+                blocks.push(b);
+            }
+        }
+        if class != cls::POWER {
+            for sg in s.segs.iter().filter(|g| g.kind == sites::tpl::RESERVOIR) {
+                if near((sg.a + sg.b) * 0.5, 0.5 * (sg.b - sg.a).length() + sg.hw as f64 + 100.0) {
+                    res.push(*sg);
+                }
+            }
+        }
+    };
+    for pl in &towns {
+        let d = line.dist(pl.center).0;
+        if pl.airport && d < pl.radius + 13_000.0 {
+            match sites::airport(ctx, pl) {
+                None => pending = true,
+                Some(Some(s)) => add(&s, &mut blocks, &mut res),
+                Some(None) => {}
+            }
+        }
+        if d < 1.2 * pl.radius + 6_500.0 {
+            for k in 0..2 {
+                match sites::solar(ctx, pl, k) {
+                    None => pending = true,
+                    Some(Some(s)) => add(&s, &mut blocks, &mut res),
+                    Some(None) => {}
+                }
+            }
+        }
+        if class != cls::POWER && pl.parent == 0 && d < 50_000.0 && u01k(pl.id, 50) < if pl.level >= places::CITY { 0.5 } else { 0.15 } {
+            match sites::dam(ctx, mix64(pl.id ^ 0xDA4), pl.center, pl.radius + 2500.0, 22_000.0) {
+                None => pending = true,
+                Some(Some(s)) => add(&s, &mut blocks, &mut res),
+                Some(None) => {}
+            }
+        }
+    }
+    for &c in &qc {
+        match sites::quarry(ctx, c) {
+            None => pending = true,
+            Some(Some(s)) => add(&s, &mut blocks, &mut res),
+            Some(None) => {}
+        }
+    }
+    for &c in &wc {
+        match sites::wind(ctx, c) {
+            None => pending = true,
+            Some(Some(s)) => add(&s, &mut blocks, &mut res),
+            Some(None) => {}
+        }
+    }
+    if class != cls::POWER {
+        for &c in &mc {
+            if let Some((id, p)) = sites::lattice_site(w, 0xDA7, sites::MTN_DAM_CELL, c) {
+                if u01k(id, 1) < 0.2 && w.smooth_relief(p, 3000.0).1 > 350.0 && w.atlas().sample(p.normalize()).glaciation < 0.4 {
+                    match sites::dam(ctx, id, p, 0.0, 20_000.0) {
+                        None => pending = true,
+                        Some(Some(s)) => add(&s, &mut blocks, &mut res),
+                        Some(None) => {}
+                    }
+                }
+            }
+        }
+    }
+    if pending {
+        return None;
+    }
+    Some((blocks, res))
 }
 
 // ---------------------------------------------------------------- profiles
@@ -360,9 +602,9 @@ fn roundabouts(arch: u8, dev: f64, h: u64) -> bool {
 
 // ---------------------------------------------------------------- the area
 
-struct Routed {
-    e: Edge,
-    line: Arc<Line>,
+pub(crate) struct Routed {
+    pub e: Edge,
+    pub line: Arc<Line>,
 }
 
 /// Vertex spacing (m) of the emitted polylines at a pixel size: 20 m × 2^k ≥ 1.5 gsd.
@@ -371,13 +613,10 @@ fn spacing(gsd: f64) -> f64 {
     20.0 * k.exp2()
 }
 
-/// The kit's features for an area.
-pub fn features(ctx: &mut HostCtx, area: &Area) -> Features {
-    let mut f = Features::default();
+/// The routes near an area (the graph's edges, spurs to motorways with their crossings, roads and
+/// lines to the sites) and whether point evaluations are pending.
+pub(crate) fn area_routes(ctx: &mut HostCtx, area: &Area) -> (Vec<Routed>, Vec<(Edge, u64, Crossing)>, bool) {
     let w = ctx.world;
-    if w.cfg.landuse.roads <= 0.0 || w.cfg.landuse.towns <= 0.0 || area.gsd >= cls::GSD_MAX[cls::POWER] {
-        return f;
-    }
     let gsd = area.gsd;
     let vis = |c: usize| gsd < cls::GSD_MAX[c];
     let margin = 1_500.0;
@@ -389,13 +628,21 @@ pub fn features(ctx: &mut HostCtx, area: &Area) -> Features {
         }
         edges.extend(net::edges_near(w, n, area.center, area.radius + margin).into_iter().filter(|e| vis(e.class)));
     }
+    let mut pending = false;
     // ---- spurs from towns to passing motorways
     let mut spurs: Vec<(Edge, u64, Crossing)> = Vec::new();
     if vis(cls::TRUNK) {
         let mut mways: Vec<Edge> = net::edges_near(w, nw::ARTERIAL, area.center, area.radius + 25_000.0);
         mways.retain(|e| e.class == cls::MOTORWAY);
         for m in &mways {
-            let Some(ml) = routed(w, m) else { continue };
+            let ml = match routed(ctx, m) {
+                Some(Some(l)) => l,
+                Some(None) => continue,
+                None => {
+                    pending = true;
+                    continue;
+                }
+            };
             for l in places::TOWN as usize..=places::CITY as usize {
                 for pl in places::places_near(w, l, area.center, area.radius + 14_000.0) {
                     if pl.id == m.a.id || pl.id == m.b.id || pl.parent != 0 {
@@ -420,11 +667,31 @@ pub fn features(ctx: &mut HostCtx, area: &Area) -> Features {
         }
     }
     // ---- roads, rail spurs and power lines to the sites
-    let mut pending = false;
     site_edges(ctx, area, &mut edges, &mut pending);
     edges.sort_unstable_by_key(|e| e.key);
     edges.dedup_by_key(|e| e.key);
-    let routes: Vec<Routed> = edges.iter().filter_map(|e| routed(w, e).map(|line| Routed { e: *e, line })).collect();
+    let mut routes: Vec<Routed> = Vec::new();
+    for e in &edges {
+        match routed(ctx, e) {
+            Some(Some(line)) => routes.push(Routed { e: *e, line }),
+            Some(None) => {}
+            None => pending = true,
+        }
+    }
+    (routes, spurs, pending)
+}
+
+/// The kit's features for an area.
+pub fn features(ctx: &mut HostCtx, area: &Area) -> Features {
+    let mut f = Features::default();
+    let w = ctx.world;
+    if w.cfg.landuse.roads <= 0.0 || w.cfg.landuse.towns <= 0.0 || area.gsd >= cls::GSD_MAX[cls::POWER] {
+        return f;
+    }
+    let gsd = area.gsd;
+    let vis = |c: usize| gsd < cls::GSD_MAX[c];
+    let margin = 1_500.0;
+    let (routes, spurs, mut pending) = area_routes(ctx, area);
     // ---- crossings among the routes near the area
     let mut mods: Vec<Vec<Mod>> = vec![Vec::new(); routes.len()];
     let mut ixs: Vec<(u32, usize, usize, Crossing)> = Vec::new();
@@ -1220,6 +1487,7 @@ type Place2 = places::Place;
 /// Clear the caches (tests).
 #[cfg(test)]
 pub fn clear_cache() {
+    *BASE.write().unwrap() = None;
     *ROUTES.write().unwrap() = None;
     *SAMPLES.write().unwrap() = None;
     *CROSS.write().unwrap() = None;

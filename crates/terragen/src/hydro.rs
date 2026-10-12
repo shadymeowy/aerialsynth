@@ -291,11 +291,19 @@ impl World {
 
     /// All drainage edges whose valley could reach within `radius` of `center`.
     pub fn river_segments(&self, center: DVec3, radius: f64, gsd: f64) -> Vec<Seg> {
+        self.river_segments_of(center, radius, gsd, 0..self.cfg.hydro.levels.len())
+    }
+
+    /// [`World::river_segments`] of the drainage levels `levels` only.
+    pub fn river_segments_of(&self, center: DVec3, radius: f64, gsd: f64, levels: std::ops::Range<usize>) -> Vec<Seg> {
         let mut out = Vec::new();
         if !self.cfg.hydro.rivers {
             return out;
         }
         for (lvl, lc) in self.cfg.hydro.levels.iter().enumerate() {
+            if !levels.contains(&lvl) {
+                continue;
+            }
             let first = out.len();
             let cell = lc.cell_km * KM;
             // skip levels far below the resolution (the carve fades out per pixel before that,
