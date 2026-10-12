@@ -699,13 +699,14 @@ mod tests {
     pub(crate) const PLACES: &[(&str, f64, f64)] = &[
         ("tower_karst", -0.714, -96.231),
         ("karst_islands", 4.857, -93.234),
-        ("cockpit_karst", 43.011, 128.036),
-        ("folded_ridges", 51.411, -28.424),
-        ("fault_blocks", 27.174, 134.125),
-        ("badlands", -12.209, -151.434),
+        ("cockpit_karst", 41.958, -21.188),
+        ("folded_ridges", 27.899, 42.870),
+        ("fault_blocks", 31.739, 137.721),
+        ("badlands", -21.410, 36.504),
         ("canyon", 21.245, -121.297),
         ("u_valley", 49.423, -162.365),
-        ("fjord", 56.509, 162.085),
+        ("tarn", 40.874, 174.741),
+        ("fjord", 63.382, -81.127),
         ("fan", -28.392, 45.461),
     ];
 
@@ -753,6 +754,8 @@ mod tests {
             ("canyon", 14),
             ("u_valley", 12),
             ("u_valley", 14),
+            ("tarn", 12),
+            ("tarn", 14),
             ("fjord", 12),
             ("fjord", 14),
             ("fan", 12),
@@ -783,6 +786,7 @@ mod tests {
             ("badlands", 12),
             ("canyon", 11),
             ("u_valley", 11),
+            ("tarn", 11),
             ("fjord", 11),
             ("fan", 12),
         ] {
@@ -1085,5 +1089,29 @@ mod tests {
         let tot = t.landcover.len() as f64;
         let h: Vec<String> = hist.iter().map(|(c, k)| format!("{} {:.1}%", crate::registry::classes::name(*c), 100.0 * *k as f64 / tot)).collect();
         eprintln!("classes: {}", h.join(", "));
+    }
+
+    /// Debug: relief across the strike: the standard deviation of the ground along a north-south and
+    /// an east-west line of 24 km through each place: `MT_LIST="lat,lon;lat,lon"`.
+    #[test]
+    #[ignore]
+    fn strike_scan() {
+        let w = World::new(crate::Config::default());
+        let list = std::env::var("MT_LIST").unwrap_or_default();
+        for item in list.split(';').filter(|s| !s.is_empty()) {
+            let mut it = item.split(',').map(|x| x.parse::<f64>().unwrap());
+            let (lat0, lon0) = (it.next().unwrap(), it.next().unwrap());
+            let line = |dn: f64, de: f64| {
+                let v: Vec<f64> = (-12..=12)
+                    .map(|j| {
+                        let (la, lo) = (lat0 + j as f64 * dn / 111.0, lon0 + j as f64 * de / (111.0 * lat0.to_radians().cos()));
+                        w.terrain(&Ctx::new(la.to_radians(), lo.to_radians(), 150.0, &w.ell)).ground
+                    })
+                    .collect();
+                let m = v.iter().sum::<f64>() / v.len() as f64;
+                (v.iter().map(|x| (x - m) * (x - m)).sum::<f64>() / v.len() as f64).sqrt()
+            };
+            eprintln!("({lat0}, {lon0}): north-south std {:.0} m, east-west std {:.0} m", line(1.0, 0.0), line(0.0, 1.0));
+        }
     }
 }
