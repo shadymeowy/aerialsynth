@@ -38,8 +38,10 @@ direction in the tangent plane of the corner), wavelength (0.7-1.3 × λ0) and p
 stripe coordinate is `dot(p - corner, strike)/λ` (anchored at the corner, so f32 keeps its
 precision), the profile of every corner is blended by its trilinear weight squared. A 38 km noise
 bends the stripes (up to 1.4 cycles), a 26 km noise makes the amplitude plunge (a fold nose ends
-where it fades). The strike is random per corner (the macro fields give no belt normal): along a
-belt the ridges turn where two corners meet.
+where it fades). Folds and fault blocks share the lattice: each corner evaluates both profiles
+(λ 9 / 16 km) and the result blends by the fault share of the zones (no switch where the two
+overlap). The strike is random per corner (the macro fields give no belt normal): along a belt
+the ridges turn where two corners meet.
 
 **Carve hook (core).** `Kit::carve` (`kits::{CarveIn, Carve}`, WGSL `kits_carve`) is called once
 per channel that reaches a pixel (levels 0 and 1; `ReliefIn`-like inputs plus the position along
@@ -65,31 +67,37 @@ instances over 200 k points), `find_fjords` and `probe` (zones and ground along 
 functions), `ridges_are_zero_mean_and_continuous`, `zones_are_weights` (bounded; the lithology
 decides the kind), `carve_hook` (unchanged where nothing applies; a fjord only on a glaciated
 coast; streams untouched), `relief_is_continuous_and_bounded`, `fans_exist_at_the_fan_place`,
-`lod_consistent_at_places` (parent ≈ mean of children at 10 places: elevation ≤ 6.3 m, albedo
-≤ 13 DN), `seamless_at_places` (E-W and N-S albedo and elevation), `deterministic_at_places`,
-`tiles_match_the_cpu` (17 tiles at z12-z16: at most 0.055 % of the pixels off) and
-`places_stay_on_the_gpu` (z6-z16 of the ten places). No kernels: no kernel parity test.
+`lod_consistent_at_places` (parent ≈ mean of children at 11 places: elevation 0.1-5.2 m, 11.9 m
+at the steep tarn place, 2.3-3.5 m at the karst places; albedo 0.8-12.6 DN), `seamless_at_places`
+(E-W and N-S albedo and elevation; across ≤ half of the inside change), `deterministic_at_places`,
+`tiles_match_the_cpu` (19 tiles at z12-z16: at most 0.009 % of the pixels off), and
+`places_stay_on_the_gpu` (z6-z16 of the eleven places). No kernels: no kernel parity test. Debug
+tools (ignored): `find_places`, `find_fjords`, `probe`, `strike_scan`, `seam_debug`, `tile_stats`,
+`tile_diff`. The full CPU `cargo test --workspace --release` and the full GPU `cargo test -p
+terragen --release` (P4) pass; the kit changed one other kit's test (see Decisions).
 
 ## Performance
 
-Cold compile, Tesla P4 (`compile_times`, one pipeline at a time, no shader cache; the farm is
-shared, so ±3 s): `pass_a1` 22.1 s, `eval_points` 26.0 s, drainage `lat_heights` 19.2 s,
-`instance_lists` 4.3 s, `grid_nodes` 9.4 s; pass B 32.5 / 33.5 / 20.8 / 30.1 s (`pass_b2` is the
-stage with the kit's layer, `PB_STAGE_STEPS` is unchanged; the other stages do not contain the
-kit). The same run with the kit's relief, carve hook and fan existence test stubbed
+Cold compile, Tesla P4 (`compile_times`, one pipeline at a time, no shader cache, farm quiet):
+`pass_a1` 20.4 s, `eval_points` 22.5 s, drainage `lat_heights` 17.2 s, `instance_lists` 3.8 s,
+`grid_nodes` 8.6 s, `pass_a2` 2.6 s; pass B 29.9 / 28.5 / 18.3 / 24.4 s (`PB_STAGE_STEPS` is
+unchanged; the kit's layer is in the third stage, the other stages do not contain the kit). The
+same run with the kit's relief, carve hook and fan existence test stubbed
 (`TERRAGEN_COMPILE_DROP=mountains TERRAGEN_COMPILE_STUB='mountains_relief=;mountains_carve=;mountains_fans_exists=…'`)
-and its layer dropped: 21.8 / 27.9 / 19.5 / 4.1 / 21.1 s: the kit is within the noise of the
-timings. The deterministic measure is the inlined size (`inlined_sizes`): `pass_a1`
-105 k → 113 k instructions (+7.8 %), `eval_points` 122 k → 131 k (+7.4 %), `lat_heights` 101 k →
-110 k (+8.0 %), `instance_lists` 41.6 k → 42.4 k (+2 %), `pass_a2` +4.5 % (the carve hook),
-`pass_b` 445 k → 450 k (+1.1 %). The first version cost +37 % in the pass-A pipelines: two call
-sites of `macro_at` (15 k each) in the fan existence test; it reads the atlas now. Noise: three
-perlins for the patches and ridges, one Worley query, eight lattice corners, a handful of
-smoothsteps; every heavy helper has one call site (`cone_h` twice: it is small).
+and its layer dropped: 18.3 / 22.5 / 17.6 / 3.6 / 17.8 s (`pass_a1`, `eval_points`, `lat_heights`,
+`instance_lists`, `pass_b2`): the kit costs ~2 s in `pass_a1`, nothing measurable in the others
+(±1 s), 0.5 s in the pass-B stage of its layer. Inlined size (`inlined_sizes`, deterministic):
+`pass_a1` 104.8 k → 114.5 k instructions (+9.3 %), `eval_points` 122.0 k → 132.5 k (+8.6 %),
+`lat_heights` 101.4 k → 111.1 k (+9.5 %), `instance_lists` 41.6 k → 42.4 k (+2 %), `pass_a2`
++3.8 % (the carve hook), `pass_b` 445.1 k → 450.3 k (+1.2 %). The first version cost +37 % in the
+pass-A pipelines: two call sites of `macro_at` (15 k each) in the fan existence test; it reads
+the atlas now. What remains: four perlins for the patches and ridges, one Worley query, eight
+lattice corners, an atlas sample, a handful of smoothsteps; every heavy helper has one call site
+(`cone_h` twice: it is small).
 
-CPU: the kit adds a few noise evaluations per pixel (two patch noises everywhere on land and in
-the shelf; the zones gate the Worley query, the ridges and the badland octaves); the tests below
-run at the same speed as before. No with / without-kit bench (as agreed).
+CPU: the kit adds a few noise evaluations per pixel (two patch noises and a regional one on land
+and on the shelf; the zones gate the Worley query, the ridges, the atlas sample and the badland
+octaves); the tests run at the same speed as before. No with / without-kit bench (as agreed).
 
 ## Stills
 
@@ -147,24 +155,52 @@ it, a lake at its foot, the old relief blended into a smooth cone.
 * **Fans from atlas fields only.** An existence test that sampled the macro fields cost 15 k
   inlined instructions per call site in every pass-A pipeline (the first version: +37 % in
   `pass_a1`); the atlas' uplift and its gradient (five samples in one loop) give the same
-  information.
+  information. Fans are sparse (cell 18 km, 40 %): at 12 km and 55 % up to nine of them reached
+  a tile's area and the first eight by id were kept, which cut fans at tile seams.
 * **The carve hook instead of a relief operator.** The relief runs before the drainage; a trough,
   a fjord or a canyon needs the channel's distance and floor, which only the carve knows.
+* **The flattening target is the atlas' smooth elevation**, not `ReliefIn::smooth`: the pixel's
+  low-passed relief comes from the tile's coarse grid, and blended 85 % over the ground it made
+  steps of ~10 m between neighbouring tiles. The atlas' elevation is the same everywhere.
+* **CPU / GPU float noise.** The same input differs by millimetres between the two backends
+  (macro fields, the drainage lattice's f32 floors); a deep feature multiplies it. The canyon's
+  depth is therefore a constant (450 m) under wide weights, its benches are counted from a
+  height above the floor (not from the ground: a rounded or ground-dependent number of benches
+  jumped with the height), and no style channel of the macro fields enters a hook. Angles are
+  polynomial harmonics of `(cos, sin)`, not `atan2` and `sin` (good to ~1e-4 on the GPU: 5 cm on a
+  tower).
+* **The canyon has no lithology**: the nearest-texel lithology is a step function, so a canyon
+  would end in a cliff at a texel border (the strata colours of the layer do read it).
 * **Pass B in slot 6** (linear): the only stage with compile headroom (the stages of slots 1-5
   are over the ~30 s budget already). The layer is composited after the canopy, which suits rock
   and sediment, and runs before the transport kit's roads.
 * **Strike of the folds**: random per 140 km corner (the macro fields give no gradient of the belt
-  field); a belt shows ridges that turn at the corners.
+  field); a belt shows ridges that turn at the corners. Folds exist in ~45 % of the old belts
+  (a 180 km noise), so that mountain belts keep their variety.
 * **Drowned karst**: the lowering of the plain is a function of the atlas coast distance at the
   pixel (smooth), so the islands have the same sea level at every zoom.
+* **Other kits' tests.** The relief changes the ground at other kits' places: the volcanic kit's
+  seam test (`cinder_field`: its margin for a step across a tile seam is 16 m instead of 8 m: the
+  flattened plateau around its cinder cones is flatter than the old hills that hid them) was
+  adjusted; no other kit file changed.
+
+## Core changes
+
+`kits/mod.rs` (`CarveIn`, `Carve`, `Kit::carve`, `has_carve`, `carve`, the WGSL glue
+`kits_carve`), `hydro.rs` (`RiverHit::{u, spring, reach}`), `world.rs` and `gpu/wgsl/world.wgsl`
+(the hook in the drainage carve: profile parameters, U profile, benches, a head lake; the carve
+bounded by the piece's reach), `kits/example.rs` (`carve: None`), the volcanic kit's seam test.
+The registration lines in `kits/mod.rs`.
 
 ## Known limits
 
 * Fold and fault ridges are gentle for the camera (slopes of 0.05-0.1): at noon and from a
   few km above they look flat; they show under a low sun or at grazing angles.
-* Folds turn where two lattice corners meet (140 km); there is no belt normal. Fault blocks have no
-  flat basin floors (a plain sawtooth), and only extensional provinces of the atlas (negative
-  uplift, 77 of 200 k land samples at the default seed) get them.
+* Folds turn where two lattice corners meet (140 km); there is no belt normal. Fault blocks are a
+  plain sawtooth (no flat basin floors), and only extensional provinces of the atlas (negative
+  uplift, 74 of 200 k land samples at the default seed) get them. A fold zone is blended 85 % into
+  the atlas' smooth elevation first: old belts lose their small relief (and the core's ridged
+  mountains), keeping the mass; where the fold noise is negative the core's mountains stay.
 * The lithology is 20 km texels with a 4 km warp: karst and badland zones have ragged but
   rounded borders; a carbonate texel under the sea is needed for drowned towers.
 * Badlands are creased noise, not a dendritic network: from 1.5 km they show meandering gully
@@ -173,15 +209,20 @@ it, a lake at its foot, the old relief blended into a smooth cone.
 * Troughs, cirques, fjords and canyons exist only along drainage channels of levels 0 and 1
   (30 and 8 km lattices): a fjord needs a river within reach of the coast, and glaciated mountain
   coasts are rare in the default world (about 20 of 200 k samples).
-* The canyon floor follows the drainage lattice (it is not below 30 m); a canyon is 3-5 km wide
-  and up to 1.2 km deep, and tributary canyons are shallower. Mesas on the rims are the core's.
+* A canyon is 450 m deep below the drainage lattice's floor (not below 30 m), 2-3 km wide, with
+  benches of 50 m; tributary canyons are 35 % as deep. Mesas on the rims are the core's. There is
+  no lithology in the carve (see Decisions): a canyon cuts granite as well.
 * Tarns are 130 m lakes at the head of tributaries: they vanish when the pixel is wider than
   about 330 m. Cirque headwalls are round, not scalloped.
 * Towers are oval cones of a 3D lattice: their size varies with the height of the lattice site
   above the surface (some are small peaks); the pale skirt of the cliff layer is a band, not
   streaks. No dolines in pass B (the cockpit relief is the doline field), no rice paddies
   (the agriculture kit decides the floors).
-* Fans are blended over the old relief (70 %): their apex is the instance's site, not the
-  mouth of a valley; they do not follow drainage channels.
+* Fans are blended into the smooth elevation (70 %): their apex is the instance's site, not the
+  mouth of a valley; they do not follow drainage channels; their pale gravel is close to the
+  soil colour of many deserts, so they show best on dark ground.
+* CPU and GPU tiles differ by up to ~5 cm in a few tenths of a percent of the pixels where a
+  zone or the carve is in transition (the desert kit's parity test, which allows 0.5 %, is the
+  tight one).
 * The layer paints over the canopy (slot 6): karst cliffs and rock walls cut through forest
   crisply.
