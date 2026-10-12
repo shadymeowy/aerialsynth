@@ -771,6 +771,36 @@ fn relief(c: Ctx, m: Macro, pre: Pre, blk: u32) -> Relief {
     return o;
 }
 
+/// Inputs and outputs of the kits' carve hook (`kits::CarveIn`, `kits::Carve`): one drainage
+/// channel at a pixel.
+struct CarveIn {
+    level: u32,
+    ad: f32,
+    u: f32,
+    spring: bool,
+    hw: f32,
+    h0: f32,
+    temp: f32,
+    moist: f32,
+    mountain: f32,
+    mesa: f32,
+    smooth_h: f32,
+}
+
+struct Carve {
+    floor: f32,
+    fp_w: f32,
+    wall_k: f32,
+    depth_cap: f32,
+    fp_min: f32,
+    u: f32,
+    steps: f32,
+    step_mix: f32,
+    top: f32,
+    lake_r: f32,
+    lake_level: f32,
+}
+
 /// Inputs of the kits' relief operators (`kits::ReliefIn`).
 struct ReliefIn {
     temp: f32,
@@ -1044,17 +1074,55 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
             let incision = 1.0 + 0.02 * width;
             let flo = max(floor_h, 1.0) - incision;
             let wall_k = lerp(6.0, 2.2, mountain);
-            let valley = max(valley_hit, fp_w + wall_k * (h0 - flo));
-            if (h0 > flo && h0 > -4.0 && ad < valley) {
-                var wall = smoothstep1(fp_w, valley, ad);
+            // the kits' carve hook (glacial troughs, fjords, canyons): the profile's parameters
+            var cv: Carve;
+            cv.floor = flo;
+            cv.fp_w = fp_w;
+            cv.wall_k = wall_k;
+            cv.depth_cap = lvb.z;
+            cv.fp_min = 0.5;
+            cv.u = 0.0;
+            cv.steps = 0.0;
+            cv.step_mix = 0.0;
+            cv.top = h0;
+            cv.lake_r = 0.0;
+            cv.lake_level = 0.0;
+            var ci: CarveIn;
+            ci.level = li;
+            ci.ad = ad;
+            ci.u = u;
+            ci.spring = sg.hw < 0.2 * sg.hw_b;
+            ci.hw = hw;
+            ci.h0 = h0;
+            ci.temp = r.temp0;
+            ci.moist = moist;
+            ci.mountain = mountain;
+            ci.mesa = r.mesa;
+            ci.smooth_h = r.smooth_h;
+            kits_carve(c, m, ci, &cv);
+            let valley = min(max(valley_hit, cv.fp_w + cv.wall_k * (h0 - cv.floor)), reach);
+            if (h0 > cv.floor && h0 > -4.0 && ad < valley) {
+                var wall = smoothstep1(cv.fp_w, valley, ad);
                 wall = wall * wall * (3.0 - 2.0 * wall);
-                let fpl = max(flo + 0.8, 0.5) + 0.4 * abs(micro);
+                let fpl = max(cv.floor + 0.8, cv.fp_min) + 0.4 * abs(micro);
                 var tgt = fpl;
                 if (ad < hw) {
-                    tgt = flo - 0.8 - 0.02 * width;
+                    tgt = cv.floor - 0.8 - 0.02 * width;
+                }
+                // (kits: U-shaped walls and stepped walls)
+                if (cv.u > 0.0 || cv.step_mix > 0.0) {
+                    let tt = clamp((ad - cv.fp_w) / max(valley - cv.fp_w, 1e-6), 0.0, 1.0);
+                    var w = lerp(wall, pow(tt, 1.5), cv.u);
+                    if (cv.step_mix > 0.0) {
+                        let k = max((cv.top - fpl) / max(cv.steps, 1.0), 1.0);
+                        let x = w * k;
+                        let i = floor(x);
+                        w = lerp(w, (i + smoothstep1(0.4, 0.97, x - i)) / k, cv.step_mix * (1.0 - smoothstep1(0.8, 1.0, w)));
+                    }
+                    wall = w;
                 }
                 var carved = min(h0, lerp(tgt, h0, wall));
-                carved = max(carved, h0 - lvb.z * (1.0 - 0.3 * wall));
+                carved = max(carved, h0 - cv.depth_cap * (1.0 - 0.3 * wall));
                 var fade = 1.0;
                 if (width < 0.3 * gsd) {
                     fade = smoothstep1(0.25, 0.5, valley_hit / gsd);
@@ -1062,6 +1130,16 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                 let shelf = smoothstep1(-4.0, 0.5, h0);
                 h = min(h, h0 + (carved - h0) * fade * land_fade * shelf);
                 floodplain = max(floodplain, (1.0 - wall) * land_fade * smoothstep1(20.0, 120.0, width) * fade);
+            }
+            // a kit's small lake in the channel's head (a tarn): a bowl and a water level
+            if (cv.lake_r > 0.0 && ad < cv.lake_r && h0 > cv.lake_level) {
+                let x = ad / cv.lake_r;
+                let bowl = cv.lake_level - 4.0 * (1.0 - x * x);
+                h = min(h, lerp(h, bowl, smoothstep1(1.0, 0.7, x)));
+                if (h < cv.lake_level) {
+                    t.water = max(t.water, cv.lake_level);
+                    t.water_kind = W_LAKE;
+                }
             }
             let key = ad - hw;
             if (key < best) {

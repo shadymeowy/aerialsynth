@@ -1155,7 +1155,27 @@ impl World {
                 // walls ~24° in mountains, ~9° in lowlands (steep walls drew long straight scarps
                 // along the floodplains of big lowland rivers)
                 let wall_k = lerp(6.0, 2.2, mountain);
-                let valley = rh.valley.max(fp_w + wall_k * (h0 - floor));
+                // the kits' carve hook (glacial troughs, fjords, canyons): the profile's parameters
+                let mut cv = crate::kits::Carve {
+                    floor,
+                    fp_w,
+                    wall_k,
+                    depth_cap: lc.max_depth_m,
+                    fp_min: 0.5,
+                    u: 0.0,
+                    steps: 0.0,
+                    step_mix: 0.0,
+                    top: h0,
+                    lake_r: 0.0,
+                    lake_level: 0.0,
+                };
+                if crate::kits::has_carve() {
+                    let ci =
+                        crate::kits::CarveIn { ctx, m, level: rh.level, ad, u: rh.u, spring: rh.spring, hw, h0, temp: temp0, moist, mountain, mesa, smooth };
+                    crate::kits::carve(self, &ci, &mut cv);
+                }
+                let (floor, fp_w, wall_k) = (cv.floor, cv.fp_w, cv.wall_k);
+                let valley = rh.valley.max(fp_w + wall_k * (h0 - floor)).min(rh.reach);
                 // no carving of the deeper seabed; floodplains stay above the sea (near the coast they were
                 // carved below it and flooded: straight "coastlines" along the valley walls and
                 // channels drawn into the sea) — only the channel itself forms an estuary
@@ -1164,11 +1184,27 @@ impl World {
                 if h0 > floor && h0 > -4.0 && ad < valley {
                     let wall = smoothstep(fp_w, valley, ad);
                     let wall = wall * wall * (3.0 - 2.0 * wall);
-                    let fp = (floor + 0.8).max(0.5) + 0.4 * micro.abs();
+                    let fp = (floor + 0.8).max(cv.fp_min) + 0.4 * micro.abs();
                     let target = if ad < hw { floor - 0.8 - 0.02 * width } else { fp };
+                    // (kits: U-shaped walls and stepped walls)
+                    let wall = if cv.u > 0.0 || cv.step_mix > 0.0 {
+                        let t = ((ad - fp_w) / (valley - fp_w).max(1e-6)).clamp(0.0, 1.0);
+                        let mut w = lerp(wall, t.powf(1.5), cv.u);
+                        if cv.step_mix > 0.0 {
+                            // (a real number of benches: a rounded one jumps with the height; the
+                            // quantization fades out towards the rim, where the wall meets the ground)
+                            let k = ((cv.top - fp) / cv.steps.max(1.0)).max(1.0);
+                            let x = w * k;
+                            let i = x.floor();
+                            w = lerp(w, (i + smoothstep(0.4, 0.97, x - i)) / k, cv.step_mix * (1.0 - smoothstep(0.8, 1.0, w)));
+                        }
+                        w
+                    } else {
+                        wall
+                    };
                     let carved = h0.min(lerp(target, h0, wall));
                     // limit the carve depth (small streams only notch the terrain)
-                    let carved = carved.max(h0 - lc.max_depth_m * (1.0 - 0.3 * wall));
+                    let carved = carved.max(h0 - cv.depth_cap * (1.0 - 0.3 * wall));
                     // valleys narrower than a pixel fade out per pixel (no hard level cutoff)
                     let fade = if width < 0.3 * ctx.gsd { smoothstep(0.25, 0.5, rh.valley / ctx.gsd) } else { 1.0 };
                     // the cut fades out across the shallow shelf (a channel continuing into the sea
@@ -1176,6 +1212,16 @@ impl World {
                     let shelf = smoothstep(-4.0, 0.5, h0);
                     h = h.min(h0 + (carved - h0) * fade * land_fade * shelf);
                     floodplain = floodplain.max((1.0 - wall) * land_fade * smoothstep(20.0, 120.0, width) * fade);
+                }
+                // a kit's small lake in the channel's head (a tarn): a bowl and a water level
+                if cv.lake_r > 0.0 && ad < cv.lake_r && h0 > cv.lake_level {
+                    let x = ad / cv.lake_r;
+                    let bowl = cv.lake_level - 4.0 * (1.0 - x * x);
+                    h = h.min(lerp(h, bowl, smoothstep(1.0, 0.7, x)));
+                    if h < cv.lake_level {
+                        t.water = t.water.max(cv.lake_level);
+                        t.water_kind = water::LAKE;
+                    }
                 }
             }
             // channel attributes from the nearest channel

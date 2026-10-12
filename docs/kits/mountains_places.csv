@@ -1,0 +1,15 @@
+# places of the default world where the mountains kit draws (lat, lon in degrees): `terrain survey --places docs/kits/mountains_places.csv`
+# (the folds and the fault blocks show best under a low sun: --local-time 8.0 / 16.5, and at 10 km: --views oblique,high)
+index,lat,lon,theme
+0,-0.714,-96.231,tower_karst
+1,4.857,-93.234,karst_islands
+2,41.958,-21.188,cockpit_karst
+3,27.899,42.870,folded_ridges
+4,31.739,137.721,fault_blocks
+5,-21.410,36.504,badlands
+6,21.245,-121.297,canyon
+7,49.423,-162.365,glacial_trough
+8,40.874,174.741,cirque_tarn
+9,63.382,-81.127,fjord
+10,56.253,161.268,fjord
+11,28.575,67.085,fan

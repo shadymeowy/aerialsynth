@@ -28,6 +28,7 @@ pub static KIT: Kit = Kit {
     }],
     relief: Some(relief),
     relief_wgsl: include_str!("../gpu/wgsl/kits/example_relief.wgsl"),
+    carve: None,
     families: &[Family { name: "example_cones", cell: 40_000.0, jitter: 0.8, reach: 6_000.0, relief: true, exists: cone_exists }],
     host: Some(host),
     replaces_towns: false,
