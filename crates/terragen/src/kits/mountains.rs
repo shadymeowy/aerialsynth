@@ -14,7 +14,7 @@
 //! **Relief (pass A, [`relief`]).**
 //! * *Tower and cockpit karst* on carbonate (humid and warm: towers; humid and cooler: cockpits):
 //!   one 3D Worley lattice of 420 m cells. Towers: the floor is flattened towards the 5 km smooth
-//!   elevation, 55 % of the cells carry a tower `H·(1 − F1/R)^0.4` (H 70–240 m, R ≤ 0.5 cell,
+//!   elevation, 70 % of the cells carry a tower `H·(1 − F1/R)^0.4` (H 70–240 m, R 0.4–0.7 cell,
 //!   clipped at the bisector so it never meets a neighbour's cut); cockpits: dolines where `F2 − F1`
 //!   is large, cone-like ridges along the cell borders. Unresolved cells show the calibrated mean.
 //!   Near the coast the plain is drowned (down to −11 m): the towers are islands.
@@ -26,8 +26,8 @@
 //!   makes the ridges plunge. Folds: triangle crests, λ 6–12 km, 240 m; blocks: tilted
 //!   sawtooth, λ 11–21 km, 520 m, a scarp on a fifth of the period.
 //! * *Badlands*: two octaves of creased noise (260 and 90 m) on soft sediment × arid.
-//! * *Alluvial fans*: family `mountains_fans` at mountain fronts in dry climates (the site's
-//!   mountain mask falling at least 0.012 per 16 km: the fan points down the gradient): a
+//! * *Alluvial fans*: family `mountains_fans` at mountain fronts in dry climates (the atlas'
+//!   uplift falling at least 0.03 per 24 km: the fan points down the gradient): a
 //!   conical apron `H(1 − r/R)^1.3` over a 70 % blend to the smooth elevation in a ±60° sector.
 //!
 //! **Carve hook ([`carve`], `kits::Carve`).** The core carves every channel's valley; the kit
@@ -48,7 +48,7 @@ use crate::kits::{Carve, CarveIn, Kit, ReliefIn};
 use crate::noise::*;
 use crate::stack::{slot, Layer, Stack};
 use crate::surface::{mixc, srgb};
-use crate::world::{Ctx, Macro, World};
+use crate::world::{Ctx, World};
 use glam::DVec3;
 use std::f64::consts::TAU;
 
@@ -162,9 +162,9 @@ pub(crate) fn zones(z: &ZIn, lit: u32, n1: f64, n2: f64) -> Zones {
 /// Karst cell (m), the share of cells with a tower, and the calibrated means (m) of the tower
 /// field and of the cockpit ridge field (a test recomputes them).
 const KARST_CELL: f64 = 420.0;
-const TOWER_DENS: f64 = 0.55;
-const TOWER_MEAN: f64 = 33.4;
-const COCKPIT_MEAN: f64 = 24.1;
+const TOWER_DENS: f64 = 0.7;
+const TOWER_MEAN: f64 = 24.4;
+const COCKPIT_MEAN: f64 = 34.68;
 
 /// A tower's height (m) at a point of its cell: `H (1 − F1/R)^0.4`, R clipped at the bisector.
 #[inline]
@@ -173,8 +173,8 @@ fn tower_h(c: &Cell3) -> f64 {
         return 0.0;
     }
     let hh = 70.0 + 170.0 * u01k(c.id, 2);
-    let rad = 0.5 * KARST_CELL * (0.55 + 0.4 * u01k(c.id, 3));
-    let x = c.f1 / rad.min(0.88 * c.f2);
+    let rad = 0.5 * KARST_CELL * (0.8 + 0.6 * u01k(c.id, 3));
+    let x = c.f1 / rad.min(0.9 * c.f2);
     if x >= 1.0 {
         0.0
     } else {
@@ -243,7 +243,7 @@ fn ridges(p: DVec3, kind: u32, nw: f64, pl: f64) -> f64 {
 // ============================================================================= badlands
 
 /// Mean of `|perlin3|^0.7` (a test recomputes it).
-const CREASE_MEAN: f64 = 0.4075;
+const CREASE_MEAN: f64 = 0.2698;
 
 /// Creased gullies (m per unit amplitude): 260 and 90 m octaves, zero mean, band-limited.
 fn badlands(p: DVec3, gsd: f64) -> f64 {
@@ -276,35 +276,26 @@ fn fan_at(it: &Instance, p: DVec3, east: DVec3, north: DVec3) -> Option<(f64, f6
     Some((sector * smoothstep(0.0, 0.1, 1.0 - rn), rn, y.atan2(x)))
 }
 
-/// The mountain mask, moisture and continent value of the macro fields at `c` (a family site;
-/// `mt_site_fields` in WGSL).
-fn site_fields(w: &World, c: DVec3) -> (f64, f64, f64) {
-    let m = w.macro_at(c, 20_000.0);
-    (w.mountain_mask(&m).0, m.moist.clamp(0.0, 1.0), m.cont)
-}
-
-/// Fans exist at the fronts of dry mountains: the mask is 0.2 … 0.6 and falls over 16 km (the
-/// fan points down the gradient). v: R (m), direction east and north, H (m).
+/// Fans exist at the fronts of dry mountains: the atlas' tectonic uplift is 0.12 … 0.55 and falls
+/// by at least 0.03 over 24 km (the fan points down the gradient). v: R (m), direction east and
+/// north, H (m). Atlas fields only (a macro-field sample costs 15 k instructions per call site).
 fn fans_exist(w: &World, s: &InstSite) -> Option<[f32; 8]> {
     if u01k(s.id, 1) >= 0.55 {
         return None;
     }
-    let a = w.atlas().sample(s.center.normalize());
-    if a.coast_km < 5.0 || World::moisture_index(a.precip_mm, a.temp_c) > 0.36 || a.temp_c < 0.0 || a.uplift < 0.03 {
-        return None;
+    let d = 12_000.0;
+    let mut up = [0.0f64; 5];
+    for (k, u) in up.iter_mut().enumerate() {
+        let (de, dn) = [(0.0, 0.0), (d, 0.0), (-d, 0.0), (0.0, d), (0.0, -d)][k];
+        let a = w.atlas().sample((s.center + s.east * de + s.north * dn).normalize());
+        if k == 0 && (a.coast_km < 5.0 || World::moisture_index(a.precip_mm, a.temp_c) > 0.33 || a.temp_c < 0.0 || a.uplift < 0.12 || a.uplift > 0.55) {
+            return None;
+        }
+        *u = a.uplift;
     }
-    let (m0, moist, cont) = site_fields(w, s.center);
-    if m0 < 0.2 || m0 > 0.6 || moist > 0.34 || cont < 0.1 {
-        return None;
-    }
-    let d = 8_000.0;
-    let g = |k: usize| {
-        let (de, dn) = [(d, 0.0), (-d, 0.0), (0.0, d), (0.0, -d)][k];
-        site_fields(w, s.center + s.east * de + s.north * dn).0
-    };
-    let (gx, gy) = (g(0) - g(1), g(2) - g(3));
+    let (gx, gy) = (up[1] - up[2], up[3] - up[4]);
     let gl = (gx * gx + gy * gy).sqrt();
-    if gl < 0.012 {
+    if gl < 0.03 {
         return None;
     }
     let rr = 2600.0 + 3000.0 * u01k(s.id, 2);
@@ -444,7 +435,7 @@ pub fn linear(s: &mut Stack) {
     if ground < 0.5 {
         return;
     }
-    let (p, gsd) = (s.ctx.p, s.ctx.gsd);
+    let p = s.ctx.p;
     let (lit, n1, n2) = fields(s.world, s.ctx);
     let zi = ZIn { moist: t.moist, temp: t.temp, mountain: t.mountain, uplift: t.uplift, cont: t.cont, coast_km: t.coast_km, sand: t.sand };
     let z = zones(&zi, lit, n1, n2);
@@ -504,13 +495,234 @@ pub fn linear(s: &mut Stack) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::Macro;
 
     #[test]
     fn class_ids() {
         use crate::registry::classes::id;
         assert_eq!(id("rock"), Some(cls::ROCK));
-        assert_eq!(id("gravel_fan").or(id("gravel")), Some(cls::GRAVEL));
+        assert_eq!(id("gravel"), Some(cls::GRAVEL));
         assert_eq!(id("badlands"), Some(cls::BADLANDS));
         assert_eq!(id("cliff"), Some(cls::CLIFF));
+    }
+
+    /// A point of a plane patch near the surface (Halton sequence, `n` of `size` m).
+    fn plane(i: usize, size: f64) -> DVec3 {
+        let x = crate::kernels::halton(i + 1, 2) * size;
+        let y = crate::kernels::halton(i + 1, 3) * size;
+        DVec3::new(6_371_000.0, 1_234_567.0 + x, 765_432.0 + y)
+    }
+
+    /// The calibrated means of the karst fields and of the creases are those of the explicit
+    /// functions.
+    #[test]
+    fn means_match_explicit_averages() {
+        let n = 120_000;
+        let (mut t, mut c, mut b) = (0.0, 0.0, 0.0);
+        for i in 0..n {
+            let p = plane(i, 60_000.0);
+            let wc = worley3(SEED + 30, p, KARST_CELL, 0.85);
+            t += tower_h(&wc);
+            c += cockpit_h(&wc);
+            b += perlin3(SEED + 20, p / 260.0).abs().powf(0.7);
+        }
+        let (t, c, b) = (t / n as f64, c / n as f64, b / n as f64);
+        eprintln!("tower mean {t:.2} (const {TOWER_MEAN}), cockpit mean {c:.2} (const {COCKPIT_MEAN}), crease mean {b:.4} (const {CREASE_MEAN})");
+        assert!((t - TOWER_MEAN).abs() < 0.04 * TOWER_MEAN, "tower mean {t}");
+        assert!((c - COCKPIT_MEAN).abs() < 0.04 * COCKPIT_MEAN, "cockpit mean {c}");
+        assert!((b - CREASE_MEAN).abs() < 0.02, "crease mean {b}");
+    }
+
+    /// Ridges have no mean, are bounded, and are continuous in the position (no step at the
+    /// lattice cells, whatever the zoom).
+    #[test]
+    fn ridges_are_zero_mean_and_continuous() {
+        for kind in [0u32, 1] {
+            let n = 40_000;
+            let (mut sum, mut lo, mut hi) = (0.0, f64::MAX, f64::MIN);
+            for i in 0..n {
+                let p = plane(i, 900_000.0);
+                let v = ridges(p, kind, 0.0, 1.0);
+                sum += v;
+                lo = lo.min(v);
+                hi = hi.max(v);
+            }
+            let mean = sum / n as f64;
+            eprintln!("ridges kind {kind}: mean {mean:.3}, range {lo:.2} .. {hi:.2}");
+            assert!(mean.abs() < 0.05 && lo > -1.0 && hi < 1.2, "kind {kind}: mean {mean} range {lo} {hi}");
+            // a line across several lattice cells: the largest step between points 20 m apart
+            let mut worst: f64 = 0.0;
+            let a = DVec3::new(6_371_000.0, 0.0, 0.0);
+            let mut prev = ridges(a, kind, 0.0, 1.0);
+            for j in 1..30_000 {
+                let v = ridges(a + DVec3::new(0.0, 20.0 * j as f64, 0.0), kind, 0.0, 1.0);
+                worst = worst.max((v - prev).abs());
+                prev = v;
+            }
+            // (the fault block's scarp falls over a fifth of 11 km: 0.02 per 20 m at most)
+            assert!(worst < 0.1, "kind {kind}: step {worst} in 20 m");
+        }
+    }
+
+    /// Zones are weights, and the lithology decides their kind.
+    #[test]
+    fn zones_are_weights() {
+        for i in 0..4000u64 {
+            let h = mix64(0x77 ^ i);
+            let z = ZIn {
+                moist: u01k(h, 1) * 1.2 - 0.1,
+                temp: 40.0 * u01k(h, 2) - 10.0,
+                mountain: u01k(h, 3),
+                uplift: 2.0 * u01k(h, 4) - 1.0,
+                cont: 0.8 * u01k(h, 5) - 0.4,
+                coast_km: 200.0 * u01k(h, 6) - 60.0,
+                sand: u01k(h, 7),
+            };
+            for lit in 0..5 {
+                let o = zones(&z, lit, 2.0 * u01k(h, 8) - 1.0, 2.0 * u01k(h, 9) - 1.0);
+                for v in [o.tower, o.cockpit, o.fold, o.fault, o.badland, o.drown] {
+                    assert!((0.0..=1.0 + 1e-9).contains(&v), "{o:?}");
+                }
+                if lit != CARBONATE {
+                    assert!(o.tower == 0.0 && o.cockpit == 0.0);
+                }
+                if lit == CARBONATE || lit == CRYSTALLINE || lit == VOLCANIC {
+                    assert!(o.badland == 0.0);
+                }
+            }
+        }
+    }
+
+    /// The carve hook leaves the core's profile alone where nothing applies, and a fjord goes
+    /// below sea level only in glaciated coastal mountains.
+    #[test]
+    fn carve_hook() {
+        let w = World::new(crate::Config::default());
+        let ctx = Ctx::new(0.8, 0.3, 20.0, &w.ell);
+        let mut m = w.macro_at(ctx.p, 1000.0);
+        let base = Carve { floor: 10.0, fp_w: 100.0, wall_k: 3.0, depth_cap: 400.0, fp_min: 0.5, u: 0.0, steps: 0.0, step_mix: 0.0, lake_r: 0.0, lake_level: 0.0 };
+        fn ci<'a>(ctx: &'a Ctx, m: &'a Macro, level: u8, mountain: f64, moist: f64) -> CarveIn<'a> {
+            CarveIn { ctx, m, level, ad: 50.0, u: 0.5, spring: false, hw: 30.0, h0: 600.0, temp: 5.0, moist, mountain, mesa: 0.0, smooth: 500.0 }
+        }
+        // humid lowland: unchanged
+        m.glaciation = 0.0;
+        let mut cv = base;
+        carve(&w, &ci(&ctx, &m, 0, 0.0, 0.6), &mut cv);
+        assert_eq!((cv.floor, cv.fp_w, cv.wall_k, cv.u, cv.lake_r), (10.0, 100.0, 3.0, 0.0, 0.0));
+        // a glaciated coast: a fjord floor, a U
+        m.glaciation = 0.9;
+        m.coast_km = 20.0;
+        let mut cv = base;
+        carve(&w, &ci(&ctx, &m, 0, 0.8, 0.6), &mut cv);
+        assert!(cv.floor < -60.0 && cv.u > 0.9 && cv.fp_min < -1000.0, "{cv:?}");
+        // inland, a glaciated trough only: the floor stays above the sea
+        m.coast_km = 300.0;
+        let mut cv = base;
+        carve(&w, &ci(&ctx, &m, 0, 0.8, 0.6), &mut cv);
+        assert!(cv.floor >= 1.0 && cv.u > 0.9 && cv.depth_cap > 400.0 * 2.0, "{cv:?}");
+        // streams are not touched
+        let mut cv = base;
+        carve(&w, &ci(&ctx, &m, 2, 0.8, 0.6), &mut cv);
+        assert_eq!(cv.u, 0.0);
+    }
+
+    /// The relief is continuous: neighbouring points of a pixel size differ by no more than the
+    /// slope allows (checked at the places where the zones are active, by a search).
+    #[test]
+    fn relief_is_continuous_and_bounded() {
+        let w = World::new(crate::Config::default());
+        let mut checked = 0;
+        for i in 0..4000u64 {
+            let h = mix64(0xCC ^ i);
+            let lat = (2.0 * u01k(h, 1) - 1.0).asin();
+            let lon = std::f64::consts::TAU * u01k(h, 2) - std::f64::consts::PI;
+            let ctx = Ctx::new(lat, lon, 30.0, &w.ell);
+            let m = w.macro_at(ctx.p, 30.0);
+            let (mountain, _) = w.mountain_mask(&m);
+            let (temp, moist) = w.climate(&m, lat, w.smooth_elevation(ctx.p).max(0.0));
+            let r = ReliefIn { ctx: &ctx, m: &m, temp, moist, mountain, sand: 0.0, mesa: 0.0, smooth: w.smooth_elevation(ctx.p), inst: None };
+            let (lit, n1, n2) = fields(&w, &ctx);
+            let zi = ZIn { moist, temp, mountain, uplift: m.uplift, cont: m.cont, coast_km: m.coast_km, sand: 0.0 };
+            let z = zones(&zi, lit, n1, n2);
+            if z.tower + z.cockpit + z.fold + z.fault + z.badland < 0.5 {
+                continue;
+            }
+            checked += 1;
+            let mut h0 = 0.0;
+            relief(&w, &r, &mut h0);
+            assert!(h0.is_finite() && h0.abs() < 6000.0, "({lat}, {lon}): {h0}");
+            // 15 m to the east: the difference is bounded by the steepest feature (a tower flank)
+            let c2 = Ctx::new(lat, lon + 15.0 / (6_371_000.0 * lat.cos().max(0.01)), 30.0, &w.ell);
+            let r2 = ReliefIn { ctx: &c2, ..r };
+            let mut h1 = 0.0;
+            relief(&w, &r2, &mut h1);
+            assert!((h1 - h0).abs() < 130.0, "({lat}, {lon}): {h0} -> {h1}");
+        }
+        eprintln!("{checked} pixels in zones");
+    }
+
+    /// Places of the default world where the kit draws: (name, lat, lon), for the tests and stills.
+    pub(crate) const PLACES: &[(&str, f64, f64)] = &[];
+
+    /// Debug: places of each landform in the default world:
+    /// `cargo test -p terragen --release --lib kits::mountains::tests::find_places -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn find_places() {
+        use rayon::prelude::*;
+        let w = World::new(crate::Config::default());
+        let n = 200_000;
+        struct Pt {
+            lat: f64,
+            lon: f64,
+            z: Zones,
+            lit: u32,
+            t: crate::world::Terrain,
+        }
+        let pts: Vec<Pt> = (0..n)
+            .into_par_iter()
+            .map(|i| {
+                let h = mix64(0x5EA ^ i as u64);
+                let lat = (2.0 * u01k(h, 1) - 1.0).asin().to_degrees();
+                let lon = 360.0 * u01k(h, 2) - 180.0;
+                let ctx = Ctx::new(lat.to_radians(), lon.to_radians(), 150.0, &w.ell);
+                let t = w.terrain(&ctx);
+                let (lit, n1, n2) = fields(&w, &ctx);
+                let zi = ZIn { moist: t.moist, temp: t.temp, mountain: t.mountain, uplift: t.uplift, cont: t.cont, coast_km: t.coast_km, sand: t.sand };
+                Pt { lat, lon, z: zones(&zi, lit, n1, n2), lit, t }
+            })
+            .collect();
+        let land = |p: &Pt| p.t.water_kind == 0 && p.t.ground > 2.0;
+        #[allow(clippy::type_complexity)]
+        let kinds: Vec<(&str, Box<dyn Fn(&Pt) -> bool + Sync>)> = vec![
+            ("tower_karst", Box::new(|p| land(p) && p.z.tower > 0.95 && p.z.drown < 0.2)),
+            ("karst_islands", Box::new(|p| p.z.tower > 0.9 && p.z.drown > 0.8 && p.t.coast_km.abs() < 12.0)),
+            ("cockpit_karst", Box::new(|p| land(p) && p.z.cockpit > 0.95)),
+            ("folded_ridges", Box::new(|p| land(p) && p.z.fold > 0.9)),
+            ("fault_blocks", Box::new(|p| land(p) && p.z.fault > 0.9)),
+            ("badlands", Box::new(|p| land(p) && p.z.badland > 0.95)),
+            ("canyon", Box::new(|p| land(p) && p.lit <= 1 && p.t.moist < 0.2 && p.t.ground > 400.0 && p.t.mountain < 0.2 && p.t.mesa > 0.1 && p.t.river_d.abs() < 1500.0)),
+            ("u_valley", Box::new(|p| land(p) && p.t.glaciation > 0.6 && p.t.mountain > 0.6 && p.t.coast_km > 150.0 && p.t.river_d.abs() < 1500.0)),
+            ("fjord", Box::new(|p| p.t.glaciation > 0.6 && p.t.mountain > 0.5 && p.t.coast_km > 3.0 && p.t.coast_km < 30.0)),
+        ];
+        for (name, f) in &kinds {
+            let v: Vec<&Pt> = pts.iter().filter(|p| f(p)).collect();
+            let step = (v.len() / 10).max(1);
+            let list: Vec<String> = v.iter().step_by(step).take(10).map(|p| format!("({:.3}, {:.3} h{:.0} ck{:.0})", p.lat, p.lon, p.t.ground, p.t.coast_km)).collect();
+            eprintln!("{name}: {} samples: {}", v.len(), list.join(" "));
+        }
+        // fans: instances near dry piedmont points
+        let mut seen = std::collections::BTreeMap::new();
+        for p in pts.iter().filter(|p| land(p) && p.t.mountain > 0.1 && p.t.mountain < 0.7 && p.t.moist < 0.3) {
+            let q = geodesy::geodetic2ecef(geodesy::Geodetic::new(p.lat.to_radians(), p.lon.to_radians(), p.t.ground), &w.ell);
+            for it in crate::instances::near(&w, fam_fans(), q, 0.0) {
+                seen.entry(it.id).or_insert(it);
+            }
+        }
+        eprintln!("{} fans", seen.len());
+        for it in seen.values().take(12) {
+            let g = geodesy::ecef2geodetic(it.center, &w.ell);
+            eprintln!("fan ({:.3}, {:.3}) R{:.0} H{:.0}", g.lat.to_degrees(), g.lon.to_degrees(), it.v[0], it.v[3]);
+        }
     }
 }

@@ -21,7 +21,6 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
         return;
     }
     let p = (*s).c.p;
-    let gsd = (*s).c.gsd;
     let fl = mt_fields((*s).c);
     var zi: MtZIn;
     zi.moist = t.moist;

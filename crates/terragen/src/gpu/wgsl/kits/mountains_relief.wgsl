@@ -14,11 +14,11 @@ const MT_WARP_LAM2: f64 = 11000.0lf;
 const MT_WARP_A: f32 = 4000.0;
 
 const MT_KARST_CELL: f32 = 420.0;
-const MT_TOWER_DENS: f32 = 0.55;
-const MT_TOWER_MEAN: f32 = 33.4;
-const MT_COCKPIT_MEAN: f32 = 24.1;
+const MT_TOWER_DENS: f32 = 0.7;
+const MT_TOWER_MEAN: f32 = 24.4;
+const MT_COCKPIT_MEAN: f32 = 34.68;
 const MT_RIDGE_CELL: f64 = 140000.0lf;
-const MT_CREASE_MEAN: f32 = 0.4075;
+const MT_CREASE_MEAN: f32 = 0.2698;
 
 /// `mountains::litho_at`: the atlas' dominant lithology at the texel nearest to `p`.
 fn mt_litho(p: vec3<f64>) -> u32 {
@@ -93,8 +93,8 @@ fn mt_tower_h(c: Cell3) -> f32 {
         return 0.0;
     }
     let hh = 70.0 + 170.0 * u01k(c.id, 2lu);
-    let rad = 0.5 * MT_KARST_CELL * (0.55 + 0.4 * u01k(c.id, 3lu));
-    let x = c.f1 / min(rad, 0.88 * c.f2);
+    let rad = 0.5 * MT_KARST_CELL * (0.8 + 0.6 * u01k(c.id, 3lu));
+    let x = c.f1 / min(rad, 0.9 * c.f2);
     if (x >= 1.0) {
         return 0.0;
     }
@@ -217,12 +217,6 @@ fn mt_fan_at(it: Inst, p: vec3<f64>, east: vec3<f32>, north: vec3<f32>) -> MtFan
     return o;
 }
 
-/// `mountains::site_fields`: (mountain mask, moisture, continent value) of the macro fields.
-fn mt_site_fields(c: vec3<f64>) -> vec3<f32> {
-    let m = macro_at(c, 20000.0);
-    return vec3<f32>(mountain_mask(m).x, clamp(m.moist, 0.0, 1.0), m.cont);
-}
-
 /// `mountains::fans_exist`.
 fn mountains_fans_exists(s: InstSite) -> InstOut {
     var o: InstOut;
@@ -230,34 +224,30 @@ fn mountains_fans_exists(s: InstSite) -> InstOut {
     if (u01k(s.id, 1lu) >= 0.55) {
         return o;
     }
-    let a = atlas_sample(vec3<f32>(normalize(s.center)));
-    if (a.coast_km < 5.0 || moisture_index(a.precip_mm, a.temp_c) > 0.36 || a.temp_c < 0.0 || a.uplift < 0.03) {
-        return o;
-    }
-    let f0 = mt_site_fields(s.center);
-    if (f0.x < 0.2 || f0.x > 0.6 || f0.y > 0.34 || f0.z < 0.1) {
-        return o;
-    }
-    let d = 8000.0;
-    var g: array<f32, 4>;
-    for (var k = 0u; k < 4u; k++) {
+    let d = 12000.0;
+    var up: array<f32, 5>;
+    for (var k = 0u; k < 5u; k++) {
         var de = 0.0;
         var dn = 0.0;
-        if (k == 0u) {
+        if (k == 1u) {
             de = d;
-        } else if (k == 1u) {
-            de = -d;
         } else if (k == 2u) {
+            de = -d;
+        } else if (k == 3u) {
             dn = d;
-        } else {
+        } else if (k == 4u) {
             dn = -d;
         }
-        g[k] = mt_site_fields(s.center + vec3<f64>(s.east * de + s.north * dn)).x;
+        let a = atlas_sample(vec3<f32>(normalize(s.center + vec3<f64>(s.east * de + s.north * dn))));
+        if (k == 0u && (a.coast_km < 5.0 || moisture_index(a.precip_mm, a.temp_c) > 0.33 || a.temp_c < 0.0 || a.uplift < 0.12 || a.uplift > 0.55)) {
+            return o;
+        }
+        up[k] = a.uplift;
     }
-    let gx = g[0] - g[1];
-    let gy = g[2] - g[3];
+    let gx = up[1] - up[2];
+    let gy = up[3] - up[4];
     let gl = sqrt(gx * gx + gy * gy);
-    if (gl < 0.012) {
+    if (gl < 0.03) {
         return o;
     }
     let rr = 2600.0 + 3000.0 * u01k(s.id, 2lu);
