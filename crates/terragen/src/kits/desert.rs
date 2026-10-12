@@ -35,7 +35,8 @@ pub static KIT: Kit = Kit {
     name: "desert",
     biomes_yaml: include_str!("../../biomes/desert.yaml"),
     wgsl: include_str!("../gpu/wgsl/kits/desert.wgsl"),
-    layers: &[(slot::AZONAL, azonal), (slot::DISTURBANCE, barchan_field), (slot::WATER, washes)],
+    layers: &[(slot::AZONAL, azonal), (slot::DISTURBANCE, barchan_field), (slot::LINEAR, qanats), (slot::WATER, washes)],
+    host: Some(qanat_host),
     relief: Some(relief),
     relief_wgsl: include_str!("../gpu/wgsl/kits/desert_relief.wgsl"),
     families: &[
@@ -881,8 +882,178 @@ fn dry_lake(s: &mut Stack) {
     s.composite(Layer { cov, albedo: col, cls: LC_SALT_FLAT, solid: true, ..Default::default() });
 }
 
+// ============================================================================= qanats
+
+/// Qanats (`docs/design/terrain-next.md` §5.1, P2): underground channels from a mother well at
+/// the foot of the mountains down to an oasis, seen as dotted lines of shaft mounds (rings of
+/// spoil around a dark shaft every 30–55 m). Host-built (shared by both backends): a lattice of
+/// 9 km cells, a qanat group where the culture digs them (desert oasis, highland, steppe and
+/// Mediterranean archetypes), the climate is arid and the ground is a piedmont (the smooth
+/// relief's slope 0.8–6 % with mountains near); 1–3 lines fan out upslope from a common outlet,
+/// each 3–8 km long with a bend. The layer (slot 6) draws the mounds, or their mean along the
+/// line where they are below the pixel.
+pub const QANAT_CELL: f64 = 9_000.0;
+/// The feature kind of a qanat's segments (the kit's kind range: 64…).
+pub const KIND_QANAT: u32 = 64;
+/// Qanats are listed for areas whose pixel is below this size (m): a line of mounds covers
+/// ≤ ~5 % of a pixel above.
+pub const QANAT_GSD_MAX: f64 = 60.0;
+
+/// The segments of the qanat group of lattice cell `c` (empty: none).
+pub fn qanat_group(w: &World, c: (i64, i64, i64)) -> Vec<crate::features::FSeg> {
+    use crate::kits::settlements::sites::{lattice_site, seed_v};
+    let mut out = Vec::new();
+    let Some((id, p)) = lattice_site(w, 0x0A4A7, QANAT_CELL, c) else { return out };
+    let a = w.atlas().sample(p.normalize());
+    let arch = [0.0, 0.0, 0.05, 0.65, 0.2, 0.15, 0.0, 0.0, 0.0, 0.0, 0.0, 0.35][(a.archetype as usize).min(11)];
+    let prob = arch * (1.0 - 0.6 * a.development) * (1.0 - smoothstep(250.0, 450.0, a.precip_mm)) * smoothstep(6.0, 12.0, a.temp_c);
+    if u01k(id, 1) >= prob || a.coast_km < 5.0 || a.glaciation > 0.1 || w.cfg.landuse.towns <= 0.0 {
+        return out;
+    }
+    // a piedmont: a moderate regional slope, mountains near
+    let (h0, amp) = w.smooth_relief(p, 2_000.0);
+    if h0 < 100.0 || amp < 120.0 {
+        return out;
+    }
+    let (_, _, east, north) = crate::kits::settlements::places::frame_at(w, p);
+    let d = 1_500.0;
+    let ge = (w.smooth_relief(p + east * d, 1_000.0).0 - w.smooth_relief(p - east * d, 1_000.0).0) / (2.0 * d);
+    let gn = (w.smooth_relief(p + north * d, 1_000.0).0 - w.smooth_relief(p - north * d, 1_000.0).0) / (2.0 * d);
+    let g = DVec2::new(ge, gn);
+    let slope = g.length();
+    if !(0.008..=0.06).contains(&slope) {
+        return out;
+    }
+    // the outlet downslope of the site, the lines upslope from it
+    let down = -g / slope;
+    let surf = |q: DVec3| crate::kits::transport::route::surface(w, q);
+    let at = |o: DVec3, v: DVec2, l: f64| surf(o + (east * v.x + north * v.y) * l);
+    let outlet = at(p, down, 1_500.0 * (u01k(id, 2) - 0.2));
+    let n = 1 + (u01k(id, 3) * 2.99) as usize;
+    let (s0, s1) = seed_v(id);
+    for i in 0..n {
+        let hi = mix64(id ^ (i as u64 + 1).wrapping_mul(0x9E37_79B9));
+        let ang = (i as f64 - 0.5 * (n as f64 - 1.0)) * 0.3 + 0.15 * (u01k(hi, 1) - 0.5);
+        let (sa, ca) = ang.sin_cos();
+        let up = DVec2::new(-down.x * ca + down.y * sa, -down.x * sa - down.y * ca);
+        let len = 3_000.0 + 5_000.0 * u01k(hi, 2);
+        let side = DVec2::new(-up.y, up.x) * (0.06 * len * (u01k(hi, 3) - 0.5));
+        let mid = surf(outlet + (east * (up.x * 0.5 * len + side.x) + north * (up.y * 0.5 * len + side.y)));
+        let end = at(outlet, up, len);
+        let spacing = 30.0 + 25.0 * u01k(hi, 4);
+        let r = 4.0 + 2.5 * u01k(hi, 5);
+        let mut s_acc = 0.0;
+        for (a0, b0) in [(outlet, mid), (mid, end)] {
+            out.push(crate::features::FSeg {
+                a: a0,
+                b: b0,
+                ha: 0.0,
+                hb: 0.0,
+                kind: KIND_QANAT,
+                class: crate::landcover::BARE,
+                hw: (r + 1.0) as f32,
+                s0: s_acc as f32,
+                deck_a: f32::NAN,
+                deck_b: f32::NAN,
+                flags: 0,
+                v: [spacing as f32, r as f32, s0, s1],
+            });
+            s_acc += (b0 - a0).length();
+        }
+    }
+    out
+}
+
+/// The kit's host features: the qanats whose lines can reach the area.
+fn qanat_host(ctx: &mut crate::features::HostCtx, area: &crate::features::Area) -> crate::features::Features {
+    let mut f = crate::features::Features::default();
+    let w = ctx.world;
+    if area.gsd >= QANAT_GSD_MAX {
+        return f;
+    }
+    // (a line reaches ≤ 1.5 km + 8 km + its bend from its cell's site)
+    for c in crate::kits::settlements::sites::lattice_cells(w, QANAT_CELL, area.center, area.radius + 10_500.0) {
+        for sg in qanat_group(w, c) {
+            if crate::kits::transport::net::chord_dist(sg.a, sg.b, area.center) <= area.radius + sg.hw as f64 + 2.0 {
+                f.segs.push(sg);
+            }
+        }
+    }
+    f
+}
+
+/// Slot 6: the shaft mounds of the qanats (explicit rings of spoil around a dark shaft where
+/// they are resolved, their mean along the line where not).
+pub fn qanats(s: &mut Stack) {
+    let gsd = s.ctx.gsd;
+    if gsd >= QANAT_GSD_MAX || s.t.sand > 0.5 || s.l.slope > 0.25 {
+        return;
+    }
+    let p = s.ctx.p;
+    let fw = s.l.fw.max(0.5 * gsd);
+    let spoil = mixc(s.pal(pal::SAND + 2), s.pal(pal::SOIL + 1), 0.4) * 1.22;
+    let hole = srgb(46.0, 38.0, 30.0);
+    let mut best: Option<(f64, DVec3, f64)> = None;
+    for sg in s.segments() {
+        if sg.kind != KIND_QANAT {
+            continue;
+        }
+        let (d, along, _) = crate::features::seg_frame(sg, p);
+        let (sp, r) = (sg.v[0] as f64, sg.v[1] as f64);
+        let hw_l = r.max(0.5 * gsd);
+        if d.abs() > hw_l + fw {
+            continue;
+        }
+        let k = (along / sp).round();
+        let u = along - k * sp;
+        let rr = (d * d + u * u).sqrt();
+        let e = smoothstep(1.2 * gsd, 3.0 * gsd, 2.0 * r);
+        // explicit: the ring of spoil, the shaft
+        let ring = crate::surface::band_cov(rr, r, fw);
+        let shaft = crate::surface::band_cov(rr, 0.9, fw) * band(1.8, gsd);
+        let col_e = mixc(spoil, hole, shaft / ring.max(1e-6));
+        // mean: the mounds' area per metre of line over the line's width
+        let m = (PI * r * r / sp) / (2.0 * hw_l);
+        let cov_m = crate::surface::band_cov(d, hw_l, fw) * m.min(1.0);
+        let col_m = mixc(spoil, hole, 0.9 * 0.9 / (r * r));
+        let cov = cov_m + (ring - cov_m) * e;
+        if cov > 0.0 && best.as_ref().is_none_or(|b| cov > b.0) {
+            let dh = 1.4 * (1.0 - (rr / r).min(1.0).powi(2)) - 2.0 * shaft;
+            best = Some((cov, mixc(col_m, col_e, e), dh * e));
+        }
+    }
+    if let Some((cov, col, dh)) = best {
+        s.composite(Layer { cov, albedo: col, dh, hmode: hmode::BLEND, cls: crate::landcover::BARE, clear: 0.6, ..Default::default() });
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    /// Debug: qanat groups of the default world (their outlets): `find_qanats -- --ignored
+    /// --nocapture`.
+    #[test]
+    #[ignore]
+    fn find_qanats() {
+        let w = World::new(crate::Config::default());
+        let mut n = 0;
+        for i in 0..400_000u64 {
+            let h = mix64(0x0A4A7 ^ i);
+            let lat = (2.0 * u01k(h, 1) - 1.0).asin();
+            let lon = (u01k(h, 2) - 0.5) * TAU;
+            let p = geodesy::geodetic2ecef(geodesy::Geodetic::new(lat, lon, 0.0), &w.ell);
+            let c = (p / QANAT_CELL).floor();
+            let segs = qanat_group(&w, (c.x as i64, c.y as i64, c.z as i64));
+            if let Some(sg) = segs.first() {
+                let g = geodesy::ecef2geodetic(sg.a, &w.ell);
+                println!("qanats: {} lines, outlet ({:.4}, {:.4})", segs.len() / 2, g.lat.to_degrees(), g.lon.to_degrees());
+                n += 1;
+                if n >= 12 {
+                    break;
+                }
+            }
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -1067,7 +1238,7 @@ mod tests {
 
     /// Places of the default world where the kit draws (from `desert_places`): transverse,
     /// linear and star dunes, barchans, a playa, an inselberg, a dry lake, a wash.
-    const PLACES: [(f64, f64); 8] = [
+    const PLACES: [(f64, f64); 9] = [
         (-19.9225, 40.0243),
         (23.5356, 43.2255),
         (-31.1491, -166.3463),
@@ -1076,6 +1247,8 @@ mod tests {
         (22.2101, 127.5214),
         (-12.4109, -155.0993),
         (-16.1256, 53.6542),
+        // qanats
+        (27.0493, 34.4005),
     ];
 
     fn tile_at(i: usize, z: u8) -> geodesy::tiles::TileId {
