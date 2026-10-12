@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- **Qanats** (desert kit, design P2): dotted lines of shaft mounds (pale spoil rings around a
+  dark shaft every 30–55 m) from the piedmont down to a common outlet, 1–3 lines of 3–8 km per
+  group; host segments (`qanat_group`, 9 km lattice, by culture, aridity and the smooth relief's
+  slope), drawn in slot 6 with their mean along the line below the pixel.
+- **Ranches and feedlots** (agriculture kit, design P2): a `ranch` field system (2.2 × 1.5 km
+  paddocks, stock trails to troughs, farm dams, savanna trees where warm), weighted to semi-arid
+  steppe climates and pastoral, steppe and survey-grid cultures; feedlots in some ranch regions
+  (slot 6): pens of dark manure along feed alleys and bunks, cattle, a feed mill with silage
+  bunkers and silos, two manure lagoons.
+- **Fishbone deforestation** (tropical kit, design P3): colonization projects in the rainforest
+  lowlands with a trunk road, feeder roads every 4.4 km and lots of 250 m cleared from the roads
+  to depths of their own (pasture, fresh burns, red soil, crops, regrowth), in the canopy slot.
+- **Tropical river water** (tropical kit, design P0): white-water rivers in café au lait, black-
+  water rivers (tea-black) in the very wet lowlands of a regional style channel's provinces,
+  slot 8 over the core's river colour.
+- **Known limits** sections in the desert, tropical, temperate, cold and agriculture kit docs.
+
+- **Settlements avoid open water and like rivers.** Hamlet and village candidates whose centre
+  lies in the sea, a lake or a level 0–1 river channel (pass A at the point) are dropped, water
+  on a ring around a candidate lowers its score, a river within 2.5 km raises it (design §6.1
+  water access); towns and larger keep the smooth-relief test (their candidates are visited
+  over continents by the transport kit's trunk networks). Hamlets and villages flooded
+  by a reservoir are drowned (not drawn), and a dam that would flood a town or a city is not
+  built. Test `places_avoid_open_water` (0 of 362 centres in pass A's water).
+- **Sites are backend-independent.** Airports, dams, ports, quarries, solar and wind farms and
+  flares take close decisions (within 0.5 m of a threshold or of a competitor) with exact
+  samples (`World::terrain`, the CPU backend's own) and keep exact heights, so GPU (f32) and CPU
+  (f64) point samples build the same sites, and the transport kit the same network: new GPU test
+  `sites_and_routes_match_the_cpu` (stamps and segments bit for bit at six places).
+- **Settlement glow at low zooms.** Where a level's places are no longer listed (hamlets below
+  z11, villages below z8, towns below z6, cities below z4), the settlements kit draws their
+  expected built cover and street lights per pixel (`places::expected_places` × the place
+  model's mean over a footprint, calibrated against the final places), so night views from
+  altitude keep their lights and coarse pixels keep the finer zooms' mean.
+
 - **Drainage: no straight trenches into inland basins.** A lattice point without a lower
   neighbour looked up to 3 cells farther for an outlet anywhere; inland that drew channels up to
   24 km long, straight across the higher ground between (canal-like water strips, several

@@ -74,8 +74,17 @@ cars belong to the transport kit.
 ## Placement and levels of detail
 
 Places of a level are listed (as stamps) for tile areas whose pixel is below 150 m (hamlets),
-800 m (villages), 3 km (towns), 12 km (cities), 50 km (metropolises): a place covers at most
-~0.2 pixel when it is dropped. Sites: airports and ports below 600 m, dams below 1.2 km,
+800 m (villages), 3 km (towns), 12 km (cities), 50 km (metropolises). At coarser pixels the
+level's **glow** takes over (`glow`, WGSL `st_glow`, slot 7): the places expected at the pixel
+(`places::expected_places`: the existence draw of `base_place` by population potential, culture
+and `landuse.towns`, its population and radius draws integrated over their hashes, calibrated
+against the final places by `GLOW_CAL`) times the place model's mean over a footprint (street
+light emission and built cover per R², `GLOW_K*`, `GLOW_J`): a grey urban tint and the street
+lights' mean, so the mean of a coarse pixel matches the finer zooms' and night views from
+altitude keep their lights (a smooth glow following the population instead of discrete spots).
+`glow_keeps_the_mean` (GPU) compares a parent tile's mean emission with its four children's at
+the zooms where a level drops, over eight populated places: 0.99 (z10, hamlets), 1.06 (z7,
+villages), 0.83 (z5, towns), 0.99 (z3, cities). Sites: airports and ports below 600 m, dams below 1.2 km,
 quarries and solar farms below 300 m, wind farms below 150 m, flares below 2.5 km. All host
 results are memoized per lattice cell or place (pure functions of the world).
 
@@ -87,9 +96,28 @@ results are memoized per lattice cell or place (pure functions of the world).
 * **The core's grid towns are off with the kit** (`Kit::replaces_towns`, `kits::legacy_towns()`,
   WGSL `KITS_LEGACY_TOWNS`): no town site in pass A, no town requests, no town code in pass B.
   The core's farmsteads stay (dispersed farmsteads between the hamlets).
-* **No river access in the scores**: the CPU drainage per candidate costs too much for an
-  analytic API; water access comes from the atlas coast distance. Dams use the CPU drainage
-  (`World::river_segments`, levels 0–1) on the host, once per dam source.
+* **Water in the scores** (hamlets and villages): a candidate whose centre lies in open water
+  (pass A at the point, `World::terrain`: the sea, lattice and closed-basin lakes, the kits'
+  lakes, a level 0–1 river channel) is dropped; water on a ring of 4 points at 0.8 × the level's
+  smallest radius lowers its score (× 0.3–1), a level 0–1 river within 2.5 km raises it (up to
+  × 1.3: crossings, mills, river ports). Host Rust, analytic, the same for both backends. Towns
+  and larger keep the smooth-relief test only: the transport kit's trunk networks visit their
+  candidates over thousands of kilometres (370 000 town candidates for one 2.5 km view), where
+  pass A at points (~2 ms) costs minutes; at villages and hamlets the test costs ~7 % of a
+  survey view's generation. (The transport routing's `Scene` was tried first: a scene per
+  block costs ~70 ms.) Reservoirs come after
+  the places (dams are placed near towns): hamlets and villages whose centre a reservoir floods
+  (> 1 m) are drowned (not drawn; `sites::drowned`), and a dam whose reservoir would flood a town
+  or a city is not built.
+* **Sites are the same on both backends**: their decisions take the backend's point samples where
+  they are clear by a margin (`sites::TIE_H` = 0.5 m) and re-take close ones with exact samples
+  (`World::terrain`, the CPU backend's own): airports evaluate their candidates in the order of
+  their backend range until the next cannot beat the best exact one, dams likewise by score (a
+  candidate near a threshold first), ports re-sample the ray samples near sea level or a lake's
+  level, quarries, wind farms, flares and solar farms near a threshold; the heights a site keeps
+  (airport grade, dam crest, wall ends, quarry floor) come from exact samples.
+  `sites_and_routes_match_the_cpu` (GPU) checks the stamps and segments of six places bit for
+  bit (the decks of engineered road profiles aside).
 * **Quarries change the DSM only** (pass B): the drainage does not see the pits.
 * **Pass B in four stages** (`[0, 3, 5, 7]`): the kit's built layer is in the linear–built stage,
   its water layer (reservoirs, dams, port piers) in the canopy–seasonal stage.
@@ -114,6 +142,11 @@ N-S, determinism (fresh generators and caches), `tiles_match_the_cpu` (22 tiles 
 kernel parity test).
 
 ## Compile time and performance
+
+After the leftover round (water, exact sites, glow; all kits): P4 cold pass B 31.4 / 28.6 / 19.7
+/ 26.0 s (the glow adds ~1.4 s to the linear–built stage; the first stage, unchanged, varies
+±1.5 s with the farm's load), points 22.7 s, drainage heights 17.3 s. The water test costs ~7 %
+of a survey view's generation (59.6 s vs 55.7 s for a 2.5 km nadir view).
 
 Cold compile on a Tesla P4 (`compile_times`, one pipeline at a time, all eight kits): pass B
 31.2 / 29.1 / 16.7 / 25.3 s in four stages (the first two stages do not contain the kit); pass
@@ -161,9 +194,12 @@ villages and farmsteads as points.
 
 ## Known limits
 
-* Places score flatness and coast access, not rivers; a town may sit on a lake shore or across
-  a small valley, and its lots do not follow the terrain beyond the slope gate and the river
-  banks.
+* Only hamlets and villages test their centres against pass A's water and score rivers; towns,
+  cities and metropolises keep the smooth-relief sea test (their candidates are too many for
+  point evaluations), so a town's centre can still lie in a lake or a river. A town's lots do not follow the terrain beyond the slope gate and
+  the river banks; its footprint may still reach into a lake or river.
+* Confluences and river mouths get no extra bonus beyond the river's proximity (the coast bonus
+  is the atlas coast distance).
 * Streets are not connected between districts (district edges are arterials) nor to the core's
   rural roads; the transport kit's graph will link places.
 * Towers cast shadows only within their own block (3 steps of 3.5 m); tall towers' long shadows
@@ -177,7 +213,11 @@ villages and farmsteads as points.
 * Ports exist where a point-sample ray finds the ocean within R + 12 km (10 of 13 coastal towns
   in `debug_ports`); estuaries and lakes have no ports.
 * Quarries are pass-B pits; their floors are not drainage sinks.
-* Hamlets below 150 m pixels, villages below 800 m, towns below 3 km are not drawn (their lights
-  vanish from night views at those zooms).
+* Hamlets below 150 m pixels, villages below 800 m, towns below 3 km are drawn as the expected
+  glow, not as places: the mean matches (statistically, over many places), the texture does not
+  (a smooth glow following the population field instead of discrete spots, also where the
+  actual places of a region happen to be few).
+* Reservoirs drown hamlets and villages (they are not drawn) instead of moving them; the
+  transport kit's graph still routes to them and ends its roads at the shore.
 * Night lights: no lit facades of towers beyond the window rims, no interchange lighting
   (transport kit).

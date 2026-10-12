@@ -54,6 +54,21 @@ lists and costs ~5 cell hashes per sample after the bound test.
 | `tropical_cloud_forest` | zone below 17.5 °C | dense low mossy canopy, tree ferns, landslide scars on steep slopes |
 | `tropical_paramo` | zone below 10 °C | tussock grass, silvery frailejón rosettes, tarns |
 
+**River water** (slot 8, `rivers`; design P0): tropical lowland rivers take the colour of their
+water. Major rivers (half width > 25 m) are white-water (café au lait, lighter where wide); the
+smaller ones are black-water (tea-black) in the very wet lowlands (moisture > 0.62) of a
+regional style channel's provinces, else muddy; so black tributaries meet a muddy main stem. The
+colour takes over from the core's between 18 and 21 °C and below 600–900 m.
+
+**Fishbone deforestation** (canopy slot, `fishbone`; design P3): colonization projects in the
+rainforest lowlands (22 km blocks of the tangent plane of a 200 km anchor, 30 % of them by a
+hash; the climate gates the forest, development ≤ 0.65): a trunk road through the project,
+feeder roads every 4.4 km at right angles, and along every road lots of 250 m each cleared from
+the road to a depth of its own (to 3 km, deeper near the trunk road: older) — pasture, fresh
+burns, red soil, crops, regrowth — so the clearings form fishbones from altitude. Red laterite
+tracks; the clearings reset the canopy's height and shadows. The kit's own spines, not the
+transport kit's roads.
+
 Laterite: red soils (`laterite` palette, `vegetation.laterite`) in every lowland biome. Cloud
 forest and páramo are the altitudinal zones of the forest and savanna biomes (`zonation`); they
 are never picked by an ecoregion (an impossible envelope keeps them out of the nearest-envelope
@@ -73,8 +88,6 @@ Classes (v2): `tropical_rainforest`, `mangrove`, `broadleaf_forest`, `woodland`,
   along-coordinate `s`, its curvature sign and the bend's inner side in `Local`; meandering
   channels need the drainage to meander. The kit draws meander *scars* beside the rivers
   (a mask on `river_dist` and `floodplain`), not the river's own bends.
-* **River colour by ecoregion** (muddy white-water, black-water, sediment plumes): a palette
-  entry for the river surface read by `layers::water::rivers`.
 * **Coast distance at pixel resolution.** `coast_km` comes from ~20 km atlas texels and can miss
   the pixel coast by hundreds of km (237 km at a beach of the default world), so the mangroves
   use the height near sea level instead.
@@ -114,6 +127,17 @@ floodplain (in the core alone this place was mostly fields).
 
 ![oxbow lake 300 m](images/tropical_oxbow_300m.jpg)
 
+**River water**: a white-water river (21.212, −20.262), nadir 800 m; a muddy and a black-water
+river side by side (4.628, 5.338), nadir 800 m.
+
+![white-water river 800 m](images/tropical_whitewater_800m.jpg)
+![black-water river 800 m](images/tropical_blackwater_800m.jpg)
+
+**Fishbone deforestation** (−5.520, 111.780), nadir 12 km: ribs of cleared lots along the
+feeder roads of two colonization projects in the forest.
+
+![fishbone 12 km](images/tropical_fishbone_12km.jpg)
+
 **Monsoon forest mosaic** (−17.95, −128.59): semi-deciduous forest and savanna glades, small
 burns and swidden plots.
 
@@ -141,3 +165,28 @@ burns and swidden plots.
   "rainforest" and "savanna" places are no longer tropical biomes in the atlas world) the
   difference is within the run-to-run noise (±2 %).
 * `places` and `find_places` (ignored) list where the biomes and features occur.
+
+## Known limits
+
+* Burn scars are large blobs of one age with a uniform charred interior (ash streaks aside) and a
+  lobate edge: from 1.5 km they read too uniform; fires do not stop at roads, rivers or fields.
+* Flowering crowns (yellow, pink-red) are saturated and evenly spread: from altitude the canopy
+  shows confetti-like dots.
+* Meander scars, oxbows and scroll bars are drawn beside the rivers (a mask on `river_dist` and
+  `floodplain`), not as the river's own bends: the live channel keeps the core's smooth
+  meander, so oxbows lie next to a river that does not meander at their scale.
+* Mangroves are rare in the default world: they need low tropical coasts below ~3–5 m inside
+  tropical ecoregions, and near-shore water whose ecoregion site lies at sea takes that site's
+  biome (see *What needs the core*). No still shows them yet.
+* River water by type (white-water, black-water) is a per-pixel choice by the river's width,
+  the moisture and a regional style channel: a tributary can change colour where the style
+  channel crosses its threshold, not only at its confluence.
+* No deltas: river mouths end at the coast without distributaries or sediment lobes (the design's
+  pass-A delta stamps at level-0 mouths are not built: the mouth must be found on the drawn coast,
+  not at the coarse drainage lattice's sea points, and the lobes must be relief).
+* Fishbone projects follow their own spines (a grid in the plane of a 200 km anchor), not the
+  transport kit's roads, and end at their 22 km block's edges; their feeder roads are 6 m tracks
+  (invisible from 12 km, where only the ribs of clearings show); red bare-soil lots read
+  saturated; the clearings ignore rivers and slopes below the 0.3 gate.
+* Rivers that join run side by side for a while before their confluence (the core's drainage
+  curves meet tangentially), as in the black-water still.
