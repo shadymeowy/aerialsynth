@@ -39,6 +39,21 @@
   noise-network roads off (pass A distances, the road pre-pass, WGSL `KITS_LEGACY_ROADS`); the
   farm tracks along region borders stay.
 
+- **Transport routing** (`kits/transport/{route,build}.rs`, `docs/kits/transport.md`): routes go
+  around water and sites and follow valleys. Each edge gets a scene along its corridor: the
+  relief with the valleys of drainage levels 0–1 carved in (the core's valley profile), the sea,
+  the core's lattice and closed-basin lakes, the cold kit's large kettle lakes, river crossings
+  (a cost per crossing, up to ×3 when oblique); a second stage adds the settlements kit's sites
+  near the route (airports, quarries, solar and wind farms as no-go footprints, reservoirs as
+  water) and routes again where it touches one. Lakes are crossed only on bridges over narrow
+  necks (500 m major, 160 m minor; reservoirs and the sea ×3), no more causeways; an edge that
+  cannot go around is dropped; ends in water move to the shore. Roads end on a town's arterials
+  (the settlements kit's district edges) instead of converging on its centre; power lines at its
+  edge. New tests `routes_avoid_water_and_sites` (~400 routes over 20 regions: 101 points in
+  water or sites before, 0 after) and `roads_end_at_town_arterials`; ignored `routing_time` and
+  finders. Core: `World::relief_terrain`, `World::river_segments_of` (some levels only), host
+  accessors of the lakes' levels.
+
 - **Settlements kit** (`kits/settlements.rs`, `settlements/{places,town,sites}.rs`,
   `docs/kits/settlements.md`): a central-place hierarchy (hamlet, village, town, city,
   metropolis; host-side and analytic, `kits::settlements::places::settlements_near` for the

@@ -36,7 +36,8 @@ pub struct Params {
     pub town: f64,
     /// extra cost per metre over standing water (lakes, reservoirs)
     pub lake: f64,
-    /// cost of a river crossing (m; × (0.5 + half width / 40 m), × up to 3 when oblique)
+    /// cost of a river crossing (m), plus [`BRIDGE`] per metre of bridge (the channel's width
+    /// over the sine of the crossing angle)
     pub xing: f64,
     /// the longest lake a route crosses (m, a narrow neck on a bridge; reservoirs and the sea:
     /// × 3; 0: any)
@@ -52,13 +53,13 @@ pub struct Params {
 #[rustfmt::skip]
 pub const PARAMS: [Params; cls::N] = [
     // motorway, trunk, secondary, local, track, ramp, rail, power
-    Params { step: 2_500.0, width: 0.16, k: 300.0, k2: 30_000.0, glim: 0.05, gmax: 0.0, turn: 150.0, wet: 40.0, town: 6.0, lake: 60.0, xing: 3_000.0, span: 500.0, smooth: 1, smooth_turns: true, window: 400.0 },
-    Params { step: 1_500.0, width: 0.18, k: 160.0, k2: 12_000.0, glim: 0.07, gmax: 0.0, turn: 60.0, wet: 25.0, town: 2.0, lake: 50.0, xing: 2_000.0, span: 500.0, smooth: 1, smooth_turns: true, window: 250.0 },
-    Params { step: 400.0, width: 0.2, k: 100.0, k2: 6_000.0, glim: 0.10, gmax: 0.11, turn: 15.0, wet: 20.0, town: 0.0, lake: 40.0, xing: 1_000.0, span: 160.0, smooth: 3, smooth_turns: false, window: 0.0 },
-    Params { step: 150.0, width: 0.22, k: 60.0, k2: 4_000.0, glim: 0.12, gmax: 0.13, turn: 6.0, wet: 15.0, town: 0.0, lake: 30.0, xing: 600.0, span: 160.0, smooth: 3, smooth_turns: false, window: 0.0 },
-    Params { step: 100.0, width: 0.22, k: 40.0, k2: 3_000.0, glim: 0.16, gmax: 0.16, turn: 4.0, wet: 10.0, town: 0.0, lake: 25.0, xing: 300.0, span: 160.0, smooth: 3, smooth_turns: false, window: 0.0 },
+    Params { step: 2_500.0, width: 0.16, k: 300.0, k2: 30_000.0, glim: 0.05, gmax: 0.0, turn: 150.0, wet: 40.0, town: 6.0, lake: 60.0, xing: 600.0, span: 500.0, smooth: 1, smooth_turns: true, window: 400.0 },
+    Params { step: 1_500.0, width: 0.18, k: 160.0, k2: 12_000.0, glim: 0.07, gmax: 0.0, turn: 60.0, wet: 25.0, town: 2.0, lake: 50.0, xing: 500.0, span: 500.0, smooth: 1, smooth_turns: true, window: 250.0 },
+    Params { step: 400.0, width: 0.2, k: 100.0, k2: 6_000.0, glim: 0.10, gmax: 0.11, turn: 15.0, wet: 20.0, town: 0.0, lake: 40.0, xing: 300.0, span: 160.0, smooth: 3, smooth_turns: false, window: 0.0 },
+    Params { step: 150.0, width: 0.22, k: 60.0, k2: 4_000.0, glim: 0.12, gmax: 0.13, turn: 6.0, wet: 15.0, town: 0.0, lake: 30.0, xing: 200.0, span: 160.0, smooth: 3, smooth_turns: false, window: 0.0 },
+    Params { step: 100.0, width: 0.22, k: 40.0, k2: 3_000.0, glim: 0.16, gmax: 0.16, turn: 4.0, wet: 10.0, town: 0.0, lake: 25.0, xing: 100.0, span: 160.0, smooth: 3, smooth_turns: false, window: 0.0 },
     Params { step: 100.0, width: 0.0, k: 0.0, k2: 0.0, glim: 1.0, gmax: 0.0, turn: 0.0, wet: 0.0, town: 0.0, lake: 0.0, xing: 0.0, span: 0.0, smooth: 0, smooth_turns: false, window: 0.0 },
-    Params { step: 2_500.0, width: 0.16, k: 2_500.0, k2: 80_000.0, glim: 0.022, gmax: 0.0, turn: 200.0, wet: 40.0, town: 6.0, lake: 60.0, xing: 3_000.0, span: 500.0, smooth: 1, smooth_turns: true, window: 600.0 },
+    Params { step: 2_500.0, width: 0.16, k: 2_500.0, k2: 80_000.0, glim: 0.022, gmax: 0.0, turn: 200.0, wet: 40.0, town: 6.0, lake: 60.0, xing: 600.0, span: 500.0, smooth: 1, smooth_turns: true, window: 600.0 },
     Params { step: 2_500.0, width: 0.08, k: 4.0, k2: 40.0, glim: 0.3, gmax: 0.0, turn: 30.0, wet: 0.5, town: 3.0, lake: 0.5, xing: 0.0, span: 0.0, smooth: 0, smooth_turns: false, window: 0.0 },
 ];
 
@@ -67,6 +68,9 @@ pub const PARAMS: [Params; cls::N] = [
 pub fn span(class: usize, wide: bool) -> f64 {
     PARAMS[class].span * if wide { 3.0 } else { 1.0 }
 }
+
+/// Cost per metre of a river bridge (on top of the length).
+pub const BRIDGE: f64 = 12.0;
 
 /// Extra corridor half width of the second try (m).
 pub const WIDEN: f64 = 600.0;
@@ -636,7 +640,7 @@ fn crossings(sc: &Scene, pr: &Params, n0: &Probe, n1: &Probe) -> f64 {
         }
         let sin = ex.cross((s.b - s.a).normalize_or_zero()).length();
         let hw = s.hw + (s.hw_b - s.hw) * t;
-        c += pr.xing * (0.5 + hw / 40.0) * (1.0 + 2.0 * (1.0 - sin));
+        c += pr.xing + BRIDGE * 2.0 * hw / sin.max(0.25);
     }
     c
 }

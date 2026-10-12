@@ -14,13 +14,13 @@ fn world() -> World {
 /// Places of the default world where the kit draws: (name, lat, lon), for the tests and stills
 /// (`find_transport_places`).
 pub(crate) const PLACES: &[(&str, f64, f64)] = &[
-    ("parclo", -7.6570, -16.6301),
+    ("parclo", -7.6475, -16.6320),
     ("diamond", -7.6988, -18.7191),
-    ("trumpet", -23.7536, -33.8316),
+    ("trumpet", -23.7203, -33.8120),
     ("switchbacks", -24.1868, -33.3606),
     ("station", -7.7302, -18.7965),
     ("yard", -7.7461, -18.7972),
-    ("roundabout", -7.6185, -16.6091),
+    ("roundabout", -7.6230, -16.6053),
     ("power", -7.8316, -18.8000),
     ("portal", 29.3400, 179.4257),
     ("bridge", -7.5782, -18.7463),
@@ -888,6 +888,7 @@ fn routes_avoid_water_and_sites() {
     let only = std::env::var("TR_REGION").ok();
     let (mut n_route, mut n_seg, mut n_river, mut n_narrow, mut n_pond, mut n_xing, mut n_oblique) = (0, 0, 0, 0, 0, 0, 0);
     let mut sin_sum = 0.0;
+    let mut n_tunnel = 0;
     let mut bad: Vec<String> = Vec::new();
     let mut sites_bad = 0;
     let (mut br_wet, mut br_dry) = (0, 0);
@@ -968,6 +969,7 @@ fn routes_avoid_water_and_sites() {
         n_route += seen;
         // bridges (not overpasses): over water or a valley
         let f = build::features(&mut ctx, &area);
+        n_tunnel += f.segs.iter().filter(|s| s.flags & flag::TUNNEL != 0).count();
         for s in f.segs.iter().filter(|s| s.flags & flag::BRIDGE != 0 && s.flags & flag::OVER == 0 && s.kind != cls::KIND0 + cls::RAMP as u32) {
             let m = (s.a + s.b) * 0.5;
             let g = geodesy::ecef2geodetic(m, &w.ell);
@@ -984,7 +986,7 @@ fn routes_avoid_water_and_sites() {
         eprintln!("{b}");
     }
     eprintln!(
-        "{n_route} routes, {n_seg} sampled 25 m pieces: {} in water or sites ({sites_bad} in sites), {n_narrow} narrow crossings, {n_river} points over rivers and streams; {n_xing} river crossings ({:.1} per 100 km, mean sin {:.2}, {n_oblique} under 30°); {n_pond} points over ponds; bridges over water {br_wet}, over dry valleys {br_dry}",
+        "{n_route} routes, {n_seg} sampled 25 m pieces: {} in water or sites ({sites_bad} in sites), {n_narrow} narrow crossings, {n_river} points over rivers and streams; {n_xing} river crossings ({:.1} per 100 km, mean sin {:.2}, {n_oblique} under 30°); {n_pond} points over ponds; bridges over water {br_wet}, over dry valleys {br_dry}; {n_tunnel} tunnel segments",
         bad.len(),
         n_xing as f64 / (n_seg as f64 * 25.0 / 1e5),
         sin_sum / n_xing.max(1) as f64
@@ -1233,15 +1235,17 @@ fn find_routing_places() {
         (g.lat.to_degrees(), g.lon.to_degrees())
     };
     let (mut n_det, mut n_x) = (0, 0);
-    for &(name, lat, lon) in ROUTE_REGIONS.iter().filter(|r| r.0.starts_with("lakes") || matches!(r.0, "bridge" | "parclo" | "dam")) {
-        let (routes, _, _) = build::area_routes(&mut ctx, &Area { center: ecef(&w, lat, lon), radius: 6_000.0, gsd: 30.0 });
+    for &(name, lat, lon) in ROUTE_REGIONS.iter().filter(|r| r.0.starts_with("lakes") || matches!(r.0, "dam" | "bridge" | "parclo")) {
+        let (routes, _, _) = build::area_routes(&mut ctx, &Area { center: ecef(&w, lat, lon), radius: 8_000.0, gsd: 30.0 });
         for r in routes.iter().filter(|r| r.e.class <= cls::LOCAL) {
             let bs = build::base(&w, &r.e);
             let [a, b] = bs.ends;
             for lk in &bs.scene.lakes {
                 let c = route::surface(&w, lk.pt);
                 let (d, _) = r.line.dist(c);
-                if lk.rad > 250.0 && net::chord_dist(a, b, c) < 0.5 * lk.rad && d > 1.0 * lk.rad && d < 1.8 * lk.rad && n_det < 10 {
+                // (the chord through the lake's middle, away from the ends; the route round it)
+                let t = (c - a).dot(b - a) / (b - a).length_squared();
+                if lk.rad > 200.0 && lk.rad < 1_500.0 && (0.15..0.85).contains(&t) && net::chord_dist(a, b, c) < 0.6 * lk.rad && d > 0.9 * lk.rad && d < 2.0 * lk.rad && n_det < 12 {
                     let (la, lo) = ll(c);
                     let (pa, po) = ll(r.line.at(r.line.dist(c).1).0);
                     eprintln!("{name}: class {} around a lake (r {:.0} m) at ({la:.4}, {lo:.4}), road at ({pa:.4}, {po:.4})", r.e.class, lk.rad);
@@ -1249,7 +1253,7 @@ fn find_routing_places() {
                 }
             }
             // wide river crossings
-            if n_x < 10 && r.e.class >= cls::SECONDARY {
+            if n_x < 10 && r.e.class >= cls::SECONDARY && std::env::var("TR_RIVERS").is_ok() {
                 let n = (r.line.len() / 20.0) as usize;
                 let mut inr = false;
                 for k in 0..n {
@@ -1265,5 +1269,37 @@ fn find_routing_places() {
                 }
             }
         }
+    }
+}
+
+/// Debug: the kit's stamps near a point (`TR_SPEC` "lat,lon,radius"):
+/// `stamps_near -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn stamps_near() {
+    let spec = std::env::var("TR_SPEC").unwrap_or("-7.6185,-16.6091,2000".into());
+    let v: Vec<f64> = spec.split(',').map(|x| x.trim().parse().unwrap()).collect();
+    let w = world();
+    let mut pts = CpuPoints(&w);
+    let mut ctx = HostCtx { world: &w, points: &mut pts };
+    let f = build::features(&mut ctx, &Area { center: ecef(&w, v[0], v[1]), radius: v[2], gsd: 2.0 });
+    for st in &f.stamps {
+        let g = geodesy::ecef2geodetic(st.center, &w.ell);
+        eprintln!("stamp {} at ({:.5}, {:.5})", st.template, g.lat.to_degrees(), g.lon.to_degrees());
+    }
+    // interchange ramps: their centroids, in clusters of 1.5 km
+    let mut cl: Vec<(DVec3, usize)> = Vec::new();
+    for sg in f.segs.iter().filter(|s| s.kind == cls::KIND0 + cls::RAMP as u32) {
+        match cl.iter_mut().find(|c| (c.0 / c.1 as f64 - sg.a).length() < 1_500.0) {
+            Some(c) => {
+                c.0 += sg.a;
+                c.1 += 1;
+            }
+            None => cl.push((sg.a, 1)),
+        }
+    }
+    for (c, n) in cl {
+        let g = geodesy::ecef2geodetic(c / n as f64, &w.ell);
+        eprintln!("ramps: {n} segments around ({:.5}, {:.5})", g.lat.to_degrees(), g.lon.to_degrees());
     }
 }

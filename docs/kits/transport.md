@@ -50,9 +50,10 @@ edge has a *scene* of host knowledge along its corridor, the same on both backen
   length, the sea 10–40; each step also measures its chord inside the lakes' outlines, so a
   coarse step does not jump a lake between two dry nodes.
 * **River crossings** (levels 0–1, in each level's meander-warped space): a cost per crossing
-  of 150 m (tracks) … 2 km (motorways, railways) × (0.5 + half width / 40 m), up to ×3 when
-  oblique (`1 + 2 (1 − sin θ)`): few crossings, near perpendicular. Bridges over the water are
-  then drawn per pixel (slot 8) and from the profiles.
+  of 100 m (tracks) … 600 m (motorways, railways) plus 12 per metre of bridge (the channel's
+  width over the sine of the crossing angle, ≥ 0.25): few crossings, near perpendicular, and no
+  mountain detours to avoid a big river. Bridges over the water are then drawn per pixel (slot
+  8) and from the profiles.
 * **Sites:** the settlements kit's airports, quarries (a disc of 1.6 pit radii), solar and wind
   farms are no-go footprints (widened by the road: half width + verge + 15 m; power lines 30 m)
   and its reservoirs are standing water. Sites need point samples, so they enter in a second
@@ -124,7 +125,7 @@ lane lines, hard shoulders, wide verges; trunk and secondary roads: centre dashe
 local roads paved or gravel; tracks: two ruts and a grass strip; urban stretches: sidewalks and
 curbs instead of verges. Verges and slopes clear the trees; towns are drawn over by the roads
 (the kit runs in slot 7 after the settlements kit), so the rural network continues into the
-towns' street grids to their centres.
+towns' street grids up to their arterials.
 
 ## Levels of detail
 
@@ -136,9 +137,24 @@ kept modulo 8.4 km (every pattern period divides it).
 
 ## Decisions
 
-* **Host-built graph, analytic routing.** The design's §6.3 pipeline as specified, with RNGs per
-  network instead of per road cell (an edge is a pure function of the node set; no cell
-  ownership needed) and refinement per coarse piece so motorways adapt locally.
+* **Host-built graph, host routing.** The design's §6.3 pipeline, with RNGs per network
+  instead of per road cell (an edge is a pure function of the node set; no cell ownership
+  needed) and refinement per coarse piece so motorways adapt locally.
+* **Routing sees water, drainage and sites; two stages.** Instead of snapping vertices to valley
+  floors (§6.3), the cost terrain has the major valleys carved in, so the grade cost itself
+  prefers the floors. Water and drainage are host-analytic (the same code paths and constants as
+  `World::terrain`), so the analytic stage stays a pure function of the edge; sites need point
+  samples, so they come second, only for the sites within reach of the analytic route (a site
+  search over a 400 km motorway's whole corridor would evaluate hundreds of airports and dams).
+  A route that still fails its check is dropped rather than drawn through water or a site.
+* **Narrow crossings, not causeways:** standing water is crossed only on a bridge no longer than
+  the class's span (500 m major, 160 m minor; reservoirs, which flood the valleys roads have to
+  cross, and the sea × 3); the per-pixel decks of slot 8 draw it. Ponds of the cold kit's small
+  lattice (≤ ~115 m, slot-3 looks, not pass-A water) are crossed on the road's fill.
+* **Roads end at the arterials.** A road's end inside a town is a point of the town model's
+  district edges (the arterials, 4–9 m half width, drawn by the settlements kit), not the centre:
+  roads from different directions end on different arterials, with no star of carriageways over
+  the core. Railways keep the centre (stations), power lines stop at the edge.
 * **Slot 7, after the settlements kit**, not slot 6: drawn after the towns, the roads continue
   into them over the blocks without exposing what lies under the town at their edges
   (compositing a town cut by the road left the ground showing at antialiased edges). Site roads
@@ -154,14 +170,19 @@ kept modulo 8.4 km (every pattern period divides it).
 
 ## Places
 
-Places of the default world (`PLACES` in the tests): partial cloverleaf (−7.6570, −16.6301),
-diamond (−7.6988, −18.7191), trumpet on a mountain motorway (−23.7536, −33.8316), switchbacks
+Places of the default world (`PLACES` in the tests): partial cloverleaf (−7.6475, −16.6320),
+diamond (−7.6988, −18.7191), trumpet on a mountain motorway (−23.7203, −33.8120), switchbacks
 (−24.1868, −33.3606), station (−7.7302, −18.7965) and yard (−7.7461, −18.7972) of a city,
-roundabouts at a town edge (−7.6185, −16.6091), power line through forest (−7.8316, −18.8000),
+roundabout at a town edge (−7.6230, −16.6053), power line through forest (−7.8316, −18.8000),
 tunnel portal (29.3400, 179.4257), river bridges (−7.5782, −18.7463), forest tracks (−7.64,
-−16.66). Find more with the ignored tests `find_transport_places`, `find_transport_places2`
-(switchbacks, interchanges by size, rural bridges and tunnels, power lines) and
-`find_river_bridges`.
+−16.66); a secondary road around a lake (20.5642, −30.1732), a secondary road crossing a
+134 m river (−7.5470, −18.7959). The routing verification's regions (`ROUTE_REGIONS`) add the
+settlements kit's airport, quarry, solar, wind and dam places, kettle-lake lowlands (65.2726,
+−28.7446), (63.0479, 13.4909) and lake districts (16.2337, −96.5839), (20.4996, −30.0929),
+(30.2156, −89.0182), (46.0667, 2.2438), (−2.4905, −123.2721). Find more with the ignored tests
+`find_transport_places`, `find_transport_places2` (switchbacks, interchanges by size, rural
+bridges and tunnels, power lines), `find_river_bridges`, `find_lake_regions`,
+`find_cold_lake_regions` and `find_routing_places` (lake detours, wide river crossings).
 
 ## Tests
 
@@ -169,8 +190,15 @@ tunnel portal (29.3400, 179.4257), river bridges (−7.5782, −18.7463), forest
 determinism), `edges_are_tile_independent`, `routes_are_deterministic`,
 `profiles_are_local_and_grade_limited`, `features_are_tile_independent` (overlapping areas give
 the same segments bit for bit; cleared caches), `ramps_connect`, LOD consistency, seams E-W /
-N-S, determinism (fresh generators and caches), `tiles_match_the_cpu`, `places_stay_on_the_gpu`;
-ignored: `find_transport_places`, `find_transport_places2`, `render_tiles`, `debug_parity`.
+N-S, determinism (fresh generators and caches), `tiles_match_the_cpu`, `places_stay_on_the_gpu`,
+`routes_avoid_water_and_sites` (the routes near 20 regions sampled every 25 m against pass A's
+water on the CPU, the sites' footprints and reservoirs and the cold kit's kettle lakes: no point
+in a site a route does not end at, no run of lake, reservoir or sea longer than the class's
+span; ~400 routes, ~21 k pieces; `TR_REGION=name` one region), `roads_end_at_town_arterials`
+(no road ends within 0.35 R of a town's centre); ignored: `find_transport_places`,
+`find_transport_places2`, `find_river_bridges`, `find_lake_regions`, `find_cold_lake_regions`,
+`find_routing_places`, `routing_time` (`TR_WHY=1`: why edges were dropped), `render_tiles`,
+`debug_parity`.
 
 ## Compile time and performance
 
@@ -221,10 +249,24 @@ the same roads through forest from 500 m.
 
 ## Known limits
 
-* Routing costs use the analytic relief (no drainage, no lakes): routes do not seek the valleys
-  the rivers carve, cross rivers anywhere (decks are added per pixel) and can run through lakes,
-  where they become causeway decks; they cross airports, quarries and solar farms (sites need
-  point samples, routes are analytic).
+* Routing's water model is host knowledge, close to pass A but not identical: a lattice lake's
+  existence comes from the values at its centre (pass A tests per pixel), the valley carve
+  leaves out the kits' carve hooks (glacial troughs, fjords, canyons), the cold kit's lake mask
+  is estimated from pass A's values and the relief's slope, the streams' (level 2) closed basins
+  are known to minor roads only, mountain tarns and crater lakes not at all, and the route is
+  checked every span / 6 (25–83 m). The verification finds no violation at its 20 regions; a
+  shore can still be clipped by a few metres between samples.
+* An edge whose corridor is blocked by water wider than the class bridges or by sites is
+  dropped (the graph adds no alternative): 2–5 % of the edges in lake districts and around
+  reservoirs, 0–2 % elsewhere (`routing_time`, `TR_WHY=1` lists them). Ends in water (a hamlet in a
+  reservoir, a track end in a lake) move to the shore, leaving the road short of the place.
+* Sites need point samples, so routes now depend on them too: within a process the site cache
+  makes both backends share them; across processes (GPU f32 vs CPU f64 samples) an airport whose
+  candidates score within a hair of each other could move and with it a route.
+* River crossings are counted in each drainage level's meander-warped space between the grid
+  nodes, an approximation of the drawn channel: crossings are near perpendicular (mean sin 0.87
+  at the verification's crossings), but their number is mostly set by the network (a road
+  between two banks has to cross).
 * The grade limit is a local operator (±1.2 km): a climb steeper than the limit over a longer
   stretch keeps the terrain's grade (no detours); in rough terrain cuttings and tunnels are
   frequent. Tunnels need 30 m of cover over ≥ 200 m.
@@ -232,9 +274,9 @@ the same roads through forest from 500 m.
   tunnels or bridges there; sub-pixel). Secondary and smaller roads have no profiles: they follow
   the ground with a per-pixel deck 2.5 m above rivers.
 * Embankments and cuttings change the DSM, not pass A's ground (DTM, drainage).
-* Roads run to the place centres: metropolis cores get a star of converging roads; the towns'
-  streets are not re-aligned to them (the roads run over the blocks). Interchanges are left out
-  inside towns, so cloverleafs (motorway × motorway away from places) are rare.
+* Roads end on a town's arterials but are not re-aligned to its streets: between the edge and
+  the arterial they still run over the blocks of the outskirts. Interchanges are left out inside
+  towns, so cloverleafs (motorway × motorway away from places) stay rare.
 * Interchange templates are fitted to the crossing roads' directions; on very oblique crossings
   loops and ramps look schematic.
 * Bridge and tunnel decisions come from point samples (GPU f32 vs CPU f64 terrain); within a
