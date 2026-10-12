@@ -48,10 +48,10 @@ both backends, memoized per edge.
 **Engineered profiles (host, point samples).** Motorways, trunk roads and railways sample the
 full terrain every 40 m (one GPU round for all samples of an area; memoized per sample) and
 derive deck heights by a local operator: a box mean of the ground (raised over water), then the
-mean of its largest grade-limited minorant and smallest majorant within ±2.4 km (grades 4.5 %,
-6.5 %, 2 %). Any stretch of a route gets the same decks, so tiles agree. Where the deck is 6 m
+mean of its largest grade-limited minorant and smallest majorant within ±1.2 km (railways ±1.8 km; grades 4.5 %,
+6.5 %, 2 %), lifted near water so it clears it. Any stretch of a route gets the same decks, so tiles agree. Where the deck is 6 m
 above the ground (or over water) the stretch is a **bridge** (deck only, parapets, its shadow
-on the ground and water below); 25 m below the ground over at least three samples a **tunnel**
+on the ground and water below); 30 m below the ground over at least 200 m a **tunnel**
 (not drawn; **portals**: a concrete headwall and the dark mouth). Elsewhere the carriageway sits
 on the deck and **embankments / cuttings** (1:2, grass on fills, rock and soil with strata in
 cuts) join it to the ground in the DSM. Profiles are computed for areas with pixels below 40 m;
@@ -77,7 +77,7 @@ pylons every 350 / 300 m (footprint, bracing and cross-arm; in the DSM) with the
 shadows and the arm's, three conductors sagging between the towers and their shadows.
 
 **Cars and lights.** Cars in their lanes on slots of 24 / 30 m (density by class and development,
-×1.5–2.4 in towns by size; trucks on motorways and trunk roads; none on tracks), their shadows,
+×1.2–2.4 in towns by their size; trucks on motorways and trunk roads; none on tracks), their shadows,
 the mean of unresolved cars at coarse pixels; parked cars in the settlements kit's parking lots
 and airport car parks (`px::parked`). Lamps every 40 m on motorway medians near cities and
 everywhere in highly developed regions, on interchange ramps, every 35 m along roads inside
@@ -118,7 +118,14 @@ kept modulo 8.4 km (every pattern period divides it).
 
 ## Places
 
-Places of the default world (`PLACES` in the tests): …
+Places of the default world (`PLACES` in the tests): partial cloverleaf (−7.6570, −16.6301),
+diamond (−7.6988, −18.7191), trumpet on a mountain motorway (−23.7536, −33.8316), switchbacks
+(−24.1868, −33.3606), station (−7.7302, −18.7965) and yard (−7.7461, −18.7972) of a city,
+roundabouts at a town edge (−7.6185, −16.6091), power line through forest (−7.8316, −18.8000),
+tunnel portal (29.3400, 179.4257), river bridges (−7.5782, −18.7463), forest tracks (−7.64,
+−16.66). Find more with the ignored tests `find_transport_places`, `find_transport_places2`
+(switchbacks, interchanges by size, rural bridges and tunnels, power lines) and
+`find_river_bridges`.
 
 ## Tests
 
@@ -129,14 +136,75 @@ the same segments bit for bit; cleared caches), `ramps_connect`, LOD consistency
 N-S, determinism (fresh generators and caches), `tiles_match_the_cpu`, `places_stay_on_the_gpu`;
 ignored: `find_transport_places`, `find_transport_places2`, `render_tiles`, `debug_parity`.
 
-## Compile time
+## Compile time and performance
 
-…
+Cold compile on a Tesla P4 (`compile_times`, one pipeline at a time, all nine kits): pass B
+32.6 / 29.5 / 18.5 / 26.1 s (the kit is in the last two stages: +1.8 s and +1.1 s against
+`TERRAGEN_COMPILE_DROP=transport`, 16.7 / 25.0 s), pass A1 19.9 s, points 21.0 s, drainage heights
+15.7 s. One copy each of the heavy parts: the segment look (`tr_seg_px`) in the segment loop of
+slot 7, the stamp look in the stamp loop, the deck look (`tr_deck_px`) in slot 8. Gates: no
+transport segment or stamp in the bin; per segment the distance to it before any look; slot 8
+only on rivers and water. The host routes an edge once (memoized per edge, per edge pair, per
+deck sample); a city's 25 km disc at 30 m pixels (some 100 k segments of all classes, profiles,
+crossings) takes 10–17 s on one CPU core the first time.
 
 ## Stills
 
-…
+GPU-generated (`terrain survey --places`, default world, 10:30 local on the equinox; nadir and
+close views straight down, oblique from 1.5 km at 25°; the night view is the emission layer of
+`render_tiles`, square-root scale).
+
+**Road network** (−7.657, −16.630): motorway, trunk and secondary roads, local roads and tracks,
+a yard at the city's edge; **mountain motorway** (−23.754, −33.832): cuttings, a trumpet, winding
+secondary roads, a quarry.
+![network 1.5 km](images/transport_network_1500m.jpg)
+![mountain motorway 1.5 km](images/transport_mountain_motorway_1500m.jpg)
+
+**Partial cloverleaf** in forest (−7.657, −16.630), cleared embankments; **switchbacks** on a
+snowy slope (−24.187, −33.361).
+![interchange 1.5 km](images/transport_interchange_1500m.jpg)
+![switchbacks 400 m](images/transport_switchbacks_400m.jpg)
+
+**River bridges** (−7.578, −18.746): a trunk road and a railway on decks over a 120 m river;
+**power line** through forest (−7.832, −18.800): the cleared corridor and pylons.
+![river bridge 800 m](images/transport_river_bridge_800m.jpg)
+![power line 800 m](images/transport_power_800m.jpg)
+
+**Yard** (−7.746, −18.797): the ladder, wagons, a motorway through the city; **station**
+(−7.730, −18.797): platforms with canopies next to a stadium.
+![yard 800 m](images/transport_yard_800m.jpg)
+![station 300 m](images/transport_station_300m.jpg)
+
+**Town edge** (−7.619, −16.609): two roundabouts where trunk and secondary roads enter, cars;
+the same roads through forest from 500 m.
+![roundabouts 250 m](images/transport_roundabouts_250m.jpg)
+![forest roads 500 m](images/transport_forest_roads_500m.jpg)
+
+**Night** (emission, z13 near −7.70, −18.76): lit streets of the town and the lit road leaving it.
+![night z13](images/transport_night_z13.jpg)
 
 ## Known limits
 
-…
+* Routing costs use the analytic relief (no drainage, no lakes): routes do not seek the valleys
+  the rivers carve, cross rivers anywhere (decks are added per pixel) and can run through lakes,
+  where they become causeway decks; they cross airports, quarries and solar farms (sites need
+  point samples, routes are analytic).
+* The grade limit is a local operator (±1.2 km): a climb steeper than the limit over a longer
+  stretch keeps the terrain's grade (no detours); in rough terrain cuttings and tunnels are
+  frequent. Tunnels need 30 m of cover over ≥ 200 m.
+* Engineered profiles exist below 40 m pixels; coarser tiles draw every road on the ground (no
+  tunnels or bridges there; sub-pixel). Secondary and smaller roads have no profiles: they follow
+  the ground with a per-pixel deck 2.5 m above rivers.
+* Embankments and cuttings change the DSM, not pass A's ground (DTM, drainage).
+* Roads run to the place centres: metropolis cores get a star of converging roads; the towns'
+  streets are not re-aligned to them (the roads run over the blocks). Interchanges are left out
+  inside towns, so cloverleafs (motorway × motorway away from places) are rare.
+* Interchange templates are fitted to the crossing roads' directions; on very oblique crossings
+  loops and ramps look schematic.
+* Bridge and tunnel decisions come from point samples (GPU f32 vs CPU f64 terrain); within a
+  process the sample cache makes both backends share them, across processes a sample within
+  centimetres of a threshold could flip.
+* No substations, no thermal power plants (the settlements kit has none); power lines run from
+  dams, solar and wind farms and between developed cities only.
+* Classes vanish above their pixel thresholds (motorways at 600 m): motorway lights are missing
+  from night views at zoom ≤ 7.
