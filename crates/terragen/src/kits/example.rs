@@ -31,6 +31,7 @@ pub static KIT: Kit = Kit {
     families: &[Family { name: "example_cones", cell: 40_000.0, jitter: 0.8, reach: 6_000.0, relief: true, exists: cone_exists }],
     host: Some(host),
     replaces_towns: false,
+    replaces_roads: false,
 };
 
 /// A track from every cone's summit 2 km east (heights from point evaluations of the terrain),

@@ -1245,7 +1245,7 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
     // ---- road networks, only where people live
     t.road_major = NONE_F;
     t.road_minor = NONE_F;
-    if (mode != MODE_RELIEF && cfg.roads > 0.0 && habit > 0.02 && gsd < 400.0) {
+    if (KITS_LEGACY_ROADS && mode != MODE_RELIEF && cfg.roads > 0.0 && habit > 0.02 && gsd < 400.0) {
         if ((pre.flags & P_ROADS) != 0u) {
             t.road_major = network_dist(pre.road_major);
             if (gsd < 200.0) {

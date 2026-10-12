@@ -406,7 +406,7 @@ impl Generator {
         // the road networks (band-limited at >= 200 m).
         let warp_on_grid = use_grid && g_m <= 1000.0;
         let gully_on_grid = use_grid && g_m <= 100.0;
-        let roads_on_grid = use_grid && g_m <= 400.0;
+        let roads_on_grid = use_grid && g_m <= 400.0 && crate::kits::legacy_roads();
         // the octaves of the pixel fields (surface) with wavelengths >= 8 node spacings come from
         // the grid too, the rest per pixel; the cut depends on the zoom only (node spacing at the
         // equator), so neighbouring tiles agree

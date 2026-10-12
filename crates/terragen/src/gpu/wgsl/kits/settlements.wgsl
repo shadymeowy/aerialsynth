@@ -981,6 +981,8 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             let in_row = select(0.0, 1.0, abs(row - 0.5) > 0.2);
             let line = band_cov((u / 2.6 - round(u / 2.6)) * 2.6, 0.08, fw) * in_row;
             col = mixc(col, srgb(210.0, 210.0, 204.0), line * band(1.0, e.gsd));
+            let pc = tr_parked(blk.id, u, v, fw, e.gsd);
+            col = mixc(col, pc.yzw, pc.x);
             em += vec3<f32>(1.0, 0.6, 0.25) * 0.03 * band(30.0, e.gsd);
         } else if (special == 4u) {
             let ph = min(vec2<f32>(34.0, 52.0), vec2<f32>(0.5 * blk.bw - 12.0, 0.5 * blk.bd - 12.0));
@@ -1898,6 +1900,8 @@ fn st_airport_px(st: FStamp, p: vec3<f64>, ground: f32, gsd: f32, fw: f32) -> St
     }
     if (park > 0.0) {
         o.col = mixc(o.col, srgb(70.0, 70.0, 74.0), park);
+        let pc = tr_parked(seed ^ 0xA1Clu, q.x + 0.6 * ah.x, q.y - term_c.y, fw, gsd);
+        o.col = mixc(o.col, pc.yzw, pc.x * park);
         o.cls = LC_PARKING;
     }
     if (tw > 0.0) {

@@ -898,11 +898,13 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
             parcel::PARKING => {
                 col = c_asphalt() * 1.45;
                 cls = crate::landcover::PARKING;
-                // stall lines in rows (cars are the transport kit's)
+                // stall lines in rows, the transport kit's parked cars
                 let row = v / 16.0 - (v / 16.0).floor();
                 let in_row = if (row - 0.5).abs() > 0.2 { 1.0 } else { 0.0 };
                 let line = band_cov((u / 2.6 - (u / 2.6).round()) * 2.6, 0.08, fw) * in_row;
                 col = mixc(col, srgb(210.0, 210.0, 204.0), line * band(1.0, e.gsd));
+                let (pc, pcol) = crate::kits::transport::px::parked(blk.id, u, v, fw, e.gsd);
+                col = mixc(col, pcol, pc);
                 em += DVec3::new(1.0, 0.6, 0.25) * 0.03 * band(30.0, e.gsd);
             }
             parcel::SPORTS => {
