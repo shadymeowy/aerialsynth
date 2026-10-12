@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Drainage: no straight trenches into inland basins.** A lattice point without a lower
+  neighbour looked up to 3 cells farther for an outlet anywhere; inland that drew channels up to
+  24 km long, straight across the higher ground between (canal-like water strips, several
+  converging side by side on the next basin's lake; 7 level-1 and 42 level-2 such pieces within
+  20 km of the 24 survey places). The farther search now only finds the sea (its original
+  purpose): an inland point without a lower neighbour is a closed basin and holds its own
+  closed-basin lake (lake share of land at the survey places 0.14 % → 0.37 %). CPU
+  `World::flow_target` and WGSL `lat_target` alike.
+
 - **Mountains kit** (`kits/mountains.rs`, `gpu/wgsl/kits/mountains{,_relief}.wgsl`,
   `docs/kits/mountains.md`): tower karst (a 3D Worley lattice of 420 m cells, oval towers 90-260 m
   over flattened floors, drowned to islands at the coast) and cockpit karst on carbonate (atlas

@@ -141,8 +141,12 @@ impl World {
                     }
                 }
             }
-            // no lower neighbour: look a little farther for an outlet (often the sea beyond a
+            // no lower neighbour: look a little farther for an outlet to the sea (beyond a
             // shallow dip of the coarse relief; rivers ended there on land in a blunt cap).
+            // Inland, a point without a lower neighbour is a closed basin and holds a lake: a
+            // 2-ring edge to a lower inland point drew a channel up to 3 cells long, straight
+            // across the higher ground between (a canal-like trench), and several of them
+            // converged side by side on the next basin's lake.
             // Targets are always lower, so the graph stays acyclic.
             if best.is_none() {
                 for dz in -2..=2i64 {
@@ -153,7 +157,7 @@ impl World {
                             }
                             let n = (c.0 + dx, c.1 + dy, c.2 + dz);
                             let o = self.flow_point(lvl, n);
-                            if !o.active {
+                            if !o.active || o.h >= 0.0 {
                                 continue;
                             }
                             let d = (o.s - me.s).length();
