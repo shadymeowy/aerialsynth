@@ -517,7 +517,13 @@ pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
         // industrial wedges: angular sectors around the downwind direction
         let ang = dc.point.y.atan2(dc.point.x);
         let mut ind = false;
-        let nw = if pl.level >= 3 { 2 } else if pl.level == 2 { 1 } else { 0 };
+        let nw = if pl.level >= 3 {
+            2
+        } else if pl.level == 2 {
+            1
+        } else {
+            0
+        };
         for k in 0..2u32 {
             if k < nw {
                 let a0 = if k == 0 { pl.wind } else { pl.wind + std::f64::consts::PI * 1.4 * (u01k(pl.seed, 41) - 0.5) };
@@ -779,7 +785,8 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     } else {
         0.0
     };
-    let walk = if has_streets && street_ok && pattern != pat::INFORMAL && pattern != pat::LINEAR { band_cov(blk.ds, blk.sw + 0.2 * blk.sw + 0.6, fw) } else { 0.0 };
+    let walk =
+        if has_streets && street_ok && pattern != pat::INFORMAL && pattern != pat::LINEAR { band_cov(blk.ds, blk.sw + 0.2 * blk.sw + 0.6, fw) } else { 0.0 };
     // ---- block content
     let mut cov_lot: f64 = 0.0;
     let mut col = c_asphalt();
@@ -945,7 +952,11 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     } else {
                         // stands, rising outwards
                         h = 8.0 + 22.0 * smoothstep(0.62, 0.98, rn);
-                        col = mixc(srgb(190.0, 190.0, 196.0), srgb(150.0, 40.0, 40.0), 0.4 * (((rr.y.atan2(rr.x) * 12.0).floor() as i64).rem_euclid(2) as f64) * band(30.0, e.gsd));
+                        col = mixc(
+                            srgb(190.0, 190.0, 196.0),
+                            srgb(150.0, 40.0, 40.0),
+                            0.4 * (((rr.y.atan2(rr.x) * 12.0).floor() as i64).rem_euclid(2) as f64) * band(30.0, e.gsd),
+                        );
                         roof = 1.0;
                         cls = crate::landcover::BUILDING;
                     }
@@ -1108,7 +1119,13 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         _ => 4,
                     };
                     let depth = if pattern == pat::INDUSTRIAL { 2 } else { depth };
-                    let min_side = if pattern == pat::INDUSTRIAL { 45.0 } else if z == zone::CBD { 22.0 } else { 9.0 };
+                    let min_side = if pattern == pat::INDUSTRIAL {
+                        45.0
+                    } else if z == zone::CBD {
+                        22.0
+                    } else {
+                        9.0
+                    };
                     let (lh, lr) = bsp(blk.id, blk.u, blk.v, blk.bw, blk.bd, depth, min_side);
                     let lc = DVec2::new(0.5 * (lr[0] + lr[2]), 0.5 * (lr[1] + lr[3]));
                     let lot_dq = rot2(lc - ublk, -theta);
@@ -1192,14 +1209,24 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                             }
                             typ::MIDRISE => {
                                 let fill = if z <= zone::INNER { DVec2::new(60.0, 60.0) } else { DVec2::new(40.0, 14.0 + 10.0 * u01k(lh, 6)) };
-                                (DVec2::new(0.5 * lw - 2.5, 0.5 * ld - 2.5).min(fill), 3.0 * (4.0 + 4.0 * u01k(lh, 4)) + if z == zone::CBD { 12.0 } else { 0.0 }, true)
+                                (
+                                    DVec2::new(0.5 * lw - 2.5, 0.5 * ld - 2.5).min(fill),
+                                    3.0 * (4.0 + 4.0 * u01k(lh, 4)) + if z == zone::CBD { 12.0 } else { 0.0 },
+                                    true,
+                                )
                             }
                             typ::WAREHOUSE => (DVec2::new(0.5 * lw - 9.0, 0.5 * ld - 9.0), 8.0 + 6.0 * u01k(lh, 4), true),
-                            typ::ROW => (DVec2::new(0.5 * lw - 0.4, (0.5 * ld - 2.0).min(6.0)), 3.0 * (2.0 + (1.6 * u01k(lh, 4)).floor()), u01k(lh, 6) < 0.3 || a == 3),
+                            typ::ROW => {
+                                (DVec2::new(0.5 * lw - 0.4, (0.5 * ld - 2.0).min(6.0)), 3.0 * (2.0 + (1.6 * u01k(lh, 4)).floor()), u01k(lh, 6) < 0.3 || a == 3)
+                            }
                             typ::PERIM => (DVec2::splat(1e4), 3.0 * (3.0 + 3.0 * u01k(lh, 4)) * if pl.level >= 3 { 1.0 } else { 0.7 }, u01k(lh, 6) < 0.35),
                             _ => {
                                 let sb = 2.5 + 3.0 * u01k(lh, 1);
-                                (DVec2::new((0.5 * lw - sb).min(7.0 + 2.0 * u01k(lh, 7)), (0.5 * ld - sb).min(5.5 + 2.0 * u01k(lh, 8))), 3.2 + 3.0 * (u01k(lh, 4) < 0.4) as u32 as f64, a == 3 || u01k(lh, 6) < 0.12)
+                                (
+                                    DVec2::new((0.5 * lw - sb).min(7.0 + 2.0 * u01k(lh, 7)), (0.5 * ld - sb).min(5.5 + 2.0 * u01k(lh, 8))),
+                                    3.2 + 3.0 * (u01k(lh, 4) < 0.4) as u32 as f64,
+                                    a == 3 || u01k(lh, 6) < 0.12,
+                                )
                             }
                         };
                         let mut podium = 0.0;
@@ -1220,7 +1247,18 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         if half.min_element() < 2.0 {
                             ins = 0.0;
                         }
-                        rf = (if t == typ::TOWER { 20 } else if t == typ::WAREHOUSE { 21 } else { a }, u01k(lh, 9), flat, 0.84 + 0.32 * u01k(lh, 11));
+                        rf = (
+                            if t == typ::TOWER {
+                                20
+                            } else if t == typ::WAREHOUSE {
+                                21
+                            } else {
+                                a
+                            },
+                            u01k(lh, 9),
+                            flat,
+                            0.84 + 0.32 * u01k(lh, 11),
+                        );
                         let frac = match t {
                             typ::HOUSE => 0.3,
                             typ::TOWER => 0.75,
@@ -1232,7 +1270,13 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                             let mut hh = hb;
                             if !flat {
                                 // pitched roof along the longer axis
-                                let dperp = if t == typ::PERIM { dd.x } else if half.x > half.y { dd.y } else { dd.x };
+                                let dperp = if t == typ::PERIM {
+                                    dd.x
+                                } else if half.x > half.y {
+                                    dd.y
+                                } else {
+                                    dd.x
+                                };
                                 let hw = if t == typ::PERIM { 0.5 * (11.0 + 3.0 * u01k(blk.id, 24)) } else { half.x.min(half.y) };
                                 hh = hb + 0.35 * hw * (dperp / hw).clamp(0.0, 1.0);
                             } else {
@@ -1269,7 +1313,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                                 tree = aa(3.0 + 1.5 * u01k(lh, 16) - (rl - tp).length(), fw);
                                 tree_h = 8.0 + 5.0 * u01k(lh, 17);
                             }
-                            em += DVec3::new(1.0, 0.72, 0.42) * point_light((rl - DVec2::new(0.0, half.y + 1.0)).length_squared(), 2.0, 0.4, fw) * (u01k(lh, 18) < 0.6) as u32 as f64;
+                            em += DVec3::new(1.0, 0.72, 0.42)
+                                * point_light((rl - DVec2::new(0.0, half.y + 1.0)).length_squared(), 2.0, 0.4, fw)
+                                * (u01k(lh, 18) < 0.6) as u32 as f64;
                         } else if t == typ::WAREHOUSE {
                             // tanks and trucks in the yards
                             if u01k(lh, 13) < 0.3 {

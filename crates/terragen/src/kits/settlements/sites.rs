@@ -313,8 +313,11 @@ pub fn dam(ctx: &mut HostCtx, key: u64, center: DVec3, r_min: f64, r_max: f64) -
             // the floor and the banks at increasing distances on both sides (all requested at
             // once): the first that rises 60 m
             let tm = pt(ctx, m);
-            let banks: Vec<Option<crate::tile::PointTerrain>> =
-                [1.0, -1.0].iter().flat_map(|sg| [200.0, 400.0, 700.0, 1100.0, 1600.0].map(|dd| (sg * dd, 0.0))).map(|(u, v)| pt(ctx, offset(w, m, n, dir, u, v))).collect();
+            let banks: Vec<Option<crate::tile::PointTerrain>> = [1.0, -1.0]
+                .iter()
+                .flat_map(|sg| [200.0, 400.0, 700.0, 1100.0, 1600.0].map(|dd| (sg * dd, 0.0)))
+                .map(|(u, v)| pt(ctx, offset(w, m, n, dir, u, v)))
+                .collect();
             let (Some(tm), true) = (tm, banks.iter().all(|b| b.is_some())) else {
                 pending = true;
                 continue;
@@ -435,7 +438,8 @@ fn side_width(ctx: &mut HostCtx, m: DVec3, n: DVec3, dir: DVec3, crest: f64, sg:
 /// The candidate of a lattice cell of `cell` m (seed `key`): its id and surface point.
 fn lattice_site(w: &World, key: u64, cell: f64, c: (i64, i64, i64)) -> Option<(u64, DVec3)> {
     let h = hash3(w.seed() ^ key, c.0, c.1, c.2);
-    let pt = DVec3::new(c.0 as f64 + 0.5 + 0.8 * (u01k(h, 1) - 0.5), c.1 as f64 + 0.5 + 0.8 * (u01k(h, 2) - 0.5), c.2 as f64 + 0.5 + 0.8 * (u01k(h, 3) - 0.5)) * cell;
+    let pt = DVec3::new(c.0 as f64 + 0.5 + 0.8 * (u01k(h, 1) - 0.5), c.1 as f64 + 0.5 + 0.8 * (u01k(h, 2) - 0.5), c.2 as f64 + 0.5 + 0.8 * (u01k(h, 3) - 0.5))
+        * cell;
     let g = geodesy::ecef2geodetic(pt, &w.ell);
     let s = geodesy::geodetic2ecef(geodesy::Geodetic::new(g.lat, g.lon, 0.0), &w.ell);
     if (pt - s).length() >= 0.5 * cell {
@@ -568,7 +572,16 @@ pub fn wind(ctx: &mut HostCtx, c: (i64, i64, i64)) -> Option<Option<Site>> {
             half: [hx as f32, hy as f32],
             template: tpl::WIND,
             h: 0.0,
-            v: [(420.0 + 220.0 * u01k(id, 4)) as f32, (80.0 + 45.0 * u01k(id, 5)) as f32, s0, s1, (40.0 + 25.0 * u01k(id, 6)) as f32, (0.55 + 0.35 * u01k(id, 7)) as f32, 0.0, 0.0],
+            v: [
+                (420.0 + 220.0 * u01k(id, 4)) as f32,
+                (80.0 + 45.0 * u01k(id, 5)) as f32,
+                s0,
+                s1,
+                (40.0 + 25.0 * u01k(id, 6)) as f32,
+                (0.55 + 0.35 * u01k(id, 7)) as f32,
+                0.0,
+                0.0,
+            ],
         };
         Some(Some(Site { center: p, reach: hx.hypot(hy), stamps: vec![st], segs: vec![] }))
     })
@@ -628,7 +641,8 @@ pub fn solar(ctx: &mut HostCtx, pl: &Place, k: u32) -> Option<Option<Site>> {
         let (ex, ey) = axes(w, c, 0.0);
         let mut lo = f64::MAX;
         let mut hi = f64::MIN;
-        let ts: Vec<Option<crate::tile::PointTerrain>> = [(0.0, 0.0), (hx, hy), (-hx, hy), (hx, -hy), (-hx, -hy)].iter().map(|&(u, v)| pt(ctx, offset(w, c, ex, ey, u, v))).collect();
+        let ts: Vec<Option<crate::tile::PointTerrain>> =
+            [(0.0, 0.0), (hx, hy), (-hx, hy), (hx, -hy), (-hx, -hy)].iter().map(|&(u, v)| pt(ctx, offset(w, c, ex, ey, u, v))).collect();
         for t in ts {
             let t = t?;
             if t.water_kind != crate::world::water::NONE {
@@ -827,7 +841,13 @@ pub fn airport_px(st: &FStamp, p: DVec3, ground: f64, gsd: f64, fw: f64) -> Site
         tw = tw.max(aa(boxd(q, DVec2::new(ck * 600.0, 0.5 * (y0 + y1)), DVec2::new(11.5, 0.5 * (y1 - y0).abs())), fw));
     }
     // apron and terminal: between the runways, or beyond the taxiway
-    let (ay0, ay1) = if layout > 0 { (ty2 + 60.0, ty - 60.0) } else if side > 0.0 { (ty + 60.0, ty + 360.0) } else { (ty - 360.0, ty - 60.0) };
+    let (ay0, ay1) = if layout > 0 {
+        (ty2 + 60.0, ty - 60.0)
+    } else if side > 0.0 {
+        (ty + 60.0, ty + 360.0)
+    } else {
+        (ty - 360.0, ty - 60.0)
+    };
     let ac = DVec2::new(0.0, 0.5 * (ay0 + ay1));
     let ah = DVec2::new(0.33 * len, 0.5 * (ay1 - ay0).abs());
     let apron = aa(boxd(q, ac, ah), fw);

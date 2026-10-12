@@ -93,6 +93,7 @@ pub struct LevelSpec {
     pub spacing: f64,
 }
 
+#[rustfmt::skip]
 pub const LEVELS: [LevelSpec; NLEVELS] = [
     // hamlet
     LevelSpec { cell: 1_600.0, k: 1, radius: [45.0, 150.0], pop: [20.0, 200.0], base: 0.42, pop_window: [-0.05, 0.3], ring: 250.0, spacing: 0.3 },
@@ -255,11 +256,8 @@ fn candidate(w: &World, level: usize, c: (i64, i64, i64), k: u32) -> Option<(u64
     let cell = LEVELS[level].cell;
     let h0 = hash3(level_seed(w, level), c.0, c.1, c.2);
     let h = mix64(h0 ^ (k as u64 + 1).wrapping_mul(0xD6E8_FEB8_6659_FD93));
-    let pt = DVec3::new(
-        c.0 as f64 + 0.5 + 0.9 * (u01k(h, 1) - 0.5),
-        c.1 as f64 + 0.5 + 0.9 * (u01k(h, 2) - 0.5),
-        c.2 as f64 + 0.5 + 0.9 * (u01k(h, 3) - 0.5),
-    ) * cell;
+    let pt = DVec3::new(c.0 as f64 + 0.5 + 0.9 * (u01k(h, 1) - 0.5), c.1 as f64 + 0.5 + 0.9 * (u01k(h, 2) - 0.5), c.2 as f64 + 0.5 + 0.9 * (u01k(h, 3) - 0.5))
+        * cell;
     let (a, b) = (w.ell.a, w.ell.b);
     let len = pt.length().max(1.0);
     let d = pt / len;
@@ -675,7 +673,15 @@ mod tests {
             }
         }
         for ((l, f, a), pl) in &seen {
-            eprintln!("level {l} form {f} arch {a}: ({:.4}, {:.4}) R {:.0} pop {:.0} dev {:.2} coast {}", pl.lat.to_degrees(), pl.lon.to_degrees(), pl.radius, pl.population, pl.dev, pl.coastal);
+            eprintln!(
+                "level {l} form {f} arch {a}: ({:.4}, {:.4}) R {:.0} pop {:.0} dev {:.2} coast {}",
+                pl.lat.to_degrees(),
+                pl.lon.to_degrees(),
+                pl.radius,
+                pl.population,
+                pl.dev,
+                pl.coastal
+            );
         }
     }
 }

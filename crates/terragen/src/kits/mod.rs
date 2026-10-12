@@ -129,7 +129,8 @@ pub struct Kit {
 }
 
 impl Kit {
-    pub const EMPTY: Kit = Kit { name: "", biomes_yaml: "", wgsl: "", layers: &[], kernels: &[], relief: None, relief_wgsl: "", families: &[], host: None, replaces_towns: false };
+    pub const EMPTY: Kit =
+        Kit { name: "", biomes_yaml: "", wgsl: "", layers: &[], kernels: &[], relief: None, relief_wgsl: "", families: &[], host: None, replaces_towns: false };
 }
 
 /// Does the core draw its grid towns (`layers::built`, the town lattice of pass A)? Off when a

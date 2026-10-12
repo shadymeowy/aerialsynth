@@ -112,7 +112,13 @@ fn built(s: &mut Stack) {
                 if r0 < 1.62 || strips {
                     let n = town::foot_noise(&pl, p, gsd);
                     let rel = r0 / (1.0 + n);
-                    let score = if rel < 1.0 { (1.0 - rel) * if pl.sub { 1.15 } else { 1.0 } } else if strips { 0.001 } else { -1.0 };
+                    let score = if rel < 1.0 {
+                        (1.0 - rel) * if pl.sub { 1.15 } else { 1.0 }
+                    } else if strips {
+                        0.001
+                    } else {
+                        -1.0
+                    };
                     if score > 0.0 && best.as_ref().is_none_or(|b| score > b.1) {
                         best = Some((pl, score, rel, n, q));
                     }
@@ -129,7 +135,17 @@ fn built(s: &mut Stack) {
         };
         if sp.cov > 0.0 || sp.emit != DVec3::ZERO || sp.shade > 0.0 {
             let (dh, hm) = if sp.abs { (sp.dh, hmode::ABS) } else { (sp.dh, hmode::BLEND) };
-            s.composite(Layer { cov: sp.cov, albedo: sp.col, dh, hmode: hm, cls: sp.cls, emit: sp.emit, clear: sp.clear, lit: 1.0 - sp.shade, ..Default::default() });
+            s.composite(Layer {
+                cov: sp.cov,
+                albedo: sp.col,
+                dh,
+                hmode: hm,
+                cls: sp.cls,
+                emit: sp.emit,
+                clear: sp.clear,
+                lit: 1.0 - sp.shade,
+                ..Default::default()
+            });
             s.m.natural_ok *= 1.0 - sp.cov * sp.clear;
         }
     }
@@ -231,7 +247,17 @@ fn water(s: &mut Stack) {
         for st in &stamps {
             let sp = sites::port_px(st, p, true, l.water, gsd, fw);
             if sp.cov > 0.0 || sp.emit != DVec3::ZERO {
-                s.composite(Layer { cov: sp.cov, albedo: sp.col, dh: sp.dh, hmode: hmode::ABS, cls: sp.cls, emit: sp.emit, solid: true, relit: 1.0, ..Default::default() });
+                s.composite(Layer {
+                    cov: sp.cov,
+                    albedo: sp.col,
+                    dh: sp.dh,
+                    hmode: hmode::ABS,
+                    cls: sp.cls,
+                    emit: sp.emit,
+                    solid: true,
+                    relit: 1.0,
+                    ..Default::default()
+                });
             }
         }
         return;
@@ -263,10 +289,26 @@ fn water(s: &mut Stack) {
     if wet > 0.0 {
         let depth = (level - ground).max(0.0);
         let col = mixc3(srgb3(70.0, 96.0, 84.0), srgb3(28.0, 58.0, 76.0), smoothstep(0.0, 25.0, depth));
-        s.composite(Layer { cov: wet, albedo: col, dh: level, hmode: hmode::ABS, cls: crate::landcover::RESERVOIR, water: true, relit: 1.0, clear: 1.0, ..Default::default() });
+        s.composite(Layer {
+            cov: wet,
+            albedo: col,
+            dh: level,
+            hmode: hmode::ABS,
+            cls: crate::landcover::RESERVOIR,
+            water: true,
+            relit: 1.0,
+            clear: 1.0,
+            ..Default::default()
+        });
     }
     if ring > 0.0 {
-        s.composite(Layer { cov: ring * (1.0 - wet) * band(8.0, gsd).max(0.5), albedo: srgb3(178.0, 166.0, 140.0), cls: crate::landcover::BARE, clear: 1.0, ..Default::default() });
+        s.composite(Layer {
+            cov: ring * (1.0 - wet) * band(8.0, gsd).max(0.5),
+            albedo: srgb3(178.0, 166.0, 140.0),
+            cls: crate::landcover::BARE,
+            clear: 1.0,
+            ..Default::default()
+        });
     }
     if dam.0 > 0.0 {
         let col = mixc3(srgb3(190.0, 188.0, 180.0), srgb3(150.0, 148.0, 142.0), dam.2);
@@ -360,7 +402,13 @@ mod tests {
             let el = off(&g.elevation, &c.elevation, 0.05, |v| v as f64);
             let lc = off(&g.landcover, &c.landcover, 0.5, |v| v as f64);
             let em = off(&g.emission, &c.emission, 2.0, |v| v as f64);
-            eprintln!("{name} z{z}: rgb off {:.3}% elevation off {:.3}% landcover off {:.3}% emission off {:.3}%", rgb * 100.0, el * 100.0, lc * 100.0, em * 100.0);
+            eprintln!(
+                "{name} z{z}: rgb off {:.3}% elevation off {:.3}% landcover off {:.3}% emission off {:.3}%",
+                rgb * 100.0,
+                el * 100.0,
+                lc * 100.0,
+                em * 100.0
+            );
             worst = worst.max(rgb).max(el).max(lc).max(em);
         }
         assert!(worst < 0.005, "worst {:.3}%", worst * 100.0);
@@ -371,7 +419,9 @@ mod tests {
     fn lod_consistent_at_places() {
         let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let n = crate::TILE_SIZE;
-        for (name, z) in [("metro", 11u8), ("metro", 13), ("metro_outer", 12), ("survey_city", 14), ("desert_town", 13), ("waldhufen", 13), ("airport", 13), ("dam", 12)] {
+        for (name, z) in
+            [("metro", 11u8), ("metro", 13), ("metro_outer", 12), ("survey_city", 14), ("desert_town", 13), ("waldhufen", 13), ("airport", 13), ("dam", 12)]
+        {
             let parent = tile_at(name, z);
             let p = g.tile(parent);
             let kids = parent.children().map(|c| g.tile(c));
@@ -582,7 +632,14 @@ mod tests {
                         continue;
                     }
                     let r = sites::port(&mut ctx, &pl);
-                    eprintln!("town {} level {} coast_km {:.1} R {:.0}: {:?}", pl.id, pl.level, w.atlas().sample(pl.center.normalize()).coast_km, pl.radius, r.map(|x| x.map(|s| geodesy::ecef2geodetic(s.center, &w.ell)).map(|g| (g.lat.to_degrees(), g.lon.to_degrees()))));
+                    eprintln!(
+                        "town {} level {} coast_km {:.1} R {:.0}: {:?}",
+                        pl.id,
+                        pl.level,
+                        w.atlas().sample(pl.center.normalize()).coast_km,
+                        pl.radius,
+                        r.map(|x| x.map(|s| geodesy::ecef2geodetic(s.center, &w.ell)).map(|g| (g.lat.to_degrees(), g.lon.to_degrees())))
+                    );
                     n += 1;
                 }
             }
