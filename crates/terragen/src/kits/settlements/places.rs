@@ -762,13 +762,12 @@ mod tests {
         let w = world();
         let radius = [5_000.0, 20_000.0, 70_000.0, 250_000.0, 900_000.0];
         let pts = land_points(&w, 24, 0.05);
-        for l in 0..NLEVELS {
+        for (l, &r) in radius.iter().enumerate() {
             let (mut n_act, mut r2_act, mut n_exp, mut r2_exp) = (0.0, 0.0, 0.0, 0.0);
             for (k, p) in pts.iter().enumerate() {
                 if l >= 3 && k >= 8 {
                     break;
                 }
-                let r = radius[l];
                 for pl in places_near(&w, l, *p, r) {
                     n_act += 1.0;
                     r2_act += pl.radius * pl.radius;

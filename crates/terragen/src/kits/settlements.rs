@@ -521,7 +521,8 @@ mod tests {
             // from point samples and may differ by centimetres)
             let mut gg: Vec<_> = g.segs.iter().map(key_sg).collect();
             let mut cg: Vec<_> = c.segs.iter().map(key_sg).collect();
-            let deckless = |v: &mut Vec<(u32, u8, [u64; 3], [u64; 3], u32, u32, u32, [u32; 4])>| {
+            type SegKey = (u32, u8, [u64; 3], [u64; 3], u32, u32, u32, [u32; 4]);
+            let deckless = |v: &mut Vec<SegKey>| {
                 for x in v.iter_mut() {
                     if x.0 >= crate::kits::transport::cls::KIND0 {
                         (x.5, x.6, x.7) = (0, 0, [0; 4]);
@@ -547,7 +548,7 @@ mod tests {
         let arr = |v: &[f64; 5]| format!("array<f32, 5>({})", v.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>().join(", "));
         assert!(w.contains(&format!("var c1 = {};", arr(&places::GLOW_C1))), "c1: {}", arr(&places::GLOW_C1));
         assert!(w.contains(&format!("var cal = {};", arr(&places::GLOW_CAL))), "cal: {}", arr(&places::GLOW_CAL));
-        assert!(w.contains(&format!("var kc = {};", arr(&GLOW_K_CBD).replace("0.0,", "0.0,"))));
+        assert!(w.contains(&format!("var kc = {};", arr(&GLOW_K_CBD))));
         assert!(w.contains(&format!("var kr = {};", arr(&GLOW_K))));
         assert!(w.contains(&format!("var kj = {};", arr(&GLOW_J))));
     }
