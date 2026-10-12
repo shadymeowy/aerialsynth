@@ -978,29 +978,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             col = st_asphalt() * 1.45;
             cls = LC_PARKING;
             let row = v / 16.0 - floor(v / 16.0);
-            let stall = floor(u / 2.6);
-            let lane = floor(v / 16.0);
-            let ch = hash2(blk.id ^ 0xCA2lu, i64(stall), i64(lane));
-            let in_row = abs(row - 0.5) > 0.2;
-            if (in_row && u01k(ch, 1lu) < 0.65) {
-                let cu = u - (stall + 0.5) * 2.6;
-                let cv = (row - select(0.15, 0.85, row > 0.5)) * 16.0;
-                let car = st_aa(min(0.9 - abs(cu), 2.2 - abs(cv)), fw);
-                let ck = u32(u01k(ch, 2lu) * 5.99);
-                var ccol = srgb(90.0, 92.0, 96.0);
-                if (ck == 0u) {
-                    ccol = srgb(230.0, 230.0, 228.0);
-                } else if (ck == 1u) {
-                    ccol = srgb(30.0, 30.0, 34.0);
-                } else if (ck == 2u) {
-                    ccol = srgb(150.0, 152.0, 156.0);
-                } else if (ck == 3u) {
-                    ccol = srgb(140.0, 30.0, 30.0);
-                } else if (ck == 4u) {
-                    ccol = srgb(40.0, 60.0, 120.0);
-                }
-                col = mixc(col, ccol, car * band(2.0, e.gsd));
-            }
+            let in_row = select(0.0, 1.0, abs(row - 0.5) > 0.2);
+            let line = band_cov((u / 2.6 - round(u / 2.6)) * 2.6, 0.08, fw) * in_row;
+            col = mixc(col, srgb(210.0, 210.0, 204.0), line * band(1.0, e.gsd));
             em += vec3<f32>(1.0, 0.6, 0.25) * 0.03 * band(30.0, e.gsd);
         } else if (special == 4u) {
             let ph = min(vec2<f32>(34.0, 52.0), vec2<f32>(0.5 * blk.bw - 12.0, 0.5 * blk.bd - 12.0));

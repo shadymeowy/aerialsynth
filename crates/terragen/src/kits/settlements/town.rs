@@ -891,26 +891,11 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
             parcel::PARKING => {
                 col = c_asphalt() * 1.45;
                 cls = crate::landcover::PARKING;
-                // stalls and cars (2.6 m × 5 m) in rows
+                // stall lines in rows (cars are the transport kit's)
                 let row = v / 16.0 - (v / 16.0).floor();
-                let stall = (u / 2.6).floor();
-                let lane = (v / 16.0).floor();
-                let ch = hash2(blk.id ^ 0xCA2, stall as i64, lane as i64);
-                let in_row = (row - 0.5).abs() > 0.2;
-                if in_row && u01k(ch, 1) < 0.65 {
-                    let cu = u - (stall + 0.5) * 2.6;
-                    let cv = (row - if row > 0.5 { 0.85 } else { 0.15 }) * 16.0;
-                    let car = aa((0.9 - cu.abs()).min(2.2 - cv.abs()), fw);
-                    let cc = match (u01k(ch, 2) * 5.99) as u32 {
-                        0 => srgb(230.0, 230.0, 228.0),
-                        1 => srgb(30.0, 30.0, 34.0),
-                        2 => srgb(150.0, 152.0, 156.0),
-                        3 => srgb(140.0, 30.0, 30.0),
-                        4 => srgb(40.0, 60.0, 120.0),
-                        _ => srgb(90.0, 92.0, 96.0),
-                    };
-                    col = mixc(col, cc, car * band(2.0, e.gsd));
-                }
+                let in_row = if (row - 0.5).abs() > 0.2 { 1.0 } else { 0.0 };
+                let line = band_cov((u / 2.6 - (u / 2.6).round()) * 2.6, 0.08, fw) * in_row;
+                col = mixc(col, srgb(210.0, 210.0, 204.0), line * band(1.0, e.gsd));
                 em += DVec3::new(1.0, 0.6, 0.25) * 0.03 * band(30.0, e.gsd);
             }
             parcel::SPORTS => {

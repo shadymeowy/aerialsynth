@@ -36,7 +36,7 @@ culture, development, population, downwind direction) drives:
 | patterns | grid / rotated grid (jittered lines, main streets every fourth), radial-concentric (rings, spokes doubling per band), organic (warped W2 at 40–90 m; medinas narrow), curvilinear suburbs (warped long blocks, most cross streets missing), superblocks (280–390 m, slab and point towers in rows, green and parking), informal (W2 at 7.5 m: tiny corrugated roofs, alleys, thinning with the footprint), industrial (230–340 m blocks) |
 | lots | hashed BSP of the block, depth 1 (CBD) … 4 (suburbs); a lot exists by the density at its centre (lots stay whole) |
 | buildings | by zone × culture × lot: detached houses with setbacks (pools in rich suburbs, yard trees, porch lights), row houses, perimeter blocks with courtyards (European, Mediterranean, monsoon cultures), mid-rises, towers on podiums (40–440 m, by population), warehouses with tanks; gable or flat roofs, roof palettes by culture (terracotta, slate, metal, shingles, thatch, corrugated, whitewashed) |
-| parcels | parks (paths, tree clumps, ponds), plazas, parking (stalls and cars), sports fields with athletics tracks, cemeteries, stadiums (stands, pitch, floodlights; cities), construction sites |
+| parcels | parks (paths, tree clumps, ponds), plazas, parking (stall lines; cars belong to the transport kit), sports fields with athletics tracks, cemeteries, stadiums (stands, pitch, floodlights; cities), construction sites |
 | trees | yard and park trees, street trees every 11 m in tree-lined cultures |
 | shadows | a 3-step march toward the sun through the same pixel model (one copy in WGSL) |
 | lights | lamps along the nearest street (sodium / warm / white LED by zone, culture and development), thinned with their energy kept where they would merge, their mean where blocks are unresolved; lit window rims (white in CBDs); floods in industry and stadiums |
@@ -112,6 +112,52 @@ sub-centres), stamp encoding, BSP partition, legacy towns off, LOD consistency, 
 N-S, determinism (fresh generators and caches), `tiles_match_the_cpu` (22 tiles at z11–z17),
 `places_stay_on_the_gpu` (z2–z16 at every place), ignored `bench_places`. No kit kernels (no
 kernel parity test).
+
+## Compile time and performance
+
+Cold compile on a Tesla P4 (`compile_times`, one pipeline at a time, all eight kits): pass B
+31.2 / 29.1 / 16.7 / 25.3 s in four stages (the first two stages do not contain the kit); pass
+A1 18.8 s, points 21.9 s, drainage heights 15.9 s. With the old three stages the last one took
+45.3 s with the kit (28.9 s with `TERRAGEN_COMPILE_DROP=settlements`), hence the fourth stage. One
+copy each of the heavy helpers: the place model is evaluated inside the shadow loop, the site
+looks inside the stamp loop, one W2 for districts and one for all cellular layouts, one roof
+colour evaluation per sample. Gates: no stamps in the bin, no place within 1.62 R, the district
+mean below ~22 m pixels (no block evaluation), lot means below ~6 m.
+
+## Stills
+
+GPU-generated (`terrain survey --places`, default world, 10:30 local on the equinox; nadir from
+800 m, oblique from 1.5 km, high from 10 km), rendered before the last fixes (cars in parking
+lots removed: the transport kit's; natural vegetation cleared also between unbuilt lots).
+
+**Metropolis** (30.35, 128.849): a radial CBD with towers on podiums and parks; districts of
+the temperate culture from 1.5 km and 10 km (the far districts at their mean).
+![metro CBD 800 m](images/settlements_metro_cbd_800m.jpg)
+![metro 1.5 km](images/settlements_metro_1500m.jpg)
+![metro 10 km](images/settlements_metro_10km.jpg)
+
+**Survey-grid city** (−6.177, −114.240): long grid blocks, warehouses, a parking lot, a
+school track; **desert town** (−12.198, −21.454): the medina's organic lanes and whitewashed
+roofs next to grid districts.
+![grid city 800 m](images/settlements_grid_city_800m.jpg)
+![grid city 1.5 km](images/settlements_grid_city_1500m.jpg)
+![medina 800 m](images/settlements_medina_800m.jpg)
+
+**Forest-strip village** (20.715, −22.646): farms along the valley street, each with its strip
+of fields and hedges up the slopes.
+![Waldhufen 800 m](images/settlements_waldhufen_800m.jpg)
+
+**Airport** (−10.539, 115.357): apron with aircraft, terminal, taxiway, runway; **dam**
+(−0.699, −17.687): the wall and the reservoir; **quarry** (−20.458, −152.138): benches and the
+haul road; **solar farm** (40.497, 46.920).
+![airport 800 m](images/settlements_airport_800m.jpg)
+![dam 800 m](images/settlements_dam_800m.jpg)
+![quarry 800 m](images/settlements_quarry_800m.jpg)
+![solar 800 m](images/settlements_solar_800m.jpg)
+
+**Night** (emission layer, z10, square-root scale): the metropolis glows by zone (white CBD),
+villages and farmsteads as points.
+![metro at night](images/settlements_metro_night_z10.jpg)
 
 ## Known limits
 

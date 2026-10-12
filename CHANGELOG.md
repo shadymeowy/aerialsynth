@@ -9,7 +9,7 @@
   conurbations; city morphology per pixel (zones, W2 districts with arterials, grid, radial,
   organic, curvilinear, superblock, informal and industrial patterns, hashed-BSP lots, houses,
   row houses, perimeter blocks, mid-rises, towers with podiums, warehouses, parks, plazas,
-  parking, sports fields, cemeteries, stadiums, pools, street trees, cast shadows, zone-based
+  parking lots, sports fields, cemeteries, stadiums, pools, street trees, cast shadows, zone-based
   night lights with energy-preserving lamp thinning); village forms by culture (nucleated,
   street villages, forest-strip Waldhufen villages with their strips, dispersed farms, kraals,
   perched hilltop villages; a plaza with church, mosque or temple); airports (runways by size
