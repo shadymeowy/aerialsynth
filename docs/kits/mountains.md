@@ -72,7 +72,24 @@ coast; streams untouched), `relief_is_continuous_and_bounded`, `fans_exist_at_th
 
 ## Performance
 
-TIMES
+Cold compile, Tesla P4 (`compile_times`, one pipeline at a time, no shader cache; the farm is
+shared, so ±3 s): `pass_a1` 22.1 s, `eval_points` 26.0 s, drainage `lat_heights` 19.2 s,
+`instance_lists` 4.3 s, `grid_nodes` 9.4 s; pass B 32.5 / 33.5 / 20.8 / 30.1 s (`pass_b2` is the
+stage with the kit's layer, `PB_STAGE_STEPS` is unchanged; the other stages do not contain the
+kit). The same run with the kit's relief, carve hook and fan existence test stubbed
+(`TERRAGEN_COMPILE_DROP=mountains TERRAGEN_COMPILE_STUB='mountains_relief=;mountains_carve=;mountains_fans_exists=…'`)
+and its layer dropped: 21.8 / 27.9 / 19.5 / 4.1 / 21.1 s: the kit is within the noise of the
+timings. The deterministic measure is the inlined size (`inlined_sizes`): `pass_a1`
+105 k → 113 k instructions (+7.8 %), `eval_points` 122 k → 131 k (+7.4 %), `lat_heights` 101 k →
+110 k (+8.0 %), `instance_lists` 41.6 k → 42.4 k (+2 %), `pass_a2` +4.5 % (the carve hook),
+`pass_b` 445 k → 450 k (+1.1 %). The first version cost +37 % in the pass-A pipelines: two call
+sites of `macro_at` (15 k each) in the fan existence test; it reads the atlas now. Noise: three
+perlins for the patches and ridges, one Worley query, eight lattice corners, a handful of
+smoothsteps; every heavy helper has one call site (`cone_h` twice: it is small).
+
+CPU: the kit adds a few noise evaluations per pixel (two patch noises everywhere on land and in
+the shelf; the zones gate the Worley query, the ridges and the badland octaves); the tests below
+run at the same speed as before. No with / without-kit bench (as agreed).
 
 ## Stills
 
@@ -89,7 +106,35 @@ islands** (4.857, -93.234, 1.5 km): the same drowned (turquoise shoals, beaches)
 the hollows.
 ![cockpit karst](images/mountains_cockpit_karst_1500m.jpg)
 
-STILLS_REST
+**Folded ridges** (27.899, 42.870, 10 km, 08:00): ridges and valleys of an old belt, the river in
+its valley; **fault blocks** (31.739, 137.721, 10 km, 16:30): tilted blocks with long lakes in
+the basins between them.
+![folded ridges](images/mountains_folded_ridges_10km.jpg)
+![fault blocks](images/mountains_fault_blocks_10km.jpg)
+
+**Stepped canyon** (21.245, -121.297; 10 km and 900 m, 08:00): benches of 55 m on both walls of a
+canyon in a red plateau, barchans of the desert kit on the rim.
+![canyon 10 km](images/mountains_canyon_10km.jpg)
+![canyon 900 m](images/mountains_canyon_900m.jpg)
+
+**Badlands** (-21.410, 36.504, 1.5 km): pale clay floors, gullies with rust and cream strata
+bands.
+![badlands](images/mountains_badlands_1500m.jpg)
+
+**Cirque and tarn** (40.874, 174.741, 4 km): a funnel of steep valleys around a tarn at the head
+of a tributary; **glacial troughs** (49.423, -162.365, 4 km): flat floors between steep walls on
+a snow plateau, tarns, hanging side valleys.
+![cirque and tarn](images/mountains_u_valley_tarn_4km.jpg)
+![glacial trough](images/mountains_glacial_trough_4km.jpg)
+
+**Fjords** (63.382, -81.127, 4 km: two flooded troughs around a spine; 56.253, 161.268, 1.5 km:
+steep walls, scoured rock above the water).
+![fjord 4 km](images/mountains_fjord_4km.jpg)
+![fjord 1.5 km](images/mountains_fjord_1500m.jpg)
+
+**Alluvial fans** (-28.392, 45.461, 1.5 km): pale gravel aprons with radial streaks at a
+mountain front, a lake in the basin.
+![fans](images/mountains_fan_1500m.jpg)
 
 ## Decisions
 
