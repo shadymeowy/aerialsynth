@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **Settlements kit** (`kits/settlements.rs`, `settlements/{places,town,sites}.rs`,
+  `docs/kits/settlements.md`): a central-place hierarchy (hamlet, village, town, city,
+  metropolis; host-side and analytic, `kits::settlements::places::settlements_near` for the
+  transport kit) with culture-, climate- and terrain-driven density, sub-centres in
+  conurbations; city morphology per pixel (zones, W2 districts with arterials, grid, radial,
+  organic, curvilinear, superblock, informal and industrial patterns, hashed-BSP lots, houses,
+  row houses, perimeter blocks, mid-rises, towers with podiums, warehouses, parks, plazas,
+  parking lots, sports fields, cemeteries, stadiums, pools, street trees, cast shadows, zone-based
+  night lights with energy-preserving lamp thinning); village forms by culture (nucleated,
+  street villages, forest-strip Waldhufen villages with their strips, dispersed farms, kraals,
+  perched hilltop villages; a plaza with church, mosque or temple); airports (runways by size
+  along the wind, taxiways, apron, terminal, lights, graded plane), ports (container yards,
+  cranes, piers, ships, breakwaters), dams and reservoirs on the drainage (upstream pieces,
+  water level, bathtub ring), quarries and open-pit mines with tailings ponds, solar farms, wind
+  farms, gas flares. Core: `Kit::replaces_towns` / `kits::legacy_towns()` switch the grid towns
+  off (pass A site, host requests, WGSL `KITS_LEGACY_TOWNS`); pass B runs in four stages
+  (`gpu::PB_STAGE_STEPS` `[0, 3, 5, 7]`).
+
 - **Coast and ocean kit** (`kits/coast.rs`, `docs/kits/coast.md`): coast types per ~50 km
   stretch (atlas uplift, mountains, glaciation, sea-level temperature × noise); cliffs with
   wave-cut platforms and strata, skerries and archipelagos with kelp, tidal flats and salt marsh

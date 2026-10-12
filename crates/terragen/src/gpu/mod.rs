@@ -241,8 +241,9 @@ pub struct GpuGenerator {
 /// whole surface model into its entry point and compile time grows faster than its size, so
 /// the stack is cut where the kits' code splits about evenly (`compile_times` in gpu/tests.rs
 /// measures the stages). A boundary after step 5 doubles the state between stages (the
-/// deferred layers and the town: `PB_STATE_FULL`).
-pub(crate) const PB_STAGE_STEPS: &[u32] = &[0, 3, 5];
+/// deferred layers and the town: `PB_STATE_FULL`). Four stages since the settlements kit: its
+/// built layer (step 6) with the linear step, the canopy and water steps in a stage of their own.
+pub(crate) const PB_STAGE_STEPS: &[u32] = &[0, 3, 5, 7];
 
 /// Pass B's work buffer (`pbw` in tile_b.wgsl): header words, samples per round, words per
 /// sample (stage state), per pixel (fields), per pixel (classes, flags).

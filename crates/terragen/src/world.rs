@@ -1317,7 +1317,7 @@ impl World {
             t.eco = Site { id: wc.id, id2: wc.id2, center: wc.point, center2: wc.point2, dist: wc.f1, edge: worley_edge_dist(&wc, pw) };
         }
         let town_cell = self.cfg.landuse.town_cell_km * KM;
-        if mode != Mode::Relief && gsd < town_cell * 0.25 && self.cfg.landuse.towns > 0.0 {
+        if mode != Mode::Relief && gsd < town_cell * 0.25 && self.cfg.landuse.towns > 0.0 && crate::kits::legacy_towns() {
             let wc = self.site_cell(m, SITE_TOWN, 0x70E1, p, town_cell, 0.8);
             t.town = Site { id: wc.id, id2: wc.id2, center: wc.point, center2: wc.point2, dist: wc.f1, edge: worley_edge_dist(&wc, p) };
         }

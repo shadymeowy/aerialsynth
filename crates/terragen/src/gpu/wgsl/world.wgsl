@@ -1232,7 +1232,7 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
     }
     t.town = 0u;
     let town_cell = f32(cfg.town_cell);
-    if (mode != MODE_RELIEF && gsd < town_cell * 0.25 && cfg.towns > 0.0) {
+    if (KITS_LEGACY_TOWNS && mode != MODE_RELIEF && gsd < town_cell * 0.25 && cfg.towns > 0.0) {
         var wc: Cell3;
         if ((pre.flags & P_SITE_TOWN) != 0u) {
             wc = worley3_from(p, cfg.town_cell, 1.0lf / cfg.town_cell, pre.site_town);
