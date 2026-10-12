@@ -193,42 +193,59 @@ pub fn port(ctx: &mut HostCtx, pl: &Place) -> Option<Option<Site>> {
         if ge.abs() + gn.abs() < 1e-6 {
             return Some(None);
         }
-        let sea = (-gn).atan2(-ge);
-        let mut coast = [DVec3::ZERO; 3];
-        let mut pending = false;
-        for (j, off) in [-500.0, 0.0, 500.0].iter().enumerate() {
-            let (ex, ey) = axes(w, pl.center, sea);
-            let start = offset(w, pl.center, ex, ey, 0.0, *off);
-            let step = 300.0;
-            let n = ((pl.radius + 8000.0) / step) as u32;
+        let sea0 = (-gn).atan2(-ge);
+        // the nearest sea along 8 bearings (the atlas' gradient first), then the coast at two
+        // lateral offsets along that bearing (the coast direction)
+        let step = 400.0;
+        let n = ((pl.radius + 12_000.0) / step) as u32;
+        // every sample of a ray is requested at once (one GPU round per phase, not per sample)
+        let ray = |ctx: &mut HostCtx, bearing: f64, off: f64| -> Option<Option<(u32, DVec3)>> {
+            let (ex, ey) = axes(w, pl.center, bearing);
+            let start = offset(w, pl.center, ex, ey, 0.0, off);
+            let ts: Vec<Option<crate::tile::PointTerrain>> = (0..=n).map(|i| pt(ctx, offset(w, start, ex, ey, i as f64 * step, 0.0))).collect();
+            if ts.iter().any(|t| t.is_none()) {
+                return None;
+            }
             let mut prev: Option<f64> = None;
-            let mut found = false;
-            for i in 0..=n {
+            for (i, t) in ts.iter().flatten().enumerate() {
                 let u = i as f64 * step;
-                let Some(t) = pt(ctx, offset(w, start, ex, ey, u, 0.0)) else {
-                    pending = true;
-                    break;
-                };
                 if t.water_kind == crate::world::water::OCEAN {
-                    if let Some(pu) = prev {
-                        coast[j] = offset(w, start, ex, ey, 0.5 * (pu + u), 0.0);
-                        found = true;
-                    }
-                    break;
+                    return Some(prev.map(|pu| (i as u32, offset(w, start, ex, ey, 0.5 * (pu + u), 0.0))));
                 }
                 // (rivers are crossed: ports sit at river mouths)
                 if t.water_kind == crate::world::water::LAKE {
-                    break;
+                    return Some(None);
                 }
                 if t.water_kind == crate::world::water::NONE {
                     prev = Some(u);
                 }
             }
-            if pending {
-                break;
+            Some(None)
+        };
+        let mut best: Option<(u32, f64)> = None;
+        let mut pending = false;
+        for k in 0..8 {
+            let b = sea0 + k as f64 * std::f64::consts::FRAC_PI_4;
+            match ray(ctx, b, 0.0) {
+                None => pending = true,
+                Some(Some((i, _))) => {
+                    if best.is_none_or(|x| i < x.0) {
+                        best = Some((i, b));
+                    }
+                }
+                Some(None) => {}
             }
-            if !found {
-                return Some(None);
+        }
+        if pending {
+            return None;
+        }
+        let Some((_, sea)) = best else { return Some(None) };
+        let mut coast = [DVec3::ZERO; 3];
+        for (j, off) in [-500.0, 0.0, 500.0].iter().enumerate() {
+            match ray(ctx, sea, *off) {
+                None => pending = true,
+                Some(Some((_, c))) => coast[j] = c,
+                Some(None) => return Some(None),
             }
         }
         if pending {
@@ -293,27 +310,25 @@ pub fn dam(ctx: &mut HostCtx, key: u64, center: DVec3, r_min: f64, r_max: f64) -
             let up = m.normalize();
             let dir = (s.b - s.a).normalize();
             let n = f32v(up.cross(dir).normalize());
-            let Some(tm) = pt(ctx, m) else {
+            // the floor and the banks at increasing distances on both sides (all requested at
+            // once): the first that rises 60 m
+            let tm = pt(ctx, m);
+            let banks: Vec<Option<crate::tile::PointTerrain>> =
+                [1.0, -1.0].iter().flat_map(|sg| [200.0, 400.0, 700.0, 1100.0, 1600.0].map(|dd| (sg * dd, 0.0))).map(|(u, v)| pt(ctx, offset(w, m, n, dir, u, v))).collect();
+            let (Some(tm), true) = (tm, banks.iter().all(|b| b.is_some())) else {
                 pending = true;
                 continue;
             };
             let floor = tm.ground;
-            // banks at increasing distances on both sides: the first that rises 30 m
             let mut side = [(0.0, 0.0); 2];
-            for (k, sg) in [1.0, -1.0].iter().enumerate() {
-                for dd in [200.0, 400.0, 700.0, 1100.0, 1600.0] {
-                    let Some(t) = pt(ctx, offset(w, m, n, dir, sg * dd, 0.0)) else {
-                        pending = true;
-                        break;
-                    };
-                    side[k] = (dd, t.ground - floor);
-                    if t.ground - floor > 60.0 {
+            for k in 0..2 {
+                for (j, dd) in [200.0, 400.0, 700.0, 1100.0, 1600.0].iter().enumerate() {
+                    let g = banks[k * 5 + j].unwrap().ground;
+                    side[k] = (*dd, g - floor);
+                    if g - floor > 60.0 {
                         break;
                     }
                 }
-            }
-            if pending {
-                continue;
             }
             let hgt = side[0].1.min(side[1].1) - 4.0;
             let width = side[0].0 + side[1].0;
@@ -403,13 +418,14 @@ pub fn dam(ctx: &mut HostCtx, key: u64, center: DVec3, r_min: f64, r_max: f64) -
 /// Distance across the valley from `m` (side `sg`) where the ground reaches `crest`.
 fn side_width(ctx: &mut HostCtx, m: DVec3, n: DVec3, dir: DVec3, crest: f64, sg: f64) -> Option<f64> {
     let w = ctx.world;
+    const D: [f64; 7] = [100.0, 200.0, 350.0, 550.0, 800.0, 1100.0, 1600.0];
+    let ts: Vec<Option<crate::tile::PointTerrain>> = D.iter().map(|dd| pt(ctx, offset(w, m, n, dir, sg * dd, 0.0))).collect();
     let mut last = 0.0;
-    for dd in [100.0, 200.0, 350.0, 550.0, 800.0, 1100.0, 1600.0] {
-        let t = pt(ctx, offset(w, m, n, dir, sg * dd, 0.0))?;
-        if t.ground >= crest {
+    for (dd, t) in D.iter().zip(ts) {
+        if t?.ground >= crest {
             return Some(0.5 * (last + dd) + 30.0);
         }
-        last = dd;
+        last = *dd;
     }
     Some(last + 30.0)
 }
@@ -612,8 +628,9 @@ pub fn solar(ctx: &mut HostCtx, pl: &Place, k: u32) -> Option<Option<Site>> {
         let (ex, ey) = axes(w, c, 0.0);
         let mut lo = f64::MAX;
         let mut hi = f64::MIN;
-        for (u, v) in [(0.0, 0.0), (hx, hy), (-hx, hy), (hx, -hy), (-hx, -hy)] {
-            let t = pt(ctx, offset(w, c, ex, ey, u, v))?;
+        let ts: Vec<Option<crate::tile::PointTerrain>> = [(0.0, 0.0), (hx, hy), (-hx, hy), (hx, -hy), (-hx, -hy)].iter().map(|&(u, v)| pt(ctx, offset(w, c, ex, ey, u, v))).collect();
+        for t in ts {
+            let t = t?;
             if t.water_kind != crate::world::water::NONE {
                 return Some(None);
             }
@@ -666,7 +683,7 @@ pub fn sites_near(ctx: &mut HostCtx, center: DVec3, radius: f64, gsd: f64, out: 
                 push(solar(ctx, pl, k), out);
             }
         }
-        if gsd < 1200.0 && pl.parent == 0 && d < radius + 30_000.0 && u01k(pl.id, 50) < if pl.level >= CITY { 0.8 } else { 0.35 } {
+        if gsd < 1200.0 && pl.parent == 0 && d < radius + 30_000.0 && u01k(pl.id, 50) < if pl.level >= CITY { 0.5 } else { 0.15 } {
             push(dam(ctx, mix64(pl.id ^ 0xDA4), pl.center, pl.radius + 2500.0, 22_000.0), out);
         }
     }
@@ -674,7 +691,7 @@ pub fn sites_near(ctx: &mut HostCtx, center: DVec3, radius: f64, gsd: f64, out: 
         // mountain dams
         for c in lattice_cells(w, MTN_DAM_CELL, center, radius + 30_000.0) {
             if let Some((id, p)) = lattice_site(w, 0xDA7, MTN_DAM_CELL, c) {
-                if u01k(id, 1) < 0.3 && w.smooth_relief(p, 3000.0).1 > 350.0 && w.atlas().sample(p.normalize()).glaciation < 0.4 {
+                if u01k(id, 1) < 0.2 && w.smooth_relief(p, 3000.0).1 > 350.0 && w.atlas().sample(p.normalize()).glaciation < 0.4 {
                     push(dam(ctx, id, p, 0.0, 20_000.0), out);
                 }
             }
@@ -878,12 +895,16 @@ pub fn airport_px(st: &FStamp, p: DVec3, ground: f64, gsd: f64, fw: f64) -> Site
     if term > 0.0 {
         o.col = mixc(o.col, srgb(196.0, 198.0, 204.0) * (1.0 - 0.1 * band_cov(boxd(q, term_c, term_h), 1.2, fw)), term);
         o.dh += 18.0 * term * wgt;
-        o.cls = crate::landcover::BUILDING;
+        if term > 0.5 {
+            o.cls = crate::landcover::BUILDING;
+        }
     }
     if hang > 0.0 && term <= 0.0 {
         o.col = mixc(o.col, srgb(176.0, 182.0, 188.0), hang);
         o.dh += 16.0 * hang * wgt;
-        o.cls = crate::landcover::BUILDING;
+        if hang > 0.5 {
+            o.cls = crate::landcover::BUILDING;
+        }
     }
     // apron floods
     o.emit += DVec3::new(1.0, 0.86, 0.62) * 0.12 * apron * (1.0 - term);
@@ -991,7 +1012,9 @@ pub fn port_px(st: &FStamp, p: DVec3, water: bool, wl: f64, gsd: f64, fw: f64) -
         if ins > 0.0 && u01k(wh, 1) < 0.8 {
             o.col = mixc(o.col, if u01k(wh, 2) < 0.5 { srgb(176.0, 178.0, 180.0) } else { srgb(110.0, 130.0, 156.0) }, ins);
             o.dh = 12.0 * ins;
-            o.cls = crate::landcover::BUILDING;
+            if ins > 0.5 {
+                o.cls = crate::landcover::BUILDING;
+            }
         }
     }
     // gantry cranes along the quay
@@ -1027,8 +1050,11 @@ pub fn quarry_px(st: &FStamp, p: DVec3, gsd: f64, fw: f64) -> SitePx {
     let ta = st.v[6] as f64;
     let tr = st.v[7] as f64;
     let mut o = SitePx { clear: 1.0, cls: crate::landcover::QUARRY, ..Default::default() };
+    // an irregular outline (lobes by the angle; per-quarry phases)
     let qa = DVec2::new(q.x / 1.25, q.y * 1.1);
-    let rn = qa.length() / r;
+    let th0 = qa.y.atan2(qa.x);
+    let wob = 1.0 + 0.13 * (3.0 * th0 + std::f64::consts::TAU * u01k(seed, 8)).sin() + 0.07 * (5.0 * th0 + std::f64::consts::TAU * u01k(seed, 9)).sin();
+    let rn = qa.length() / (r * wob);
     let (rock, bench) = match kind {
         0 => (srgb(196.0, 192.0, 180.0), srgb(222.0, 218.0, 204.0)),
         1 => (srgb(150.0, 112.0, 82.0), srgb(186.0, 150.0, 112.0)),
@@ -1062,11 +1088,13 @@ pub fn quarry_px(st: &FStamp, p: DVec3, gsd: f64, fw: f64) -> SitePx {
         return o;
     }
     // spoil heap beside the pit
-    let sc = DVec2::new(ta.cos(), ta.sin()) * (1.35 * r + 60.0);
-    let ds = (q - sc).length() / (0.45 * r + 50.0);
+    let sc = DVec2::new(ta.cos(), ta.sin()) * (1.3 * r + 60.0);
+    let qs = q - sc;
+    let ths = qs.y.atan2(qs.x);
+    let ds = qs.length() / ((0.35 * r + 40.0) * (1.0 + 0.25 * (4.0 * ths + std::f64::consts::TAU * u01k(seed, 10)).sin()));
     if ds < 1.0 {
         o.cov = 1.0;
-        o.dh = (0.18 * r).min(45.0) * (1.0 - ds * ds);
+        o.dh = (0.12 * r).min(35.0) * (1.0 - ds * ds);
         o.col = bench * (0.92 + 0.12 * (1.0 - ds));
         return o;
     }

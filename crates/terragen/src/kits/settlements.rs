@@ -183,19 +183,15 @@ fn place(s: &mut Stack, pl: &town::Pl, rel: f64, n: f64, q: DVec2, sun: DVec3) {
         }
     }
     let cov = mean_cov + (ev.cov - mean_cov) * e_blk;
+    // no natural vegetation in the built-up area (also between its lots: the same at every zoom)
+    s.m.veg *= 1.0 - smoothstep(0.0, 0.08, dens) * if city { 1.0 } else { 0.6 };
+    s.m.town_urban = dens;
     if cov <= 0.0 && ev.tree <= 0.0 {
-        s.m.town_urban = dens;
         return;
     }
     let col = mixc3(mcol * (0.92 + 0.1 * s.pf.detail), ev.col, e_blk);
     let h = mh * dens + (ev.h - mh * dens) * e_blk;
-    let cls = if e_blk >= 0.5 {
-        ev.cls
-    } else if z == zone::CBD {
-        crate::landcover::COMMERCIAL
-    } else {
-        crate::landcover::RESIDENTIAL
-    };
+    let cls = if e_blk >= 0.5 { ev.cls } else { mean_class(pl, &d, q) };
     let dev = 0.55 + 0.9 * pl.dev;
     let lamp = lamps(pl, &ev, dens, gsd, fw, block, e_blk);
     let win_lit = 0.1 + if z == zone::CBD { 0.25 } else { 0.0 };
@@ -207,10 +203,8 @@ fn place(s: &mut Stack, pl: &town::Pl, rel: f64, n: f64, q: DVec2, sun: DVec3) {
         let tc = crown(s) * (0.85 + 0.3 * u01k(ev.sid ^ 0x7EE, 1));
         s.composite(Layer { cov: ev.tree * e_blk, albedo: tc, dh: ev.tree_h, hmode: hmode::BLEND, ..Default::default() });
     }
-    s.m.town_urban = dens;
     s.m.town_cov = cov;
     s.m.natural_ok *= 1.0 - cov;
-    s.m.veg *= 1.0 - smoothstep(0.0, 0.08, dens) * if city { 1.0 } else { 0.6 };
 }
 
 #[inline]
@@ -301,6 +295,13 @@ mod tests {
         ("linear", -9.1620, 96.5530),
         ("kraal", -15.9711, 62.8364),
         ("perched", -38.7777, -166.8082),
+        ("airport", -10.5390, 115.3568),
+        ("port", -11.7166, -173.5204),
+        ("quarry", -20.4582, -152.1378),
+        ("solar", 40.4972, 46.9202),
+        ("wind", 42.4183, 33.3454),
+        ("flare", 24.0306, -57.4828),
+        ("dam", -0.6990, -17.6874),
     ];
 
     fn tile_at(name: &str, z: u8) -> geodesy::tiles::TileId {
@@ -341,6 +342,16 @@ mod tests {
             ("linear", 16),
             ("kraal", 17),
             ("perched", 16),
+            ("airport", 13),
+            ("airport", 15),
+            ("port", 14),
+            ("port", 16),
+            ("quarry", 15),
+            ("solar", 16),
+            ("wind", 16),
+            ("flare", 16),
+            ("dam", 11),
+            ("dam", 14),
         ] {
             let id = tile_at(name, z);
             let g = gen.tiles(&[id]).unwrap().remove(0);
@@ -360,7 +371,7 @@ mod tests {
     fn lod_consistent_at_places() {
         let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let n = crate::TILE_SIZE;
-        for (name, z) in [("metro", 11u8), ("metro", 13), ("metro_outer", 12), ("survey_city", 14), ("desert_town", 13), ("waldhufen", 13)] {
+        for (name, z) in [("metro", 11u8), ("metro", 13), ("metro_outer", 12), ("survey_city", 14), ("desert_town", 13), ("waldhufen", 13), ("airport", 13), ("dam", 12)] {
             let parent = tile_at(name, z);
             let p = g.tile(parent);
             let kids = parent.children().map(|c| g.tile(c));
@@ -492,8 +503,10 @@ mod tests {
             let (name, rest) = item.split_once(':').unwrap();
             let v: Vec<f64> = rest.split(',').map(|x| x.trim().parse().unwrap()).collect();
             let z = v[2] as u8;
-            let c = geodesy::tiles::tile_for_latlon(v[0].to_radians(), v[1].to_radians(), z);
-            let ids: Vec<_> = (0..4).map(|k| geodesy::tiles::TileId::new(z, c.x + (k % 2), c.y + (k / 2))).collect();
+            // the 2 × 2 tiles centred on the point
+            let px = geodesy::tiles::latlon_to_pixel(v[0].to_radians(), v[1].to_radians(), z, crate::TILE_SIZE as u32);
+            let (x0, y0) = ((px.x / crate::TILE_SIZE as f64 - 0.5).floor() as u32, (px.y / crate::TILE_SIZE as f64 - 0.5).floor() as u32);
+            let ids: Vec<_> = (0..4).map(|k| geodesy::tiles::TileId::new(z, x0 + (k % 2), y0 + (k / 2))).collect();
             let t0 = std::time::Instant::now();
             let tiles = gen.tiles(&ids).unwrap();
             let n = crate::TILE_SIZE;
@@ -516,6 +529,66 @@ mod tests {
             }
             img.save(out.join(format!("{name}_z{z}{}.png", if night { "_night" } else { "" }))).unwrap();
             eprintln!("{name} z{z}: {:.1} s", t0.elapsed().as_secs_f64());
+        }
+    }
+
+    /// Debug: class histograms of a parent and its children (`SETTLE_SPEC` "lat,lon,z").
+    #[test]
+    #[ignore]
+    fn debug_class_lod() {
+        let spec = std::env::var("SETTLE_SPEC").unwrap_or("47.092,-2.889,12".into());
+        let v: Vec<f64> = spec.split(',').map(|x| x.trim().parse().unwrap()).collect();
+        let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+        let parent = geodesy::tiles::tile_for_latlon(v[0].to_radians(), v[1].to_radians(), v[2] as u8);
+        let p = g.tile(parent);
+        let mut hp = [0f64; 256];
+        let mut hk = [0f64; 256];
+        for c in &p.landcover {
+            hp[*c as usize] += 1.0;
+        }
+        for kid in parent.children().map(|c| g.tile(c)) {
+            for c in &kid.landcover {
+                hk[*c as usize] += 0.25;
+            }
+        }
+        let n = (crate::TILE_SIZE * crate::TILE_SIZE) as f64;
+        for c in 0..256 {
+            if hp[c] + hk[c] > 0.0 {
+                eprintln!("class {c:3} {:>14}: parent {:.4} children {:.4}", crate::landcover::name(c as u8), hp[c] / n, hk[c] / n);
+            }
+        }
+    }
+
+    /// Debug: ports of coastal towns: `debug_ports -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn debug_ports() {
+        let w = crate::world::World::new(crate::Config::default());
+        let mut pts = crate::features::CpuPoints(&w);
+        let mut ctx = HostCtx { world: &w, points: &mut pts };
+        let mut n = 0;
+        for i in 0..20000u64 {
+            let h = mix64(0x9027 ^ i);
+            let lat = (2.0 * u01k(h, 1) - 1.0).asin();
+            let lon = (u01k(h, 2) - 0.5) * std::f64::consts::TAU;
+            let p = geodesy::geodetic2ecef(geodesy::Geodetic::new(lat, lon, 0.0), &w.ell);
+            let a = w.atlas().sample(p.normalize());
+            if a.coast_km < 0.0 || a.coast_km > 8.0 || a.population < 0.05 {
+                continue;
+            }
+            for l in 2..5 {
+                for pl in places::places_near(&w, l, p, 30_000.0) {
+                    if !pl.port || pl.parent != 0 {
+                        continue;
+                    }
+                    let r = sites::port(&mut ctx, &pl);
+                    eprintln!("town {} level {} coast_km {:.1} R {:.0}: {:?}", pl.id, pl.level, w.atlas().sample(pl.center.normalize()).coast_km, pl.radius, r.map(|x| x.map(|s| geodesy::ecef2geodetic(s.center, &w.ell)).map(|g| (g.lat.to_degrees(), g.lon.to_degrees()))));
+                    n += 1;
+                }
+            }
+            if n > 12 {
+                break;
+            }
         }
     }
 

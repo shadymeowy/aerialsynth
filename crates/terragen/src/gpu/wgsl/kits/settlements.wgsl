@@ -1094,7 +1094,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     rf_ins = ins;
                     roof = ins;
                     rim = (1.0 - smoothstep1(0.0, 0.9, st_min2(dd))) * ins;
-                    cls = select(LC_BUILDING, LC_BUILDING_TALL, floors * 3.0 > 30.0);
+                    if (ins > 0.5) {
+                        cls = select(LC_BUILDING, LC_BUILDING_TALL, floors * 3.0 > 30.0);
+                    }
                 }
             } else if (dbc <= 0.25) {
                 cov_lot = 0.0;
@@ -1126,7 +1128,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     rf_ins = ins;
                     h = (3.0 + 3.5 * u01k(wc.id, 6lu)) * ins;
                     roof = ins;
-                    cls = LC_BUILDING;
+                    if (ins > 0.5) {
+                        cls = LC_BUILDING;
+                    }
                 }
             }
         } else if (pattern == SP_LINEAR) {
@@ -1160,7 +1164,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     h = (5.5 + 2.5 * ridge) * ih;
                     roof = ih;
                     rim = (1.0 - smoothstep1(0.0, 0.9, st_min2(dh))) * ih;
-                    cls = LC_BUILDING;
+                    if (ih > 0.5) {
+                        cls = LC_BUILDING;
+                    }
                 } else if (ib > 0.0) {
                     let ridge = clamp(db.y / bh.y, 0.0, 1.0);
                     rf_u = u01k(blk.id, 6lu);
@@ -1169,7 +1175,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     rf_shade = 0.9 + 0.15 * ridge;
                     h = (6.0 + 2.0 * ridge) * ib;
                     roof = ib;
-                    cls = LC_BUILDING;
+                    if (ib > 0.5) {
+                        cls = LC_BUILDING;
+                    }
                 }
                 if (ih <= 0.0 && ib <= 0.0 && u01k(blk.id, 7lu) < 0.6) {
                     let tp = vec2<f32>(0.25 * blk.bw, 0.55 * blk.bd);
@@ -1369,7 +1377,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     h = hh * ins;
                     roof = ins;
                     rim = (1.0 - smoothstep1(0.0, 0.9, st_min2(dd))) * ins;
-                    cls = select(LC_BUILDING, LC_BUILDING_TALL, hh > 30.0);
+                    if (ins > 0.5) {
+                        cls = select(LC_BUILDING, LC_BUILDING_TALL, hh > 30.0);
+                    }
                     if (t == STY_TOWER || (t == STY_MIDRISE && z == SZ_CBD)) {
                         win = vec3<f32>(0.82, 0.90, 1.0);
                     }
@@ -1381,7 +1391,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     rf_ins = podium;
                     h = (12.0 + 8.0 * u01k(lh, 20lu)) * podium;
                     roof = podium;
-                    cls = LC_BUILDING;
+                    if (podium > 0.5) {
+                        cls = LC_BUILDING;
+                    }
                 } else if (t == STY_HOUSE) {
                     if (pl.dev > 0.55 && (a == 5u || a == 7u || a == 3u || a == 0u || a == 1u) && u01k(lh, 13lu) < 0.35) {
                         let pc = vec2<f32>(0.0, half.y + 0.5 * (0.5 * ld - half.y));
@@ -1448,7 +1460,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     h = (5.0 + 2.0 * ridge) * ih;
                     roof = ih;
                     rim = (1.0 - smoothstep1(0.0, 0.9, st_min2(dh))) * ih;
-                    cls = LC_BUILDING;
+                    if (ih > 0.5) {
+                        cls = LC_BUILDING;
+                    }
                 } else if (ib > 0.0) {
                     let ridge = clamp(db.y / 6.0, 0.0, 1.0);
                     rf_arch = pl.arch;
@@ -1458,7 +1472,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     rf_ins = ib;
                     h = (6.0 + 1.5 * ridge) * ib;
                     roof = ib;
-                    cls = LC_BUILDING;
+                    if (ib > 0.5) {
+                        cls = LC_BUILDING;
+                    }
                 }
                 let lp = rr - hc - vec2<f32>(0.0, 5.5);
                 em += vec3<f32>(1.0, 0.72, 0.42) * point_light(dot(lp, lp), 2.0, 0.4, fw);
@@ -1499,7 +1515,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     rf_shade = 0.85 + 0.25 * cone;
                     h = (2.2 + 1.6 * cone) * ih;
                     roof = ih;
-                    cls = LC_BUILDING;
+                    if (ih > 0.5) {
+                        cls = LC_BUILDING;
+                    }
                 }
             }
         }
@@ -1548,7 +1566,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                 rf_shade = 1.0;
                 h = hh * ins;
                 roof = ins;
-                cls = LC_BUILDING;
+                if (ins > 0.5) {
+                    cls = LC_BUILDING;
+                }
             }
             em += vec3<f32>(1.0, 0.8, 0.55) * 0.05 * pz * band(20.0, e.gsd);
         }
@@ -1629,27 +1649,51 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     return o;
 }
 
+/// `town::zone_fracs`: (green, paved).
+fn st_zone_fracs(z: u32) -> vec2<f32> {
+    if (z == SZ_INNER) {
+        return vec2<f32>(0.12, 0.4);
+    } else if (z == SZ_OUTER) {
+        return vec2<f32>(0.25, 0.32);
+    } else if (z == SZ_SUBURB) {
+        return vec2<f32>(0.42, 0.25);
+    } else if (z == SZ_PERI) {
+        return vec2<f32>(0.5, 0.18);
+    }
+    return vec2<f32>(0.05, 0.5);
+}
+
+/// `town::mean_class`.
+fn st_mean_class(pl: StPl, d: StDist, q: vec2<f32>) -> u32 {
+    let gp = st_zone_fracs(d.zone);
+    let roofs = 1.0 - gp.x - gp.y;
+    let u = u01k(hash2(pl.seed ^ 0xC1A55lu, i64(floor(q.x / 6.0)), i64(floor(q.y / 6.0))), 1lu);
+    if (u < roofs) {
+        return select(LC_BUILDING, LC_BUILDING_TALL, d.zone == SZ_CBD && pl.level >= 3u);
+    } else if (u < roofs + 0.55 * gp.y) {
+        return LC_ROAD_MINOR;
+    } else if (d.zone == SZ_CBD) {
+        return LC_COMMERCIAL;
+    } else if (d.pattern == SP_INDUSTRIAL) {
+        return LC_INDUSTRIAL;
+    }
+    return LC_RESIDENTIAL;
+}
+
 /// `town::zone_mean`: (colour, building height).
 fn st_zone_mean(pl: StPl, d: StDist, moist: f32) -> vec4<f32> {
     let z = d.zone;
-    var green = 0.05;
-    var paved = 0.5;
+    let gp = st_zone_fracs(z);
+    let green = gp.x;
+    let paved = gp.y;
     var hm = 30.0 * smoothstep1(1e5, 1.5e7, pl.pop) + 12.0;
     if (z == SZ_INNER) {
-        green = 0.12;
-        paved = 0.4;
         hm = 12.0;
     } else if (z == SZ_OUTER) {
-        green = 0.25;
-        paved = 0.32;
         hm = 8.0;
     } else if (z == SZ_SUBURB) {
-        green = 0.42;
-        paved = 0.25;
         hm = 4.0;
     } else if (z == SZ_PERI) {
-        green = 0.5;
-        paved = 0.18;
         hm = 2.5;
     }
     let roofs = 1.0 - green - paved;
@@ -1909,12 +1953,16 @@ fn st_airport_px(st: FStamp, p: vec3<f64>, ground: f32, gsd: f32, fw: f32) -> St
     if (term > 0.0) {
         o.col = mixc(o.col, srgb(196.0, 198.0, 204.0) * (1.0 - 0.1 * band_cov(st_boxm(q, term_c, term_h), 1.2, fw)), term);
         o.dh += 18.0 * term * wgt;
-        o.cls = LC_BUILDING;
+        if (term > 0.5) {
+            o.cls = LC_BUILDING;
+        }
     }
     if (hang > 0.0 && term <= 0.0) {
         o.col = mixc(o.col, srgb(176.0, 182.0, 188.0), hang);
         o.dh += 16.0 * hang * wgt;
-        o.cls = LC_BUILDING;
+        if (hang > 0.5) {
+            o.cls = LC_BUILDING;
+        }
     }
     o.emit += vec3<f32>(1.0, 0.86, 0.62) * 0.12 * apron * (1.0 - term);
     o.col = mixc(o.col, srgb(90.0, 90.0, 92.0), band_cov(din - margin - 6.0, 3.5, fw));
@@ -1975,7 +2023,9 @@ fn st_port_land_px(st: FStamp, p: vec3<f64>, gsd: f32, fw: f32) -> StSite {
         if (ins > 0.0 && u01k(wh, 1lu) < 0.8) {
             o.col = mixc(o.col, select(srgb(110.0, 130.0, 156.0), srgb(176.0, 178.0, 180.0), u01k(wh, 2lu) < 0.5), ins);
             o.dh = 12.0 * ins;
-            o.cls = LC_BUILDING;
+            if (ins > 0.5) {
+                o.cls = LC_BUILDING;
+            }
         }
     }
     let ck = round(q.x / 90.0);
@@ -2068,7 +2118,9 @@ fn st_quarry_px(st: FStamp, p: vec3<f64>, gsd: f32, fw: f32) -> StSite {
     o.clear = 1.0;
     o.cls = LC_QUARRY;
     let qa = vec2<f32>(q.x / 1.25, q.y * 1.1);
-    let rn = length(qa) / r;
+    let th0 = atan2(qa.y, qa.x);
+    let wob = 1.0 + 0.13 * sin(3.0 * th0 + ST_TAU * u01k(seed, 8lu)) + 0.07 * sin(5.0 * th0 + ST_TAU * u01k(seed, 9lu));
+    let rn = length(qa) / (r * wob);
     var rock = srgb(170.0, 150.0, 118.0);
     var bench = srgb(196.0, 180.0, 148.0);
     if (kind == 0u) {
@@ -2105,11 +2157,13 @@ fn st_quarry_px(st: FStamp, p: vec3<f64>, gsd: f32, fw: f32) -> StSite {
         }
         return o;
     }
-    let sc = vec2<f32>(cos(ta), sin(ta)) * (1.35 * r + 60.0);
-    let ds = length(q - sc) / (0.45 * r + 50.0);
+    let sc = vec2<f32>(cos(ta), sin(ta)) * (1.3 * r + 60.0);
+    let qs = q - sc;
+    let ths = atan2(qs.y, qs.x);
+    let ds = length(qs) / ((0.35 * r + 40.0) * (1.0 + 0.25 * sin(4.0 * ths + ST_TAU * u01k(seed, 10lu))));
     if (ds < 1.0) {
         o.cov = 1.0;
-        o.dh = min(0.18 * r, 45.0) * (1.0 - ds * ds);
+        o.dh = min(0.12 * r, 35.0) * (1.0 - ds * ds);
         o.col = bench * (0.92 + 0.12 * (1.0 - ds));
         return o;
     }
@@ -2436,17 +2490,16 @@ fn st_place(s: ptr<function, Stack>, pl: StPl, rel: f32, n: f32, q: vec2<f32>, s
         }
     }
     let cov = mean_cov + (ev.cov - mean_cov) * e_blk;
+    (*s).m.veg *= 1.0 - smoothstep1(0.0, 0.08, dens) * select(0.6, 1.0, city);
+    (*s).m.town_urban = dens;
     if (cov <= 0.0 && ev.tree <= 0.0) {
-        (*s).m.town_urban = dens;
         return;
     }
     let col = mixc(mcol * (0.92 + 0.1 * (*s).pf.f[PF_DETAIL]), ev.col, e_blk);
     let h = mh * dens + (ev.h - mh * dens) * e_blk;
-    var cls = LC_RESIDENTIAL;
-    if (e_blk >= 0.5) {
-        cls = ev.cls;
-    } else if (z == SZ_CBD) {
-        cls = LC_COMMERCIAL;
+    var cls = ev.cls;
+    if (e_blk < 0.5) {
+        cls = st_mean_class(pl, d, q);
     }
     let dev = 0.55 + 0.9 * pl.dev;
     let lamp = st_lamps(pl, ev, dens, gsd, fw, block, e_blk);
@@ -2467,10 +2520,8 @@ fn st_place(s: ptr<function, Stack>, pl: StPl, rel: f32, n: f32, q: vec2<f32>, s
         lt.hmode = HM_BLEND;
         composite(s, lt);
     }
-    (*s).m.town_urban = dens;
     (*s).m.town_cov = cov;
     (*s).m.natural_ok *= 1.0 - cov;
-    (*s).m.veg *= 1.0 - smoothstep1(0.0, 0.08, dens) * select(0.6, 1.0, city);
 }
 
 /// Slot 8: reservoirs and dam walls on land, the water side of ports on standing water

@@ -1007,7 +1007,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         rf_ins = ins;
                         roof = ins;
                         rim = (1.0 - smoothstep(0.0, 0.9, dd.min_element())) * ins;
-                        cls = if floors * 3.0 > 30.0 { crate::landcover::BUILDING_TALL } else { crate::landcover::BUILDING };
+                        if ins > 0.5 {
+                            cls = if floors * 3.0 > 30.0 { crate::landcover::BUILDING_TALL } else { crate::landcover::BUILDING };
+                        }
                     }
                 } else if dbc <= 0.25 {
                     cov_lot = 0.0;
@@ -1035,7 +1037,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         rf_ins = ins;
                         h = (3.0 + 3.5 * u01k(wc.id, 6)) * ins;
                         roof = ins;
-                        cls = crate::landcover::BUILDING;
+                        if ins > 0.5 {
+                            cls = crate::landcover::BUILDING;
+                        }
                     }
                 }
             }
@@ -1065,7 +1069,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         h = (5.5 + 2.5 * ridge) * ih;
                         roof = ih;
                         rim = (1.0 - smoothstep(0.0, 0.9, dh.min_element())) * ih;
-                        cls = crate::landcover::BUILDING;
+                        if ih > 0.5 {
+                            cls = crate::landcover::BUILDING;
+                        }
                     } else if ib > 0.0 {
                         let ridge = (db.y / bh.y).clamp(0.0, 1.0);
                         rf = (pl.arch, u01k(blk.id, 6), false, 0.85);
@@ -1073,7 +1079,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         rf_shade = 0.9 + 0.15 * ridge;
                         h = (6.0 + 2.0 * ridge) * ib;
                         roof = ib;
-                        cls = crate::landcover::BUILDING;
+                        if ib > 0.5 {
+                            cls = crate::landcover::BUILDING;
+                        }
                     }
                     if ih <= 0.0 && ib <= 0.0 && u01k(blk.id, 7) < 0.6 {
                         let tp = DVec2::new(0.25 * blk.bw, 0.55 * blk.bd);
@@ -1249,7 +1257,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                             h = hh * ins;
                             roof = ins;
                             rim = (1.0 - smoothstep(0.0, 0.9, dd.min_element())) * ins;
-                            cls = if hh > 30.0 { crate::landcover::BUILDING_TALL } else { crate::landcover::BUILDING };
+                            if ins > 0.5 {
+                                cls = if hh > 30.0 { crate::landcover::BUILDING_TALL } else { crate::landcover::BUILDING };
+                            }
                             if t == typ::TOWER || (t == typ::MIDRISE && z == zone::CBD) {
                                 win = DVec3::new(0.82, 0.90, 1.0);
                             }
@@ -1258,7 +1268,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                             rf_ins = podium;
                             h = (12.0 + 8.0 * u01k(lh, 20)) * podium;
                             roof = podium;
-                            cls = crate::landcover::BUILDING;
+                            if podium > 0.5 {
+                                cls = crate::landcover::BUILDING;
+                            }
                         } else if t == typ::HOUSE {
                             // a pool behind some houses in rich suburbs, a yard tree
                             if pl.dev > 0.55 && matches!(a, 5 | 7 | 3 | 0 | 1) && u01k(lh, 13) < 0.35 {
@@ -1321,14 +1333,18 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     h = (5.0 + 2.0 * ridge) * ih;
                     roof = ih;
                     rim = (1.0 - smoothstep(0.0, 0.9, dh.min_element())) * ih;
-                    cls = crate::landcover::BUILDING;
+                    if ih > 0.5 {
+                        cls = crate::landcover::BUILDING;
+                    }
                 } else if ib > 0.0 {
                     let ridge = (db.y / 6.0).clamp(0.0, 1.0);
                     rf = (pl.arch, u01k(uh, 5), false, 0.85);
                     rf_ins = ib;
                     h = (6.0 + 1.5 * ridge) * ib;
                     roof = ib;
-                    cls = crate::landcover::BUILDING;
+                    if ib > 0.5 {
+                        cls = crate::landcover::BUILDING;
+                    }
                 }
                 em += DVec3::new(1.0, 0.72, 0.42) * point_light((rr - hc - DVec2::new(0.0, 5.5)).length_squared(), 2.0, 0.4, fw);
             }
@@ -1366,7 +1382,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     rf_shade = 0.85 + 0.25 * cone;
                     h = (2.2 + 1.6 * cone) * ih;
                     roof = ih;
-                    cls = crate::landcover::BUILDING;
+                    if ih > 0.5 {
+                        cls = crate::landcover::BUILDING;
+                    }
                 }
             }
         }
@@ -1408,7 +1426,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                 rf_shade = 1.0;
                 h = hh * ins;
                 roof = ins;
-                cls = crate::landcover::BUILDING;
+                if ins > 0.5 {
+                    cls = crate::landcover::BUILDING;
+                }
             }
             em += DVec3::new(1.0, 0.8, 0.55) * 0.05 * pz * band(20.0, e.gsd);
         }
@@ -1488,12 +1508,41 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     o
 }
 
+/// Shares of green and paved ground of a zone (the rest is roofs).
+pub fn zone_fracs(z: u32) -> (f64, f64) {
+    let zi = z as usize;
+    ([0.05, 0.12, 0.25, 0.42, 0.5][zi], [0.5, 0.4, 0.32, 0.25, 0.18][zi])
+}
+
+/// The land-cover class of a sample where the district's lots are below the pixel: drawn from
+/// the zone's shares of roofs, streets and lots by a hash of a 6 m cell (classes are
+/// categorical: the parent's histogram matches its children's).
+pub fn mean_class(pl: &Pl, d: &Dist, q: DVec2) -> u8 {
+    let (green, paved) = zone_fracs(d.zone);
+    let roofs = 1.0 - green - paved;
+    let u = u01k(hash2(pl.seed ^ 0xC1A55, (q.x / 6.0).floor() as i64, (q.y / 6.0).floor() as i64), 1);
+    if u < roofs {
+        if d.zone == zone::CBD && pl.level >= 3 {
+            crate::landcover::BUILDING_TALL
+        } else {
+            crate::landcover::BUILDING
+        }
+    } else if u < roofs + 0.55 * paved {
+        crate::landcover::ROAD_MINOR
+    } else if d.zone == zone::CBD {
+        crate::landcover::COMMERCIAL
+    } else if d.pattern == pat::INDUSTRIAL {
+        crate::landcover::INDUSTRIAL
+    } else {
+        crate::landcover::RESIDENTIAL
+    }
+}
+
 /// Mean look of a district where its lots are below the pixel: colour and building height.
 pub fn zone_mean(pl: &Pl, d: &Dist, moist: f64) -> (DVec3, f64) {
     let z = d.zone;
     let zi = z as usize;
-    let green = [0.05, 0.12, 0.25, 0.42, 0.5][zi];
-    let paved = [0.5, 0.4, 0.32, 0.25, 0.18][zi];
+    let (green, paved) = zone_fracs(z);
     let roofs = 1.0 - green - paved;
     let flat = z <= zone::OUTER && pl.form == form::CITY as u32;
     let rc = roof_col(pl.arch, 0.35, flat);
