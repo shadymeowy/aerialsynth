@@ -140,7 +140,7 @@ fn built(s: &mut Stack) {
     let mut best = px::Px::none();
     let mut second = px::Px::none();
     let mut emit = DVec3::ZERO;
-    let (mut shade, mut clear, mut road): (f64, f64, f64) = (0.0, 0.0, 0.0);
+    let (mut shade, mut shade_low, mut clear, mut road): (f64, f64, f64, f64) = (0.0, 0.0, 0.0, 0.0);
     for sg in &segs {
         // (on a volcano's cone and lava only motorways, trunk roads and railways)
         if s.no_town && !matches!((sg.kind - cls::KIND0) as usize, cls::MOTORWAY | cls::TRUNK | cls::RAMP | cls::RAIL) {
@@ -149,6 +149,7 @@ fn built(s: &mut Stack) {
         let o = px::seg_px(sg, &e);
         emit += o.emit;
         shade = shade.max(o.shade);
+        shade_low = shade_low.max(o.shade_low);
         clear = clear.max(o.clear);
         road = road.max(o.road);
         if o.cov > 0.0 {
@@ -175,6 +176,8 @@ fn built(s: &mut Stack) {
             s.composite(Layer { cov: o.cov, albedo: o.col, dh: o.h, hmode: hmode::ABS, cls: o.cls, relit: 0.5, ..Default::default() });
         }
     }
+    // (decks shade the ground below them, not the road surfaces)
+    let shade = shade.max(shade_low * (1.0 - road));
     // cast shadows (bridges, pylons, wires, cars) without painting; lamps
     s.composite(Layer { cov: if shade > 0.0 { 1e-4 } else { 0.0 }, albedo: s.col, lit: 1.0 - shade, emit, ..Default::default() });
     s.m.veg *= 1.0 - clear;

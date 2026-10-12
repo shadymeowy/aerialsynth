@@ -35,8 +35,10 @@ pub struct Px {
     pub h: f64,
     pub cls: u8,
     pub emit: DVec3,
-    /// cast shadow 0..1, vegetation cleared 0..1, share of road surface
+    /// cast shadow 0..1 (cars, pylons, portals), a bridge deck's shadow on the ground below
+    /// (not on road surfaces), vegetation cleared 0..1, share of road surface
     pub shade: f64,
+    pub shade_low: f64,
     pub clear: f64,
     pub road: f64,
     /// z-order (the top surface wins)
@@ -45,7 +47,7 @@ pub struct Px {
 
 impl Px {
     pub fn none() -> Px {
-        Px { cov: 0.0, col: DVec3::ZERO, h: 0.0, cls: 0, emit: DVec3::ZERO, shade: 0.0, clear: 0.0, road: 0.0, z: -1e9 }
+        Px { cov: 0.0, col: DVec3::ZERO, h: 0.0, cls: 0, emit: DVec3::ZERO, shade: 0.0, shade_low: 0.0, clear: 0.0, road: 0.0, z: -1e9 }
     }
 }
 
@@ -278,34 +280,39 @@ fn road_px(sg: &FSeg, f: &Frame, e: &Env, class: usize) -> Px {
         let as_ = f.ar + f.su * l;
         let s0 = sg.s0 as f64;
         if as_ >= s0 && as_ <= s0 + f.len {
-            o.shade = 0.75 * boxcov(ds, hw + 0.6, fw) * (1.0 - boxcov(f.dl, hw + 0.6, fw));
+            o.shade_low = 0.75 * boxcov(ds, hw + 0.6, fw) * (1.0 - boxcov(f.dl, hw + 0.6, fw));
         }
     }
     // embankment / cutting slopes (1:2) down / up to the ground
-    if has_deck && !bridge && dd > edge - fw {
-        let sl = (dd - edge).max(0.0) * 0.5;
+    // (each segment its own stretch, measured square to its line: no scalloped joints)
+    let ddl = f.dl.abs();
+    let own = f.ar >= sg.s0 as f64 - 0.5 * fw - 0.3 && f.ar <= sg.s0 as f64 + f.len + 0.5 * fw + 0.3;
+    if has_deck && !bridge && own && ddl > edge - fw {
+        let sl = (ddl - edge).max(0.0) * 0.5;
         if raised > 0.0 {
             let toe = edge + 2.0 * raised.min(15.0);
-            over(&mut o, aa(toe - dd, fw), mixc(e.below, srgb(112.0, 124.0, 74.0), 0.35), hs - sl);
+            over(&mut o, aa(toe - ddl, fw), mixc(e.below, srgb(112.0, 124.0, 74.0), 0.35), hs - sl);
         } else {
             let toe = edge + 2.0 * (-raised).min(15.0);
             let strata = 0.9 + 0.1 * ((hs + sl) / 3.0).sin();
-            over(&mut o, aa(toe - dd, fw), mixc(e.below, srgb(140.0, 128.0, 100.0) * strata, 0.4), hs + sl);
+            over(&mut o, aa(toe - ddl, fw), mixc(e.below, srgb(140.0, 128.0, 100.0) * strata, 0.4), hs + sl);
         }
         o.z = hs - sl;
         o.clear = o.cov;
     }
     // verge: shoulder, gravel, grass (sidewalks in towns; a parapet on bridges)
-    let av = boxcov(f.d, edge, fw);
+    // (the verge, too, square to the line: parapets and verges of decks at slightly different
+    // heights left rings at every joint)
+    let av = if own { boxcov(f.dl, edge, fw) } else { 0.0 };
     if av > 0.0 {
         let c = if bridge {
             srgb(184.0, 182.0, 176.0)
         } else if urban {
-            mixc(srgb(172.0, 170.0, 164.0), srgb(196.0, 194.0, 188.0), boxcov(dd - hw - 0.15, 0.15, fw))
+            mixc(srgb(172.0, 170.0, 164.0), srgb(196.0, 194.0, 188.0), boxcov(ddl - hw - 0.15, 0.15, fw))
         } else if class == cls::TRACK || class == cls::RAIL {
             mixc(e.below, srgb(150.0, 140.0, 120.0), 0.5)
         } else {
-            mixc(mixc(e.below, srgb(118.0, 128.0, 82.0), 0.45), srgb(150.0, 146.0, 136.0), boxcov(dd - hw, 0.8, fw))
+            mixc(mixc(e.below, srgb(118.0, 128.0, 82.0), 0.45), srgb(150.0, 146.0, 136.0), boxcov(ddl - hw, 0.8, fw))
         };
         over(&mut o, av, c, hs + if bridge { 1.0 } else { 0.0 });
         o.z = hs;

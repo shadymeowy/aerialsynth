@@ -51,6 +51,7 @@ struct TrPx {
     cls: u32,
     emit: vec3<f32>,
     shade: f32,
+    shade_low: f32,
     clear: f32,
     road: f32,
     z: f32,
@@ -64,6 +65,7 @@ fn tr_px_none() -> TrPx {
     o.cls = 0u;
     o.emit = vec3<f32>(0.0);
     o.shade = 0.0;
+    o.shade_low = 0.0;
     o.clear = 0.0;
     o.road = 0.0;
     o.z = -1e9;
@@ -298,33 +300,35 @@ fn tr_road_px(sg: FSeg, f: TrFrame, e: TrEnv, kc: u32) -> TrPx {
         let as_ = f.ar + f.su * l;
         let s0 = sg.s0;
         if (as_ >= s0 && as_ <= s0 + f.len) {
-            o.shade = 0.75 * tr_boxcov(ds, hw + 0.6, fw) * (1.0 - tr_boxcov(f.dl, hw + 0.6, fw));
+            o.shade_low = 0.75 * tr_boxcov(ds, hw + 0.6, fw) * (1.0 - tr_boxcov(f.dl, hw + 0.6, fw));
         }
     }
-    if (has_deck && !bridge && dd > edge - fw) {
-        let sl = max(dd - edge, 0.0) * 0.5;
+    let ddl = abs(f.dl);
+    let own = f.ar >= sg.s0 - 0.5 * fw - 0.3 && f.ar <= sg.s0 + f.len + 0.5 * fw + 0.3;
+    if (has_deck && !bridge && own && ddl > edge - fw) {
+        let sl = max(ddl - edge, 0.0) * 0.5;
         if (raised > 0.0) {
             let toe = edge + 2.0 * min(raised, 15.0);
-            tr_over(&o, tr_aa(toe - dd, fw), mixc(e.below, srgb(112.0, 124.0, 74.0), 0.35), hs - sl);
+            tr_over(&o, tr_aa(toe - ddl, fw), mixc(e.below, srgb(112.0, 124.0, 74.0), 0.35), hs - sl);
         } else {
             let toe = edge + 2.0 * min(-raised, 15.0);
             let strata = 0.9 + 0.1 * sin((hs + sl) / 3.0);
-            tr_over(&o, tr_aa(toe - dd, fw), mixc(e.below, srgb(140.0, 128.0, 100.0) * strata, 0.4), hs + sl);
+            tr_over(&o, tr_aa(toe - ddl, fw), mixc(e.below, srgb(140.0, 128.0, 100.0) * strata, 0.4), hs + sl);
         }
         o.z = hs - sl;
         o.clear = o.cov;
     }
-    let av = tr_boxcov(f.d, edge, fw);
+    let av = select(0.0, tr_boxcov(f.dl, edge, fw), own);
     if (av > 0.0) {
         var c: vec3<f32>;
         if (bridge) {
             c = srgb(184.0, 182.0, 176.0);
         } else if (urban) {
-            c = mixc(srgb(172.0, 170.0, 164.0), srgb(196.0, 194.0, 188.0), tr_boxcov(dd - hw - 0.15, 0.15, fw));
+            c = mixc(srgb(172.0, 170.0, 164.0), srgb(196.0, 194.0, 188.0), tr_boxcov(ddl - hw - 0.15, 0.15, fw));
         } else if (kc == TR_TRACK || kc == TR_RAIL) {
             c = mixc(e.below, srgb(150.0, 140.0, 120.0), 0.5);
         } else {
-            c = mixc(mixc(e.below, srgb(118.0, 128.0, 82.0), 0.45), srgb(150.0, 146.0, 136.0), tr_boxcov(dd - hw, 0.8, fw));
+            c = mixc(mixc(e.below, srgb(118.0, 128.0, 82.0), 0.45), srgb(150.0, 146.0, 136.0), tr_boxcov(ddl - hw, 0.8, fw));
         }
         tr_over(&o, av, c, hs + select(0.0, 1.0, bridge));
         o.z = hs;
@@ -681,6 +685,7 @@ fn transport_slot_built(s: ptr<function, Stack>) {
     var second = tr_px_none();
     var emit = vec3<f32>(0.0);
     var shade = 0.0;
+    var shade_low = 0.0;
     var clear = 0.0;
     var road = 0.0;
     var any = false;
@@ -697,6 +702,7 @@ fn transport_slot_built(s: ptr<function, Stack>) {
         let o = tr_seg_px(sg, e);
         emit += o.emit;
         shade = max(shade, o.shade);
+        shade_low = max(shade_low, o.shade_low);
         clear = max(clear, o.clear);
         road = max(road, o.road);
         if (o.cov > 0.0) {
@@ -732,6 +738,7 @@ fn transport_slot_built(s: ptr<function, Stack>) {
     if (!any) {
         return;
     }
+    shade = max(shade, shade_low * (1.0 - road));
     var ls = layer_paint(select(0.0, 1e-4, shade > 0.0), (*s).col, 0u);
     ls.lit = 1.0 - shade;
     ls.emit = emit;

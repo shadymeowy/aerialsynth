@@ -23,7 +23,7 @@ pub(crate) const PLACES: &[(&str, f64, f64)] = &[
     ("roundabout", -7.6185, -16.6091),
     ("power", -7.8316, -18.8000),
     ("portal", 29.3400, 179.4257),
-    ("bridge", -7.6907, -18.7744),
+    ("bridge", -7.5782, -18.7463),
     ("tracks", -7.64, -16.66),
 ];
 
@@ -733,6 +733,36 @@ fn debug_lamps() {
     for st in &f.stamps {
         if (st.center - p).length() < 400.0 {
             eprintln!("stamp {} at {:.1} m half {:?} v {:?}", st.template, (st.center - p).length(), st.half, st.v);
+        }
+    }
+}
+
+/// Debug: roads and railways crossing rivers outside towns: `find_river_bridges -- --ignored
+/// --nocapture`.
+#[test]
+#[ignore]
+fn find_river_bridges() {
+    let w = world();
+    let mut pts = CpuPoints(&w);
+    let mut ctx = HostCtx { world: &w, points: &mut pts };
+    let mut n = 0;
+    for &(lat, lon) in &[(-7.70, -18.75), (-7.62, -16.62), (28.7, 178.9)] {
+        let f = build::features(&mut ctx, &Area { center: ecef(&w, lat, lon), radius: 25_000.0, gsd: 150.0 });
+        for (i, s) in f.segs.iter().enumerate() {
+            let k = (s.kind - cls::KIND0) as usize;
+            if i % 2 != 0 || (k > cls::SECONDARY && k != cls::RAIL) {
+                continue;
+            }
+            let m = (s.a + s.b) * 0.5;
+            let g = geodesy::ecef2geodetic(m, &w.ell);
+            let t = w.terrain(&crate::world::Ctx::new(g.lat, g.lon, 10.0, &w.ell));
+            if t.river_hw > 6.0 && t.river_d.abs() < t.river_hw && !build::in_town(&w, m) {
+                eprintln!("river bridge class {k} hw {:.0}: ({:.5}, {:.5})", t.river_hw, g.lat.to_degrees(), g.lon.to_degrees());
+                n += 1;
+                if n >= 12 {
+                    return;
+                }
+            }
         }
     }
 }
