@@ -871,7 +871,9 @@ mod tests {
             assert_eq!((as_has_layer(w, AS_LAYER_DTM), as_has_layer(w, AS_LAYER_INSTANCE)), (1, 1));
             let mut dtm = vec![0u8; as_layer_size(AS_LAYER_DTM)];
             assert_eq!(as_tile(w, 3, 5, 3, AS_LAYER_DTM, dtm.as_mut_ptr() as *mut c_void, dtm.len()), AS_OK, "{}", last_error());
-            let dsm: Vec<f32> = a.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+            let mut e2 = vec![0u8; as_layer_size(AS_LAYER_ELEVATION)];
+            assert_eq!(as_tile(w, 3, 5, 3, AS_LAYER_ELEVATION, e2.as_mut_ptr() as *mut c_void, e2.len()), AS_OK);
+            let dsm: Vec<f32> = e2.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
             let dtm: Vec<f32> = dtm.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
             assert!(dsm.iter().zip(&dtm).all(|(s, t)| t <= s), "the DTM lies at or below the DSM");
             let mut info = std::mem::MaybeUninit::<as_layer_info>::uninit();
