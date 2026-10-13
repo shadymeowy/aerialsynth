@@ -41,7 +41,7 @@ fn agri_sys(i: u32) -> AgSys {
         case 1u: { return AgSys(4u, vec2<f32>(402.336, 402.336), vec4<u32>(0u, 2u, 1u, 11u), vec4<f32>(0.84, 0.07, 0.07, 0.02), vec2<u32>(2u, 4u), vec2<f32>(0.06, 0.08), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
         case 2u: { return AgSys(0u, vec2<f32>(1300.0, 900.0), vec4<u32>(0u, 1u, 2u, 3u), vec4<f32>(0.68, 0.22, 0.06, 0.04), vec2<u32>(2u, 5u), vec2<f32>(0.82, 0.1), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
         case 3u: { return AgSys(2u, vec2<f32>(520.0, 24.0), vec4<u32>(0u, 1u, 3u, 2u), vec4<f32>(0.72, 0.12, 0.12, 0.04), vec2<u32>(0u, 0u), vec2<f32>(1.0, 0.0), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
-        case 4u: { return AgSys(1u, vec2<f32>(170.0, 1.5), vec4<u32>(2u, 0u, 3u, 1u), vec4<f32>(0.5, 0.3, 0.14, 0.06), vec2<u32>(1u, 3u), vec2<f32>(0.88, 0.06), vec2<f32>(0.3, 0.42), 0.0, 0.0); }
+        case 4u: { return AgSys(1u, vec2<f32>(170.0, 1.5), vec4<u32>(2u, 0u, 3u, 1u), vec4<f32>(0.5, 0.3, 0.14, 0.06), vec2<u32>(1u, 3u), vec2<f32>(0.55, 0.06), vec2<f32>(0.3, 0.42), 0.0, 0.0); }
         case 5u: { return AgSys(1u, vec2<f32>(48.0, 1.8), vec4<u32>(0u, 1u, 2u, 12u), vec4<f32>(0.6, 0.24, 0.1, 0.06), vec2<u32>(0u, 1u), vec2<f32>(0.6, 0.08), vec2<f32>(0.3, 0.42), 0.0, 0.3); }
         case 6u: { return AgSys(0u, vec2<f32>(130.0, 90.0), vec4<u32>(9u, 11u, 0u, 12u), vec4<f32>(0.9, 0.025, 0.065, 0.01), vec2<u32>(6u, 7u), vec2<f32>(0.75, 0.25), vec2<f32>(0.7, 0.9), 1.0, 0.0); }
         case 7u: { return AgSys(1u, vec2<f32>(110.0, 1.3), vec4<u32>(0u, 5u, 1u, 4u), vec4<f32>(0.42, 0.28, 0.2, 0.1), vec2<u32>(3u, 0u), vec2<f32>(0.75, 0.25), vec2<f32>(0.7, 0.9), 1.0, 0.0); }
@@ -49,7 +49,7 @@ fn agri_sys(i: u32) -> AgSys {
         case 9u: { return AgSys(1u, vec2<f32>(190.0, 1.4), vec4<u32>(5u, 4u, 0u, 1u), vec4<f32>(0.55, 0.2, 0.15, 0.1), vec2<u32>(3u, 0u), vec2<f32>(0.5, 0.5), vec2<f32>(0.6, 0.8), 0.0, 0.0); }
         case 10u: { return AgSys(0u, vec2<f32>(480.0, 360.0), vec4<u32>(7u, 13u, 8u, 0u), vec4<f32>(0.45, 0.22, 0.15, 0.18), vec2<u32>(5u, 0u), vec2<f32>(0.9, 0.1), vec2<f32>(0.6, 0.8), 0.0, 0.0); }
         case 11u: { return AgSys(0u, vec2<f32>(95.0, 60.0), vec4<u32>(10u, 0u, 1u, 11u), vec4<f32>(0.76, 0.13, 0.09, 0.02), vec2<u32>(5u, 0u), vec2<f32>(0.25, 0.75), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
-        case 12u: { return AgSys(0u, vec2<f32>(850.0, 650.0), vec4<u32>(2u, 3u, 1u, 11u), vec4<f32>(0.82, 0.12, 0.04, 0.02), vec2<u32>(0u, 1u), vec2<f32>(0.85, 0.15), vec2<f32>(0.38, 0.5), 0.0, 0.0); }
+        case 12u: { return AgSys(0u, vec2<f32>(420.0, 300.0), vec4<u32>(2u, 3u, 0u, 11u), vec4<f32>(0.6, 0.22, 0.16, 0.02), vec2<u32>(0u, 1u), vec2<f32>(0.8, 0.2), vec2<f32>(0.38, 0.5), 0.0, 0.0); }
         case 13u: { return AgSys(3u, vec2<f32>(805.0, 805.0), vec4<u32>(0u, 1u, 0u, 0u), vec4<f32>(0.75, 0.25, 0.0, 0.0), vec2<u32>(6u, 6u), vec2<f32>(1.0, 0.0), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
         default: { return AgSys(0u, vec2<f32>(2200.0, 1500.0), vec4<u32>(2u, 3u, 1u, 11u), vec4<f32>(0.86, 0.04, 0.08, 0.02), vec2<u32>(5u, 0u), vec2<f32>(0.4, 0.6), vec2<f32>(0.38, 0.5), 0.0, 0.0); }
     }
@@ -1537,7 +1537,7 @@ fn agri_border(b: u32, edge: f32, i: Shade, pc: Parcel, px: AgPx) -> Shade {
             let clump = perlin3(hb, p * (1.0lf / f64(lam)));
             // crowns of different size along the hedge: its width varies (the mean below the pixel)
             let hw = hw0 * (0.875 + 0.4 * clump * band(lam, gsd));
-            let c = band_cov(edge, hw, fwb);
+            let c = max(min(edge + 0.5 * fwb, hw) - max(edge - 0.5 * fwb, -hw), 0.0) / fwb;
             if (c <= 0.0) {
                 return o;
             }

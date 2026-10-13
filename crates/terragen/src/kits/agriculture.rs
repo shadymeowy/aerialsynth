@@ -1557,7 +1557,9 @@ fn draw_border(b: u32, edge: f64, col: DVec3, dh: f64, cls: u8, pc: &Parcel, px:
             let clump = perlin3(hb, p / lam);
             // crowns of different size along the hedge: its width varies (the mean below the pixel)
             let hw = hw0 * (0.875 + 0.4 * clump * band(lam, gsd));
-            let c = band_cov(edge, hw, fwb);
+            // (the band box-filtered exactly: a band narrower than the filter keeps its area
+            // instead of widening to the filter)
+            let c = ((edge + 0.5 * fwb).min(hw) - (edge - 0.5 * fwb).max(-hw)).max(0.0) / fwb;
             if c <= 0.0 {
                 return (col, dh, cls);
             }
