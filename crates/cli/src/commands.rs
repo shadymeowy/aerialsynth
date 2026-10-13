@@ -32,7 +32,7 @@ fn bar(len: usize, what: &str) -> ProgressBar {
 fn synth(s: &Scenario, out: &Path) -> Result<()> {
     let gen = pipeline::generator(s)?;
     let home = s.world.home.clone().unwrap_or_default();
-    let ell = gen.world.ell;
+    let ell = gen.ell();
     // ground reference for AGL flights: smooth terrain sampled at ~200 m resolution
     let failed = std::sync::Mutex::new(None);
     let ground = |pts: &[(f64, f64)]| -> Vec<f64> {

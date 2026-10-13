@@ -14,7 +14,7 @@
 //! is timed separately.
 use geodesy::tiles::{tile_for_latlon, TileId};
 use std::time::Instant;
-use terragen::{Generator, TileData, TILE_SIZE};
+use terragen::{NextGenerator, TileData, TILE_SIZE};
 
 /// Places of the default world (seed 1): name, lat, lon (deg).
 const PLACES: &[(&str, f64, f64)] = &[
@@ -54,7 +54,7 @@ fn main() -> anyhow::Result<()> {
     let png = arg(&args, "--png").map(std::path::PathBuf::from);
     let places: Vec<(&str, f64, f64)> = PLACES.iter().copied().filter(|p| only.as_ref().is_none_or(|o| o.contains(&p.0))).collect();
     let t0 = Instant::now();
-    let gen = Generator::try_with_backend(cfg, backend)?;
+    let gen = NextGenerator::try_with_backend(cfg, backend)?;
     gen.tiles(&[TileId::new(3, 4, 3)])?;
     eprintln!("generator on {} ready in {:.2} s (incl. one tile)", gen.backend_name(), t0.elapsed().as_secs_f64());
     if let Some(d) = &png {

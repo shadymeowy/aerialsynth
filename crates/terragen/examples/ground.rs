@@ -15,7 +15,7 @@ fn main() -> anyhow::Result<()> {
     if let Some(seed) = args.iter().find(|a| *a != "--cover") {
         cfg.seed = seed.parse()?;
     }
-    let g = terragen::Generator::new(cfg);
+    let g = terragen::NextGenerator::new(cfg);
     let mut pts = Vec::new();
     for line in std::io::stdin().lock().lines() {
         let v: Vec<f64> = line?.split_whitespace().map(|s| s.parse()).collect::<Result<_, _>>()?;

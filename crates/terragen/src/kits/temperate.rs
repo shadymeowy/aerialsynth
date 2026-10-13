@@ -798,7 +798,7 @@ mod tests {
                 return;
             }
         };
-        let cpu = crate::Generator::new(cfg);
+        let cpu = crate::NextGenerator::new(cfg);
         let mut worst = 0.0f64;
         for (name, _, _) in PLACES {
             for z in [16u8, 14, 12, 9] {
@@ -820,7 +820,7 @@ mod tests {
     #[test]
     fn lod_seams_determinism() {
         let cfg = crate::Config { tile_supersample: 1, ..crate::Config::default() };
-        let g = crate::Generator::new(cfg.clone());
+        let g = crate::NextGenerator::new(cfg.clone());
         let n = crate::TILE_SIZE;
         for (name, _, _) in PLACES {
             for z in [12u8, 15] {
@@ -857,7 +857,7 @@ mod tests {
             // determinism (a fresh generator) and the seam to the eastern neighbour
             let id = tile_at(name, 15);
             let a = g.tile(id);
-            let b = crate::Generator::new(cfg.clone()).tile(id);
+            let b = crate::NextGenerator::new(cfg.clone()).tile(id);
             assert_eq!(a.rgb, b.rgb, "{name}: not deterministic");
             let r = g.tile(geodesy::tiles::TileId::new(id.z, id.x + 1, id.y));
             let (mut across, mut inside) = (0.0, 0.0);
@@ -881,7 +881,7 @@ mod tests {
         if g.check_generator().is_err() {
             return;
         }
-        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
         for &(name, lat, lon) in &PLACES {
             let ids: Vec<_> = [6u8, 8, 10, 12, 14, 16].iter().map(|&z| geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)).collect();
             if let Err(e) = gen.tiles(&ids) {
@@ -898,7 +898,7 @@ mod tests {
     #[test]
     #[ignore]
     fn bench_places() {
-        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
         gen.tiles(&[geodesy::tiles::TileId::new(3, 4, 3)]).unwrap();
         for z in [8u8, 10, 12, 14, 16] {
             let mut ids = Vec::new();
@@ -926,7 +926,7 @@ mod tests {
     #[ignore]
     fn find_features() {
         use rayon::prelude::*;
-        let g = crate::Generator::new(crate::Config::default());
+        let g = crate::NextGenerator::new(crate::Config::default());
         let n: usize = std::env::var("FIND_N").ok().and_then(|v| v.parse().ok()).unwrap_or(20_000);
         let hits: Vec<(f64, f64, u8)> = (0..n)
             .into_par_iter()

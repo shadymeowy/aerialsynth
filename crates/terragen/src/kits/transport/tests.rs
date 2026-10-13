@@ -322,7 +322,7 @@ fn render_tiles() {
     let spec = std::env::var("TR_SPEC").unwrap_or_default();
     let backend = if std::env::var("TR_GPU").is_ok() { crate::Backend::Gpu } else { crate::Backend::Cpu };
     let night = std::env::var("TR_NIGHT").is_ok();
-    let gen = crate::Generator::try_with_backend(crate::Config::default(), backend).unwrap();
+    let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), backend).unwrap();
     for item in spec.split(';').filter(|s| !s.is_empty()) {
         let (name, rest) = item.split_once(':').unwrap();
         let v: Vec<f64> = rest.split(',').map(|x| x.trim().parse().unwrap()).collect();
@@ -356,7 +356,7 @@ fn render_tiles() {
 /// Parent ≈ mean of children where the kit draws (elevation, albedo).
 #[test]
 fn lod_consistent_at_places() {
-    let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+    let g = crate::NextGenerator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
     let n = crate::TILE_SIZE;
     for &(name, z) in &[("parclo", 13u8), ("station", 14), ("roundabout", 15), ("trumpet", 14), ("portal", 15)] {
         let parent = tile_at(name, z);
@@ -389,7 +389,7 @@ fn lod_consistent_at_places() {
 /// No seam between neighbouring tiles where the kit draws (E-W and N-S).
 #[test]
 fn seamless_at_places() {
-    let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+    let g = crate::NextGenerator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
     let n = crate::TILE_SIZE;
     for &(name, z) in &[("parclo", 15u8), ("station", 14), ("roundabout", 16), ("bridge", 15)] {
         let id = tile_at(name, z);
@@ -418,12 +418,12 @@ fn seamless_at_places() {
 #[test]
 fn deterministic_at_places() {
     let cfg = crate::Config { tile_supersample: 1, ..crate::Config::default() };
-    let a = crate::Generator::new(cfg.clone());
+    let a = crate::NextGenerator::new(cfg.clone());
     let list = [("parclo", 15u8), ("roundabout", 16), ("portal", 16)];
     let ta: Vec<_> = list.iter().map(|&(nm, z)| a.tile(tile_at(nm, z))).collect();
     net::clear_cache();
     build::clear_cache();
-    let b = crate::Generator::new(cfg);
+    let b = crate::NextGenerator::new(cfg);
     for (k, &(nm, z)) in list.iter().enumerate() {
         let y = b.tile(tile_at(nm, z));
         let x = &ta[k];
@@ -449,7 +449,7 @@ fn tiles_match_the_cpu() {
             return;
         }
     };
-    let cpu = crate::Generator::new(cfg);
+    let cpu = crate::NextGenerator::new(cfg);
     let mut worst: f64 = 0.0;
     for &(name, z) in &[
         ("parclo", 12u8),
@@ -489,7 +489,7 @@ fn places_stay_on_the_gpu() {
     if g.check_generator().is_err() {
         return;
     }
-    let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+    let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
     for &(name, lat, lon) in PLACES {
         let ids: Vec<_> = [6u8, 8, 10, 12, 14, 16, 18].iter().map(|&z| geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)).collect();
         if let Err(e) = gen.tiles(&ids) {
@@ -548,7 +548,7 @@ fn debug_parity() {
     std::fs::create_dir_all(&out).unwrap();
     let cfg = crate::Config::default();
     let gen = crate::gpu::GpuGenerator::new(cfg.clone()).unwrap();
-    let cpu = crate::Generator::new(cfg);
+    let cpu = crate::NextGenerator::new(cfg);
     let id = if v.len() == 2 {
         tile_at(name, z)
     } else {
