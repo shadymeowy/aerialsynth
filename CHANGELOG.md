@@ -18,7 +18,9 @@
     notices, the device-wide compile lock, the pipeline cache under `pipelines-classic-*` file
     names, so switching generators does not evict the other's cache).
     `scripts/classic_v020_check.sh V020_TERRAIN` compares tiles of the v0.2.0 binary and of
-    this one byte by byte (CLASSIC_V020_RESULT).
+    this one byte by byte: 24 tiles (zooms 6–16 at four places) identical on the CPU and on
+    the GPU (Tesla P4), every layer. A v0.2.0 store opens with the default config and takes new
+    tiles.
   - **API:** `terragen::Generator` is the world's generator (classic or next, from the config);
     the modular one is `terragen::NextGenerator`, the classic one `terragen::classic::Generator`.
     `Generator::ell()` replaces `gen.world.ell`, `Generator::biome` is `None` for classic,
@@ -40,7 +42,10 @@
     both generators.
   - **Example** `camera-footprint`: the v0.2.0 showcase's boreal pose (52.97924 N, 16.41426 W,
     900 m above the ground, heading 60°, 32° below the horizon, midsummer noon) on the default
-    generator; `cargo run --release -p camera-footprint OUT next` renders the next generator's.
+    generator; `cargo run --release -p camera-footprint OUT next ALT` renders the next
+    generator's. Its corner rays meet the terrain by marching (¼ elevation pixel steps) and
+    bisection to 1 cm instead of a fixed-point iteration, which oscillated on steep ground (the
+    boreal upland's far corner: 1575 ↔ 1992 m).
 
 - **Example `camera-footprint`** (`examples/camera-footprint`, `cargo run --release -p
   camera-footprint`): a teaching program, read top to bottom, that makes the coordinate frames
