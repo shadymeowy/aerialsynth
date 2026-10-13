@@ -39,6 +39,7 @@ const F_ATMO: u32 = 32u;
 const F_FLICKER: u32 = 64u;
 const F_LIGHTS: u32 = 128u;
 const F_POLLUTION: u32 = 256u;
+const F_WALLS: u32 = 512u;
 
 const HAS_COLOR: u32 = 1u;
 const HAS_NORMAL: u32 = 2u;
@@ -480,6 +481,213 @@ fn sun_visibility(p0: GP) -> f32 {
     return 1.0;
 }
 
+// ---------------------------------------------------------------- steep walls (render::walls)
+
+const WK_NONE: u32 = 0u;
+const WK_BUILT: u32 = 1u;
+const WK_GLASS: u32 = 2u;
+const WK_ROCK: u32 = 3u;
+const WK_VEG: u32 = 4u;
+const WK_SNOW: u32 = 5u;
+const WALL_WRAP: i32 = 4095;
+
+fn wall_weight(nz: f32) -> f32 {
+    let t = clamp((0.62 - nz) / 0.22, 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+// height above the ellipsoid of the point at `range` along a view direction with dot `e` with
+// the camera's up (walls::sample_height)
+fn sample_height(h_cam: f32, e: f32, range: f32) -> f32 {
+    let dv = range * e;
+    return h_cam + dv + (range * range - dv * dv) / (2.0 * (6371000.0 + h_cam));
+}
+
+fn wall_is_built(c: u32) -> bool {
+    return lc_group(c) == LG_BUILT || c == LC_GREENHOUSE;
+}
+
+fn wall_kind(top: u32, here: u32) -> u32 {
+    if wall_is_built(top) {
+        return select(WK_BUILT, WK_GLASS, lc_material(top).x > 0.0);
+    }
+    var g = lc_group(here);
+    if g == LG_WATER || g == LG_UNKNOWN || g == LG_BUILT || g == LG_TRANSPORT {
+        g = lc_group(top);
+    }
+    if g == LG_BARE || g == LG_WATER || g == LG_UNKNOWN || g == LG_BUILT || g == LG_TRANSPORT {
+        return WK_ROCK;
+    }
+    if g == LG_SNOW_ICE {
+        return WK_SNOW;
+    }
+    return WK_VEG;
+}
+
+fn wall_hash(a: i32, b: i32) -> f32 {
+    var h = (bitcast<u32>(a) * 0x8DA6B343u) ^ (bitcast<u32>(b) * 0xD8163841u);
+    h ^= h >> 15u;
+    h *= 0x2C1B3C6Du;
+    h ^= h >> 12u;
+    h *= 0x297A2D39u;
+    h ^= h >> 15u;
+    return f32(h >> 8u) / 16777216.0;
+}
+
+fn wall_inside(f: f32, a: f32, b: f32) -> f32 {
+    return select(0.0, 1.0, f >= a && f < b);
+}
+
+// colour and night emission of a wall sample (walls::texel)
+fn wall_texel(kind: u32, base: vec3<f32>, s: f32, h: f32, ground: f32, top: f32, foot: f32) -> TX {
+    if kind == WK_BUILT || kind == WK_GLASS {
+        let glass = kind == WK_GLASS;
+        let rel = h - ground;
+        let fh = select(3.1, 3.8, glass);
+        let bw = select(2.4, 1.6, glass);
+        let fl = rel / fh;
+        let fi = floor(fl);
+        let fy = fl - fi;
+        let sx = s / bw;
+        let bi = floor(sx);
+        let fx = sx - bi;
+        let body = wall_inside(rel, 0.0, top - ground - 0.9);
+        let lit_p = select(0.28, 0.4, glass);
+        let lit = select(0.0, 1.0, wall_hash(i32(bi), i32(fi)) < lit_p);
+        var col: vec3<f32>;
+        var mean: vec3<f32>;
+        var win: f32;
+        var wf: f32;
+        var e_col: vec3<f32>;
+        if glass {
+            let pane = mix(base, vec3<f32>(0.07, 0.09, 0.11), 0.75);
+            let mullion = vec3<f32>(0.30, 0.31, 0.33);
+            let spandrel = pane * 0.6;
+            let m = wall_inside(fx, 0.0, 0.07);
+            let sp = wall_inside(fy, 0.0, 0.2) * (1.0 - m);
+            col = pane * (1.0 - m - sp) + mullion * m + spandrel * sp;
+            mean = pane * (0.93 - 0.186) + mullion * 0.07 + spandrel * 0.186;
+            win = (1.0 - m) * (1.0 - sp);
+            wf = 0.93 * 0.8;
+            e_col = vec3<f32>(0.85, 0.9, 1.0);
+        } else {
+            let l = dot(base, vec3<f32>(0.2126, 0.7152, 0.0722));
+            let facade = min(mix(base, vec3<f32>(l), 0.35) * 1.1 + vec3<f32>(0.03), vec3<f32>(0.8));
+            let glass_c = vec3<f32>(0.05, 0.06, 0.075);
+            let slab = wall_inside(fy, 0.0, 0.06);
+            win = wall_inside(fy, 0.32, 0.82) * wall_inside(fx, 0.22, 0.78);
+            col = mix(facade * (1.0 - 0.15 * slab), glass_c, win);
+            wf = 0.5 * 0.56;
+            mean = mix(facade * (1.0 - 0.15 * 0.06), glass_c, wf);
+            e_col = vec3<f32>(1.0, 0.78, 0.5);
+        }
+        let k = clamp((1.4 - foot) / 0.7, 0.0, 1.0) * body;
+        let e = e_col * (0.9 * (win * lit * k + wf * lit_p * (1.0 - k)) * body);
+        return TX(mix(mean, col, k), e);
+    }
+    if kind == WK_ROCK {
+        let b = h / 2.6 + 0.35 * sin(s / 23.0);
+        let bi = floor(b);
+        let fb = b - bi;
+        let layer = 0.8 + 0.4 * wall_hash(i32(bi), 7);
+        let bed = 1.08 - 0.16 * fb;
+        let j = s / 3.5 + wall_hash(i32(bi), 3);
+        let joint = select(1.0, 0.7, j - floor(j) < 0.08);
+        let k = clamp((4.0 - foot) / 2.5, 0.0, 1.0);
+        let f = 1.0 + (layer * bed * joint / 0.976 - 1.0) * k;
+        let rock = mix(base, vec3<f32>(dot(base, vec3<f32>(0.2126, 0.7152, 0.0722))), 0.3);
+        return TX(rock * f, vec3<f32>(0.0));
+    }
+    if kind == WK_VEG {
+        let c = wall_hash(i32(floor(s / 3.0)), i32(floor(h / 3.0)));
+        let k = clamp((4.0 - foot) / 2.5, 0.0, 1.0);
+        return TX(base * (0.8 * (1.0 + (0.5 * c - 0.25) * k)), vec3<f32>(0.0));
+    }
+    return TX(base * vec3<f32>(0.95, 0.97, 1.0), vec3<f32>(0.0));
+}
+
+// The texels the wall reads (nearest, no fallback): the tile entry of q (`e` when q is in p's
+// tile: one table lookup for most walls), its land cover (0: none), DSM height (h0: none),
+// colour (w = 0: none).
+fn wall_entry(q: GP, p: GP, e: u32) -> u32 {
+    if q.z == p.z && (q.ix >> 8u) == (p.ix >> 8u) && (q.iy >> 8u) == (p.iy >> 8u) {
+        return e;
+    }
+    return tile_of(q.z, q.ix, q.iy);
+}
+
+fn wall_lc(e: u32, q: GP) -> u32 {
+    if e == EMPTY || ((e >> 16u) & HAS_LC) == 0u {
+        return 0u;
+    }
+    return textureLoad(t_lc, vec2<i32>(q.ix & 255, q.iy & 255), i32(e & 0xFFFFu), 0).r;
+}
+
+fn wall_h(e: u32, q: GP, h0: f32) -> f32 {
+    if e == EMPTY || ((e >> 16u) & HAS_ELEV) == 0u {
+        return h0;
+    }
+    return textureLoad(t_elev, vec2<i32>(q.ix & 255, q.iy & 255), i32(e & 0xFFFFu), 0).r;
+}
+
+fn wall_col(e: u32, q: GP) -> vec4<f32> {
+    if e == EMPTY || ((e >> 16u) & HAS_COLOR) == 0u {
+        return vec4<f32>(0.0);
+    }
+    return vec4<f32>(textureLoad(t_color, vec2<i32>(q.ix & 255, q.iy & 255), i32(e & 0xFFFFu), 0).rgb, 1.0);
+}
+
+// geometric normal (camera frame, facing the camera; zero when unknown) of the rendered surface
+// at supersampled pixel (x, y), from its neighbours' points (Renderer::geo_normal: the next pixel
+// on each axis, the previous one where that is missing or across a silhouette)
+fn ss_point(x: i32, y: i32) -> vec4<f32> {
+    if x < 0 || y < 0 || x >= i32(u.dims.x) || y >= i32(u.dims.y) {
+        return vec4<f32>(0.0);
+    }
+    let g = textureLoad(gbuf, vec2<i32>(x, y), 0);
+    let ray = rays[u32(y) * u.dims.x + u32(x)].xyz;
+    if bitcast<u32>(g.w) == 0u || all(ray == vec3<f32>(0.0)) {
+        return vec4<f32>(0.0);
+    }
+    return vec4<f32>(ray * g.z, 1.0);
+}
+
+// the step from point c to its neighbour at +d (pixels), or from the one at -d where that is
+// missing or across a silhouette (farther than a tenth of the range); w = 0: neither
+fn geo_step(c: vec3<f32>, x: i32, y: i32, d: vec2<i32>) -> vec4<f32> {
+    let lim = 0.01 * dot(c, c);
+    let hi = ss_point(x + d.x, y + d.y);
+    if hi.w > 0.0 {
+        let b = hi.xyz - c;
+        if dot(b, b) < lim {
+            return vec4<f32>(b, 1.0);
+        }
+    }
+    let lo = ss_point(x - d.x, y - d.y);
+    if lo.w > 0.0 {
+        let a = c - lo.xyz;
+        if dot(a, a) < lim {
+            return vec4<f32>(a, 1.0);
+        }
+    }
+    return vec4<f32>(0.0);
+}
+
+// (c: the sample's own point, camera frame)
+fn geo_normal(x: i32, y: i32, c: vec3<f32>) -> vec3<f32> {
+    let dx = geo_step(c, x, y, vec2<i32>(1, 0));
+    let dy = geo_step(c, x, y, vec2<i32>(0, 1));
+    if dx.w == 0.0 || dy.w == 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let n = cross(dx.xyz, dy.xyz);
+    let l = length(n);
+    if l < 1e-12 {
+        return vec3<f32>(0.0);
+    }
+    return select(n / l, -n / l, dot(n, c) > 0.0);
+}
+
 // ---------------------------------------------------------------- shading
 
 struct PS {
@@ -495,9 +703,17 @@ struct PS {
     flicker: f32,
     fdepth: f32,
     fphase: f32,
+    // the steep wall at the pixel (render::walls), packed (fewer registers): kind + weight / 2,
+    // base colour (sqrt, unorm8 x 3), ground and top heights, direction along it (texel space,
+    // snorm16 x 2)
+    wkw: f32,
+    wbase: u32,
+    wground: f32,
+    wtop: f32,
+    wtan: u32,
 };
 
-fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32) -> PS {
+fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32>, hs: f32) -> PS {
     let lat = gp_lat(p);
     let lon = gp_lon(p);
     let sl = sin(lat);
@@ -523,6 +739,50 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32) -> PS {
         hdir = vec2<f32>(1.0, 0.0);
     }
     let sky_amb = vec3<f32>(0.80, 0.90, 1.10) * 0.32 * u.sun.y;
+    // a steep wall: the geometric normal's slope; kind, base colour, ground and top heights
+    var wk = WK_NONE;
+    var ww = 0.0;
+    var wbase = vec3<f32>(0.0);
+    var wground = 0.0;
+    var wtop = 0.0;
+    var wtan = vec2<f32>(0.0);
+    var cls_top = 0u;
+    let ng = vec3<f32>(dot(n_geo, east), dot(n_geo, north), dot(n_geo, up));
+    let hz = vec2<f32>(ng.x, -ng.y);
+    let wt = wall_weight(ng.z);
+    if wt > 0.0 && dot(hz, hz) > 1e-6 {
+        let out = normalize(hz);
+        let e0 = tile_of(p.z, p.ix, p.iy);
+        let pt = gp_add(p, -2.5 * out);
+        let pg = gp_add(p, 2.5 * out);
+        let et = wall_entry(pt, p, e0);
+        cls_top = wall_lc(et, pt);
+        wk = wall_kind(cls_top, wall_lc(e0, p));
+        var b: vec4<f32>;
+        if wk == WK_BUILT || wk == WK_GLASS {
+            b = wall_col(et, pt);
+        } else {
+            let pc = gp_coarser(p, min(p.z, 2));
+            b = wall_col(tile_of(pc.z, pc.ix, pc.iy), pc);
+        }
+        wbase = select(vec3<f32>(0.2), b.xyz, b.w > 0.0);
+        wtop = wall_h(et, pt, hs);
+        wground = wall_h(wall_entry(pg, p, e0), pg, hs);
+        wtan = vec2<f32>(-out.y, out.x);
+        ww = wt;
+    }
+    // the class's material (lc_material, generated from terragen::landcover): self-emission
+    // with the lights, the glint of water and other glossy classes (as raster.rs)
+    var mat = vec4<f32>(0.0);
+    if has(F_RELIT) {
+        if ww > 0.5 {
+            if wk == WK_GLASS {
+                mat = lc_material(cls_top);
+            }
+        } else {
+            mat = lc_material(landcover(p));
+        }
+    }
     var mul: vec3<f32>;
     var add = vec3<f32>(0.0);
     if has(F_RELIT) {
@@ -531,7 +791,7 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32) -> PS {
         if ns.w > 0.0 {
             n_enu = ns.xyz;
         }
-        let n = normalize(east * n_enu.x + north * n_enu.y + up * n_enu.z);
+        let n = normalize(normalize(east * n_enu.x + north * n_enu.y + up * n_enu.z) * (1.0 - ww) + n_geo * ww);
         let ndl = max(dot(n, u.sun_dir.xyz), 0.0);
         let ndm = max(dot(n, u.moon_dir.xyz), 0.0);
         mul = u.sun_col.xyz * (ndl * 1.25 * shadow) + u.moon_col.xyz * (ndm * 1.25) + sky_amb * (0.6 + 0.4 * dot(n, up));
@@ -545,21 +805,19 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32) -> PS {
             mul += e.xyz * (0.2 * u.sun.z);
         }
     }
-    // the class's material (lc_material, generated from terragen::landcover): self-emission
-    // with the lights, the glint of water and other glossy classes (as raster.rs)
-    var mat = vec4<f32>(0.0);
-    if has(F_RELIT) {
-        mat = lc_material(landcover(p));
-    }
     if mat.w > 0.0 && u.sun.z > 1e-3 {
         mul += vec3<f32>(mat.w * u.sun.z);
     }
     if has(F_GLINT) && mat.x > 0.0 {
         let sun = u.sun_dir.xyz;
+        var nm = up;
+        if ww > 0.0 {
+            nm = normalize(up * (1.0 - ww) + n_geo * ww);
+        }
         let hv = normalize(v + sun);
-        let nh = max(dot(up, hv), 0.0);
-        let fres = mat.y + (1.0 - mat.y) * pow(1.0 - max(dot(v, up), 0.0), 5.0);
-        let sky_c = sky(normalize(dir_w - up * 2.0 * dot(dir_w, up)), up);
+        let nh = max(dot(nm, hv), 0.0);
+        let fres = mat.y + (1.0 - mat.y) * pow(1.0 - clamp(dot(v, nm), 0.0, 1.0), 5.0);
+        let sky_c = sky(normalize(dir_w - nm * 2.0 * dot(dir_w, nm)), up);
         mul *= 1.0 - mat.x * fres;
         add += (sky_c * fres + u.sun_col.xyz * (shadow * 1.5 * pow(nh, mat.z))) * mat.x;
     }
@@ -589,7 +847,7 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32) -> PS {
         // 1 + d · sinc · cos(ωt + phase)
         flicker = 1.0 + m.x * u.flick.z * (u.flick.x * cos(m.y) - u.flick.y * sin(m.y));
     }
-    return PS(p.z, range, lam, aniso, hdir, major / texel, mul * tt.t, add * tt.t + ins, tt.t * u.sun.z, flicker, fd, fph);
+    return PS(p.z, range, lam, aniso, hdir, major / texel, mul * tt.t, add * tt.t + ins, tt.t * u.sun.z, flicker, fd, fph, f32(wk) + 0.5 * ww, pack4x8unorm(vec4<f32>(sqrt(clamp(wbase, vec3<f32>(0.0), vec3<f32>(1.0))), 0.0)), wground, wtop, pack2x16snorm(wtan));
 }
 
 struct TX {
@@ -597,7 +855,23 @@ struct TX {
     emis: vec3<f32>,
 };
 
-fn texture_fetch(ps: PS, p: GP) -> TX {
+fn texture_fetch(ps: PS, p: GP, hs: f32) -> TX {
+    // a wall's material at the sample's height and position along the wall
+    var wall = TX(vec3<f32>(0.0), vec3<f32>(0.0));
+    let ww = 2.0 * fract(ps.wkw);
+    if ww > 0.0 {
+        // (metres per texel of the sample's zoom, and the patterns' footprint: two sub-samples)
+        let minor = ps.range * u.cam_up.w;
+        let tz = minor * exp2(f32(ps.z - p.z) - ps.lam);
+        let lx = f32(p.ix & WALL_WRAP) + p.fx;
+        let ly = f32(p.iy & WALL_WRAP) + p.fy;
+        let b = unpack4x8unorm(ps.wbase).xyz;
+        let tan = unpack2x16snorm(ps.wtan);
+        wall = wall_texel(u32(ps.wkw), b * b, (lx * tan.x + ly * tan.y) * tz, hs, ps.wground, ps.wtop, 2.0 * minor);
+        if ww >= 1.0 {
+            return TX(wall.col * ps.mul + ps.add, wall.emis * ps.emis);
+        }
+    }
     let dz = f32(p.z - ps.z);
     let lam = max(ps.lam + dz, 0.0);
     let major_texels = ps.major_texels * exp2(dz);
@@ -654,6 +928,10 @@ fn texture_fetch(ps: PS, p: GP) -> TX {
     var c0 = vec3<f32>(0.2);
     if wsum > 0.0 {
         c0 = col / wsum;
+    }
+    if ww > 0.0 {
+        c0 += (wall.col - c0) * ww;
+        e0 += (wall.emis - e0) * ww;
     }
     return TX(c0 * ps.mul + ps.add, e0 * ps.emis);
 }
@@ -731,6 +1009,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if sx == cs && sy == cs {
             geo = vec4<f32>(range * ray.z, range, f32(landcover(p)), 0.0);
         }
+        // height of the sample (wall patterns)
+        let hs = sample_height(u.cam_pos.w, dot(dir_w, u.cam_up.xyz), range);
         var pc: PS;
         let reuse = have_ctx && abs(range - ctx.range) < 0.03 * ctx.range;
         if reuse {
@@ -740,13 +1020,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if has(F_SHADOWS) {
                 shadow = sun_visibility(p);
             }
-            pc = pixel_shade(p, range, dir_w, shadow);
+            var n_geo = vec3<f32>(0.0);
+            if has(F_WALLS) {
+                n_geo = r_cam * geo_normal(i32(x), i32(y), ray * range);
+            }
+            pc = pixel_shade(p, range, dir_w, shadow, n_geo, hs);
             if !have_ctx {
                 ctx = pc;
                 have_ctx = true;
             }
         }
-        let tx = texture_fetch(pc, p);
+        let tx = texture_fetch(pc, p, hs);
         if split {
             acc0 += tx.col + tx.emis;
             acc1 += tx.emis * (pc.fdepth * cos(pc.fphase));

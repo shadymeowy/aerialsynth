@@ -127,6 +127,7 @@ const F_ATMO: u32 = 32;
 const F_FLICKER: u32 = 64;
 const F_LIGHTS: u32 = 128;
 const F_POLLUTION: u32 = 256;
+const F_WALLS: u32 = 512;
 
 /// Render targets and read-back buffers of one resolution.
 struct Targets {
@@ -483,6 +484,7 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
         (lights && sun_state.flicker.enabled, F_FLICKER),
         (split, F_SPLIT),
         (atmo.p.enabled, F_ATMO),
+        (r.settings.walls, F_WALLS),
     ] {
         if on {
             flags |= f;
@@ -716,6 +718,33 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
 /// The shading shader: the land-cover class table (generated WGSL) and `shade.wgsl`.
 fn shade_source() -> String {
     format!("{}{}", terragen::landcover::WGSL, include_str!("shade.wgsl"))
+}
+
+/// Cold compile time of the renderer's pipelines (shading; `RENDER_SHADE_WGSL=FILE`: that
+/// shading source instead, e.g. an older version): `__GL_SHADER_DISK_CACHE=0 cargo test -p render
+/// --release --lib compile_times -- --ignored --nocapture` (on the farm: `rrun --gpu`).
+#[cfg(test)]
+#[test]
+#[ignore]
+fn compile_times() {
+    let Ok(g) = device::shared() else { return };
+    let d = &g.device;
+    let src = match std::env::var("RENDER_SHADE_WGSL") {
+        Ok(f) => std::fs::read_to_string(f).unwrap(),
+        Err(_) => shade_source(),
+    };
+    let t = std::time::Instant::now();
+    let m = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("shade"), source: wgpu::ShaderSource::Wgsl(src.into()) });
+    let _p = d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("shade"),
+        layout: None,
+        module: &m,
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    d.poll(wgpu::PollType::wait_indefinitely()).ok();
+    eprintln!("compile shade::main: {:.2} s", t.elapsed().as_secs_f64());
 }
 
 #[cfg(test)]

@@ -239,8 +239,9 @@ villages and farmsteads as points.
   actual places of a region happen to be few).
 * Reservoirs drown hamlets and villages (they are not drawn) instead of moving them; the
   transport kit's graph still routes to them and ends its roads at the shore.
-* Night lights: no lit facades of towers beyond the window rims, no interchange lighting
-  (transport kit).
+* Night lights: no interchange lighting (transport kit). The renderer lights the windows of
+  facades (`render.walls`: hashed per window, warm, white on glass towers); the tiles hold only
+  the window rims seen from above.
 
 Leftovers round B: districts are looked up at a position warped by two sines (16 % and 4.5 % of the cell), so their borders
 wander, and 60 % of the edges are arterials (the others are ordinary streets); the metro is still the same pattern mix to

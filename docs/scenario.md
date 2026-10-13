@@ -135,3 +135,5 @@ output: { file: out/seq.h5, pose: { path: /pose, rate_hz: 200 } }
 | `render.atmosphere.visibility_km`, `inscatter` | haze |
 | `cameras[].rgb.sensor.exposure.target` | overall brightness |
 | `cameras[].rgb.sensor.tone` | `saturation`, `white_balance`, `curve` (`srgb`/`filmic`/`gamma`/`linear`) |
+| `render.walls` | steep walls (facades, cliffs, steep canopy) get a wall material (floors and windows, lit windows at night; rock strata; canopy sides) instead of the top-down texture stretched down them (default on) |
+

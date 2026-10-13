@@ -47,7 +47,7 @@ messages) and `terragen::gpu::compiling_since()` (polled by the viewer).
 | mesh geometry per unit and vertex stride: f64 ECEF vertices (shared `unit_geometry`) | CPU, once; cached on the GPU relative to a per-unit origin | camera-independent |
 | projection through the camera model (pinhole ± distortion, rational, Kannala–Brandt, Mei, Scaramuzza) | GPU vertex shader (`mesh.wgsl`) | per frame only a per-unit offset (f64 on the CPU) is uploaded |
 | rasterization into a supersampled G-buffer (unit, u, v, range) | GPU render pass | |
-| deferred shading: pyramid texture filtering, relighting, DSM shadows, lamps + flicker, sky, aerial perspective | GPU compute pass (`shade.wgsl`, a port of `raster.rs` / `atmo.rs`) | the expensive part |
+| deferred shading: pyramid texture filtering, relighting, DSM shadows, lamps + flicker, wall materials, sky, aerial perspective | GPU compute pass (`shade.wgsl`, a port of `raster.rs` / `atmo.rs` / `walls.rs`) | the expensive part |
 | read-back, 3D points from depth and rays | CPU | |
 
 A unit's mesh is fixed by the unit, its vertex stride (from the camera distance, as on the CPU)
