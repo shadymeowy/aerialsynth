@@ -830,17 +830,17 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     o.sid = blk.sid;
     o.major = blk.major;
     // ---- streets and arterials
-    let street_ok = dens_here > 0.3;
-    var art_hw = 4.0;
+    let street_ok = dens_here > 0.42;
+    var art_hw = 3.5;
     if (pl.level == 2u) {
-        art_hw = 6.0;
+        art_hw = 5.0;
     } else if (pl.level == 3u) {
-        art_hw = 7.5;
+        art_hw = 6.0;
     } else if (pl.level >= 4u) {
-        art_hw = 9.0;
+        art_hw = 7.5;
     }
     let has_streets = !(pattern == SP_DISPERSED || pattern == SP_KRAAL);
-    if (art < art_hw + 2.0 * fw && dens_here > 0.25) {
+    if (art < art_hw + 2.0 * fw && dens_here > 0.35) {
         let c = band_cov(art, art_hw, fw);
         if (c > 0.0) {
             o.ds = art;

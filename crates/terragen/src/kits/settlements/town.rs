@@ -789,10 +789,13 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     o.sid = blk.sid;
     o.major = blk.major;
     // ---- streets and arterials
-    let street_ok = dens_here > 0.3;
-    let art_hw = [4.0, 4.0, 6.0, 7.5, 9.0][pl.level as usize];
+    // (streets end where the town thins out: they ran on far into the fields, a grid of empty
+    // streets around every town; arterials narrower: they drew a dark outline around every
+    // district, the districts read as pieces of different towns)
+    let street_ok = dens_here > 0.42;
+    let art_hw = [3.5, 3.5, 5.0, 6.0, 7.5][pl.level as usize];
     let has_streets = !matches!(pattern, pat::DISPERSED | pat::KRAAL);
-    if art < art_hw + 2.0 * fw && dens_here > 0.25 {
+    if art < art_hw + 2.0 * fw && dens_here > 0.35 {
         let c = band_cov(art, art_hw, fw);
         if c > 0.0 {
             o.ds = art;
