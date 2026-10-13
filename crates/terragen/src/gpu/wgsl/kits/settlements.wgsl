@@ -553,7 +553,7 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
         if (survey) {
             theta = 0.0;
         } else {
-            theta = (ud - 0.5) * 0.3;
+            theta = (u01k(pl.seed ^ 0x7E7Alu, 5lu) - 0.5) * 0.3;
         }
         var bf = 1.0;
         let ar = pl.arch % 12u;

@@ -569,7 +569,9 @@ pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
         }
         let survey = pl.arch == 7;
         let ud = u01k(did, 5);
-        theta = if survey { 0.0 } else { (ud - 0.5) * 0.3 };
+        // (one street orientation per town: districts turned against each other read as pieces
+        // of different towns)
+        theta = if survey { 0.0 } else { (u01k(pl.seed ^ 0x7E7A, 5) - 0.5) * 0.3 };
         let bf = [1.0, 1.0, 0.9, 0.85, 1.0, 0.9, 1.05, 1.25, 0.8, 1.0, 0.9, 0.9][pl.arch as usize % 12];
         let u2 = u01k(did, 6);
         match pattern {
