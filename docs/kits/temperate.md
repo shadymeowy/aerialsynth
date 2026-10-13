@@ -44,11 +44,13 @@ gets the steppe class.
   patches, open water in the core and a network of creeks; beaver ponds on small streams — a
   lens-shaped pond, a ring of dead grey trees, the beaver meadow; floodplain meadows with
   swales parallel to the channel. Pools and ponds are class *lake*; mires *bog*, reed *marsh*.
-* **Managed forest** (disturbance slot): rectangular stands (a brick pattern of columns
-  150–300 m wide in the land-use region's frame) where the culture manages its forests (boreal,
-  survey-grid and temperate archetypes, by development and a per-ecoregion draw), some cut in the
-  last 16 years — fresh slash with skid trails, a landing and a few seed trees, then grass and
-  fireweed, then dense young plantations in rows — with logging roads along the column edges
+* **Managed forest** (disturbance slot): stands (a brick pattern of columns 150–300 m wide in
+  the land-use region's frame, warped by ~25 m) where the culture manages its forests (boreal,
+  survey-grid and temperate archetypes, by development and a per-ecoregion draw), about 0.5 %
+  of them cut a year (at most 9 % within 16 years; most cuts years old) with ragged edges (seed
+  trees and uncut corners along the border) — fresh dark slash with skid trails, a landing and a
+  few seed trees, then grass and fireweed, then dense young plantations in rows — with logging
+  roads along the column edges
   (class *clear-cut*, roads *track*); windthrow — patches of fallen trunks lying in the storm's
   direction; firebreaks — straight cleared strips with a track through the forests and scrub of
   dry-summer climates (and the managed boreal forest).

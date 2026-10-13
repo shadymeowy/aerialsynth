@@ -45,6 +45,13 @@ Parcels are crisp units with hashed ids (their crops are the parcel's instance i
 `instance` tile layer; borders, yards and ponds are not); rows, furrows, crowns and trails are
 band-limited and blend to the system's mean at coarse pixels. Field tracks only: roads are the transport kit's.
 
+**Around the fields** (core and kit): the farmland's woodlots (the most forest-prone patches,
+about a seventh of the land by the biome and culture) are forest whatever the climate's forest
+share; streams carry gallery trees wherever the moisture is above 0.18 (a belt 7 m + 0.6 × the
+channel's half width, box-filtered by the pixel); hedges have gaps (gateways, missing
+stretches) and hedgerow trees bulging out of them every few tens of metres (shelter belts are
+continuous); tilled soil is a dull brown of the biome's soils.
+
 ## Stills
 
 GPU-generated (`terrain survey`, `AERIALSYNTH_GPU_STRICT=1`), default world, 10:30 local on the
