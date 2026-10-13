@@ -235,7 +235,8 @@ fn ridges(p: DVec3, wf: f64, nw: f64, pl: f64, belt: DVec3, wg: f64) -> f64 {
                 let n = d.cross(e);
                 // the strike: the belt's normal (the atlas' uplift gradient, `belt`, weight `wg`),
                 // else a direction shared by blocks of 4 × 4 × 4 corners (560 km) with a little jitter
-                let hb = hash3(SEED + 11, ((ix + dx) as f64 / 4.0).floor() as i64, ((iy + dy) as f64 / 4.0).floor() as i64, ((iz + dz) as f64 / 4.0).floor() as i64);
+                let hb =
+                    hash3(SEED + 11, ((ix + dx) as f64 / 4.0).floor() as i64, ((iy + dy) as f64 / 4.0).floor() as i64, ((iz + dz) as f64 / 4.0).floor() as i64);
                 let th = TAU * (u01k(hb, 1) + 0.18 * (u01k(h, 1) - 0.5));
                 let nn = (e * th.cos() + n * th.sin()) * (1.0 - wg) + belt * wg;
                 let lamk = 0.7 + 0.6 * u01k(h, 2);
