@@ -1,5 +1,10 @@
 # Desert kit
 
+> [!NOTE]
+> This kit belongs to the **next** generator (`world.generator: next`, a preview; see
+> [`docs/simulation.md`](../simulation.md)). The default generator, `classic` (v0.2.0's), has no
+> kits: worlds made with it do not show what this page describes.
+
 Hot and cold deserts from 100 m to 10 km above the ground: sand seas whose dunes follow the
 wind, the stony deserts between them, playas and dry lakes, wadis, yardangs and inselbergs.
 Design: [terrain-next.md §5.1](../design/terrain-next.md); contract:

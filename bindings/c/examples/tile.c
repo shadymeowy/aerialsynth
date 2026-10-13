@@ -10,7 +10,8 @@
  *   ./tile out/world.h5 [CONFIG.yaml|- [Z X Y]]
  *
  * CONFIG.yaml is a scenario (its `world:` section) or a world config; "-" or nothing = the default
- * world. The tile store is created if missing; the tile is generated and stored on first use.
+ * world. Its `world.generator` picks the terrain generator: classic (the default) or next
+ * (as_open_generator overrides it). The tile store is created if missing; the tile is generated and stored on first use.
  * Then the 2 x 2 tiles from Z/X/Y (to the east and south) are read in one call (as_tiles).
  */
 #include "aerialsynth.h"
@@ -38,6 +39,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "as_open: %s\n", as_last_error());
         return 1;
     }
+    printf("generator %s\n", as_generator(w));
     int status = 1;
     float *elev = NULL, *block = NULL;
     uint8_t *rgb = NULL;

@@ -240,6 +240,30 @@ pub unsafe extern "C" fn as_open(tiles_file: *const c_char, config_yaml: *const 
     out
 }
 
+/// `as_open` with the world's terrain generator: `generator` is `"classic"` (the default
+/// generator, v0.2.0's terrain) or `"next"` (the modular generator with the biome kits, a
+/// preview), or NULL for the config's `world.generator` (default `classic`). A store holds the
+/// tiles of one generator: a store of the other one is refused.
+///
+/// # Safety
+/// `tiles_file` is a NUL-terminated path; `config_yaml` is NULL or a NUL-terminated path;
+/// `generator` is NULL or a NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn as_open_generator(tiles_file: *const c_char, config_yaml: *const c_char, seed: i64, generator: *const c_char) -> *mut as_world {
+    let mut out = std::ptr::null_mut();
+    guard(|| {
+        let Some(tiles) = (unsafe { path(tiles_file, "tiles_file") })? else { return Err(invalid("tiles_file is NULL")) };
+        let config = unsafe { path(config_yaml, "config_yaml") }?;
+        let seed = u64::try_from(seed).ok();
+        let generator =
+            if generator.is_null() { None } else { Some(unsafe { CStr::from_ptr(generator) }.to_str().map_err(|_| invalid("generator is not UTF-8"))?) };
+        let world = World::open_generator(&tiles, config.as_deref(), seed, generator).map_err(status)?;
+        out = Box::into_raw(Box::new(as_world { world: Arc::new(world) }));
+        Ok(())
+    });
+    out
+}
+
 /// Close a world (flushing its store). NULL is ignored. The handle must not be in use by another
 /// thread, and is invalid afterwards. Cameras of the world stay usable: the store is closed when
 /// the world and all its cameras are closed.
@@ -424,6 +448,20 @@ pub unsafe extern "C" fn as_max_zoom(w: *const as_world) -> c_int {
     match unsafe { w.as_ref() } {
         Some(w) => w.world.max_zoom() as c_int,
         None => -1,
+    }
+}
+
+/// The world's terrain generator, `"classic"` or `"next"` (a static string), or NULL if `w` is
+/// NULL.
+///
+/// # Safety
+/// `w` is NULL or a handle from `as_open`.
+#[no_mangle]
+pub unsafe extern "C" fn as_generator(w: *const as_world) -> *const c_char {
+    match unsafe { w.as_ref() }.map(|w| w.world.generator()) {
+        Some("next") => c"next".as_ptr(),
+        Some(_) => c"classic".as_ptr(),
+        None => std::ptr::null(),
     }
 }
 
@@ -702,8 +740,46 @@ mod tests {
             assert!(last_error().contains("unknown layer 99"));
             assert_eq!(as_max_zoom(std::ptr::null()), -1);
             assert_eq!(as_has_layer(std::ptr::null(), AS_LAYER_RGB), AS_ERR_INVALID_ARGUMENT);
+            assert!(as_generator(std::ptr::null()).is_null());
+            assert!(as_open_generator(c"/tmp/aerialsynth-never.h5".as_ptr(), std::ptr::null(), -1, c"future".as_ptr()).is_null());
+            assert!(last_error().contains("unknown generator \"future\""), "{}", last_error());
             as_close(std::ptr::null_mut());
         }
+    }
+
+    /// Both generators: the config's (default classic) and the override; a store keeps its
+    /// generator.
+    #[test]
+    fn generators_through_the_c_api() {
+        let dir = std::env::temp_dir().join(format!("aerialsynth-capi-gen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("w.yaml");
+        std::fs::write(&cfg, "world: { tile_supersample: 1 }\ntiles: { max_zoom: 4 }\n").unwrap();
+        let c = |p: &std::path::Path| CString::new(p.to_str().unwrap()).unwrap();
+        let cfgc = c(&cfg);
+        let n = as_layer_size(AS_LAYER_LANDCOVER);
+        let mut tiles = Vec::new();
+        unsafe {
+            for (file, gen, want) in [("c.h5", None, "classic"), ("n.h5", Some(c"next"), "next"), ("c2.h5", Some(c"classic"), "classic")] {
+                let path = c(&dir.join(file));
+                let w = as_open_generator(path.as_ptr(), cfgc.as_ptr(), 3, gen.map_or(std::ptr::null(), |g: &CStr| g.as_ptr()));
+                assert!(!w.is_null(), "{}", last_error());
+                assert_eq!(CStr::from_ptr(as_generator(w)).to_str().unwrap(), want);
+                let mut lc = vec![0u8; n];
+                assert_eq!(as_tile(w, 2, 2, 1, AS_LAYER_LANDCOVER, lc.as_mut_ptr() as *mut c_void, n), AS_OK, "{}", last_error());
+                tiles.push(lc);
+                as_close(w);
+            }
+            // the same world with either way of naming classic; next builds another one
+            assert_eq!(tiles[0], tiles[2]);
+            assert_ne!(tiles[0], tiles[1]);
+            // a store of the next generator refuses classic
+            let path = c(&dir.join("n.h5"));
+            assert!(as_open(path.as_ptr(), cfgc.as_ptr(), 3).is_null());
+            assert!(last_error().contains("holds tiles of the next generator"), "{}", last_error());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -788,7 +864,7 @@ mod tests {
             assert!(last_error().contains("world.seed (2 → 3)"), "{}", last_error());
             // a store created with the optional layers
             let cfg2 = dir.join("w2.yaml");
-            std::fs::write(&cfg2, "world: { tile_supersample: 1 }\ntiles: { max_zoom: 5, layers: [dtm, instance] }\n").unwrap();
+            std::fs::write(&cfg2, "world: { generator: next, tile_supersample: 1 }\ntiles: { max_zoom: 5, layers: [dtm, instance] }\n").unwrap();
             let (tiles2, cfg2c) = (c(&dir.join("w2.h5")), c(&cfg2));
             let w = as_open(tiles2.as_ptr(), cfg2c.as_ptr(), 2);
             assert!(!w.is_null(), "{}", last_error());

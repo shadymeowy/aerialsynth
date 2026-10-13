@@ -2,13 +2,14 @@
 
 <p align="center"><img src="showcase/media/globe.jpg" width="440" alt="The generated planet (seed 1) seen from 15,000 km: continents, deserts, forests and oceans"></p>
 
-> [!WARNING]
-> **The terrain generator on `master` is being rewritten** (a modular generator with
-> climate-driven biomes, cultures and landscape kits; generator version 4). Until that work
-> is finished, `master` may look unfinished or change between commits, and tile stores made
-> with it are not compatible with releases. **To try aerialsynth, use the latest release,
-> [v0.2.0](https://github.com/shadymeowy/aerialsynth/releases/tag/v0.2.0)** (prebuilt
-> wheels and binaries there, or `git checkout v0.2.0` to build from source).
+> [!NOTE]
+> **Two terrain generators.** The default, `world.generator: classic`, is the generator of
+> [v0.2.0](https://github.com/shadymeowy/aerialsynth/releases/tag/v0.2.0), unchanged: its
+> tiles are bit-identical to v0.2.0's, and v0.2.0 tile stores open with it. `generator: next`
+> is the new modular generator (planetary atlas, climate-driven biomes, cultures and eleven
+> landscape kits, [`docs/kits/`](docs/kits/)): a **preview** with known limits (field
+> mosaics, merged towns and broken lakes in places), which may change between releases.
+> Everything else (rendering, sensors, bindings, viewer) is the same for both.
 
 A procedural planet for aerial vision research. `terrain` generates a deterministic world as
 Web-Mercator XYZ tiles, flies cameras and an IMU over it, and writes datasets with exact
@@ -105,9 +106,11 @@ terrain view -c my.yaml                     # look around: map, camera (M), flyi
 ```
 
 Without `-c` every command uses the default scenario. `--seed N` overrides `world.seed`: a
-different planet. A tile store holds exactly one world: a store made with another seed or world
-config is refused (the error names the settings that differ), so give each world its own
-`tiles.file`.
+different planet. The terrain comes from the **classic generator** (`world.generator: classic`,
+the default: v0.2.0's); `--generator next` (or `world.generator: next`) uses the new modular
+generator, a preview (see the note above). A tile store holds exactly one world: a store made
+with another seed, world config or generator is refused (the error names what differs), so give
+each world its own `tiles.file`.
 
 `configs/quick.yaml` is a 3 s smoke test (16 frames of a 320 × 256 camera; under a minute on
 4 CPU cores without a GPU, most of it generating its ~75 tiles, and ~6 s with one) and
@@ -128,8 +131,9 @@ fisheye, a 10 km cruise, a sunset and an IMU check.
 | `terrain info FILE` | summarize a tile store or a sequence file |
 | `terrain config` | the scenario template; `--all` every setting; `-c my.yaml` a scenario with its defaults filled in |
 
-`run`, `tiles`, `view` and `config` read one scenario (`-c`) and take `--seed` (a different
-world) and `-j` (threads); `show`, `export` and `info` take just the file.
+`run`, `tiles`, `view`, `survey` and `config` read one scenario (`-c`) and take `--seed` (a
+different world), `--generator classic|next` (the terrain generator) and `-j` (threads); `show`,
+`export` and `info` take just the file (`info` names a tile store's generator).
 `terrain <command> --help` lists the options.
 
 ## Outputs
@@ -150,14 +154,16 @@ Both are plain HDF5; layouts in [`docs/formats.md`](docs/formats.md).
 Tiles and rendering from C and Python ([`bindings/`](bindings/README.md)): open a world's tile
 store and get a layer of tile z/x/y, or render a camera image (RGB, depth, land cover) from a
 pose with the renderer of `terrain run`; tiles that are not stored yet are generated (GPU if
-available, else CPU) and stored first. The world is given like `terrain -c FILE --seed N`.
+available, else CPU) and stored first. The world is given like `terrain -c FILE --seed N
+--generator G` (default: the classic generator; `generator="next"` / `as_open_generator` for
+the preview).
 The first render at a new place generates a few hundred tiles: under half a minute on a GPU,
 minutes on a CPU (`World(..., verbose=True)` / `as_set_verbose` shows the progress, `World.prefetch` /
 `as_prefetch` makes an area's tiles ahead; [details](bindings/README.md#rendering)).
 
 ```python
 import aerialsynth                                       # bindings/python (maturin, abi3 ≥ 3.10)
-w = aerialsynth.World("out/world.h5")                    # the default world; created if missing
+w = aerialsynth.World("out/world.h5")                    # the default world (classic generator); created if missing
 rgb = w.tile(12, 2200, 1500, "rgb")                      # np.uint8 (256, 256, 3)
 h = w.tile(12, 2200, 1500, "elevation")                  # np.float32 (256, 256), m above WGS84
 cam = w.camera(width=640, height=480, hfov=90)           # or a scenario camera: config=, camera=
@@ -185,6 +191,7 @@ as_close(w);
 | [`docs/stars.md`](docs/stars.md) | stars, planets, Moon: catalogue, astrometry, star ground truth |
 | [`docs/gpu.md`](docs/gpu.md) | the GPU backend: tile generation and rendering |
 | [`bindings/README.md`](bindings/README.md) | the C and Python bindings: tile access, rendering, building, examples |
+| [`examples/camera-footprint`](examples/camera-footprint) | example: camera ↔ geodetic / ECEF / ENU ↔ XYZ tiles, a camera's ground footprint on the stitched map, the map warped into the camera by a homography |
 
 ## Repository layout
 
@@ -192,15 +199,16 @@ as_close(w);
 crates/geodesy    ellipsoid, geodetic/ECEF/ENU/NED/AER, XYZ tile math, attitude
 crates/h5         safe wrapper over hdf5-sys (HDF5 2.2.0 bundled)
 crates/tilestore  the HDF5 tile store
-crates/terragen   the world generator (CPU / GPU)
+crates/terragen   the world generators (CPU / GPU): classic (default, v0.2.0's) and next (preview)
 crates/render     cameras, flights, level of detail, renderer (CPU / GPU), lighting, sensor, events, IMU, writers
 crates/viewer     terrain view: map and camera views
 crates/seqview    terrain show / export: the dataset viewer and exporter
 crates/cli        the terrain command
 bindings/         C API (libaerialsynth) and Python package (aerialsynth): tiles, rendering
+examples/         example programs (camera-footprint: camera, geodesy and tile coordinates)
 configs/          example scenarios
 docs/             documentation
-scripts/          builders of the bundled star catalogue and ephemeris
+scripts/          builders of the bundled star catalogue and ephemeris; classic_v020_check.sh
 showcase/         the showcase videos
 ```
 

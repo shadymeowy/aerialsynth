@@ -28,7 +28,7 @@ pub(crate) fn snapshot(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Gener
     let (w, h) = parse_size(&args.size)?;
     let t0 = Instant::now();
     let (device, queue) = headless_device()?;
-    let ell = gen.world.ell;
+    let ell = gen.ell();
     let svc = Service::start(store, gen, base_tiles(args.base_zoom()), (rayon::current_num_threads() / 2).max(1), || {});
     let mut globe = Globe::new(&device, &queue, ell, args.gpu_tiles);
     let s = map_settings(args);
@@ -296,7 +296,7 @@ pub(crate) fn record(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Generat
     let mut csv = std::io::BufWriter::new(std::fs::File::create(dir.join("frames.csv"))?);
     writeln!(csv, "frame,t,lat,lon,h,roll,pitch,yaw,km,mode,max_zoom")?;
     let (device, queue) = headless_device()?;
-    let ell = gen.world.ell;
+    let ell = gen.ell();
     let mut ground = Ground { store: store.clone(), gen: gen.clone(), z: GROUND_ZOOM, tiles: HashMap::new() };
     let svc = Service::start(store, gen, base_tiles(args.base_zoom()), (rayon::current_num_threads() / 2).max(1), || {});
     let mut globe = Globe::new(&device, &queue, ell, args.gpu_tiles);

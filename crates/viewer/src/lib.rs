@@ -265,7 +265,7 @@ impl App {
         gen: Arc<Generator>,
     ) -> Result<App, Box<dyn std::error::Error + Send + Sync>> {
         let rs = cc.wgpu_render_state.as_ref().ok_or("wgpu is not available")?;
-        let ell = gen.world.ell;
+        let ell = gen.ell();
         let home = gen.config().home.as_ref().map(|h| (h.lat.to_radians(), h.lon.to_radians())).unwrap_or((20f64.to_radians(), 10f64.to_radians()));
         let start = match &opts.start {
             Some(s) => {

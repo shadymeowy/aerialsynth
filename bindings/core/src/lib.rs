@@ -32,7 +32,15 @@ pub use cache::CacheStats;
 use cache::{Bytes, TileCache};
 
 pub use camera::{Backend, Camera, CameraDef, Exposure, Frame, Mount, Outputs, Pinhole, Pose, MAX_IMAGE_SIZE};
-pub use terragen::GENERATOR_VERSION;
+pub use terragen::{CLASSIC_GENERATOR_VERSION, GENERATOR_VERSION};
+
+/// The terrain generators a world can use (`world.generator`; the first is the default).
+pub const GENERATORS: [&str; 2] = ["classic", "next"];
+
+/// A generator name (`classic`, `next`).
+pub fn parse_generator(name: &str) -> Result<terragen::GeneratorKind> {
+    name.parse().map_err(|e: anyhow::Error| Error::InvalidArgument(format!("{e:#}")))
+}
 pub use tilestore::{Layer, TileId};
 
 /// Highest zoom level of a tile (`x, y < 2^z`).
@@ -310,6 +318,17 @@ impl World {
         Self::with_spec(tiles_file, world_spec(config, seed)?)
     }
 
+    /// [`World::open`] with an optional override of the config's terrain generator
+    /// (`world.generator`): `"classic"` (the default generator) or `"next"` (the modular one, a
+    /// preview).
+    pub fn open_generator(tiles_file: &Path, config: Option<&Path>, seed: Option<u64>, generator: Option<&str>) -> Result<World> {
+        let mut spec = world_spec(config, seed)?;
+        if let Some(g) = generator {
+            spec.config.generator = parse_generator(g)?;
+        }
+        Self::with_spec(tiles_file, spec)
+    }
+
     /// [`World::open`] with a world spec.
     pub fn with_spec(tiles_file: &Path, spec: WorldSpec) -> Result<World> {
         if spec.max_zoom > MAX_ZOOM {
@@ -383,6 +402,17 @@ impl World {
     /// The world's seed.
     pub fn seed(&self) -> u64 {
         self.gen.config().seed
+    }
+
+    /// The world's terrain generator: `"classic"` or `"next"`.
+    pub fn generator(&self) -> &'static str {
+        self.gen.kind().name()
+    }
+
+    /// The version of the world's generator output (what its tile store records):
+    /// [`CLASSIC_GENERATOR_VERSION`] or [`GENERATOR_VERSION`].
+    pub fn generator_version(&self) -> u32 {
+        self.gen.version()
     }
 
     /// The highest zoom served (tiles above it are refused).
@@ -723,7 +753,7 @@ pub(crate) mod tests {
     fn optional_layers() {
         let d = TempDir::new("optional");
         let cfg = d.0.join("world.yaml");
-        std::fs::write(&cfg, "world:\n  tile_supersample: 1\ntiles:\n  max_zoom: 14\n  layers: [dtm, instance]\n").unwrap();
+        std::fs::write(&cfg, "world:\n  generator: next\n  tile_supersample: 1\ntiles:\n  max_zoom: 14\n  layers: [dtm, instance]\n").unwrap();
         let path = d.0.join("w.h5");
         let w = World::open(&path, Some(&cfg), Some(5)).unwrap();
         assert_eq!(w.layers(), Layer::ALL.to_vec());

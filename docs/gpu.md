@@ -124,8 +124,18 @@ writes CPU | GPU | |difference| side by side.
 `tiles.generator: auto` (default) generates tiles on the GPU when it has 64-bit float and
 integer shaders with 64-bit atomics (`SHADER_F64`, `SHADER_INT64`,
 `SHADER_INT64_ATOMIC_ALL_OPS`: Vulkan on NVIDIA and recent AMD), else on the CPU;
-`gpu` / `cpu` force one. The GPU generator (`terragen::gpu`) is the CPU generator ported to WGSL
-and builds the same world:
+`gpu` / `cpu` force one. Each of the two terrain generators (`world.generator`: `classic`, the
+default, and `next`, a preview; `docs/simulation.md`) has its GPU port; they share the device
+and its handling (adapter selection, strict mode, stall and device-lost errors, the read-back
+and compile locks, the exit fix), the compile notices and the pipeline cache (each generator
+under its own file names: `pipelines-classic-<adapter>-<hash>.bin` and
+`pipelines-<adapter>-<hash>.bin`, so using both does not evict either). The classic GPU
+generator (`terragen::classic::gpu`) is v0.2.0's, unchanged: its tiles are bit-identical to
+v0.2.0's on the same GPU (`scripts/classic_v020_check.sh`). The rest of this section describes
+the next generator's (`terragen::gpu`); the classic one is the same design without the stack,
+registry, ecoregions, atlas and kits (one pass-B pipeline, generator version 3).
+
+The GPU generator is the CPU generator ported to WGSL and builds the same world:
 
 * **Same noise:** the hashes are the CPU's (u64 in the shader), the octave frames and the
   gradient table are uploaded from the CPU's own tables, and noise lattice coordinates are f64
@@ -133,7 +143,8 @@ and builds the same world:
   inside a lattice cell in f32).
 * **Agreement:** tiles agree with the CPU's to f32 precision. On test tiles from z7 to z16, at
   most 0.03% of the pixels differ by more than 2 DN or 5 cm (`cargo test -p terragen
-  gpu::tests`, asserted below 0.1%), so both write generator version 4 and can share a store.
+  gpu::tests`, asserted below 0.1%), so both write the same generator version (4 next, 3
+  classic) and can share a store.
   Every kernel of the library is compared on 20,000 random inputs (`kernel_parity`: no sample
   off); its parameters are rounded to f32 on both sides, and noise wavelengths derived from
   them are computed in f64 (an f32 wavelength shifts an ECEF-domain noise by ~|p|/λ · 6e-8

@@ -11,6 +11,8 @@ DEFAULT_MAX_ZOOM: int
 DEFAULT_CACHE_MB: int
 MAX_PREFETCH_TILES: int
 GENERATOR_VERSION: int
+CLASSIC_GENERATOR_VERSION: int
+GENERATORS: list[str]
 
 class World:
     def __init__(
@@ -19,6 +21,7 @@ class World:
         config: str | os.PathLike[str] | None = None,
         seed: int | None = None,
         cache_mb: int = ...,
+        generator: str | None = None,
     ) -> None: ...
     def camera(
         self,
@@ -52,6 +55,8 @@ class World:
     @property
     def max_zoom(self) -> int: ...
     def layers(self) -> list[str]: ...
+    @property
+    def generator(self) -> str: ...
 
 class Camera:
     def render(

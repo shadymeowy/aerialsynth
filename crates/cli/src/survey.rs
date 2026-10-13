@@ -237,7 +237,7 @@ impl Sampler for Generator {
             river: t.river_wet > 0.5 && t.river_hw > 3.0 && t.river_d.abs() < t.river_hw + 150.0,
             temp: t.temp,
             moist: t.moist,
-            biome: Some(self.biome(&t).0 as u32),
+            biome: self.biome(&t).map(|b| b.0 as u32),
         }
     }
 

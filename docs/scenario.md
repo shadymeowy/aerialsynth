@@ -5,7 +5,7 @@ template of the main settings; `terrain config --all` lists every setting with i
 `terrain config -c my.yaml` shows a scenario with its defaults filled in (and checks it).
 
 ```
-world        the planet: seed, continents, relief, rivers, climate, vegetation, land use
+world        the planet: generator (classic | next), seed, continents, relief, rivers, climate, vegetation, land use
 tiles        the tile store: file, zoom range, generation while rendering
 trajectory   the flight: a CSV, synthesised from `synth` (path, speed, wind, vibration, gimbal)
 render       backend, supersampling, level of detail, lighting, atmosphere, stars
@@ -30,8 +30,15 @@ output       the sequence file: body pose rate, time window, PNG export, compres
   generation, rendering). `render.texel_px` sets the level of detail within it; planning
   refines to 0.8× that. `min_zoom` is at most 6 (the tile selection tests every tile of that
   level for every frame).
+- **Terrain generator:** `world.generator: classic` (default) is the generator of v0.2.0,
+  unchanged (bit-identical tiles); `world.generator: next` is the modular generator with the
+  biome kits (`docs/kits/`), a preview. `--generator` on the command line overrides it. The
+  classic generator reads the settings v0.2.0 had; `world.ecoregions`, `world.biomes`,
+  `world.atlas`, `world.relief.tectonic_mountains` and `world.relief.belt_mountains` only
+  affect `next` (`docs/simulation.md`). A tile store holds one generator's tiles.
 - **Generation:** `tiles.generator: auto` (default) generates tiles on the GPU when it can, else
-  on the CPU; `gpu` / `cpu` force one. Both build the same world (`docs/gpu.md`).
+  on the CPU; `gpu` / `cpu` force one. Both build the same world (`docs/gpu.md`). (Not to be
+  confused with `world.generator`, which picks the terrain generator.)
 - **Paths:** relative paths are relative to the working directory.
 
 Examples: `configs/quick.yaml` (3 s smoke test), `configs/dataset.yaml` (60 s with wind,

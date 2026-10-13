@@ -17,16 +17,20 @@ Both bindings call the same Rust code (`aerialsynth-core`), so they behave ident
 
 ## The world
 
-A world is given like the CLI's `terrain -c CONFIG --seed N`:
+A world is given like the CLI's `terrain -c CONFIG --seed N --generator G`:
 
 - **config:** the path of a scenario YAML (its `world:` section is the world, its
   `tiles.max_zoom` the zoom limit; the other sections are ignored), or of a bare world config
   (the contents of a `world:` section), or none for the default world;
-- **seed:** overrides the config's seed.
+- **seed:** overrides the config's seed;
+- **generator:** overrides the config's terrain generator (`world.generator`): `"classic"`, the
+  default (the generator of v0.2.0, bit-identical tiles), or `"next"` (the modular generator
+  with the biome kits, a preview). Python: `World(..., generator="next")`, `World.generator`;
+  C: `as_open_generator(tiles, config, seed, "next")`, `as_generator(w)`.
 
-A tile store holds exactly one world. Opening a store made by another world (or by another
-generator version) fails, naming the settings that differ; a missing store is created (with its
-directory), and an empty one is stamped with the world.
+A tile store holds exactly one world. Opening a store made by another world, generator or
+generator version fails, naming what differs; a missing store is created (with its directory),
+and an empty one is stamped with the world.
 
 ## Tiles
 
@@ -45,7 +49,8 @@ pixel-centre registered, channels last, little-endian:
 | dtm | f32 | 1 | *optional:* bare ground (DTM), metres above the WGS84 ellipsoid (the bed under water); `elevation - dtm` = heights above ground |
 | instance | u32 | 1 | *optional:* instance id (building lot, field, forest stand; hashed, in [2^23, 2^30)); 0 = none |
 
-The optional layers are in a store only when it was created with them: `tiles.layers: [dtm,
+The optional layers are in a store only when it was created with them (by the `next`
+generator: `world.generator: next`; the classic generator makes none): `tiles.layers: [dtm,
 instance]` in the config given to `as_open` / `World(...)` (a scenario's `tiles` section), off by
 default (they add about half to the store). `as_has_layer` / `World.layers` tell what a store
 holds; a layer it lacks is refused (`AS_ERR_INVALID_ARGUMENT` / `ValueError`). Stores of format
@@ -214,6 +219,8 @@ as_close(w);
 | function | |
 |---|---|
 | `as_world *as_open(const char *tiles_file, const char *config_yaml, int64_t seed)` | open / create the store; NULL on error |
+| `as_world *as_open_generator(const char *tiles_file, const char *config_yaml, int64_t seed, const char *generator)` | `as_open` with the terrain generator, `"classic"` or `"next"` (NULL: the config's, default classic) |
+| `const char *as_generator(const as_world *w)` | the world's terrain generator: `"classic"` or `"next"` (static) |
 | `int as_tile(const as_world *w, uint32_t z, uint32_t x, uint32_t y, as_layer layer, void *out, size_t out_len)` | write a layer of a tile (generated and stored if missing); `AS_OK` or `AS_ERR_*` |
 | `int as_tiles(const as_world *w, const uint32_t *zxy, size_t n, as_layer layer, void *out, size_t out_len)` | a layer of `n` tiles (`zxy`: n × (z, x, y)), tile `i` at `out + i * as_layer_size(layer)` |
 | `int as_prefetch(const as_world *w, double lat_min, double lon_min, double lat_max, double lon_max, uint32_t z_min, uint32_t z_max, size_t *generated)` | generate and store the missing tiles of a box (at most `AS_MAX_PREFETCH_TILES`); the count into `*generated` (may be NULL) |

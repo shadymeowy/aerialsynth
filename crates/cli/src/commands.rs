@@ -20,6 +20,9 @@ pub(crate) fn setup(c: &Common) -> Result<Scenario> {
     if let Some(seed) = c.seed {
         s.world.seed = seed;
     }
+    if let Some(g) = c.generator {
+        s.world.generator = g;
+    }
     Ok(s)
 }
 
@@ -32,7 +35,7 @@ fn bar(len: usize, what: &str) -> ProgressBar {
 fn synth(s: &Scenario, out: &Path) -> Result<()> {
     let gen = pipeline::generator(s)?;
     let home = s.world.home.clone().unwrap_or_default();
-    let ell = gen.world.ell;
+    let ell = gen.ell();
     // ground reference for AGL flights: smooth terrain sampled at ~200 m resolution
     let failed = std::sync::Mutex::new(None);
     let ground = |pts: &[(f64, f64)]| -> Vec<f64> {
@@ -487,7 +490,7 @@ pub struct ConfigArgs {
 pub const TEMPLATE: &str = include_str!("template.yaml");
 
 pub fn config(a: ConfigArgs) -> Result<()> {
-    if a.common.config.is_none() && a.common.seed.is_none() && !a.all {
+    if a.common.config.is_none() && a.common.seed.is_none() && a.common.generator.is_none() && !a.all {
         print!("{TEMPLATE}");
         return Ok(());
     }
@@ -535,12 +538,14 @@ pub fn info(a: InfoArgs) -> Result<()> {
 
 fn store_info(path: &Path, st: &TileStore) -> Result<()> {
     let m = st.meta();
+    let kind = terragen::store::generator_of(m);
     println!(
-        "tile store {} (seed {}, generator version {}{}, ellipsoid a={} b={:.6})",
+        "tile store {} (seed {}, generator {}, version {}{}, ellipsoid a={} b={:.6})",
         path.display(),
         m.seed,
+        kind.map_or("unknown".to_string(), |k| k.to_string()),
         m.generator_version,
-        if m.generator_version == terragen::GENERATOR_VERSION { "" } else { " — not this binary's" },
+        if kind.is_some_and(|k| k.version() == m.generator_version) { "" } else { " — not this binary's" },
         m.ellipsoid_a,
         m.ellipsoid_b
     );

@@ -104,22 +104,29 @@ fn temp_dir(name: &str) -> (PathBuf, PathBuf) {
     (dir, config)
 }
 
+/// Both generators: the default config (classic) and `world.generator: next`.
 #[test]
 fn c_example_runs() {
-    let (dir, config) = temp_dir("tile");
-    let Some(bin) = compile("tile", &dir) else { return };
-    let store: PathBuf = dir.join("store").join("world.h5");
-    let run = || {
-        let out = example_cmd(&bin).arg(&store).arg(&config).args(["3", "5", "3"]).output().unwrap();
-        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-        assert!(out.status.success(), "tile failed ({}):\n{stdout}\n{}", out.status, String::from_utf8_lossy(&out.stderr));
-        stdout
-    };
-    let first = run(); // generates the tile
-    assert!(first.contains("tile 3/5/3 elevation: min") && first.contains("rgb: 3 channels, 196608 bytes"), "{first}");
-    assert!(first.contains("zoom 7: refused") && first.contains("as_tiles: 4 tiles, the first equal to as_tile"), "{first}");
-    assert_eq!(run(), first, "the stored tile differs from the generated one");
-    let _ = std::fs::remove_dir_all(&dir);
+    for generator in ["classic", "next"] {
+        let (dir, config) = temp_dir(&format!("tile-{generator}"));
+        if generator == "next" {
+            std::fs::write(&config, "world: { generator: next, seed: 4, tile_supersample: 1 }\ntiles: { max_zoom: 6 }\n").unwrap();
+        }
+        let Some(bin) = compile("tile", &dir) else { return };
+        let store: PathBuf = dir.join("store").join("world.h5");
+        let run = || {
+            let out = example_cmd(&bin).arg(&store).arg(&config).args(["3", "5", "3"]).output().unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+            assert!(out.status.success(), "tile failed ({}):\n{stdout}\n{}", out.status, String::from_utf8_lossy(&out.stderr));
+            stdout
+        };
+        let first = run(); // generates the tile
+        assert!(first.contains(&format!("generator {generator}")), "{first}");
+        assert!(first.contains("tile 3/5/3 elevation: min") && first.contains("rgb: 3 channels, 196608 bytes"), "{first}");
+        assert!(first.contains("zoom 7: refused") && first.contains("as_tiles: 4 tiles, the first equal to as_tile"), "{first}");
+        assert_eq!(run(), first, "the stored tile differs from the generated one");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[test]

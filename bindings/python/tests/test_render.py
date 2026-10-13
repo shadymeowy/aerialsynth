@@ -199,3 +199,15 @@ def test_threads(world, ground):
         np.testing.assert_array_equal(a, b)
     for a in same:
         np.testing.assert_array_equal(a, serial[0])
+
+
+def test_next_generator_renders(tmp_path):
+    """A camera over a world of the next generator (the default one is above)."""
+    cfg = tmp_path / "world.yaml"
+    cfg.write_text("world:\n  tile_supersample: 1\ntiles:\n  max_zoom: 6\n")
+    with aerialsynth.World(tmp_path / "w.h5", config=cfg, seed=3, generator="next") as w:
+        assert w.generator == "next"
+        ground = w.surface_height(LAT, LON)
+        with w.camera(32, 24, 70, backend="cpu") as c:
+            f = c.render(LAT, LON, ground + 20_000, pitch=-90, time=T, depth=True)
+        assert np.isfinite(f.depth).all() and 20 < f.rgb.mean() < 235

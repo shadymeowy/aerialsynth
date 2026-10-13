@@ -274,6 +274,21 @@ const char *as_last_error(void);
 struct as_world *as_open(const char *tiles_file, const char *config_yaml, int64_t seed);
 
 /**
+ * `as_open` with the world's terrain generator: `generator` is `"classic"` (the default
+ * generator, v0.2.0's terrain) or `"next"` (the modular generator with the biome kits, a
+ * preview), or NULL for the config's `world.generator` (default `classic`). A store holds the
+ * tiles of one generator: a store of the other one is refused.
+ *
+ * # Safety
+ * `tiles_file` is a NUL-terminated path; `config_yaml` is NULL or a NUL-terminated path;
+ * `generator` is NULL or a NUL-terminated string.
+ */
+struct as_world *as_open_generator(const char *tiles_file,
+                                   const char *config_yaml,
+                                   int64_t seed,
+                                   const char *generator);
+
+/**
  * Close a world (flushing its store). NULL is ignored. The handle must not be in use by another
  * thread, and is invalid afterwards. Cameras of the world stay usable: the store is closed when
  * the world and all its cameras are closed.
@@ -402,6 +417,15 @@ int as_has_layer(const struct as_world *w, as_layer layer);
  * `w` is NULL or a handle from `as_open`.
  */
 int as_max_zoom(const struct as_world *w);
+
+/**
+ * The world's terrain generator, `"classic"` or `"next"` (a static string), or NULL if `w` is
+ * NULL.
+ *
+ * # Safety
+ * `w` is NULL or a handle from `as_open`.
+ */
+const char *as_generator(const struct as_world *w);
 
 /**
  * The DSM height (ground, canopy, buildings, water surface; metres above the WGS84 ellipsoid) at

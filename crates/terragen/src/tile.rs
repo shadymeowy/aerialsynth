@@ -14,7 +14,7 @@ pub use tilestore::TILE_SIZE;
 
 pub use tilestore::TileData;
 
-pub struct Generator {
+pub struct NextGenerator {
     pub world: World,
     pub surface: SurfaceModel,
     backend: Backend,
@@ -25,7 +25,7 @@ pub struct Generator {
     #[cfg(feature = "gpu")]
     gpu_failed: std::sync::atomic::AtomicBool,
     /// the GPU generator is being set up on a background thread
-    /// ([`Generator::prepare_gpu_in_background`]): the CPU generates meanwhile
+    /// ([`NextGenerator::prepare_gpu_in_background`]): the CPU generates meanwhile
     #[cfg(feature = "gpu")]
     gpu_preparing: std::sync::atomic::AtomicBool,
 }
@@ -42,7 +42,7 @@ pub enum Backend {
     Cpu,
 }
 
-/// Pass A at a point ([`Generator::terrain_points`]).
+/// Pass A at a point ([`NextGenerator::terrain_points`]).
 #[derive(Clone, Copy, Debug)]
 pub struct PointTerrain {
     /// bare ground (m above the ellipsoid; the bed under water)
@@ -148,21 +148,21 @@ struct PassA {
     pf_cut: f64,
 }
 
-impl Generator {
+impl NextGenerator {
     /// A generator on the GPU when there is one (`Backend::Auto`). The config is not checked:
-    /// use [`Generator::try_new`] for configs from users.
+    /// use [`NextGenerator::try_new`] for configs from users.
     pub fn new(cfg: Config) -> Self {
         Self::with_backend(cfg, Backend::Auto)
     }
 
     /// A generator on `backend` (the GPU generator is compiled on first use).
     pub fn with_backend(cfg: Config, backend: Backend) -> Self {
-        let mut cfg = cfg;
+        let mut cfg = Config { generator: crate::config::GeneratorKind::Next, ..cfg };
         // the resolved biome registry is part of the world (stores record it)
         cfg.biomes.resolved = crate::registry::Registry::for_config(&cfg).ok().map(|r| r.resolved.clone());
         let world = World::new(cfg);
         let surface = SurfaceModel::new(&world);
-        Generator {
+        NextGenerator {
             world,
             surface,
             backend,
@@ -183,6 +183,7 @@ impl Generator {
     /// A generator on `backend` for a validated config ([`Config::validate`]); `Backend::Gpu`
     /// fails without a suitable GPU.
     pub fn try_with_backend(cfg: Config, backend: Backend) -> anyhow::Result<Self> {
+        let cfg = Config { generator: crate::config::GeneratorKind::Next, ..cfg };
         cfg.validate()?;
         if backend == Backend::Gpu {
             #[cfg(feature = "gpu")]
@@ -220,7 +221,7 @@ impl Generator {
     }
 
     /// The GPU generator, if tiles are generated on the GPU (`None` while it is being set up in
-    /// the background, [`Generator::prepare_gpu_in_background`]).
+    /// the background, [`NextGenerator::prepare_gpu_in_background`]).
     #[cfg(feature = "gpu")]
     pub fn gpu(&self) -> Option<&crate::gpu::GpuGenerator> {
         use std::sync::atomic::Ordering;
@@ -333,7 +334,7 @@ impl Generator {
             .collect())
     }
 
-    /// Generate one tile (see [`Generator::tiles`]; panics if the GPU fails).
+    /// Generate one tile (see [`NextGenerator::tiles`]; panics if the GPU fails).
     pub fn tile(&self, id: TileId) -> TileData {
         self.tiles(&[id]).expect("tile generation").remove(0)
     }

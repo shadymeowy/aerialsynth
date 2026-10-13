@@ -1,0 +1,16 @@
+[package]
+name = "camera-footprint"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Teaching example: camera <-> geodesy <-> XYZ tile coordinates, a camera's ground footprint on the stitched map, and the map warped into the camera by a homography"
+publish = false
+
+[dependencies]
+aerialsynth-core.workspace = true
+geodesy.workspace = true
+render.workspace = true
+image.workspace = true
+anyhow.workspace = true

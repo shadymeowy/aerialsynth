@@ -14,7 +14,7 @@
   (`Material::forward`, a renderer-only `lc_forward` table). *Emission:* lit greenhouses through
   the `emission` layer (20 % of them, sodium orange, gone at pixels > 300 m; the greenhouse material is no longer
   self-emissive); runway / taxiway lights, port and stadium floods, flares and turbine beacons
-  were there. *Optional tile layers* (tile store format 2): `dtm` (bare ground) and `instance`
+  were there. *Optional tile layers* (tile store format 2; the `next` generator only): `dtm` (bare ground) and `instance`
   (building lots, fields, forest stands; `Layer::inst` through the stack, per-sample ids in
   pass B) with `tiles.layers` (off by default: about +50 % store size); identical on both
   backends (parity tests: ≤ 0.008 % of the pixels off); readable from Rust, C
@@ -25,6 +25,60 @@
   shade pipeline cold compile 0.39 → 0.65 s; pass B cold compile within the farm's noise in
   stages 0, 1, 3 (+0.4–0.9 s), stage 2 +~3 s (A/B on one P4 under load: 40.0 / 41.8 / 27.0 /
   35.4 → 40.9 / 42.2 / 30.3 / 35.8 s).
+
+- **The classic generator is the default again** (`world.generator: classic | next`, default
+  `classic`). Compared with v0.2.0 at identical poses, the new modular generator looked worse
+  (field mosaics, towns grown together, broken lakes), so the terrain of v0.2.0 is back as the
+  default and the modular generator is `generator: next`, a preview. Everything else since
+  v0.2.0 (C / Python camera rendering, wheels, renderer, CLI, viewer, survey, notices, GPU
+  robustness, pipeline cache) is unchanged and serves both.
+  - **Classic = v0.2.0, bit-identical:** v0.2.0's terrain code (CPU and WGSL) is
+    `crates/terragen/src/classic`, unchanged but for module paths. It shares only
+    infrastructure with `next`: the config type (a superset of v0.2.0's; classic ignores
+    `ecoregions`, `biomes`, `atlas`, `relief.tectonic_mountains` / `belt_mountains`), the
+    land-cover ids (v2 keeps 0–17, the only ones classic emits: the identity mapping), the GPU
+    device (`AERIALSYNTH_GPU` selection, stall and device-lost errors, concurrent read-backs,
+    the exit fix), strict mode (`AERIALSYNTH_GPU_STRICT`), and a shared compile session (compile
+    notices, the device-wide compile lock, the pipeline cache under `pipelines-classic-*` file
+    names, so switching generators does not evict the other's cache).
+    `scripts/classic_v020_check.sh V020_TERRAIN` compares tiles of the v0.2.0 binary and of
+    this one byte by byte: 24 tiles (zooms 6–16 at four places) identical on the CPU and on
+    the GPU (Tesla P4), every layer. A v0.2.0 store opens with the default config and takes new
+    tiles.
+  - **API:** `terragen::Generator` is the world's generator (classic or next, from the config);
+    the modular one is `terragen::NextGenerator`, the classic one `terragen::classic::Generator`.
+    `Generator::ell()` replaces `gen.world.ell`, `Generator::biome` is `None` for classic,
+    `terragen::GeneratorKind`, `CLASSIC_GENERATOR_VERSION` (3; `GENERATOR_VERSION` stays 4, the
+    next generator's).
+  - **Everywhere:** `--generator classic|next` on `terrain run / tiles / view / survey /
+    config`; the CLI template and `configs/` name `generator: classic`; `terrain info` shows a
+    store's generator. Bindings: Python `World(..., generator="next")`, `World.generator`,
+    `aerialsynth.GENERATORS`, `CLASSIC_GENERATOR_VERSION`; C `as_open_generator`,
+    `as_generator`.
+  - **Stores** record the generator (`generator:` in the world config; version 3 classic, 4
+    next) and refuse the other generator's tiles with a message naming it. Stores without the
+    key are told apart by their version: v0.2.0 stores (version 3) open with the classic
+    generator and take more tiles; stores of master before this change (version 4) need
+    `generator: next`.
+  - **Tests:** the next generator's suites (kits, parity, invariants) build their worlds with
+    `NextGenerator`; classic has v0.2.0's tests (CPU/GPU parity, `classic_invariants`), store
+    tests for both generators and for pre-switch stores, and the C and Python binding tests run
+    both generators.
+  - **Example** `camera-footprint`: the v0.2.0 showcase's boreal pose (52.97924 N, 16.41426 W,
+    900 m above the ground, heading 60°, 32° below the horizon, midsummer noon) on the default
+    generator; `cargo run --release -p camera-footprint OUT next ALT` renders the next
+    generator's. Its corner rays meet the terrain by marching (¼ elevation pixel steps) and
+    bisection to 1 cm instead of a fixed-point iteration, which oscillated on steep ground (the
+    boreal upland's far corner: 1575 ↔ 1992 m).
+
+- **Example `camera-footprint`** (`examples/camera-footprint`, `cargo run --release -p
+  camera-footprint`): a teaching program, read top to bottom, that makes the coordinate frames
+  explicit (geodetic ↔ ECEF ↔ ENU ↔ camera ↔ pixels; fractional XYZ tiles ↔ stitched-map pixels).
+  It renders an oblique and a nadir pinhole image from one position (with the bindings'
+  `Camera`), intersects the oblique image's corner rays with the elevation tiles, prints the
+  corners in GPS / ECEF and as fractional tiles with the tile range, stitches the albedo and
+  elevation tiles, draws the footprint, and warps the map into the camera by the homography of
+  the 4 corners (DLT); a check against the rendered depth measures the alignment.
 
 - **Visual polish, round B** (see the kits' Known limits): tower karst on a rounder, taller profile with forest paint on
   the walls; fjords as narrow troughs (new `Carve::narrow` in the carve hook: the valley's extent from the walls alone);

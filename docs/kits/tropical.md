@@ -1,5 +1,10 @@
 # Tropical and savanna kit
 
+> [!NOTE]
+> This kit belongs to the **next** generator (`world.generator: next`, a preview; see
+> [`docs/simulation.md`](../simulation.md)). The default generator, `classic` (v0.2.0's), has no
+> kits: worlds made with it do not show what this page describes.
+
 The wet and dry tropics from 100 m to 10 km above the ground: rainforest canopies with emergent
 and flowering crowns, floodplains with meander scars, cloud forest and páramo on the mountains,
 mangroves on low coasts; savannas in dry-season colours with umbrella acacias, baobabs, palm

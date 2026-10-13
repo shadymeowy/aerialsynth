@@ -20,12 +20,14 @@ with aerialsynth.World("out/world.h5", config=None, seed=None) as w:   # created
 aerialsynth.LAYERS["normal"]   # LayerInfo(name='normal', dtype=dtype('int8'), channels=3, shape=(256, 256, 3), ...)
 ```
 
-- **The world** is given like the CLI's `terrain -c CONFIG --seed N`: `config` is a scenario YAML
-  (its `world:` section is the world and its `tiles.max_zoom` the zoom limit, default 18; the
-  other sections are ignored) or a bare world config; `None` is the default world. `seed`
-  overrides the config's seed.
-- **One world per store:** opening a store made by another world (or generator version) raises
-  `RuntimeError`, naming the settings that differ. Give each world its own tiles file.
+- **The world** is given like the CLI's `terrain -c CONFIG --seed N --generator G`: `config` is a
+  scenario YAML (its `world:` section is the world and its `tiles.max_zoom` the zoom limit,
+  default 18; the other sections are ignored) or a bare world config; `None` is the default
+  world. `seed` overrides the config's seed. `generator` overrides its terrain generator:
+  `"classic"` (the default: the generator of v0.2.0) or `"next"` (the modular generator with the
+  biome kits, a preview); `World.generator` says which, `aerialsynth.GENERATORS` lists them.
+- **One world per store:** opening a store made by another world, generator or generator version
+  raises `RuntimeError`, naming what differs. Give each world its own tiles file.
 - **Tiles:** `z` at most `World.max_zoom`, `x, y < 2**z`; row 0 is the north edge. The arrays are
   writable and own their memory (no copy is made from the extension's buffer).
 - **Many tiles:** `w.tiles(coords, layer="rgb")` takes `(z, x, y)` triples (a list or an
