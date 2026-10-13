@@ -204,9 +204,11 @@ ecoregion's site the planetary atlas (`src/atlas/`) gives the climate (Köppen c
 site's smooth elevation, mean temperature, annual precipitation, dry months, precipitation
 regime, temperature range), lithology and culture; the biomes whose `koppen`, `envelope` and
 `lithology` fit are drawn by `weight` (none fits: the nearest envelope). A sample takes its
-ecoregion's biome, then that biome's `zonation` entry by its own temperature (lapse rate), with
-a dithered ±1 °C transition. Within 10 km of an ecoregion border each ~220 m patch belongs to
-one side or the other (a mosaic, not a gradient). Where that mosaic is below the pixel the two
+ecoregion's biome, then that biome's `zonation` entry by its own temperature (lapse rate)
+shifted by the continentality (`registry::zone_temp`: + (range / 2 − 10) °C, clamped −6..8),
+with a dithered ±2 °C transition. Within 10 km of an ecoregion border each ~220 m patch belongs
+to one side or the other (a mosaic, not a gradient; the two blend over ~50 m at a patch's
+border). Where that mosaic is below the pixel the two
 sides blend; a sample then has two biomes `a`, `b` with weight `w` (≤ 2 biomes per sample).
 
 **Ecoregion style and culture.** Every ecoregion also draws a style (`eco::EcoStyle`): soil and

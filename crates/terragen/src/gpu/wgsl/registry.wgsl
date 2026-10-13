@@ -181,7 +181,7 @@ fn ecotone_pick(p: vec3<f64>, gsd: f32, edge: f32) -> f32 {
     }
     let n = 0.75 * perlin3(cfg.seed ^ 0xEC7lu, p * (1.0lf / 220.0lf)) + 0.35 * perlin3(cfg.seed ^ 0xEC8lu, p * (1.0lf / 80.0lf)) * band(80.0, gsd);
     let u = 1.0 / (1.0 + exp(-1.7 * n / 0.29));
-    let crisp = select(0.0, 1.0, u < pb);
+    let crisp = 1.0 - smoothstep1(pb - 0.25, pb + 0.25, u);
     return pb + (crisp - pb) * ex;
 }
 

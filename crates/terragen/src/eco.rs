@@ -229,7 +229,7 @@ pub fn warp_min_wavelength(w: &World) -> f64 {
 }
 
 /// Weight (0..1) of the ecoregion across the border at `edge` m from it: within the ecotone a
-/// crisp mosaic of ~220 m patches (0 or 1), blended to the probability where the patches are
+/// mosaic of ~220 m patches (0 or 1, blended over ~50 m at their borders), blended to the probability where the patches are
 /// below the pixel.
 pub fn ecotone_pick(w: &World, p: DVec3, gsd: f64, edge: f64) -> f64 {
     let wd = w.cfg.ecoregions.ecotone_km * KM;
@@ -247,7 +247,9 @@ pub fn ecotone_pick(w: &World, p: DVec3, gsd: f64, edge: f64) -> f64 {
     let n = 0.75 * perlin3(s ^ 0xEC7, p / 220.0) + 0.35 * perlin3(s ^ 0xEC8, p / 80.0) * band(80.0, gsd);
     // ~uniform 0..1 (logistic of the noise over its spread)
     let u = 1.0 / (1.0 + (-1.7 * n / 0.29).exp());
-    let crisp = if u < pb { 1.0 } else { 0.0 };
+    // (a soft edge: the two biomes' colours blend over ~50 m at a patch's border; crisp
+    // patches of strongly different biomes read as hard-edged discs)
+    let crisp = 1.0 - smoothstep(pb - 0.25, pb + 0.25, u);
     pb + (crisp - pb) * ex
 }
 
