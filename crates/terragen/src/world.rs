@@ -957,7 +957,9 @@ impl World {
             return v.clone();
         }
         let center = (c + 0.5) * CELL;
-        let v = std::sync::Arc::new(crate::kits::astamps(self, center, 0.5 * 3f64.sqrt() * CELL + 1.0, gsd));
+        // (the kits' host code may run rayon jobs; the GPU generator's host preparation calls this
+        // while holding its cache: on the host pool, from a plain thread)
+        let v = std::sync::Arc::new(crate::pool::host_run(|| crate::kits::astamps(self, center, 0.5 * 3f64.sqrt() * CELL + 1.0, gsd)));
         let mut g = CACHE.write().unwrap();
         let m = g.get_or_insert_with(FxHashMap::default);
         if m.len() > 100_000 {

@@ -213,14 +213,15 @@ pub fn settlements_near_min_level(world: &World, center: DVec3, radius_m: f64, m
 
 /// The places of `level` whose centre lies within `radius` of `center`, by id.
 pub fn places_near(w: &World, level: usize, center: DVec3, radius: f64) -> Vec<Place> {
-    let mut out = Vec::new();
-    for_cells(w, level, center, radius, |c| {
-        if let Some(p) = final_place(w, level, c) {
-            if (p.center - center).length() <= radius {
-                out.push(p);
-            }
-        }
-    });
+    let cells = cells_near(w, level, center, radius);
+    let within = |c: &Cell| final_place(w, level, *c).filter(|p| (p.center - center).length() <= radius);
+    // (wide discs, e.g. a transport network's nodes at a low zoom: their cells in parallel)
+    let mut out: Vec<Place> = if cells.len() > 64 {
+        use rayon::prelude::*;
+        cells.par_iter().filter_map(within).collect()
+    } else {
+        cells.iter().filter_map(within).collect()
+    };
     out.sort_unstable_by_key(|p| p.id);
     out
 }
@@ -247,6 +248,31 @@ fn for_cells(w: &World, level: usize, center: DVec3, radius: f64, mut f: impl Fn
             }
         }
     }
+}
+
+/// A lattice cell of a level.
+pub type Cell = (i64, i64, i64);
+
+/// The lattice cells of `level` whose places can lie within `radius` of `center`.
+pub fn cells_near(w: &World, level: usize, center: DVec3, radius: f64) -> Vec<Cell> {
+    let mut v = Vec::new();
+    for_cells(w, level, center, radius, |c| v.push(c));
+    v
+}
+
+/// The cells whose base places the resolution of cell `c` may read (its own level's
+/// neighbours, `resolve`), `c` included.
+pub fn resolve_cells(w: &World, level: usize, c: Cell) -> Vec<Cell> {
+    let spec = &LEVELS[level];
+    let reach = (spec.spacing * spec.cell).max(2.4 * spec.radius[1]);
+    // (around any candidate of the cell: its centre ± the cell's half diagonal)
+    let cc = (DVec3::new(c.0 as f64, c.1 as f64, c.2 as f64) + 0.5) * spec.cell;
+    cells_near(w, level, cc, reach + 0.87 * spec.cell)
+}
+
+/// Compute (memoize) the base place of a cell.
+pub fn warm_base(w: &World, level: usize, c: Cell) {
+    base(w, level, c);
 }
 
 fn level_seed(w: &World, level: usize) -> u64 {

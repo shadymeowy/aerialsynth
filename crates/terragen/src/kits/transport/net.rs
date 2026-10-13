@@ -302,7 +302,15 @@ fn edges_near_uncached(w: &World, n: usize, center: DVec3, radius: f64) -> Vec<E
     let mut out: Vec<Edge> = Vec::new();
     // one end of every such edge lies within radius + lmax / 2 + deviation of the centre
     let dev_max = super::route::max_deviation(super::cls::TRACK, lmax).max(super::route::max_deviation(super::cls::MOTORWAY, lmax));
-    for a in nodes(w, n, center, radius + 0.5 * lmax + dev_max) {
+    let ends = nodes(w, n, center, radius + 0.5 * lmax + dev_max);
+    if ends.len() > 16 {
+        // (the nodes' neighbourhoods, memoized, in parallel first)
+        use rayon::prelude::*;
+        ends.par_iter().for_each(|a| {
+            neighbours(w, n, a);
+        });
+    }
+    for a in ends {
         for b in neighbours(w, n, &a).iter() {
             let d = (b.p - a.p).length();
             // each edge once: from the end nearer to the centre (ties: lower id)

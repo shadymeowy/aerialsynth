@@ -32,6 +32,7 @@ pub mod landcover;
 pub mod layers;
 pub mod memo;
 pub mod noise;
+pub(crate) mod pool;
 pub mod registry;
 pub mod stack;
 pub mod store;
