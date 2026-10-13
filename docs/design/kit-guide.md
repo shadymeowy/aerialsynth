@@ -1,5 +1,11 @@
 # Writing a kit
 
+> [!NOTE]
+> Kits are part of the **next** generator (`world.generator: next`, a preview); the default
+> generator, `classic`, is v0.2.0's and frozen (`crates/terragen/src/classic`: no kits, no
+> changes that alter its tiles). Tests of a kit build their worlds with `NextGenerator` (or a
+> config with `generator: next`): the default config is the classic generator.
+
 A **kit** adds landscapes to the generator: biomes (data), and where data is not enough,
 kernels, layer functions, relief operators, instance families and host-built features (code).
 This guide is the contract between the generator core (`crates/terragen`, design:

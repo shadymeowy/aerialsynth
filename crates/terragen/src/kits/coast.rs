@@ -783,7 +783,7 @@ mod tests {
                 return;
             }
         };
-        let cpu = crate::Generator::new(cfg);
+        let cpu = crate::NextGenerator::new(cfg);
         for (name, z) in [
             ("cliff", 14u8),
             ("cliff", 16),
@@ -841,7 +841,7 @@ mod tests {
     /// Parent ≈ mean of its children (elevation, albedo) where the kit draws.
     #[test]
     fn lod_consistent_at_coast_places() {
-        let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+        let g = crate::NextGenerator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let n = crate::TILE_SIZE;
         for (name, z) in [
             ("cliff", 12u8),
@@ -885,7 +885,7 @@ mod tests {
     /// No seam between neighbouring tiles where the kit draws (E-W and N-S).
     #[test]
     fn seamless_at_coast_places() {
-        let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+        let g = crate::NextGenerator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let n = crate::TILE_SIZE;
         for (name, z) in [("cliff", 14u8), ("flat", 15), ("flat_arid", 14), ("reef", 14), ("skerry", 13), ("atoll", 12), ("delta_birdsfoot", 13)] {
             let id = tile_at(name, z);
@@ -919,8 +919,8 @@ mod tests {
     #[test]
     fn deterministic_at_coast_places() {
         let cfg = crate::Config { tile_supersample: 1, ..crate::Config::default() };
-        let a = crate::Generator::new(cfg.clone());
-        let b = crate::Generator::new(cfg);
+        let a = crate::NextGenerator::new(cfg.clone());
+        let b = crate::NextGenerator::new(cfg);
         for (name, z) in [("cliff", 14u8), ("flat", 15), ("reef", 15)] {
             let id = tile_at(name, z);
             let (x, y) = (a.tile(id), b.tile(id));
@@ -937,7 +937,7 @@ mod tests {
         if g.check_generator().is_err() {
             return;
         }
-        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
         for &(name, lat, lon) in PLACES {
             let ids: Vec<_> = [6u8, 8, 10, 12, 14, 16].iter().map(|&z| geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)).collect();
             if let Err(e) = gen.tiles(&ids) {
@@ -954,7 +954,7 @@ mod tests {
     #[test]
     #[ignore]
     fn bench_places() {
-        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
         gen.tiles(&[geodesy::tiles::TileId::new(3, 4, 3)]).unwrap();
         for z in [8u8, 10, 12, 14, 16] {
             // three blocks of 8 x 8 tiles per place (neighbouring blocks: no cached lattice), the median

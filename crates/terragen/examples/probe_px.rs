@@ -10,7 +10,7 @@
 //! closed basins within about `R_KM` km.
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let g = terragen::Generator::new(terragen::Config::default());
+    let g = terragen::NextGenerator::new(terragen::Config::default());
     if args[0] == "info" {
         // info LAT LON [LAT LON ...]: ecoregion, biome and land use
         let a: Vec<f64> = args[1..].iter().map(|s| s.parse().unwrap()).collect();

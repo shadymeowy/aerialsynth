@@ -398,15 +398,7 @@ impl GpuGenerator {
         );
         let globals_bufs = vec![g_cfg, g_grads, g_octs, g_fbms, g_pal, g_atlas, g_biomes, g_crowns, g_zones, g_layers, g_band_ranges, g_band_idx];
         let (src_points, src_tile, src_drain) = sources();
-        let hash = sources_hash(&[&src_points, &src_tile, &src_drain]);
-        let cache = PipelineCache::open(&gpu, hash);
-        let marker = if cache.is_none() { CompileMarker::open(&gpu, hash) } else { None };
-        // (no file for these shaders in the pipeline cache, or without one no marker that this
-        // adapter compiled them before: the compile may be cold)
-        let cold = !(cache.as_ref().is_some_and(|c| c.warm) || marker.as_ref().is_some_and(|m| m.path.exists()));
-        notice::emit(CompileEvent::Started { gpu_name: gpu.info.name.clone(), cold });
-        let t_compile = std::time::Instant::now();
-        let compiling = gpu.compiling();
+        let compile = Compile::start(&gpu, "", &[&src_points, &src_tile, &src_drain]);
         let m_points = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("points"), source: wgpu::ShaderSource::Wgsl(src_points.into()) });
         let m_tile = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("tile"), source: wgpu::ShaderSource::Wgsl(src_tile.into()) });
         let m_drain = d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("drainage"), source: wgpu::ShaderSource::Wgsl(src_drain.into()) });
@@ -433,7 +425,7 @@ impl GpuGenerator {
                 module,
                 entry_point: Some(entry),
                 compilation_options: Default::default(),
-                cache: cache.as_ref().map(|c| &c.cache),
+                cache: compile.cache(),
             });
             if std::env::var_os("TERRAGEN_PROFILE").is_some() {
                 eprintln!("  pipeline {entry}: {:.1} s", t.elapsed().as_secs_f64());
@@ -484,15 +476,7 @@ impl GpuGenerator {
             scan: dk(),
             write: dk(),
         };
-        if let Some(c) = &cache {
-            c.save();
-        }
-        if let Some(m) = &marker {
-            m.save();
-        }
-        drop(compiling);
-        let secs = t_compile.elapsed().as_secs_f64();
-        notice::emit(CompileEvent::Finished { secs, cold });
+        let secs = compile.finish();
         if std::env::var_os("TERRAGEN_PROFILE").is_some() {
             eprintln!("GPU generator: pipelines ready in {secs:.1} s");
         }
@@ -1677,6 +1661,56 @@ fn dbox(ell: &geodesy::Ellipsoid, center: DVec3, lo: DVec3, hi: DVec3, cell: f64
     }
 }
 
+/// One generator's pipeline compile (shared by the generators, see `crate::classic`): the
+/// on-disk pipeline cache (or, without one, the compile marker), the compile notices
+/// ([`notice`]) and the device-wide compile lock ([`Gpu::compiling`]). `flavor` keeps each
+/// generator's cache files apart (`""`: the next generator, `"classic-"`), so using both on one
+/// machine does not prune the other's.
+pub(crate) struct Compile<'g> {
+    cache: Option<PipelineCache>,
+    marker: Option<CompileMarker>,
+    cold: bool,
+    t: std::time::Instant,
+    _lock: std::sync::MutexGuard<'g, ()>,
+}
+
+impl<'g> Compile<'g> {
+    /// Start compiling the pipelines of `srcs` (the WGSL modules) on `gpu`.
+    pub(crate) fn start(gpu: &'g Gpu, flavor: &str, srcs: &[&str]) -> Compile<'g> {
+        let hash = sources_hash(srcs);
+        let cache = PipelineCache::open(gpu, flavor, hash);
+        let marker = if cache.is_none() { CompileMarker::open(gpu, flavor, hash) } else { None };
+        // (no file for these shaders in the pipeline cache, or without one no marker that this
+        // adapter compiled them before: the compile may be cold)
+        let cold = !(cache.as_ref().is_some_and(|c| c.warm) || marker.as_ref().is_some_and(|m| m.path.exists()));
+        notice::emit(CompileEvent::Started { gpu_name: gpu.info.name.clone(), cold });
+        let t = std::time::Instant::now();
+        let lock = gpu.compiling();
+        Compile { cache, marker, cold, t, _lock: lock }
+    }
+
+    /// The pipeline cache to create the pipelines with.
+    pub(crate) fn cache(&self) -> Option<&wgpu::PipelineCache> {
+        self.cache.as_ref().map(|c| &c.cache)
+    }
+
+    /// The pipelines are created: save the cache, release the device, announce it; the seconds
+    /// it took.
+    pub(crate) fn finish(self) -> f64 {
+        if let Some(c) = &self.cache {
+            c.save();
+        }
+        if let Some(m) = &self.marker {
+            m.save();
+        }
+        let (t, cold) = (self.t, self.cold);
+        drop(self);
+        let secs = t.elapsed().as_secs_f64();
+        notice::emit(CompileEvent::Finished { secs, cold });
+        secs
+    }
+}
+
 /// The compiled pipelines kept on disk (`~/.cache/terrain/pipelines-<adapter>-<hash>.bin`): the
 /// driver's own shader cache is per executable, and compiling the generator takes half a minute
 /// or more. `<hash>` covers the generated WGSL and the wgpu version, so a file that exists is a
@@ -1744,14 +1778,14 @@ struct CompileMarker {
 }
 
 impl CompileMarker {
-    fn open(gpu: &Gpu, hash: u64) -> Option<CompileMarker> {
+    fn open(gpu: &Gpu, flavor: &str, hash: u64) -> Option<CompileMarker> {
         let i = &gpu.info;
         let adapter = sources_hash(&[&format!("{:?}", i.backend), &i.name, &format!("{:x}:{:x}", i.vendor, i.device), &i.driver, &i.driver_info]);
-        Some(Self::at(&cache_dir()?, adapter, hash))
+        Some(Self::at(&cache_dir()?, flavor, adapter, hash))
     }
 
-    fn at(dir: &std::path::Path, adapter: u64, hash: u64) -> CompileMarker {
-        let prefix = format!("compiled-{adapter:016x}-");
+    fn at(dir: &std::path::Path, flavor: &str, adapter: u64, hash: u64) -> CompileMarker {
+        let prefix = format!("compiled-{flavor}{adapter:016x}-");
         CompileMarker { path: dir.join(format!("{prefix}{hash:016x}")), prefix }
     }
 
@@ -1768,11 +1802,11 @@ impl CompileMarker {
 }
 
 impl PipelineCache {
-    fn open(gpu: &Gpu, hash: u64) -> Option<PipelineCache> {
+    fn open(gpu: &Gpu, flavor: &str, hash: u64) -> Option<PipelineCache> {
         if !gpu.device.features().contains(wgpu::Features::PIPELINE_CACHE) {
             return None;
         }
-        let key = wgpu::util::pipeline_cache_key(&gpu.info)?;
+        let key = format!("{flavor}{}", wgpu::util::pipeline_cache_key(&gpu.info)?);
         let dir = cache_dir()?;
         let path = cache_file(&dir, &key, hash);
         let data = std::fs::read(&path).ok();
@@ -1827,12 +1861,12 @@ mod cache_tests {
         left.sort();
         assert_eq!(left, ["other.bin", "pipelines-gpu-a-0000000000000001.bin", "pipelines-gpu-a-b-0000000000000001.bin", "pipelines-gpu-b.bin"]);
         // markers (devices without a pipeline cache): one per adapter, the current shaders'
-        let old = CompileMarker::at(&dir, 7, 1);
+        let old = CompileMarker::at(&dir, "", 7, 1);
         old.save();
         assert!(old.path.exists());
-        let other = CompileMarker::at(&dir, 8, 1);
+        let other = CompileMarker::at(&dir, "", 8, 1);
         other.save();
-        let m = CompileMarker::at(&dir, 7, 2);
+        let m = CompileMarker::at(&dir, "", 7, 2);
         assert!(!m.path.exists());
         m.save();
         assert!(m.path.exists() && !old.path.exists() && other.path.exists());

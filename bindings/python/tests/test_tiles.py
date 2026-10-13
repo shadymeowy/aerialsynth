@@ -56,6 +56,35 @@ def test_tiles_are_generated_then_read(tmp_path, config):
         aerialsynth.World(path, config=config, seed=6)
 
 
+@pytest.mark.parametrize("generator", [None, "classic", "next"])
+def test_generators(tmp_path, config, generator):
+    """Both terrain generators: the default (classic), and either named; a store keeps its own."""
+    kind = generator or "classic"
+    assert aerialsynth.GENERATORS == ("classic", "next")
+    path = tmp_path / "w.h5"
+    with aerialsynth.World(path, config=config, seed=5, generator=generator) as w:
+        assert w.generator == kind and f"{kind} generator" in repr(w)
+        lc = w.tile(4, 9, 6, "landcover")
+        assert lc.max() < 128
+        h = w.tile(4, 9, 6, "elevation")
+        assert np.isfinite(h).all()
+    # the store holds this generator's tiles: the other one is refused, naming it
+    other = "next" if kind == "classic" else "classic"
+    with pytest.raises(RuntimeError, match=f"holds tiles of the {kind} generator"):
+        aerialsynth.World(path, config=config, seed=5, generator=other)
+    # the config's world.generator does the same as the argument
+    cfg = tmp_path / "g.yaml"
+    cfg.write_text(f"world:\n  generator: {kind}\n  tile_supersample: 1\ntiles:\n  max_zoom: 8\n")
+    with aerialsynth.World(path, config=cfg, seed=5) as w:
+        assert w.generator == kind
+        np.testing.assert_array_equal(w.tile(4, 9, 6, "elevation"), h)
+    # the two generators build different worlds
+    with aerialsynth.World(tmp_path / "o.h5", config=config, seed=5, generator=other) as w:
+        assert not np.array_equal(w.tile(4, 9, 6, "elevation"), h)
+    with pytest.raises(ValueError, match="unknown generator"):
+        aerialsynth.World(tmp_path / "x.h5", generator="future")
+
+
 def test_bad_arguments(tmp_path, config):
     w = aerialsynth.World(str(tmp_path / "w.h5"), config=str(config))
     for z, x, y in [(9, 0, 0), (3, 8, 0), (3, 0, 8), (-1, 0, 0), (3, -1, 0), (2**40, 0, 0)]:

@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    /// The terrain generator that builds the world: `classic` (the default; the generator of
+    /// v0.2.0, `crate::classic`) or `next` (the modular generator with the biome kits, a
+    /// preview). Each builds its own world from the same settings; a tile store holds tiles of
+    /// one of them.
+    pub generator: GeneratorKind,
     /// Master seed. Everything is a deterministic function of (seed, config, position).
     pub seed: u64,
     pub planet: Planet,
@@ -39,6 +44,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
+            generator: GeneratorKind::default(),
             seed: 1,
             planet: Planet::default(),
             home: Some(Home::default()),
@@ -55,6 +61,58 @@ impl Default for Config {
             atlas: AtlasConfig::default(),
             tile_supersample: 2,
             tile_supersample_adaptive: true,
+        }
+    }
+}
+
+/// The terrain generators (`world.generator`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GeneratorKind {
+    /// The generator of v0.2.0 (`crate::classic`), unchanged: its tiles are bit-identical to
+    /// v0.2.0's. Reads the settings v0.2.0 had; `ecoregions`, `biomes`, `atlas`,
+    /// `relief.tectonic_mountains` and `relief.belt_mountains` are not used.
+    #[default]
+    Classic,
+    /// The modular generator: planetary atlas, biome registry, ecoregions and the kits
+    /// (`docs/kits/`). A preview with known limits.
+    Next,
+}
+
+impl GeneratorKind {
+    pub const ALL: [GeneratorKind; 2] = [GeneratorKind::Classic, GeneratorKind::Next];
+
+    /// The name in configs: `classic`, `next`.
+    pub fn name(self) -> &'static str {
+        match self {
+            GeneratorKind::Classic => "classic",
+            GeneratorKind::Next => "next",
+        }
+    }
+
+    /// The version of the generator's output that its tile stores record
+    /// (`crate::CLASSIC_GENERATOR_VERSION`, `crate::GENERATOR_VERSION`).
+    pub fn version(self) -> u32 {
+        match self {
+            GeneratorKind::Classic => crate::store::CLASSIC_GENERATOR_VERSION,
+            GeneratorKind::Next => crate::store::GENERATOR_VERSION,
+        }
+    }
+}
+
+impl std::fmt::Display for GeneratorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+impl std::str::FromStr for GeneratorKind {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> anyhow::Result<Self> {
+        match s.trim() {
+            "classic" => Ok(GeneratorKind::Classic),
+            "next" => Ok(GeneratorKind::Next),
+            _ => anyhow::bail!("unknown generator {s:?} (classic or next)"),
         }
     }
 }
@@ -485,7 +543,7 @@ impl Config {
         if !(1..=MAX_TILE_SUPERSAMPLE).contains(&self.tile_supersample) {
             errs.push(format!("world.tile_supersample must be 1..={MAX_TILE_SUPERSAMPLE} (is {})", self.tile_supersample));
         }
-        if errs.is_empty() {
+        if errs.is_empty() && self.generator == GeneratorKind::Next {
             if let Err(e) = crate::registry::Registry::for_config(self) {
                 errs.push(format!("world.biomes: {e:#}"));
             }

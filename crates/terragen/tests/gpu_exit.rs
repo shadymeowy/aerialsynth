@@ -2,7 +2,7 @@
 //! ends, and the NVIDIA driver's exit handlers used to unload its core library under its own
 //! worker threads (a segfault after all the work was done, about one exit in six).
 use geodesy::tiles::tile_for_latlon;
-use terragen::{Config, Generator};
+use terragen::{Config, NextGenerator};
 
 const RUNS: usize = 8;
 
@@ -14,7 +14,7 @@ fn gpu_exit_child() {
     let threads: Vec<_> = (0..2)
         .map(|_| {
             std::thread::spawn(move || {
-                let g = Generator::new(Config { tile_supersample: 1, ..Config::default() });
+                let g = NextGenerator::new(Config { tile_supersample: 1, ..Config::default() });
                 let t = g.tile(tile_for_latlon(39.9f64.to_radians(), 32.8f64.to_radians(), 12));
                 assert!(t.elevation.iter().all(|e| e.is_finite()));
                 g.backend_name()

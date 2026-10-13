@@ -1786,7 +1786,7 @@ mod tests {
         }
         let cfg = crate::Config::default();
         let gen = crate::gpu::GpuGenerator::new(cfg.clone()).unwrap();
-        let cpu = crate::Generator::new(cfg);
+        let cpu = crate::NextGenerator::new(cfg);
         let mut worst = 0.0f64;
         for &(name, lat, lon) in PLACES {
             for z in [12u8, 14, 16] {
@@ -1829,7 +1829,7 @@ mod tests {
     #[test]
     fn lod_seams_determinism() {
         let cfg = crate::Config { tile_supersample: 1, ..crate::Config::default() };
-        let g = crate::Generator::new(cfg.clone());
+        let g = crate::NextGenerator::new(cfg.clone());
         let n = crate::TILE_SIZE;
         for (name, _, _) in PLACES.iter().filter(|p| LOD_PLACES.contains(&p.0)) {
             for z in [12u8, 15] {
@@ -1866,7 +1866,7 @@ mod tests {
             // determinism (a fresh generator) and the seam to the eastern neighbour
             let id = tile_at(name, 15);
             let a = g.tile(id);
-            let b = crate::Generator::new(cfg.clone()).tile(id);
+            let b = crate::NextGenerator::new(cfg.clone()).tile(id);
             assert_eq!(a.rgb, b.rgb, "{name}: not deterministic");
             let r = g.tile(geodesy::tiles::TileId::new(id.z, id.x + 1, id.y));
             let (mut across, mut inside) = (0.0, 0.0);
@@ -1890,7 +1890,7 @@ mod tests {
         if g.check_generator().is_err() {
             return;
         }
-        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
         for &(name, lat, lon) in PLACES {
             let ids: Vec<_> = [6u8, 8, 10, 12, 14, 16].iter().map(|&z| geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)).collect();
             if let Err(e) = gen.tiles(&ids) {
@@ -1907,7 +1907,7 @@ mod tests {
     #[test]
     #[ignore]
     fn bench_places() {
-        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
         gen.tiles(&[geodesy::tiles::TileId::new(3, 4, 3)]).unwrap();
         for z in [8u8, 10, 12, 14, 16] {
             let mut ids = Vec::new();
@@ -1963,7 +1963,7 @@ mod tests {
             })
             .collect();
         // ranch regions with a feedlot: the feedlot's centre
-        let g = crate::Generator::new(crate::Config::default());
+        let g = crate::NextGenerator::new(crate::Config::default());
         let mut nf = 0;
         for x in hits.iter().filter(|x| x.0 == sys::RANCH) {
             let ctx = crate::world::Ctx::new(x.1.to_radians(), x.2.to_radians(), 30.0, &w.ell);

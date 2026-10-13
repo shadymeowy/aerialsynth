@@ -158,7 +158,7 @@ fn noise_matches_the_cpu() {
 
 /// Compare GPU and CPU pass A over a tile: (field name, max abs error, mean abs error,
 /// share of pixels off by more than `tol`).
-fn compare_pass_a(gen: &GpuGenerator, cpu: &crate::Generator, id: geodesy::tiles::TileId) -> Vec<(String, f64, f64, f64)> {
+fn compare_pass_a(gen: &GpuGenerator, cpu: &crate::NextGenerator, id: geodesy::tiles::TileId) -> Vec<(String, f64, f64, f64)> {
     let g = gen.pass_a(&[id]).unwrap().remove(0);
     let c = cpu.pass_a(id);
     assert_eq!(g.len(), c.len());
@@ -204,7 +204,7 @@ fn pass_a_matches_the_cpu() {
     }
     let cfg = crate::Config::default();
     let gen = GpuGenerator::new(cfg.clone()).unwrap();
-    let cpu = crate::Generator::new(cfg);
+    let cpu = crate::NextGenerator::new(cfg);
     let tiles = [
         geodesy::tiles::TileId::new(14, 9779, 6278),
         geodesy::tiles::TileId::new(12, 2444, 1569),
@@ -254,7 +254,7 @@ fn tiles_match_the_cpu() {
     }
     let cfg = crate::Config::default();
     let gen = GpuGenerator::new(cfg.clone()).unwrap();
-    let cpu = crate::Generator::new(cfg);
+    let cpu = crate::NextGenerator::new(cfg);
     let ids = [
         geodesy::tiles::TileId::new(16, 39117, 25113),
         geodesy::tiles::TileId::new(14, 9779, 6278),
@@ -297,7 +297,7 @@ fn planet_tiles() {
     assert_eq!(out.len(), 3);
     // (was 73 s on an RTX 6000 Ada; generous for slow GPUs)
     assert!(tg < 60.0, "planet-scale tiles took {tg:.1} s");
-    let cpu = crate::Generator::new(cfg);
+    let cpu = crate::NextGenerator::new(cfg);
     let id = geodesy::tiles::TileId::new(4, 12, 5);
     let g = gen.tiles(&[id]).unwrap().remove(0);
     let t0 = std::time::Instant::now();
@@ -348,7 +348,7 @@ fn throughput() {
         done += gen.tiles(chunk).unwrap().len();
     }
     let tg = t0.elapsed().as_secs_f64();
-    let cpu = crate::Generator::new(crate::Config::default());
+    let cpu = crate::NextGenerator::new(crate::Config::default());
     let t0 = std::time::Instant::now();
     let m: usize = ids.par_iter().map(|&id| cpu.tile_cpu(id).rgb.len()).count();
     let tc = t0.elapsed().as_secs_f64();
@@ -367,7 +367,7 @@ fn polar_tile() {
     let t0 = std::time::Instant::now();
     let g = gen.tiles(&[id]).unwrap().remove(0);
     let tg = t0.elapsed().as_secs_f64();
-    let cpu = crate::Generator::new(crate::Config::default());
+    let cpu = crate::NextGenerator::new(crate::Config::default());
     let t0 = std::time::Instant::now();
     let c = cpu.tile_cpu(id);
     let tc = t0.elapsed().as_secs_f64();
@@ -825,7 +825,7 @@ fn parallel_callers_do_not_deadlock() {
     if gpu().is_none() {
         return;
     }
-    let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+    let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let d = done.clone();
     std::thread::spawn(move || {

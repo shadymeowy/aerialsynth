@@ -26,11 +26,18 @@ Both files are HDF5 and open in h5py or any HDF5 reader. `terrain info FILE` sum
 - **Locking:** HDF5 locks the file: a store open for writing in one process (`terrain view`,
   `terrain tiles`) cannot be opened by another, and one open for reading cannot be written;
   such an open fails with an error saying so.
-- **One world per store:** a store records the world config and generator version of its
-  tiles. Every command refuses a store of another world, naming the settings that differ.
+- **One world per store:** a store records the world config (with `generator: classic` or
+  `next`) and generator version of its tiles: 3 for the classic generator, 4 for the next one.
+  Every command refuses a store of another generator (the error names it and the
+  `world.generator` that opens it) or of another world, naming the settings that differ; a
+  classic world is the settings v0.2.0 had (the next generator's `ecoregions`, `biomes`, `atlas`
+  and `relief.tectonic_mountains` / `belt_mountains` are not part of it, nor recorded). Stores
+  written before the generator switch have no `generator` key: version 3 or lower (v0.2.0's)
+  is classic, so v0.2.0 stores open with the default config, and version 4 is next.
   It also refuses to add tiles to a store of another generator version; reading such a store
   only warns (`run` and `tiles` open a store for writing only when tiles are missing, or with
-  `--lazy`; `terrain view` unless `--no-generate`). `terrain info` shows both.
+  `--lazy`; `terrain view` unless `--no-generate`). `terrain info` shows the generator and
+  version.
 - **Making tiles:** `terrain tiles` plans and generates the flight's tiles. `--bbox` covers a
   region, `--list` a tile list. Existing tiles are skipped, so the store grows lazily.
   `tiles.lazy` (or `terrain run --lazy`) generates what the renderer misses while rendering.

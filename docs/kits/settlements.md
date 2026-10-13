@@ -1,5 +1,10 @@
 # Settlements kit: hamlets to megacities, airports, ports, dams, mines, energy
 
+> [!NOTE]
+> This kit belongs to the **next** generator (`world.generator: next`, a preview; see
+> [`docs/simulation.md`](../simulation.md)). The default generator, `classic` (v0.2.0's), has no
+> kits: worlds made with it do not show what this page describes.
+
 `crates/terragen/src/kits/settlements.rs` (the kit, host function, slots 7 and 8, tests),
 `settlements/places.rs` (the central-place hierarchy), `settlements/town.rs` (the settlement
 pixel model), `settlements/sites.rs` (infrastructure placement and looks), and the WGSL twin

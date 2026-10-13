@@ -1256,8 +1256,8 @@ mod tests {
         geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)
     }
 
-    fn gen1() -> crate::Generator {
-        crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() })
+    fn gen1() -> crate::NextGenerator {
+        crate::NextGenerator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() })
     }
 
     /// Parent ≈ mean of children where the kit draws: elevation, albedo and the share of the
@@ -1341,7 +1341,7 @@ mod tests {
             eprintln!("no GPU: skipped");
             return;
         };
-        let cpu = crate::Generator::new(cfg);
+        let cpu = crate::NextGenerator::new(cfg);
         let mut ids = Vec::new();
         for i in 0..PLACES.len() {
             for z in [10u8, 13, 16] {
@@ -1382,7 +1382,7 @@ mod tests {
         };
         let zooms: Vec<u8> = std::env::var("DESERT_Z").map(|v| v.split(',').map(|z| z.parse().unwrap()).collect()).unwrap_or(vec![11, 13, 15]);
         let be = if std::env::var("DESERT_CPU").is_ok() { crate::Backend::Cpu } else { crate::Backend::Auto };
-        let g = crate::Generator::try_with_backend(crate::Config::default(), be).unwrap();
+        let g = crate::NextGenerator::try_with_backend(crate::Config::default(), be).unwrap();
         let n = crate::TILE_SIZE;
         for (k, &(lat, lon)) in places.iter().enumerate() {
             let ids: Vec<_> = zooms.iter().map(|&z| geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)).collect();
