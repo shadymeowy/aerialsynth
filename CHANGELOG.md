@@ -68,8 +68,13 @@
     biomes; the canopy closes at lower moisture below 8 °C in the lowlands (taiga of dry
     continental interiors); altitudinal zones follow a continentality-corrected temperature
     (krummholz no longer covers the hills of hot-summer continental climates), dithered ±2 °C.
+    Managed boreal stands: up to 18 % cut within 16 years (42 %), muted regrowth.
+  - **Ecotones:** the 10 km border mosaic's patches have ragged outlines (a strong 80 m octave):
+    a patch of a strongly different neighbour biome read as a hard-edged disc (53 N, −16.4 E).
   - **Look:** cinder cones twice as steep relative to their size and without light baked into
     their albedo; muted gobi gravel, desert pavement and barchans; softer canyon strata.
+  - Tests: the LOD, seam, parity and determinism tests unchanged and passing; agriculture's WGSL
+    tables re-blessed.
 
 - **Example `camera-footprint`** (`examples/camera-footprint`, `cargo run --release -p
   camera-footprint`): a teaching program, read top to bottom, that makes the coordinate frames
