@@ -47,7 +47,6 @@ messages) and `terragen::gpu::compiling_since()` (polled by the viewer).
 | mesh geometry per unit and vertex stride: f64 ECEF vertices (shared `unit_geometry`) | CPU, once; cached on the GPU relative to a per-unit origin | camera-independent |
 | projection through the camera model (pinhole ± distortion, rational, Kannala–Brandt, Mei, Scaramuzza) | GPU vertex shader (`mesh.wgsl`) | per frame only a per-unit offset (f64 on the CPU) is uploaded |
 | rasterization into a supersampled G-buffer (unit, u, v, range) | GPU render pass | |
-| geometric normals of the rendered surface from neighbouring G-buffer points (walls) | GPU compute pass (`normals.wgsl`, `render.walls` only) | a pass of its own: inside the shading kernel this gather made WARP's / FXC's kernel write no terrain |
 | deferred shading: pyramid texture filtering, relighting, DSM shadows, lamps + flicker, materials (glints with bank-occluded reflections, snow BRDF), wall materials, sky, aerial perspective | GPU compute pass (`shade.wgsl`, a port of `raster.rs` / `atmo.rs` / `walls.rs`) | the expensive part |
 | read-back, 3D points from depth and rays | CPU | |
 
@@ -245,8 +244,8 @@ the CPU (6 threads).
   CPU`) and the CPU renders. Seen on the virtual GPU of macOS VMs on Intel hosts ("Apple
   Paravirtual device"), which renders nothing. A GPU render that fails in the check (a shader
   the backend rejects) fails it too. `backend: gpu` skips the check. The G-buffer pass is
-  submitted separately from the shading pass that reads it: a software rasterizer (Mesa's
-  lavapipe) can otherwise shade parts of a G-buffer not yet drawn.
+  submitted separately from the shading pass that reads it: software rasterizers (Mesa's
+  lavapipe, Windows' WARP) can otherwise shade parts of a G-buffer not yet drawn.
 
 - **No suitable GPU:** with `backend: auto` (the default) generation and rendering fall back to
   the CPU; `backend: gpu` makes a missing GPU an error instead. Tile generation
