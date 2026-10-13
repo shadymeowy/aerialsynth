@@ -1,0 +1,71 @@
+world:
+  seed: 1
+tiles:
+  file: out/world.h5
+  max_zoom: 18
+  margin: 0
+  plan_every: 5
+trajectory:
+  synth:
+    rate_hz: 400
+    speed_mps: 50
+    altitude_m: 1200
+    heading_deg: 60
+    kind: line
+    lat: -33.5
+    lon: -171.0
+    duration_s: 7.6
+render:
+  supersample: 2
+  shading: relit
+  lighting:
+    mode: clock
+    date: '2026-06-21'
+    time_utc: 02:54:00
+    time_scale: 1.0
+    sky_intensity: 0.55
+  atmosphere:
+    visibility_km: 40
+    inscatter: 1.0
+cameras:
+- path: /cam0
+  intrinsics:
+    model: pinhole
+    width: 640
+    height: 360
+    intrinsics:
+    - 457.0
+    - 457.0
+    - 319.5
+    - 179.5
+  extrinsics:
+    mount: forward
+    pitch_deg: -30
+  frame_rate: 0.5357142857142857
+  rgb:
+    sensor:
+      exposure:
+        mode: auto
+        tau_s: 0.4
+        target: 0.13
+      motion_blur:
+        enabled: true
+        max_samples: 24
+      optics:
+        defocus_px: 0.25
+        chromatic_aberration_px: 0.3
+        vignette: 0.25
+        bloom: 0.06
+      noise:
+        enabled: true
+        read: 0.08
+        shot: 0.1
+      tone:
+        curve: filmic
+        saturation: 0.92
+    supersample: 2
+output:
+  start: 1.0
+  compression:
+    level: 1
+  end: 6.6

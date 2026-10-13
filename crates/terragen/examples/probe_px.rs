@@ -3,6 +3,7 @@
 //!     cargo run --release -p terragen --example probe_px -- LAT LON [GSD_M]
 //!     cargo run --release -p terragen --example probe_px -- scan LAT0 LAT1 LON0 LON1 STEP_DEG
 //!     cargo run --release -p terragen --example probe_px -- sinks LAT LON R_KM
+//!     cargo run --release -p terragen --example probe_px -- info LAT LON [LAT LON ...]
 //!
 //! The first prints the world fields at one point (default 5 m pixels); `scan` prints one line of
 //! features per grid point (200 m pixels) to look for places; `sinks` lists the rivers ending in
@@ -10,6 +11,14 @@
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let g = terragen::Generator::new(terragen::Config::default());
+    if args[0] == "info" {
+        // info LAT LON [LAT LON ...]: ecoregion, biome and land use
+        let a: Vec<f64> = args[1..].iter().map(|s| s.parse().unwrap()).collect();
+        for ll in a.chunks(2) {
+            println!("{:.4} {:.4} {}", ll[0], ll[1], g.describe(ll[0].to_radians(), ll[1].to_radians(), 5.0));
+        }
+        return;
+    }
     if args[0] == "sinks" {
         let a: Vec<f64> = args[1..].iter().map(|s| s.parse().unwrap()).collect();
         let ctx = terragen::world::Ctx::new(a[0].to_radians(), a[1].to_radians(), 50.0, &g.world.ell);

@@ -414,3 +414,9 @@ pub fn wgsl_relief() -> String {
     s.push_str("}\n");
     s
 }
+
+/// The agriculture kit's field system of land-use region `rid` in ecoregion `e` (its name).
+pub fn agriculture_system(e: &crate::eco::EcoParams, rid: u64) -> &'static str {
+    agriculture::sys::NAMES[agriculture::pick_system(&agriculture::EcoV::of(e), rid) as usize]
+}
+

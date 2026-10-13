@@ -377,6 +377,30 @@ impl Generator {
         (e.biome, self.surface.registry.biomes[e.biome as usize].name.as_str())
     }
 
+    /// A one-line description of the ecoregion, biome and land use at a point (radians), for
+    /// inspection (`probe_px info`).
+    pub fn describe(&self, lat: f64, lon: f64, gsd: f64) -> String {
+        let ctx = Ctx::new(lat, lon, gsd, &self.world.ell);
+        let t = self.world.terrain(&ctx);
+        let e = self.surface.eco.params(&self.world, &self.surface.registry, &mut Caches::default(), t.eco.id, t.eco.center);
+        let sys = crate::kits::agriculture_system(&e, t.region.id);
+        format!(
+            "biome {} koppen {} site temp {:.1} precip {:.0} dry {:.1} arch {:?} dev {:.2} agri {:.2} habit {:.2} region {} system {} eco_edge {:.1} km",
+            self.surface.registry.biomes[e.biome as usize].name,
+            e.climate.koppen,
+            e.climate.temp_c,
+            e.climate.precip_mm,
+            e.climate.dry_months,
+            crate::atlas::Archetype::ALL.get(e.style.archetype as usize),
+            e.style.development,
+            t.agri,
+            t.habit,
+            t.region.id,
+            sys,
+            t.eco.edge,
+        )
+    }
+
     /// Pass A of a tile: the terrain at the pixel centres of the tile and a 2-pixel apron
     /// (260 x 260, row-major).
     pub fn pass_a(&self, id: TileId) -> Vec<Terrain> {
