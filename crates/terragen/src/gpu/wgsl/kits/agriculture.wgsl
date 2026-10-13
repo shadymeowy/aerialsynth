@@ -630,18 +630,19 @@ fn agri_draw(s: ptr<function, Stack>, pl: Plan) {
         ly.inst = instance_id(pc.id);
     }
     // lit greenhouses
-    if (pl.sys == AG_GREENH) {
+    if (pl.sys == AG_GREENH && gsd < AG_GH_GSD) {
         var lit = 0.0;
         if (cls == LC_GREENHOUSE && u01k(pc.id, 41lu) < AG_GH_LIT) {
             lit = cov;
         }
-        ly.emit = AG_GH_GLOW * (lerp(cult * 0.9 * inside_mean * d.kw.x * AG_GH_LIT, lit, k) * keep);
+        ly.emit = AG_GH_GLOW * (lerp(cult * 0.9 * inside_mean * d.kw.x * AG_GH_LIT, lit, k) * keep * (1.0 - smoothstep1(0.5 * AG_GH_GSD, AG_GH_GSD, gsd)));
     }
     composite(s, ly);
 }
 
-const AG_GH_LIT: f32 = 0.35;
-const AG_GH_GLOW: vec3<f32> = vec3<f32>(0.9, 0.5, 0.2);
+const AG_GH_LIT: f32 = 0.2;
+const AG_GH_GLOW: vec3<f32> = vec3<f32>(0.25, 0.14, 0.05);
+const AG_GH_GSD: f32 = 300.0;
 
 // ---------------------------------------------------------------- parcels
 

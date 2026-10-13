@@ -12,7 +12,7 @@
   capped), reflections show the banks where the DSM rises above the reflected ray (narrow
   rivers in forest were silvery lines of horizon sky), snow and ice scatter forward
   (`Material::forward`, a renderer-only `lc_forward` table). *Emission:* lit greenhouses through
-  the `emission` layer (35 % of them, sodium orange; the greenhouse material is no longer
+  the `emission` layer (20 % of them, sodium orange, gone at pixels > 300 m; the greenhouse material is no longer
   self-emissive); runway / taxiway lights, port and stadium floods, flares and turbine beacons
   were there. *Optional tile layers* (tile store format 2): `dtm` (bare ground) and `instance`
   (building lots, fields, forest stands; `Layer::inst` through the stack, per-sample ids in

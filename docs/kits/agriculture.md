@@ -24,7 +24,7 @@ share for the core's fields. Systems change at region and ecoregion borders, nev
 | vineyards | parcels of vine rows along the field axis or the contours |
 | groves | olive, almond, citrus groves; date palms in deserts, apples in cool climates |
 | plantations | oil palm, rubber, tea on contours, cane; estate roads |
-| greenhouse seas | white plastic bays in different states, irrigation ponds; at night an orange glow of grow lights through 35 % of the roofs (`emission`; the system's mean where parcels are unresolved) |
+| greenhouse seas | white plastic bays in different states, irrigation ponds; at night an orange glow of grow lights through 20 % of the roofs (`emission`; the system's mean where parcels are unresolved, none at pixels > 300 m) |
 | pastures | paddocks, livestock trails to troughs, farm dams, hay meadows, savanna trees in warm climates |
 | irrigated pivots | centre pivots in the desert |
 | ranches | huge fenced paddocks (2.2 × 1.5 km), stock trails converging on troughs, farm dams, savanna trees where warm; feedlots |

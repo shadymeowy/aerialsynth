@@ -731,10 +731,11 @@ fn draw(s: &mut Stack, pl: &Plan) {
     let a = cov_m * keep;
     s.m.field_cov = a;
     // lit greenhouses (horticultural lamps; design §8 emission): an orange glow through the
-    // roofs of some, the system's mean where the parcels are not resolved
-    let glow = if pl.sys == sys::GREENH {
+    // roofs of some, the system's mean where the parcels are not resolved; gone at coarse pixels
+    // (> ~300 m: the low zooms' town glow keeps its mean without them)
+    let glow = if pl.sys == sys::GREENH && gsd < GH_GSD {
         let lit = if cls == CLS_GREENHOUSE && u01k(pc.id, 41) < GH_LIT { cov } else { 0.0 };
-        lerp(cult * 0.9 * inside_mean * d.kw[0] * GH_LIT, lit, k) * keep
+        lerp(cult * 0.9 * inside_mean * d.kw[0] * GH_LIT, lit, k) * keep * (1.0 - smoothstep(0.5 * GH_GSD, GH_GSD, gsd))
     } else {
         0.0
     };
@@ -743,9 +744,11 @@ fn draw(s: &mut Stack, pl: &Plan) {
     s.composite(Layer { cov: a, albedo: col, dh: dh * k - 0.6 * m.micro, hmode: hmode::ADD, cls, inst, emit: GH_GLOW * glow, ..Default::default() });
 }
 
-/// Share of the greenhouses lit at night, and their glow (emission, linear: sodium lamps).
-const GH_LIT: f64 = 0.35;
-const GH_GLOW: DVec3 = DVec3::new(0.9, 0.5, 0.2);
+/// Share of the greenhouses lit at night, their glow (emission, linear: sodium lamps) and the
+/// pixel size where it is gone.
+const GH_LIT: f64 = 0.2;
+const GH_GLOW: DVec3 = DVec3::new(0.25, 0.14, 0.05);
+const GH_GSD: f64 = 300.0;
 
 /// The share of quarter sections with a pivot (dry ecoregions).
 fn pivot_share(e: &EcoV) -> f64 {
