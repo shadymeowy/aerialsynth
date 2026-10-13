@@ -20,20 +20,35 @@ pub struct StoreMeta {
     /// Version of the generator that produced the tiles (0 = not recorded). Tiles of different
     /// versions differ slightly and must not be mixed in one store.
     pub generator_version: u32,
-    /// Layers stored in this file.
+    /// Layers stored in this file: the base layers ([`Layer::BASE`]) and any optional ones.
     pub layers: Vec<Layer>,
+    /// Format version of the file (version-1 stores are read too; new stores get
+    /// [`FORMAT_VERSION`]).
+    pub format_version: i32,
 }
 
 impl Default for StoreMeta {
     fn default() -> Self {
         let e = geodesy::Ellipsoid::WGS84;
-        StoreMeta { ellipsoid_a: e.a, ellipsoid_b: e.b, generator_config: String::new(), seed: 0, generator_version: 0, layers: Layer::ALL.to_vec() }
+        StoreMeta {
+            ellipsoid_a: e.a,
+            ellipsoid_b: e.b,
+            generator_config: String::new(),
+            seed: 0,
+            generator_version: 0,
+            layers: Layer::BASE.to_vec(),
+            format_version: FORMAT_VERSION,
+        }
     }
 }
 
 impl StoreMeta {
     pub fn ellipsoid(&self) -> geodesy::Ellipsoid {
         geodesy::Ellipsoid { a: self.ellipsoid_a, b: self.ellipsoid_b }
+    }
+    /// Does the store hold layer `l`?
+    pub fn has(&self, l: Layer) -> bool {
+        self.layers.contains(&l)
     }
 }
 
@@ -70,6 +85,13 @@ impl TileStore {
     /// later runs cannot open.
     pub fn create(path: impl AsRef<Path>, meta: StoreMeta) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
+        if let Some(l) = Layer::BASE.iter().find(|l| !meta.layers.contains(l)) {
+            bail!("creating {}: every store holds the base layers ({} missing)", path.display(), l.name());
+        }
+        // (version 1: the base layers only; written for tests of old stores)
+        if !(1..=FORMAT_VERSION).contains(&meta.format_version) || (meta.format_version < 2 && meta.layers.iter().any(|l| l.optional())) {
+            bail!("creating {}: format version {} with layers {:?}", path.display(), meta.format_version, meta.layers);
+        }
         if let Some(p) = path.parent() {
             if !p.as_os_str().is_empty() {
                 std::fs::create_dir_all(p)?;
@@ -83,7 +105,7 @@ impl TileStore {
         let file = h5::File::create(&tmp).map_err(|e| open_error(&tmp, e, "creating"))?;
         let res = (move || -> Result<()> {
             file.set_attr_str("format", FORMAT)?;
-            file.set_attr("format_version", FORMAT_VERSION)?;
+            file.set_attr("format_version", meta.format_version)?;
             file.set_attr("tile_size", TILE_SIZE as i32)?;
             file.set_attr_str("scheme", "xyz")?;
             file.set_attr_str("projection", "EPSG:3857")?;
@@ -94,7 +116,8 @@ impl TileStore {
             file.set_attr_str("generator_config", &meta.generator_config)?;
             file.set_attr("seed", meta.seed)?;
             file.set_attr("generator_version", meta.generator_version)?;
-            let names: Vec<&str> = meta.layers.iter().map(|l| l.name()).collect();
+            // (the layers in their canonical order, each once)
+            let names: Vec<&str> = Layer::ALL.iter().filter(|l| meta.layers.contains(l)).map(|l| l.name()).collect();
             file.set_attr_str("layers", &names.join(","))?;
             file.ensure_group("levels")?;
             file.flush()?;
@@ -135,8 +158,13 @@ impl TileStore {
         if format != FORMAT {
             bail!("{} is not a terrain tile store (format attr = {format:?})", path.display());
         }
+        let version: i32 = file.attr("format_version").unwrap_or(1);
+        if version > FORMAT_VERSION {
+            bail!("{} has tile store format version {version}; this build reads versions 1..={FORMAT_VERSION} (update aerialsynth)", path.display());
+        }
         let layers = file.attr_str("layers")?.split(',').filter_map(Layer::from_name).collect::<Vec<_>>();
         let meta = StoreMeta {
+            format_version: version,
             ellipsoid_a: file.attr("ellipsoid_a")?,
             ellipsoid_b: file.attr("ellipsoid_b")?,
             generator_config: file.attr_str("generator_config").unwrap_or_default(),
@@ -266,8 +294,11 @@ impl TileStore {
             let mut chunk = shape.clone();
             chunk[0] = 1;
             let ds = match l {
-                Layer::Elevation => {
+                Layer::Elevation | Layer::Dtm => {
                     g.new_dataset::<f32>().shape(&shape).max_shape(&max).chunk(&chunk).shuffle(true).deflate(DEFLATE_LEVEL as u8).create(l.name())?
+                }
+                Layer::Instance => {
+                    g.new_dataset::<u32>().shape(&shape).max_shape(&max).chunk(&chunk).shuffle(true).deflate(DEFLATE_LEVEL as u8).create(l.name())?
                 }
                 Layer::Normal => {
                     g.new_dataset::<i8>().shape(&shape).max_shape(&max).chunk(&chunk).shuffle(true).deflate(DEFLATE_LEVEL as u8).create(l.name())?
@@ -283,6 +314,8 @@ impl TileStore {
                     Layer::Normal => "unit surface normal (east, north, up) * 127, i8",
                     Layer::Landcover => "land-cover class id (terragen::landcover)",
                     Layer::Emission => "night-time artificial light, linear radiance = 16 * (v/255)^3",
+                    Layer::Dtm => "bare ground (DTM) height above the ellipsoid (m) at pixel centres; the bed under water",
+                    Layer::Instance => "instance id (hashed building lot, field or tree stand; 0: none), u32",
                 },
             )?;
             layers.insert(l, ds);
@@ -418,8 +451,12 @@ impl TileStore {
                     let mut count = layer_shape(l, 1);
                     count[0] = 1;
                     let data = match l {
-                        Layer::Elevation => {
+                        Layer::Elevation | Layer::Dtm => {
                             let v: Vec<f32> = ds.read_slice(&off, &count)?;
+                            v.iter().flat_map(|f| f.to_le_bytes()).collect()
+                        }
+                        Layer::Instance => {
+                            let v: Vec<u32> = ds.read_slice(&off, &count)?;
                             v.iter().flat_map(|f| f.to_le_bytes()).collect()
                         }
                         // i8 normals must be read as i8 (an i8 → u8 conversion clips negatives)

@@ -17,9 +17,9 @@ def config(tmp_path):
 
 
 def test_layers():
-    assert list(aerialsynth.LAYERS) == ["rgb", "albedo", "elevation", "normal", "landcover", "emission"]
+    assert list(aerialsynth.LAYERS) == ["rgb", "albedo", "elevation", "normal", "landcover", "emission", "dtm", "instance"]
     expect = {"rgb": ("uint8", 3), "albedo": ("uint8", 3), "elevation": ("float32", 1), "normal": ("int8", 3),
-              "landcover": ("uint8", 1), "emission": ("uint8", 3)}
+              "landcover": ("uint8", 1), "emission": ("uint8", 3), "dtm": ("float32", 1), "instance": ("uint32", 1)}
     for name, info in aerialsynth.LAYERS.items():
         assert (info.dtype.name, info.channels) == expect[name]
         assert info.size == 256 * 256 * info.channels * info.dtype.itemsize
@@ -35,7 +35,11 @@ def test_tiles_are_generated_then_read(tmp_path, config):
         assert h.dtype == np.float32 and h.shape == (256, 256)
         assert np.isfinite(h).all() and np.abs(h).max() < 12_000
         np.testing.assert_array_equal(w.tile(4, 9, 6, "elevation"), h)  # now read from the store
-        tiles = {name: w.tile(4, 9, 6, name) for name in aerialsynth.LAYERS}
+        # (a store without the optional layers)
+        assert w.layers == ["rgb", "albedo", "elevation", "normal", "landcover", "emission"]
+        with pytest.raises(ValueError, match="no dtm layer"):
+            w.tile(4, 9, 6, "dtm")
+        tiles = {name: w.tile(4, 9, 6, name) for name in w.layers}
         for name, a in tiles.items():
             info = aerialsynth.LAYERS[name]
             assert a.dtype == info.dtype and a.shape == info.shape
@@ -54,6 +58,22 @@ def test_tiles_are_generated_then_read(tmp_path, config):
         np.testing.assert_array_equal(w.tile(4, 9, 6, "elevation"), h)
     with pytest.raises(RuntimeError, match=r"world\.seed \(5 → 6\)"):
         aerialsynth.World(path, config=config, seed=6)
+
+
+def test_optional_layers(tmp_path):
+    cfg = tmp_path / "world.yaml"
+    cfg.write_text("world:\n  tile_supersample: 1\ntiles:\n  max_zoom: 8\n  layers: [dtm, instance]\n")
+    with aerialsynth.World(tmp_path / "w.h5", config=cfg, seed=5) as w:
+        assert w.layers == list(aerialsynth.LAYERS)
+        dsm, dtm = w.tile(5, 17, 11, "elevation"), w.tile(5, 17, 11, "dtm")
+        assert dtm.dtype == np.float32 and np.isfinite(dtm).all() and (dtm <= dsm).all()
+        inst = w.tiles([[5, 17, 11], [5, 18, 11]], "instance")
+        assert inst.dtype == np.uint32 and inst.shape == (2, 256, 256)
+        assert ((inst == 0) | ((inst >= 2**23) & (inst < 2**30))).all()
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("tiles:\n  layers: [rgb]\n")
+    with pytest.raises(RuntimeError, match="not an optional layer"):
+        aerialsynth.World(tmp_path / "bad.h5", config=bad)
 
 
 def test_bad_arguments(tmp_path, config):

@@ -248,7 +248,9 @@ pub fn layer(s: &mut crate::stack::Stack) {
             lc::MIXED_FOREST
         };
         let hm = if veg.trees_in_dsm { hmode::MAX } else { hmode::NONE };
-        s.composite(Layer { cov: tcov, albedo: tc, dh: th, hmode: hm, cls, ..Default::default() });
+        // (the forest stand is the instance: not for shrubs)
+        let inst = if cls == lc::SHRUB { 0 } else { crate::stack::instance_id(stand_id) };
+        s.composite(Layer { cov: tcov, albedo: tc, dh: th, hmode: hm, cls, inst, ..Default::default() });
     }
     // cast shadows from neighbouring trees onto the ground / other crowns
     if world.cfg.satellite.shadows && tcov < 0.99 {

@@ -28,6 +28,9 @@ pub struct Payload {
     pub elev: Vec<f32>,
     /// slope (east, north) of the DSM, m/m
     pub grad: Vec<half::f16>,
+    /// the optional layers (zero where the store has none): height above ground in decimetres
+    /// (u16 in r, g) and the instance (16 bits of its id in b, a; 0: none)
+    pub extra: Vec<u8>,
     pub elev_min: f32,
     pub elev_max: f32,
 }
@@ -152,7 +155,7 @@ fn loader(sh: Arc<Shared>, store: Arc<TileStore>) {
                 sh.cv.wait(&mut s);
             }
         };
-        match store.read_tile(id, &[Layer::Albedo, Layer::Elevation, Layer::Landcover]) {
+        match store.read_tile(id, &[Layer::Albedo, Layer::Elevation, Layer::Landcover, Layer::Dtm, Layer::Instance]) {
             Ok(Some(t)) => {
                 let p = payload(&t, &store);
                 sh.results.lock().push(p);
@@ -302,7 +305,20 @@ fn payload(t: &TileData, store: &TileStore) -> Payload {
     // the mesh takes a box-filtered height (the vertices are 8 px apart: single buildings and
     // trees made needles); the full-resolution slope above still shades them
     let elev = if e.len() == N * N { box_filter(e, 4) } else { vec![0.0; N * N] };
-    Payload { id: t.id, color, elev, grad, elev_min: t.elev_min, elev_max: t.elev_max }
+    // (only the layers the store holds: generated tiles carry them all)
+    let mut extra = vec![0u8; N * N * 4];
+    let (has_dtm, has_inst) = (store.meta().has(Layer::Dtm), store.meta().has(Layer::Instance));
+    for k in 0..N * N {
+        if let (true, Some(h), Some(g)) = (has_dtm, e.get(k), t.dtm.get(k)) {
+            let dm = ((h - g) * 10.0).round().clamp(0.0, 65535.0) as u16;
+            extra[4 * k..4 * k + 2].copy_from_slice(&dm.to_le_bytes());
+        }
+        if let (true, Some(&i)) = (has_inst, t.instance.get(k)) {
+            let v = if i == 0 { 0 } else { (((i ^ (i >> 16)) & 0xFFFF) as u16).max(1) };
+            extra[4 * k + 2..4 * k + 4].copy_from_slice(&v.to_le_bytes());
+        }
+    }
+    Payload { id: t.id, color, elev, grad, extra, elev_min: t.elev_min, elev_max: t.elev_max }
 }
 
 /// Separable (2r+1)² box filter, clamped at the edges.

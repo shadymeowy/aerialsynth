@@ -1,6 +1,6 @@
 //! XYZ tile pyramid stored in a single HDF5 file.
 //!
-//! Layout (format version 1):
+//! Layout (format version 2; version 1 is the same without the optional layers):
 //! ```text
 //! /                      attrs: format="terrain-tiles", format_version, tile_size, scheme="xyz",
 //!                               projection="EPSG:3857", ellipsoid_a, ellipsoid_b,
@@ -15,10 +15,16 @@
 //!     normal     i8  x3  unit normal (east, north, up) * 127
 //!     landcover  u8      class id (see terragen::landcover)
 //!     emission   u8  x3  night-time artificial light, linear radiance = 16 * (v/255)^3
+//!   optional (listed in the `layers` attribute when the store has them):
+//!     dtm        f32     bare ground (DTM), meters above the ellipsoid (the bed under water)
+//!     instance   u32     instance id (hashed building lot / field / tree stand; 0 = none)
 //! ```
 //! Rows are appended in any order, so the file can be grown lazily (generate only the tiles a
 //! trajectory needs, add more later). Tile pixels are pixel-centre registered: pixel (i, j) of
 //! tile (z, x, y) covers global pixel (256 x + i, 256 y + j) at zoom z, row 0 = north.
+//!
+//! Readers open both versions: a store's layers are those of its `layers` attribute (the
+//! optional ones are absent from version-1 stores and from stores created without them).
 
 mod codec;
 mod store;
@@ -28,7 +34,9 @@ pub use store::{StoreMeta, TileStore};
 
 pub const TILE_SIZE: usize = 256;
 pub const FORMAT: &str = "terrain-tiles";
-pub const FORMAT_VERSION: i32 = 1;
+/// Format version written by this crate (2: the optional layers). Stores of versions 1 and 2
+/// are read; newer ones are refused.
+pub const FORMAT_VERSION: i32 = 2;
 
 /// A data layer of a tile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -40,10 +48,19 @@ pub enum Layer {
     Landcover,
     /// Night-time artificial light emission, u8 x3: linear radiance = 16 * (v/255)^3
     Emission,
+    /// Optional: bare ground (DTM), f32 metres above the ellipsoid (the bed under water).
+    Dtm,
+    /// Optional: instance id, u32 (hashed building lot / field / tree stand; 0 = none).
+    Instance,
 }
 
 impl Layer {
-    pub const ALL: [Layer; 6] = [Layer::Rgb, Layer::Albedo, Layer::Elevation, Layer::Normal, Layer::Landcover, Layer::Emission];
+    /// Every layer (the base layers, then the optional ones).
+    pub const ALL: [Layer; 8] = [Layer::Rgb, Layer::Albedo, Layer::Elevation, Layer::Normal, Layer::Landcover, Layer::Emission, Layer::Dtm, Layer::Instance];
+    /// The layers of every store (format version 1 had only these).
+    pub const BASE: [Layer; 6] = [Layer::Rgb, Layer::Albedo, Layer::Elevation, Layer::Normal, Layer::Landcover, Layer::Emission];
+    /// The layers a store holds only when it was created with them.
+    pub const OPTIONAL: [Layer; 2] = [Layer::Dtm, Layer::Instance];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -53,7 +70,13 @@ impl Layer {
             Layer::Normal => "normal",
             Layer::Landcover => "landcover",
             Layer::Emission => "emission",
+            Layer::Dtm => "dtm",
+            Layer::Instance => "instance",
         }
+    }
+    /// Is it one of the optional layers ([`Layer::OPTIONAL`])?
+    pub fn optional(self) -> bool {
+        Layer::OPTIONAL.contains(&self)
     }
     pub fn from_name(s: &str) -> Option<Layer> {
         Layer::ALL.into_iter().find(|l| l.name() == s)
@@ -67,7 +90,7 @@ impl Layer {
     /// Bytes per element (per channel).
     pub fn elem_size(self) -> usize {
         match self {
-            Layer::Elevation => 4,
+            Layer::Elevation | Layer::Dtm | Layer::Instance => 4,
             _ => 1,
         }
     }
@@ -86,6 +109,9 @@ pub struct TileData {
     pub normal: Vec<i8>,
     pub landcover: Vec<u8>,
     pub emission: Vec<u8>,
+    /// optional layers (empty when not generated or not loaded)
+    pub dtm: Vec<f32>,
+    pub instance: Vec<u32>,
     pub elev_min: f32,
     pub elev_max: f32,
 }
@@ -102,6 +128,8 @@ impl TileData {
                     Layer::Normal => self.normal = vec![],
                     Layer::Landcover => self.landcover = vec![],
                     Layer::Emission => self.emission = vec![],
+                    Layer::Dtm => self.dtm = vec![],
+                    Layer::Instance => self.instance = vec![],
                 }
             }
         }
@@ -115,6 +143,8 @@ impl TileData {
             Layer::Normal => !self.normal.is_empty(),
             Layer::Landcover => !self.landcover.is_empty(),
             Layer::Emission => !self.emission.is_empty(),
+            Layer::Dtm => !self.dtm.is_empty(),
+            Layer::Instance => !self.instance.is_empty(),
         }
     }
 
@@ -131,6 +161,8 @@ impl TileData {
             Layer::Normal => cast(&self.normal),
             Layer::Landcover => &self.landcover,
             Layer::Emission => &self.emission,
+            Layer::Dtm => cast(&self.dtm),
+            Layer::Instance => cast(&self.instance),
         }
     }
 
@@ -142,6 +174,8 @@ impl TileData {
             Layer::Emission => self.emission = b,
             Layer::Normal => self.normal = b.into_iter().map(|x| x as i8).collect(),
             Layer::Elevation => self.elevation = b.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect(),
+            Layer::Dtm => self.dtm = b.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect(),
+            Layer::Instance => self.instance = b.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect(),
         }
     }
 

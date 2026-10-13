@@ -36,8 +36,9 @@ or polar ones. Some ranch regions (20–65 % by development) hold a **feedlot** 
 along 12 m feed alleys with concrete bunks, dark manure, cattle; a feed mill with silage bunkers,
 a shed and silos at one end; two manure lagoons in embankments beyond the other. No pivots.
 
-Parcels are crisp units with hashed ids; rows, furrows, crowns and trails are band-limited and
-blend to the system's mean at coarse pixels. Field tracks only: roads are the transport kit's.
+Parcels are crisp units with hashed ids (their crops are the parcel's instance in the optional
+`instance` tile layer; borders, yards and ponds are not); rows, furrows, crowns and trails are
+band-limited and blend to the system's mean at coarse pixels. Field tracks only: roads are the transport kit's.
 
 ## Stills
 

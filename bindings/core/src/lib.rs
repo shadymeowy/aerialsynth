@@ -83,21 +83,24 @@ pub enum Dtype {
     I8,
     /// little-endian IEEE 754 binary32
     F32,
+    /// little-endian u32
+    U32,
 }
 
 impl Dtype {
-    /// numpy-style type string: `"|u1"`, `"|i1"`, `"<f4"`.
+    /// numpy-style type string: `"|u1"`, `"|i1"`, `"<f4"`, `"<u4"`.
     pub fn numpy(self) -> &'static str {
         match self {
             Dtype::U8 => "|u1",
             Dtype::I8 => "|i1",
             Dtype::F32 => "<f4",
+            Dtype::U32 => "<u4",
         }
     }
     pub fn size(self) -> usize {
         match self {
             Dtype::U8 | Dtype::I8 => 1,
-            Dtype::F32 => 4,
+            Dtype::F32 | Dtype::U32 => 4,
         }
     }
 }
@@ -118,8 +121,9 @@ pub struct LayerInfo {
 /// Describe a layer.
 pub fn layer_info(layer: Layer) -> LayerInfo {
     let dtype = match layer {
-        Layer::Elevation => Dtype::F32,
+        Layer::Elevation | Layer::Dtm => Dtype::F32,
         Layer::Normal => Dtype::I8,
+        Layer::Instance => Dtype::U32,
         _ => Dtype::U8,
     };
     debug_assert_eq!(dtype.size(), layer.elem_size());
@@ -130,16 +134,21 @@ pub fn layer_info(layer: Layer) -> LayerInfo {
         Layer::Normal => "unit surface normal (east, north, up) * 127",
         Layer::Landcover => "land-cover class id (terragen::landcover classes v2, docs/formats.md: 0 unknown, 1 ocean, 2 lake, 3 river, ...)",
         Layer::Emission => "night-time artificial light: linear radiance = 16 * (v/255)^3",
+        Layer::Dtm => "optional: bare ground (DTM), metres above the WGS84 ellipsoid at pixel centres (the bed under water); elevation - dtm = heights above ground",
+        Layer::Instance => "optional: instance id (hashed building lot, field or forest stand; 0 = none)",
     };
     LayerInfo { layer, name: layer.name(), dtype, channels: layer.channels(), size: layer.tile_bytes(), description }
 }
 
-/// Every layer, in the order of the C `AS_LAYER_*` values.
-pub fn layers() -> [LayerInfo; 6] {
+/// Every layer, in the order of the C `AS_LAYER_*` values (the base layers, then the optional
+/// `dtm` and `instance`, which a store holds only when it was created with them:
+/// [`World::has_layer`]).
+pub fn layers() -> [LayerInfo; 8] {
     Layer::ALL.map(layer_info)
 }
 
-/// A layer by name (`"rgb"`, `"albedo"`, `"elevation"`, `"normal"`, `"landcover"`, `"emission"`).
+/// A layer by name (`"rgb"`, `"albedo"`, `"elevation"`, `"normal"`, `"landcover"`, `"emission"`,
+/// `"dtm"`, `"instance"`).
 pub fn layer_by_name(name: &str) -> Result<Layer> {
     Layer::from_name(name).ok_or_else(|| {
         let names: Vec<&str> = Layer::ALL.iter().map(|l| l.name()).collect();
@@ -157,11 +166,13 @@ pub struct WorldSpec {
     /// Tiles above this zoom are refused (`tiles.max_zoom` of a scenario, default 18; at most
     /// [`MAX_ZOOM`]).
     pub max_zoom: u32,
+    /// Optional layers of a new store (`tiles.layers` of a scenario: `dtm`, `instance`).
+    pub layers: Vec<Layer>,
 }
 
 impl Default for WorldSpec {
     fn default() -> Self {
-        WorldSpec { config: Config::default(), max_zoom: DEFAULT_MAX_ZOOM }
+        WorldSpec { config: Config::default(), max_zoom: DEFAULT_MAX_ZOOM, layers: Vec::new() }
     }
 }
 
@@ -189,7 +200,7 @@ pub fn world_spec(config: Option<&Path>, seed: Option<u64>) -> Result<WorldSpec>
 fn parse_spec(s: &str) -> anyhow::Result<WorldSpec> {
     use serde_yaml::Value;
     let v: Value = serde_yaml::from_str(s)?;
-    let (world, max_zoom) = match v {
+    let (world, max_zoom, layers) = match v {
         Value::Null => return Ok(WorldSpec::default()),
         Value::Mapping(ref m) if SCENARIO_KEYS.iter().any(|k| m.contains_key(*k)) => {
             let max_zoom = match m.get("tiles").and_then(|t| t.get("max_zoom")) {
@@ -199,12 +210,20 @@ fn parse_spec(s: &str) -> anyhow::Result<WorldSpec> {
                     _ => anyhow::bail!("tiles.max_zoom must be an integer in 0..={MAX_ZOOM}"),
                 },
             };
-            (m.get("world").cloned().unwrap_or(Value::Null), max_zoom)
+            let layers = match m.get("tiles").and_then(|t| t.get("layers")) {
+                None => Vec::new(),
+                Some(v) => {
+                    let names: Vec<String> = serde_yaml::from_value(v.clone()).context("tiles.layers: a list of layer names")?;
+                    let tiles = render::scenario::TilesConfig { layers: names, ..Default::default() };
+                    tiles.optional_layers()?
+                }
+            };
+            (m.get("world").cloned().unwrap_or(Value::Null), max_zoom, layers)
         }
-        v => (v, DEFAULT_MAX_ZOOM),
+        v => (v, DEFAULT_MAX_ZOOM, Vec::new()),
     };
     let config = if world.is_null() { Config::default() } else { serde_yaml::from_value(world).context("world")? };
-    Ok(WorldSpec { config, max_zoom })
+    Ok(WorldSpec { config, max_zoom, layers })
 }
 
 /// A tile id from binding arguments: `z <= max_zoom` (at most [`MAX_ZOOM`]), `x, y < 2^z`.
@@ -311,7 +330,7 @@ impl World {
             }
         }
         // (the store's errors name the file and lead with the reason: "… is a directory")
-        let store = gen.open_store_rw(tiles_file)?;
+        let store = gen.open_store_rw_with(tiles_file, &spec.layers)?;
         let key = tiles_file.canonicalize().with_context(|| format!("resolving {}", tiles_file.display()))?;
         open.push(key.clone());
         Ok(World {
@@ -387,6 +406,31 @@ impl World {
         Ok(self.gen.probe(lat, lon_deg.to_radians(), gsd).1)
     }
 
+    /// Does the store hold `layer`? The base layers always; the optional `dtm` and `instance`
+    /// only when the store was created with them (`tiles.layers`; never in format-version-1
+    /// stores).
+    pub fn has_layer(&self, layer: Layer) -> bool {
+        self.store.meta().has(layer)
+    }
+
+    /// The store's layers (base layers first).
+    pub fn layers(&self) -> Vec<Layer> {
+        Layer::ALL.into_iter().filter(|l| self.has_layer(*l)).collect()
+    }
+
+    /// A layer this store has, or an error naming the reason.
+    fn check_layer(&self, layer: Layer) -> Result<()> {
+        if self.has_layer(layer) {
+            return Ok(());
+        }
+        Err(Error::InvalidArgument(format!(
+            "{} has no {} layer (an optional layer: a store has it only when created with tiles.layers: [{}])",
+            self.path.display(),
+            layer.name(),
+            layer.name()
+        )))
+    }
+
     /// Is the tile stored (i.e. would [`World::tile`] read it rather than generate it)?
     pub fn contains(&self, z: u32, x: u32, y: u32) -> Result<bool> {
         Ok(self.store.contains(tile_id(z, x, y, self.max_zoom)?))
@@ -404,6 +448,7 @@ impl World {
     /// [`World::tile`] into `out` (at least [`LayerInfo::size`] bytes; only those are written).
     pub fn tile_into(&self, z: u32, x: u32, y: u32, layer: Layer, out: &mut [u8]) -> Result<()> {
         let id = tile_id(z, x, y, self.max_zoom)?;
+        self.check_layer(layer)?;
         let n = layer.tile_bytes();
         if out.len() < n {
             return Err(Error::InvalidArgument(format!("buffer of {} bytes is too small for layer {} ({n} bytes)", out.len(), layer.name())));
@@ -433,6 +478,7 @@ impl World {
     /// stored).
     pub fn tiles_into(&self, tiles: &[[u32; 3]], layer: Layer, out: &mut [u8]) -> Result<()> {
         let ids = tiles.iter().map(|&[z, x, y]| tile_id(z, x, y, self.max_zoom)).collect::<Result<Vec<_>>>()?;
+        self.check_layer(layer)?;
         let size = layer.tile_bytes();
         let need = size.checked_mul(ids.len()).ok_or_else(|| Error::InvalidArgument(format!("{} tiles are too many", ids.len())))?;
         if out.len() < need {
@@ -575,7 +621,7 @@ impl World {
         let mut cached = Vec::new();
         for mut t in tiles {
             if all {
-                for l in Layer::ALL.into_iter().filter(|&l| l != layer) {
+                for l in self.layers().into_iter().filter(|&l| l != layer) {
                     cached.push((t.id, l, Arc::new(take_layer(&mut t, l)?)));
                 }
             }
@@ -597,6 +643,8 @@ fn take_layer(t: &mut TileData, layer: Layer) -> Result<Vec<u8>> {
         Layer::Albedo => std::mem::take(&mut t.albedo),
         Layer::Landcover => std::mem::take(&mut t.landcover),
         Layer::Emission => std::mem::take(&mut t.emission),
+        Layer::Dtm => std::mem::take(&mut t.dtm).iter().flat_map(|v| v.to_le_bytes()).collect(),
+        Layer::Instance => std::mem::take(&mut t.instance).iter().flat_map(|v| v.to_le_bytes()).collect(),
     };
     if v.len() != layer.tile_bytes() {
         return Err(Error::Failed(anyhow::anyhow!("tile {}: layer {} has {} bytes, expected {}", t.id, layer.name(), v.len(), layer.tile_bytes())));
@@ -648,6 +696,12 @@ pub(crate) mod tests {
         let h: Vec<f32> = elev.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
         assert!(h.iter().all(|v| v.is_finite() && v.abs() < 12_000.0), "elevation out of range");
         for info in layers() {
+            if info.layer.optional() {
+                // (a store without the optional layers: refused)
+                assert!(!w.has_layer(info.layer));
+                assert!(matches!(w.tile(4, 9, 6, info.layer), Err(Error::InvalidArgument(_))), "{:?}", info.layer);
+                continue;
+            }
             let b = w.tile(4, 9, 6, info.layer).unwrap();
             assert_eq!(b.len(), info.size);
         }
@@ -664,6 +718,41 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn optional_layers() {
+        let d = TempDir::new("optional");
+        let cfg = d.0.join("world.yaml");
+        std::fs::write(&cfg, "world:\n  tile_supersample: 1\ntiles:\n  max_zoom: 14\n  layers: [dtm, instance]\n").unwrap();
+        let path = d.0.join("w.h5");
+        let w = World::open(&path, Some(&cfg), Some(5)).unwrap();
+        assert_eq!(w.layers(), Layer::ALL.to_vec());
+        // the DTM lies at or below the DSM; instance ids are 0 or in [2^23, 2^30)
+        let (z, x, y) = (12, 2178, 1488);
+        let dsm: Vec<f32> = w.tile(z, x, y, Layer::Elevation).unwrap().as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+        let dtm: Vec<f32> = w.tile(z, x, y, Layer::Dtm).unwrap().as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+        assert!(dsm.iter().zip(&dtm).all(|(s, t)| t.is_finite() && t <= s), "dtm above the dsm");
+        let inst: Vec<u32> = w.tile(z, x, y, Layer::Instance).unwrap().as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect();
+        assert!(inst.iter().all(|&i| i == 0 || (1 << 23..1 << 30).contains(&i)));
+        drop(w);
+        // read back from the store: the same bytes
+        let w = World::open(&path, Some(&cfg), Some(5)).unwrap();
+        w.set_cache_mb(0);
+        let back: Vec<u32> = w.tile(z, x, y, Layer::Instance).unwrap().as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect();
+        assert_eq!(back, inst);
+        drop(w);
+        // a version-1 store (base layers only) opens; the optional layers are absent
+        let v1 = d.0.join("v1.h5");
+        let g = Generator::try_new(world_spec(Some(&cfg), Some(5)).unwrap().config).unwrap();
+        drop(TileStore::create(&v1, tilestore::StoreMeta { format_version: 1, ..g.store_meta() }).unwrap());
+        let w = World::open(&v1, Some(&cfg), Some(5)).unwrap();
+        assert_eq!(w.layers(), Layer::BASE.to_vec());
+        assert!(!w.has_layer(Layer::Dtm) && w.tile(3, 4, 2, Layer::Elevation).is_ok());
+        assert!(matches!(w.tile(3, 4, 2, Layer::Instance), Err(Error::InvalidArgument(_))));
+        // a bad layer name in tiles.layers
+        std::fs::write(&cfg, "tiles:\n  layers: [rgb]\n").unwrap();
+        assert!(World::open(&d.0.join("bad.h5"), Some(&cfg), None).is_err());
+    }
+
+    #[test]
     fn the_cache_serves_the_same_bytes() {
         let d = TempDir::new("cache");
         let cfg = fast_config(&d.0);
@@ -672,8 +761,8 @@ pub(crate) mod tests {
         let rgb = w.tile(4, 9, 6, Layer::Rgb).unwrap(); // generated: all its layers are cached
         let s = w.cache_stats();
         assert_eq!(s.entries, 6);
-        assert_eq!(s.bytes, Layer::ALL.iter().map(|l| l.tile_bytes()).sum::<usize>());
-        let cached: Vec<Vec<u8>> = Layer::ALL
+        assert_eq!(s.bytes, Layer::BASE.iter().map(|l| l.tile_bytes()).sum::<usize>());
+        let cached: Vec<Vec<u8>> = Layer::BASE
             .iter()
             .map(|&l| {
                 let before = w.cache_stats().hits;
@@ -687,7 +776,7 @@ pub(crate) mod tests {
         w.set_cache_mb(0);
         let s = w.cache_stats();
         assert_eq!((s.capacity, s.bytes, s.entries), (0, 0, 0));
-        for (l, b) in Layer::ALL.iter().zip(&cached) {
+        for (l, b) in Layer::BASE.iter().zip(&cached) {
             // the same bytes as read from the store
             assert_eq!(w.tile(4, 9, 6, *l).unwrap(), *b, "{l:?}");
         }

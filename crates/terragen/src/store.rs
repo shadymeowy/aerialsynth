@@ -16,29 +16,50 @@ use tilestore::{Layer, StoreMeta, TileStore};
 pub const GENERATOR_VERSION: u32 = 4;
 
 impl Generator {
-    /// Metadata of a new store for this world.
+    /// Metadata of a new store for this world (the base layers).
     pub fn store_meta(&self) -> StoreMeta {
+        self.store_meta_with(&[])
+    }
+
+    /// Metadata of a new store for this world with the base layers and the optional layers
+    /// `extra` ([`Layer::OPTIONAL`]: `dtm`, `instance`).
+    pub fn store_meta_with(&self, extra: &[Layer]) -> StoreMeta {
         StoreMeta {
             ellipsoid_a: self.world.ell.a,
             ellipsoid_b: self.world.ell.b,
             generator_config: self.config().to_yaml(),
             seed: self.config().seed,
             generator_version: GENERATOR_VERSION,
-            layers: Layer::ALL.to_vec(),
+            layers: Layer::ALL.into_iter().filter(|l| !l.optional() || extra.contains(l)).collect(),
+            format_version: tilestore::FORMAT_VERSION,
         }
     }
 
     /// Open `path` for adding tiles of this world, creating it if missing. An existing store
     /// must hold this world (an empty one is re-stamped).
     pub fn open_store_rw(&self, path: &std::path::Path) -> Result<TileStore> {
+        self.open_store_rw_with(path, &[])
+    }
+
+    /// [`Generator::open_store_rw`]; a new store also gets the optional layers `extra`. An
+    /// existing store keeps its layers (a note names those it lacks).
+    pub fn open_store_rw_with(&self, path: &std::path::Path, extra: &[Layer]) -> Result<TileStore> {
         if !path.exists() {
-            return TileStore::create(path, self.store_meta());
+            return TileStore::create(path, self.store_meta_with(extra));
         }
         let mut st = TileStore::open_rw(path)?;
         if st.is_empty() {
             st.set_generator(&self.store_meta())?;
         } else {
             self.check_store(&st, true)?;
+        }
+        let lacking: Vec<&str> = extra.iter().filter(|l| !st.meta().has(**l)).map(|l| l.name()).collect();
+        if !lacking.is_empty() {
+            eprintln!(
+                "note: tile store {} was created without the layer(s) {} (tiles.layers applies to new stores)",
+                path.display(),
+                lacking.join(", ")
+            );
         }
         Ok(st)
     }

@@ -244,6 +244,9 @@ pub(crate) fn compare_tiles(g: &tilestore::TileData, c: &tilestore::TileData) ->
     push("emission", stats(&g.emission, &c.emission, 2.0, |v| v as f64));
     push("normal", stats(&g.normal, &c.normal, 2.0, |v| v as f64));
     push("landcover", stats(&g.landcover, &c.landcover, 0.5, |v| v as f64));
+    push("dtm", stats(&g.dtm, &c.dtm, 0.05, |v| v as f64));
+    // (ids: equal or not)
+    push("instance", stats(&g.instance, &c.instance, 0.5, |v| v as f64));
     out
 }
 

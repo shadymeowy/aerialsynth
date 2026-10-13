@@ -72,9 +72,9 @@ pub struct ViewOptions {
     #[arg(long, default_value_t = 1.0, help_heading = "Map")]
     pub exag: f32,
     /// Shading at start.
-    #[arg(long, default_value = "surface", value_parser = ["surface", "elevation", "landcover", "relief"], help_heading = "Map")]
+    #[arg(long, default_value = "surface", value_parser = ["surface", "elevation", "landcover", "relief", "height", "instance"], help_heading = "Map")]
     pub mode: String,
-    /// Tiles kept on the GPU (768 KB each; capped by the GPU's texture array limit).
+    /// Tiles kept on the GPU (1 MB each; capped by the GPU's texture array limit).
     #[arg(long, default_value_t = 1536, help_heading = "Map")]
     pub gpu_tiles: u32,
 
@@ -186,6 +186,8 @@ pub(crate) fn parse_mode(m: &str) -> Mode {
         "elevation" => Mode::Elevation,
         "landcover" => Mode::Landcover,
         "relief" => Mode::Relief,
+        "height" => Mode::Height,
+        "instance" => Mode::Instance,
         _ => Mode::Albedo,
     }
 }
@@ -480,6 +482,13 @@ impl App {
             ui.selectable_value(&mut self.s.mode, Mode::Elevation, "Elevation");
             ui.selectable_value(&mut self.s.mode, Mode::Landcover, "Land cover");
             ui.selectable_value(&mut self.s.mode, Mode::Relief, "Relief");
+            // (the optional layers, when the store has them)
+            if self.svc.store.meta().has(tilestore::Layer::Dtm) {
+                ui.selectable_value(&mut self.s.mode, Mode::Height, "Height above ground").on_hover_text("DSM - DTM (the store's dtm layer)");
+            }
+            if self.svc.store.meta().has(tilestore::Layer::Instance) {
+                ui.selectable_value(&mut self.s.mode, Mode::Instance, "Instances").on_hover_text("building lots, fields, forest stands (the store's instance layer)");
+            }
         });
         ui.add(egui::Slider::new(&mut self.s.exaggeration, 1.0..=100.0).logarithmic(true).text("relief ×"));
         egui::CollapsingHeader::new("Display").default_open(false).show(ui, |ui| {

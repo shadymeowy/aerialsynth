@@ -660,6 +660,8 @@ impl Generator {
             ground: f64,
             lit: f64,
             class: u8,
+            /// instance id: of the first sample of the pixel's class
+            inst: u32,
         }
         let rows_b: Vec<Vec<PixB>> = (0..na)
             .into_par_iter()
@@ -771,7 +773,14 @@ impl Generator {
                         let mut acc_l = 0.0;
                         let mut acc_g = 0.0;
                         let mut counts = [0u16; crate::landcover::MAX_CLASSES];
+                        // (class, instance) of the samples in order
+                        let mut insts = [(0u8, 0u32); 16];
+                        let mut ni = 0;
                         let mut add = |(s, ground): (Surface, f64)| {
+                            if ni < insts.len() {
+                                insts[ni] = (s.class, s.instance);
+                                ni += 1;
+                            }
                             acc_a += s.albedo;
                             acc_e += s.emission;
                             acc_h += s.height;
@@ -806,7 +815,8 @@ impl Generator {
                         }
                         let inv = 1.0 / taken as f64;
                         let class = counts.iter().enumerate().max_by_key(|(_, c)| **c).map(|(k, _)| k as u8).unwrap_or(0);
-                        row.push(PixB { emission: acc_e * inv, albedo: acc_a * inv, height: acc_h * inv, ground: acc_g * inv, lit: acc_l * inv, class });
+                        let inst = insts[..ni].iter().find(|(c, _)| (*c as usize).min(crate::landcover::MAX_CLASSES - 1) == class as usize).map_or(0, |v| v.1);
+                        row.push(PixB { emission: acc_e * inv, albedo: acc_a * inv, height: acc_h * inv, ground: acc_g * inv, lit: acc_l * inv, class, inst });
                     }
                     row
                 })
@@ -868,6 +878,8 @@ impl Generator {
         let mut normal = vec![0i8; n * n * 3];
         let mut landcover = vec![0u8; n * n];
         let mut emission = vec![0u8; n * n * 3];
+        let mut dtm = vec![0f32; n * n];
+        let mut instance = vec![0u32; n * n];
         let mut emin = f32::MAX;
         let mut emax = f32::MIN;
         let hb = |i: usize, j: usize| pb[j * na + i].height;
@@ -882,6 +894,9 @@ impl Generator {
                 let k = j * n + i;
                 let h = px.height as f32;
                 elevation[k] = h;
+                // bare ground (pits and ponds below it: the surface)
+                dtm[k] = (px.ground as f32).min(h);
+                instance[k] = px.inst;
                 emin = emin.min(h);
                 emax = emax.max(h);
                 landcover[k] = px.class;
@@ -903,6 +918,6 @@ impl Generator {
                 }
             }
         }
-        TileData { id, rgb, albedo, elevation, normal, landcover, emission, elev_min: emin, elev_max: emax }
+        TileData { id, rgb, albedo, elevation, normal, landcover, emission, dtm, instance, elev_min: emin, elev_max: emax }
     }
 }

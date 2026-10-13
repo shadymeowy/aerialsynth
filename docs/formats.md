@@ -16,7 +16,30 @@ Both files are HDF5 and open in h5py or any HDF5 reader. `terrain info FILE` sum
 /levels/<z>/normal       i8  [N,256,256,3]  ENU unit normal * 127
 /levels/<z>/landcover    u8  [N,256,256]    class id (land-cover classes below)
 /levels/<z>/emission     u8  [N,256,256,3]  night lights, linear = 16 (v/255)^3
+  optional (tiles.layers):
+/levels/<z>/dtm          f32 [N,256,256]    bare ground (DTM), m above ellipsoid
+/levels/<z>/instance     u32 [N,256,256]    instance id (building lot, field, forest stand; 0 none)
 ```
+
+- **Format version 2** (root attribute `format_version`): version 1 plus the optional layers.
+  The root attribute `layers` lists the layers a store holds; readers take it from there, so
+  version-1 stores open as before and report the optional layers as absent (the Rust
+  `StoreMeta::has`, the bindings' `World.layers` / `as_has_layer`). A store of a newer version
+  is refused with a message.
+- **Optional layers:** `tiles.layers: [dtm, instance]` (scenario or bindings config) adds them
+  to a **new** store; an existing store keeps its layers (a note names the ones it lacks).
+  Off by default: together they add about a quarter to a store (a z15–z17 town tile: ~0.35 MB
+  more on ~1.3 MB). Both backends generate them identically (the GPU / CPU parity tests compare
+  them like the other layers).
+  - `dtm`: the bare ground under buildings and vegetation (the bed under water; pits and ponds
+    below the ground: their surface), so `elevation - dtm` is the height of buildings, trees and
+    water depth (nDSM ground truth).
+  - `instance`: one id per building lot (settlements kit: the lot of a building; one block where
+    no finer lot exists), field (core fields and the agriculture kit's parcels; not their hedges
+    and tracks) and forest stand (the canopy's ~240 m stands; not shrubs). Ids are hashes in
+    [2^23, 2^30), stable across tiles and zooms; 0 = no instance. A pixel takes the instance
+    of its land-cover class's first sub-sample. `terrain view` shows both (map shading
+    *Height above ground*, *Instances*) when the store has them.
 
 - **Chunks:** one tile per chunk, compressed with shuffle + deflate. Compression runs in parallel
   and is written with HDF5 direct chunk I/O. The bundled HDF5 is 2.2.0 (via `hdf5-metno-sys`).

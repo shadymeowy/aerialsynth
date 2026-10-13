@@ -4,10 +4,12 @@
 /// pass-B grid: tile pixels plus a 1-pixel apron
 const NA: u32 = 258u;
 const N: u32 = 256u;
-/// floats per pass-B pixel: emission (3), albedo (3), height, ground, lit, cls, canopy, -
+/// floats per pass-B pixel: emission (3), albedo (3), height, ground, lit, cls, canopy, instance
+/// (bits)
 const PB_F: u32 = 12u;
-/// u32 per output pixel: rgb, albedo, emission, normal, elevation (f32 bits), land cover
-const OUT_U: u32 = 6u;
+/// u32 per output pixel: rgb, albedo, emission, normal, elevation (f32 bits), land cover, DTM
+/// (f32 bits), instance
+const OUT_U: u32 = 8u;
 
 /// A site whose data the host is to provide: point, id.
 struct SiteReq {
@@ -389,8 +391,10 @@ fn sample_in(ti: TileInfo, i: u32, j: u32, sx: u32, sy: u32, slope: f32, grad: v
 /// (`PBW_HDR`, `PB_RS` samples per round, `ST_F` words of stage state per sample: masks (19),
 /// colour (3), height, emission (3), lit, class and flags, with `PB_STATE_FULL` (a stage
 /// boundary after step 5) the deferred layers (10) and the town (14); `PFW` words of pixel fields: f (16),
-/// pending, has_stand, stand (2); `ACCW` words of classes (8 bits each, up to 16) and flags
-/// (1: finished): constants from `gpu::stages_wgsl`)
+/// pending, has_stand, stand (2); `ACCW` words of classes (8 bits each, up to 16), flags
+/// (1: finished) and the samples' instance ids (16); the stage state ends with the instance ids
+/// (the stack's; with `PB_STATE_FULL` the deferred layers' and the town's before it):
+/// constants from `gpu::stages_wgsl`)
 @group(2) @binding(22) var<storage, read_write> pbw: array<u32>;
 
 fn st_save(sp: ptr<function, Stack>, b: u32) {
@@ -423,6 +427,8 @@ fn st_save(sp: ptr<function, Stack>, b: u32) {
     pbw[b + 25u] = bitcast<u32>((*sp).emission.z);
     pbw[b + 26u] = bitcast<u32>((*sp).lit);
     pbw[b + 27u] = ((*sp).cls & 0xffffu) | select(0u, 0x10000u, (*sp).is_water) | select(0u, 0x20000u, (*sp).done) | select(0u, 0x40000u, (*sp).deferring) | select(0u, 0x80000u, (*sp).no_town);
+    // (instance ids: the last words)
+    pbw[b + ST_F - 1u] = (*sp).inst;
     if (PB_STATE_FULL) {
         // (stage boundaries after step 5: the deferred layers and the town)
         let d = (*sp).def;
@@ -436,6 +442,7 @@ fn st_save(sp: ptr<function, Stack>, b: u32) {
         pbw[b + 35u] = bitcast<u32>(d.lb);
         pbw[b + 36u] = bitcast<u32>(d.lmin);
         pbw[b + 37u] = d.cls;
+        pbw[b + ST_F - 2u] = d.inst;
         let tw = (*sp).town;
         pbw[b + 38u] = bitcast<u32>((*sp).town_i);
         pbw[b + 39u] = select(0u, 1u, tw.px.ok) | select(0u, 2u, tw.px.shadow_ok);
@@ -486,6 +493,7 @@ fn st_load(sp: ptr<function, Stack>, b: u32) {
     (*sp).done = (w & 0x20000u) != 0u;
     (*sp).deferring = (w & 0x40000u) != 0u;
     (*sp).no_town = (w & 0x80000u) != 0u;
+    (*sp).inst = pbw[b + ST_F - 1u];
     if (PB_STATE_FULL) {
         var d: Deferred;
         d.k = bitcast<f32>(pbw[b + 28u]);
@@ -496,6 +504,7 @@ fn st_load(sp: ptr<function, Stack>, b: u32) {
         d.lb = bitcast<f32>(pbw[b + 35u]);
         d.lmin = bitcast<f32>(pbw[b + 36u]);
         d.cls = pbw[b + 37u];
+        d.inst = pbw[b + ST_F - 2u];
         (*sp).def = d;
         (*sp).town_i = bitcast<i32>(pbw[b + 38u]);
         let fl = pbw[b + 39u];
@@ -649,6 +658,7 @@ fn pass_b_stage(gid: vec3<u32>, stage: u32) {
         } else {
             pbw[cw] |= cv;
         }
+        pbw[ab + 5u + k] = o.inst;
         var taken = 0u;
         if (adaptive && k == 0u) {
             first_s = o;
@@ -696,6 +706,14 @@ fn pass_b_finish(pb: u32, ab: u32, taken: u32) {
             cls = ca;
         }
     }
+    // the instance of the first sample of the pixel's class
+    var inst = 0u;
+    for (var a = 0u; a < taken; a++) {
+        if (((pbw[ab + a / 4u] >> ((a & 3u) * 8u)) & 0xFFu) == cls) {
+            inst = pbw[ab + 5u + a];
+            break;
+        }
+    }
     let inv = 1.0 / f32(taken);
     let e = vec3<f32>(pixb[pb + 0u], pixb[pb + 1u], pixb[pb + 2u]) * inv;
     let a = vec3<f32>(pixb[pb + 3u], pixb[pb + 4u], pixb[pb + 5u]) * inv;
@@ -712,6 +730,8 @@ fn pass_b_finish(pb: u32, ab: u32, taken: u32) {
     pixb[pb + 8u] = pixb[pb + 8u] * inv;
     pixb[pb + 9u] = f32(cls);
     pixb[pb + 10u] = max(h - g, 0.0);
+    // (ids are normal f32 bit patterns: `instance_id`)
+    pixb[pb + 11u] = bitcast<f32>(inst);
 }
 
 // ---- canopy clean-up: morphological opening of the height above ground (~1 m radius)
@@ -856,6 +876,9 @@ fn finish(@builtin(global_invocation_id) gid: vec3<u32>) {
     tile_out[o + 3u] = pack_snorm(nrm);
     tile_out[o + 4u] = bitcast<u32>(h);
     tile_out[o + 5u] = u32(pixb[b + 9u]);
+    // bare ground (pits and ponds below it: the surface), instance
+    tile_out[o + 6u] = bitcast<u32>(min(pixb[b + 7u], h));
+    tile_out[o + 7u] = bitcast<u32>(pixb[b + 11u]);
     atomicMax(&ranges[gid.z * 2u], ~orderable(h));
     atomicMax(&ranges[gid.z * 2u + 1u], orderable(h));
 }

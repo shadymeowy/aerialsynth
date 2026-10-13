@@ -1,3 +1,4 @@
+use h5::Attrs;
 use tilestore::{Layer, StoreMeta, TileData, TileId, TileStore, TILE_SIZE};
 
 fn tile(id: TileId, k: u8) -> TileData {
@@ -10,6 +11,8 @@ fn tile(id: TileId, k: u8) -> TileData {
         normal: (0..n * 3).map(|i| (i % 255) as i8).collect(),
         landcover: (0..n).map(|i| (i % 17) as u8).collect(),
         emission: (0..n * 3).map(|i| (i % 7) as u8).collect(),
+        dtm: (0..n).map(|i| i as f32 * 0.25 - 103.0 + k as f32).collect(),
+        instance: (0..n).map(|i| (i as u32 / 300) * 0x9E37_79B1 ^ k as u32).collect(),
         elev_min: -100.0,
         elev_max: 1000.0 + k as f32,
     }
@@ -84,11 +87,67 @@ fn a_new_store_opens_before_any_write() {
     assert!(!dir.join("t.h5.tmp").exists());
     let s = TileStore::open(&path).unwrap();
     assert!(s.is_empty());
-    assert_eq!(s.meta().layers, Layer::ALL.to_vec());
+    assert_eq!(s.meta().layers, Layer::BASE.to_vec());
+    assert_eq!(s.meta().format_version, tilestore::FORMAT_VERSION);
     drop(s);
     let s = TileStore::open_rw(&path).unwrap();
     s.write_tile(&tile(TileId::new(2, 1, 1), 1)).unwrap();
     assert_eq!(s.len(), 1);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn optional_layers_round_trip() {
+    let dir = test_dir("optional");
+    let path = dir.join("t.h5");
+    {
+        let s = TileStore::create(&path, StoreMeta { layers: Layer::ALL.to_vec(), ..StoreMeta::default() }).unwrap();
+        s.write_tiles(&[tile(TileId::new(3, 1, 2), 1), tile(TileId::new(4, 2, 2), 2)]).unwrap();
+        // a tile without them cannot go into a store that has them
+        let mut no_dtm = tile(TileId::new(3, 0, 0), 3);
+        no_dtm.dtm.clear();
+        assert!(s.write_tiles(&[no_dtm]).is_err());
+    }
+    let s = TileStore::open(&path).unwrap();
+    assert_eq!(s.meta().layers, Layer::ALL.to_vec());
+    let t = s.read_tile(TileId::new(4, 2, 2), &Layer::ALL).unwrap().unwrap();
+    let e = tile(TileId::new(4, 2, 2), 2);
+    assert_eq!((t.dtm, t.instance, t.elevation), (e.dtm, e.instance, e.elevation));
+    drop(s);
+    // a store without them: tiles that carry them are stored without them
+    let base = dir.join("base.h5");
+    let s = TileStore::create(&base, StoreMeta::default()).unwrap();
+    s.write_tile(&tile(TileId::new(3, 1, 2), 1)).unwrap();
+    let t = s.read_tile(TileId::new(3, 1, 2), &Layer::ALL).unwrap().unwrap();
+    assert!(!t.has(Layer::Dtm) && !t.has(Layer::Instance) && t.has(Layer::Elevation));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn version_1_stores_open_and_newer_ones_are_refused() {
+    let dir = test_dir("versions");
+    // a store as version 1 wrote it: format_version 1, the base layers
+    let v1 = dir.join("v1.h5");
+    {
+        let s = TileStore::create(&v1, StoreMeta { format_version: 1, ..StoreMeta::default() }).unwrap();
+        s.write_tile(&tile(TileId::new(3, 1, 2), 1)).unwrap();
+    }
+    let s = TileStore::open_rw(&v1).unwrap();
+    assert_eq!((s.meta().format_version, s.meta().layers.clone()), (1, Layer::BASE.to_vec()));
+    assert!(!s.meta().has(Layer::Dtm));
+    // appending to it keeps its version and layers
+    s.write_tile(&tile(TileId::new(3, 2, 2), 2)).unwrap();
+    assert_eq!(s.read_tile(TileId::new(3, 2, 2), &Layer::ALL).unwrap().unwrap().elevation, tile(TileId::new(3, 2, 2), 2).elevation);
+    drop(s);
+    assert!(TileStore::create(dir.join("bad.h5"), StoreMeta { format_version: 1, layers: Layer::ALL.to_vec(), ..StoreMeta::default() }).is_err());
+    // a newer format: refused with a clear message
+    let v3 = dir.join("v3.h5");
+    {
+        let s = TileStore::create(&v3, StoreMeta::default()).unwrap();
+        s.file().set_attr("format_version", tilestore::FORMAT_VERSION + 1).unwrap();
+    }
+    let e = format!("{:#}", TileStore::open(&v3).err().expect("a newer format opened"));
+    assert!(e.contains("format version 3"), "{e}");
     std::fs::remove_dir_all(&dir).ok();
 }
 

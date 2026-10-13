@@ -135,7 +135,8 @@ world) and `-j` (threads); `show`, `export` and `info` take just the file.
 ## Outputs
 
 - **Tile store** (`tiles.file`): the world's tiles, layers rgb, albedo, elevation (a surface model: ground, trees and buildings),
-  normal, land cover, night lights. It holds one world and grows as needed.
+  normal, land cover, night lights; optionally (`tiles.layers`) the bare ground (DTM) and instance ids (building lots,
+  fields, forest stands). It holds one world and grows as needed.
 - **Sequence file** (`output.file`):
   - body poses, the IMU, and every camera's frames, depth, flow, land cover, events and
     stars;

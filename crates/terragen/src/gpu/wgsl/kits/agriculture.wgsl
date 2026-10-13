@@ -626,6 +626,9 @@ fn agri_draw(s: ptr<function, Stack>, pl: Plan) {
     var ly = layer_paint(a, col, cls);
     ly.dh = dh * k - 0.6 * m.micro;
     ly.hmode = HM_ADD;
+    if (cov > 0.0 && lc_group(cls) == LG_AGRICULTURE) {
+        ly.inst = instance_id(pc.id);
+    }
     // lit greenhouses
     if (pl.sys == AG_GREENH) {
         var lit = 0.0;

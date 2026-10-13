@@ -738,7 +738,9 @@ fn draw(s: &mut Stack, pl: &Plan) {
     } else {
         0.0
     };
-    s.composite(Layer { cov: a, albedo: col, dh: dh * k - 0.6 * m.micro, hmode: hmode::ADD, cls, emit: GH_GLOW * glow, ..Default::default() });
+    // the parcel is the instance (its crops, not its borders, yards and ponds)
+    let inst = if cov > 0.0 && crate::landcover::group(cls) == crate::landcover::Group::Agriculture { crate::stack::instance_id(pc.id) } else { 0 };
+    s.composite(Layer { cov: a, albedo: col, dh: dh * k - 0.6 * m.micro, hmode: hmode::ADD, cls, inst, emit: GH_GLOW * glow, ..Default::default() });
 }
 
 /// Share of the greenhouses lit at night, and their glow (emission, linear: sodium lamps).
@@ -1686,12 +1688,15 @@ mod tests {
     /// Per-pixel comparison of two tiles: (layer, share of pixels off) (rgb > 2 DN, elevation
     /// > 5 cm, class differs; `gpu::tests::compare_tiles` is private to the gpu module).
     #[cfg(feature = "gpu")]
-    fn off(g: &crate::TileData, c: &crate::TileData) -> [(&'static str, f64); 3] {
+    fn off(g: &crate::TileData, c: &crate::TileData) -> [(&'static str, f64); 5] {
         let n = g.elevation.len() as f64;
         let e = g.elevation.iter().zip(&c.elevation).filter(|(a, b)| (**a - **b).abs() > 0.05).count() as f64 / n;
         let r = g.rgb.iter().zip(&c.rgb).filter(|(a, b)| (**a as i32 - **b as i32).abs() > 2).count() as f64 / g.rgb.len() as f64;
         let l = g.landcover.iter().zip(&c.landcover).filter(|(a, b)| a != b).count() as f64 / n;
-        [("elevation", e), ("rgb", r), ("landcover", l)]
+        // (the optional layers: the emission of lit greenhouses, the parcels as instances)
+        let em = g.emission.iter().zip(&c.emission).filter(|(a, b)| (**a as i32 - **b as i32).abs() > 2).count() as f64 / g.emission.len() as f64;
+        let i = g.instance.iter().zip(&c.instance).filter(|(a, b)| a != b).count() as f64 / n;
+        [("elevation", e), ("rgb", r), ("landcover", l), ("emission", em), ("instance", i)]
     }
 
     /// The systems' tiles on the GPU are the CPU's (both backends: at most 0.5 % of the pixels

@@ -31,8 +31,15 @@ pub const AS_LAYER_NORMAL: as_layer = 3;
 pub const AS_LAYER_LANDCOVER: as_layer = 4;
 /// Night-time artificial light: linear radiance = 16 * (v/255)^3. u8 x 3.
 pub const AS_LAYER_EMISSION: as_layer = 5;
+/// Optional: bare ground (DTM) in metres above the WGS84 ellipsoid at pixel centres (the bed under
+/// water); elevation - dtm = heights above ground. f32 x 1. Only in stores created with it
+/// (`tiles.layers: [dtm]`; `as_has_layer`).
+pub const AS_LAYER_DTM: as_layer = 6;
+/// Optional: instance id (hashed building lot, field or forest stand; 0 = none). u32 x 1. Only in
+/// stores created with it (`tiles.layers: [instance]`; `as_has_layer`).
+pub const AS_LAYER_INSTANCE: as_layer = 7;
 /// Number of layers (valid layers are 0 .. AS_LAYER_COUNT - 1).
-pub const AS_LAYER_COUNT: u32 = 6;
+pub const AS_LAYER_COUNT: u32 = 8;
 
 /// Element type of a layer's pixels: one of the `AS_DTYPE_*` values.
 pub type as_dtype = u32;
@@ -42,6 +49,8 @@ pub const AS_DTYPE_U8: as_dtype = 0;
 pub const AS_DTYPE_I8: as_dtype = 1;
 /// little-endian IEEE 754 binary32
 pub const AS_DTYPE_F32: as_dtype = 2;
+/// little-endian unsigned 32-bit
+pub const AS_DTYPE_U32: as_dtype = 3;
 
 /// Success.
 pub const AS_OK: c_int = 0;
@@ -128,7 +137,7 @@ pub struct as_layer_info {
     pub size: usize,
 }
 
-const NAMES: [&CStr; 6] = [c"rgb", c"albedo", c"elevation", c"normal", c"landcover", c"emission"];
+const NAMES: [&CStr; 8] = [c"rgb", c"albedo", c"elevation", c"normal", c"landcover", c"emission", c"dtm", c"instance"];
 
 thread_local! {
     static LAST_ERROR: RefCell<CString> = RefCell::new(CString::default());
@@ -388,6 +397,23 @@ pub unsafe extern "C" fn as_set_verbose(w: *const as_world, on: c_int) -> c_int 
     })
 }
 
+/// Does world `w`'s store hold `layer`? 1 yes, 0 no, `AS_ERR_INVALID_ARGUMENT` (`w` is NULL, an
+/// unknown layer). The base layers (0-5) always; the optional `AS_LAYER_DTM` and
+/// `AS_LAYER_INSTANCE` only when the store was created with them (`tiles.layers` of the config;
+/// never in stores of format version 1). `as_tile` and `as_tiles` refuse a layer the store lacks
+/// (`AS_ERR_INVALID_ARGUMENT`).
+///
+/// # Safety
+/// `w` is NULL or a handle from `as_open`.
+#[no_mangle]
+pub unsafe extern "C" fn as_has_layer(w: *const as_world, layer: as_layer) -> c_int {
+    let Some(w) = (unsafe { w.as_ref() }) else { return AS_ERR_INVALID_ARGUMENT };
+    match self::layer(layer) {
+        Ok(l) => w.world.has_layer(l) as c_int,
+        Err(_) => AS_ERR_INVALID_ARGUMENT,
+    }
+}
+
 /// The highest zoom the world serves (`tiles.max_zoom` of its config, default 18), or -1 if `w`
 /// is NULL.
 ///
@@ -625,6 +651,7 @@ pub unsafe extern "C" fn as_layer_describe(layer: as_layer, info: *mut as_layer_
             aerialsynth_core::Dtype::U8 => AS_DTYPE_U8,
             aerialsynth_core::Dtype::I8 => AS_DTYPE_I8,
             aerialsynth_core::Dtype::F32 => AS_DTYPE_F32,
+            aerialsynth_core::Dtype::U32 => AS_DTYPE_U32,
         };
         let i = as_layer_info { name: NAMES[layer as usize].as_ptr(), dtype, channels: d.channels as u32, elem_size: d.dtype.size() as u32, size: d.size };
         unsafe { info.write(i) };
@@ -674,6 +701,7 @@ mod tests {
             assert_eq!(as_tile(std::ptr::null(), 0, 0, 0, 99, buf.as_mut_ptr() as *mut c_void, buf.len()), AS_ERR_INVALID_ARGUMENT);
             assert!(last_error().contains("unknown layer 99"));
             assert_eq!(as_max_zoom(std::ptr::null()), -1);
+            assert_eq!(as_has_layer(std::ptr::null(), AS_LAYER_RGB), AS_ERR_INVALID_ARGUMENT);
             as_close(std::ptr::null_mut());
         }
     }
@@ -731,6 +759,12 @@ mod tests {
             let mut again = vec![0u8; 4 * n];
             assert_eq!(as_tiles(w, ids.as_ptr(), 4, AS_LAYER_ELEVATION, again.as_mut_ptr() as *mut c_void, 4 * n), AS_OK);
             assert!(again[..] == many[..4 * n]);
+            // the optional layers: absent from this store (created without tiles.layers)
+            assert_eq!(as_has_layer(w, AS_LAYER_ELEVATION), 1);
+            assert_eq!(as_has_layer(w, AS_LAYER_DTM), 0);
+            assert_eq!(as_has_layer(w, 99), AS_ERR_INVALID_ARGUMENT);
+            assert_eq!(as_tile(w, 3, 5, 3, AS_LAYER_INSTANCE, b.as_mut_ptr() as *mut c_void, n), AS_ERR_INVALID_ARGUMENT);
+            assert!(last_error().contains("no instance layer"), "{}", last_error());
             assert_eq!(as_set_cache_mb(w, AS_DEFAULT_CACHE_MB), AS_OK);
             assert_eq!(as_set_cache_mb(std::ptr::null(), 1), AS_ERR_INVALID_ARGUMENT);
             assert_eq!(as_set_verbose(w, 1), AS_OK);
@@ -752,6 +786,22 @@ mod tests {
             // another seed: refused
             assert!(as_open(tiles.as_ptr(), cfgc.as_ptr(), 3).is_null());
             assert!(last_error().contains("world.seed (2 → 3)"), "{}", last_error());
+            // a store created with the optional layers
+            let cfg2 = dir.join("w2.yaml");
+            std::fs::write(&cfg2, "world: { tile_supersample: 1 }\ntiles: { max_zoom: 5, layers: [dtm, instance] }\n").unwrap();
+            let (tiles2, cfg2c) = (c(&dir.join("w2.h5")), c(&cfg2));
+            let w = as_open(tiles2.as_ptr(), cfg2c.as_ptr(), 2);
+            assert!(!w.is_null(), "{}", last_error());
+            assert_eq!((as_has_layer(w, AS_LAYER_DTM), as_has_layer(w, AS_LAYER_INSTANCE)), (1, 1));
+            let mut dtm = vec![0u8; as_layer_size(AS_LAYER_DTM)];
+            assert_eq!(as_tile(w, 3, 5, 3, AS_LAYER_DTM, dtm.as_mut_ptr() as *mut c_void, dtm.len()), AS_OK, "{}", last_error());
+            let dsm: Vec<f32> = a.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+            let dtm: Vec<f32> = dtm.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+            assert!(dsm.iter().zip(&dtm).all(|(s, t)| t <= s), "the DTM lies at or below the DSM");
+            let mut info = std::mem::MaybeUninit::<as_layer_info>::uninit();
+            assert_eq!(as_layer_describe(AS_LAYER_INSTANCE, info.as_mut_ptr()), AS_OK);
+            assert_eq!(info.assume_init().dtype, AS_DTYPE_U32);
+            as_close(w);
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

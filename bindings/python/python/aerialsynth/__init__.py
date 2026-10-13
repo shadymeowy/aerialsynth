@@ -76,7 +76,7 @@ MAX_IMAGE_SIZE: int = _native.MAX_IMAGE_SIZE
 #: Land-cover class of sky pixels in a rendered frame.
 SKY: int = 255
 
-LayerName = Literal["rgb", "albedo", "elevation", "normal", "landcover", "emission"]
+LayerName = Literal["rgb", "albedo", "elevation", "normal", "landcover", "emission", "dtm", "instance"]
 BackendName = Literal["auto", "cpu", "gpu"]
 PathLike = Union[str, "os.PathLike[str]"]
 TimeLike = Union[float, int, str, _dt.datetime, None]
@@ -100,7 +100,9 @@ def _layer(name: str, dtype: str, channels: int, size: int, description: str) ->
     return LayerInfo(name, np.dtype(dtype), channels, shape, size, description)
 
 
-#: Every layer by name: rgb, albedo, elevation, normal, landcover, emission.
+#: Every layer by name: rgb, albedo, elevation, normal, landcover, emission, and the optional
+#: dtm (bare ground, float32) and instance (instance ids, uint32), which a store holds only when
+#: it was created with them (``tiles.layers`` of the config; :attr:`World.layers`).
 LAYERS: dict[str, LayerInfo] = {t[0]: _layer(*t) for t in _native.layers()}
 
 
@@ -123,9 +125,10 @@ class World:
     """The tile store ``tiles_file`` of one world, generating missing tiles on demand.
 
     :param tiles_file: the HDF5 tile store; created (with its directory) if missing.
-    :param config: a scenario YAML (its ``world:`` section is the world and its
-        ``tiles.max_zoom`` the zoom limit, default 18; other sections are ignored) or a bare world
-        config; ``None`` is the default world. Like ``terrain -c``.
+    :param config: a scenario YAML (its ``world:`` section is the world, its ``tiles.max_zoom``
+        the zoom limit, default 18, and its ``tiles.layers`` the optional layers of a new store,
+        ``dtm`` and ``instance``; other sections are ignored) or a bare world config; ``None`` is
+        the default world. Like ``terrain -c``.
     :param seed: overrides the config's seed (like ``terrain --seed``).
     :param cache_mb: size of the in-memory cache of decoded tiles in MiB (0: no cache; see
         :attr:`cache_mb`).
@@ -162,7 +165,8 @@ class World:
         ``y = 0`` at the north). The array has the layer's dtype and shape (see :data:`LAYERS`).
 
         :raises TypeError: a coordinate is not an integer (Python or numpy).
-        :raises ValueError: bad coordinates or layer name, or the world is closed.
+        :raises ValueError: bad coordinates or layer name, a layer the store does not hold (see
+            :attr:`layers`), or the world is closed.
         :raises RuntimeError: reading, generating or storing the tile failed.
         """
         info = LAYERS.get(layer)
@@ -333,6 +337,13 @@ class World:
     def max_zoom(self) -> int:
         """The highest zoom served (the config's ``tiles.max_zoom``, default 18)."""
         return self._w.max_zoom
+
+    @property
+    def layers(self) -> list:
+        """Names of the layers the store holds: the base layers (rgb ... emission) and the
+        optional ``dtm`` and ``instance`` when the store was created with them (``tiles.layers``
+        of the config; stores of format version 1 have none)."""
+        return list(self._w.layers())
 
     def __enter__(self) -> "World":
         return self
