@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **GPU renderer on software rasterizers.** The G-buffer pass is now submitted before the
+  shading pass instead of in the same submission: lavapipe shaded parts of the frame (whole
+  8 × 8 workgroups) before the mesh was drawn there, i.e. as sky, and WARP (Windows CI) drew no
+  terrain at all; a barrier, or a separate command buffer in the same submission, did not help.
+  A shader the backend rejects is now an error of the renderer's start-up (not a device failure
+  reported a frame later), and a GPU render error fails the self-check (auto renders on the
+  CPU). The self-check test runs four frames and wants all of them right; CI runs it on lavapipe
+  too.
 - **Rendering side** (design §8). *Walls:* steep faces (the geometric normal of the rendered
   mesh from the G-buffer, slope > ~52–66°) get a wall material instead of the top-down texture
   stretched down them: building facades from the roof's colour with floors, window bays and

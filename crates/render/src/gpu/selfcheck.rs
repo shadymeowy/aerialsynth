@@ -5,8 +5,9 @@
 //! process, with a one-line warning. Some virtual GPUs render nothing at all (the macOS Intel
 //! runners' "Apple Paravirtual device"). `backend: gpu` is not checked.
 //!
-//! The verdict is computed once per process. A check that cannot run (no temporary directory for
-//! its scratch tile store, a render error) is inconclusive and keeps the GPU.
+//! The verdict is computed once per process. A GPU render that fails (a shader the backend
+//! rejects, a device error) fails the check; a check that cannot run (no temporary directory for
+//! its scratch tile store, a CPU render error) is inconclusive and keeps the GPU.
 
 use crate::cache::TileCache;
 use crate::camera::CameraConfig;
@@ -74,8 +75,10 @@ pub fn run() -> anyhow::Result<Result<(), String>> {
             r.try_render(&camera(&ell), &sun)
         };
         let cpu = render(Backend::Cpu)?;
-        let gpu = render(Backend::Gpu)?;
-        Ok(compare(&cpu, &gpu))
+        Ok(match render(Backend::Gpu) {
+            Ok(gpu) => compare(&cpu, &gpu),
+            Err(e) => Err(format!("the GPU render failed: {e:#}")),
+        })
     })();
     // the GPU keeps tiles and meshes by tile id: forget the synthetic ones
     super::forget_tiles(&[id]);
@@ -207,16 +210,20 @@ mod tests {
             eprintln!("no GPU, skipped");
             return;
         }
-        // (the first run includes the GPU renderer's start-up: shaders, pipelines)
-        let mut r = Ok(());
-        for k in 0..2 {
-            let t0 = std::time::Instant::now();
-            r = run().expect("the self-check ran");
-            eprintln!("gpu self-check {k}: {r:?} in {:.1} ms", t0.elapsed().as_secs_f64() * 1e3);
-        }
+        // (the first run includes the GPU renderer's start-up: shaders, pipelines; the later ones
+        // reuse its targets and run at full speed, where a missing synchronization between the
+        // passes showed on software rasterizers)
+        let rs: Vec<Result<(), String>> = (0..4)
+            .map(|k| {
+                let t0 = std::time::Instant::now();
+                let r = run().expect("the self-check ran");
+                eprintln!("gpu self-check {k}: {r:?} in {:.1} ms", t0.elapsed().as_secs_f64() * 1e3);
+                r
+            })
+            .collect();
         match std::env::var("AERIALSYNTH_EXPECT_GPU_CHECK").as_deref() {
-            Ok("pass") => assert_eq!(r, Ok(())),
-            Ok("fail") => assert!(r.is_err(), "the GPU passed"),
+            Ok("pass") => assert!(rs.iter().all(|r| r.is_ok()), "{rs:?}"),
+            Ok("fail") => assert!(rs.iter().all(|r| r.is_err()), "the GPU passed: {rs:?}"),
             _ => {}
         }
     }

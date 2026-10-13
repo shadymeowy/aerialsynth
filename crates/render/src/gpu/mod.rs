@@ -16,6 +16,7 @@ use crate::lighting::SunState;
 use crate::lod::Unit;
 use crate::raster::{FrameOut, Renderer, Shading, TileView};
 use crate::trajectory::CamPose;
+use anyhow::Context as _;
 use bytemuck::{Pod, Zeroable};
 use device::Gpu;
 use geodesy::tiles::TileId;
@@ -189,6 +190,26 @@ impl Ctx {
         let gpu = device::shared()?;
         let d = &gpu.device;
         let compiling = gpu.compiling();
+        // a shader the backend rejects (e.g. its HLSL / MSL compiler) is an error here, not a
+        // device failure that only the next frame reports
+        let (gbuf_pipe, shade_pipe) = gpu.scoped(|| Ok(Self::pipelines(d))).context("the renderer's shaders")?;
+        drop(compiling);
+        Ok(Ctx {
+            gpu,
+            meshes: HashMap::new(),
+            mesh_bytes: 0,
+            indices: HashMap::new(),
+            frame: 0,
+            gbuf_pipe,
+            shade_pipe,
+            pools: HashMap::new(),
+            targets: None,
+            rays: Vec::new(),
+        })
+    }
+
+    /// The G-buffer (mesh) and shading pipelines.
+    fn pipelines(d: &wgpu::Device) -> (wgpu::RenderPipeline, wgpu::ComputePipeline) {
         let gmod =
             d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("mesh"), source: wgpu::ShaderSource::Wgsl(include_str!("mesh.wgsl").into()) });
         let gbuf_pipe = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -231,19 +252,7 @@ impl Ctx {
             compilation_options: Default::default(),
             cache: None,
         });
-        drop(compiling);
-        Ok(Ctx {
-            gpu,
-            meshes: HashMap::new(),
-            mesh_bytes: 0,
-            indices: HashMap::new(),
-            frame: 0,
-            gbuf_pipe,
-            shade_pipe,
-            pools: HashMap::new(),
-            targets: None,
-            rays: Vec::new(),
-        })
+        (gbuf_pipe, shade_pipe)
     }
 
     fn ensure_targets(&mut self, w: u32, h: u32, ow: u32, oh: u32) {
@@ -600,6 +609,14 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
             }
         }
     }
+    // The G-buffer pass is submitted on its own, before the shading pass that reads it: software
+    // rasterizers can start a compute pass while the draws before it in the same submission are
+    // still being rasterized, despite the barrier wgpu records between them (Mesa's lavapipe
+    // does, in the same or another command buffer: the shading then sees parts of the G-buffer
+    // still cleared, i.e. sky; Windows' WARP rendered no terrain at all). A submission boundary
+    // makes them finish; on other GPUs it costs one more submit per frame.
+    queue.submit([enc.finish()]);
+    let mut enc = d.create_command_encoder(&Default::default());
     // ---------------- shading
     {
         let pool = &c.pools[&shading];

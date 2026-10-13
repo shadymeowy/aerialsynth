@@ -242,7 +242,10 @@ the CPU (6 threads).
   clearly differs (no terrain, wrong depth, land cover or brightness) is not used: a one-line
   warning (`render.backend auto: the GPU (…) renders a test frame wrongly (…); rendering on the
   CPU`) and the CPU renders. Seen on the virtual GPU of macOS VMs on Intel hosts ("Apple
-  Paravirtual device"), which renders nothing. `backend: gpu` skips the check.
+  Paravirtual device"), which renders nothing. A GPU render that fails in the check (a shader
+  the backend rejects) fails it too. `backend: gpu` skips the check. The G-buffer pass is
+  submitted separately from the shading pass that reads it: software rasterizers (Mesa's
+  lavapipe, Windows' WARP) can otherwise shade parts of a G-buffer not yet drawn.
 
 - **No suitable GPU:** with `backend: auto` (the default) generation and rendering fall back to
   the CPU; `backend: gpu` makes a missing GPU an error instead. Tile generation
