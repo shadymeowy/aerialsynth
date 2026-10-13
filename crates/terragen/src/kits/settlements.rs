@@ -31,6 +31,7 @@ pub static KIT: Kit = Kit {
     wgsl: include_str!("../gpu/wgsl/kits/settlements.wgsl"),
     layers: &[(slot::BUILT, built), (slot::WATER, water)],
     host: Some(host),
+    prepare: Some(prepare),
     replaces_towns: true,
     ..Kit::EMPTY
 };
@@ -98,6 +99,39 @@ fn host(ctx: &mut HostCtx, area: &Area) -> Features {
     }
     sites::sites_near(ctx, area.center, area.radius, area.gsd, &mut f);
     f
+}
+
+/// The kit's `prepare` hook: the places a batch of areas lists (and the town lists of its
+/// sites), each lattice cell once and in parallel, top-down by level (a level's resolution
+/// reads the larger levels' places), the bases of the cells and their neighbours before the
+/// final places — the areas' host calls then find them memoized.
+fn prepare(w: &crate::world::World, areas: &[Area]) {
+    use rayon::prelude::*;
+    if w.cfg.landuse.towns <= 0.0 {
+        return;
+    }
+    for level in (0..places::NLEVELS).rev() {
+        let ext = places::LEVELS[level].radius[1] * 1.15 * 1.62 * 1.62 + if level <= 1 { places::WALDHUFEN_STRIP } else { 0.0 };
+        // (towns and larger: also the sites' town lists, 32 km around the area)
+        let more = |a: &Area| if level >= places::TOWN as usize && a.gsd < sites::DAMS_GSD_MAX { 32_000.0 } else { 0.0 };
+        let mut cells: Vec<places::Cell> = areas
+            .par_iter()
+            .filter(|a| a.gsd < GSD_MAX[level])
+            .flat_map_iter(|a| places::cells_near(w, level, a.center, a.radius + (1.42 * ext).max(more(a))))
+            .collect();
+        cells.sort_unstable();
+        cells.dedup();
+        if cells.is_empty() {
+            continue;
+        }
+        let mut near: Vec<places::Cell> = cells.par_iter().flat_map_iter(|&c| places::resolve_cells(w, level, c)).collect();
+        near.sort_unstable();
+        near.dedup();
+        near.par_iter().for_each(|&c| places::warm_base(w, level, c));
+        cells.par_iter().for_each(|&c| {
+            places::final_place(w, level, c);
+        });
+    }
 }
 
 /// Crown colour of town trees.

@@ -81,10 +81,12 @@ at most one per node (no hairpins) and are smoothed by a moving average (400, 25
 Chaikin; minor roads by Chaikin ×3. Steeper than they may climb (secondary 11 %, local 13 %,
 tracks 16 %), minor roads get **switchbacks**: zigzag legs across the slope with rounded
 hairpins, long enough to keep the grade. Power lines run straight between angle points.
-Routes are memoized per edge (the analytic stage and the final route).
+Routes are memoized per edge (the analytic stage and the final route); the edges near a batch of
+tiles are routed once each, in parallel, before the tiles' features (`Kit::prepare`), and a
+route's corridor probes and fine corridors run in parallel.
 
 **Engineered profiles (host, point samples).** Motorways, trunk roads and railways sample the
-full terrain every 40 m (one GPU round for all samples of an area; memoized per sample) and
+full terrain every 40 m (exact host evaluations on both backends; memoized per sample) and
 derive deck heights by a local operator; the samples' ground and water levels are quantized to
 1 m, from the exact sample (`World::terrain`, the CPU backend's own) where the backend's is
 within 4 cm of a rounding boundary or near a water decision (`build::deck_sample`: ~8 % of the
@@ -222,6 +224,12 @@ now — 1.7× per route, and 16 % more edges per area from the wider deviation b
 try's 600 m, entries 600 m off the chord). Of it, the scenes (drainage, lakes) take 10–25 %, the
 analytic routes (probes with the carved valleys and the lakes, the check, the sampled steps
 near water) ~70 %, the sites stage 5–25 %.
+
+After the perf round (Tesla P4, 6 host threads, 39.9N 32.8E, cold process): the edges near a
+GPU batch are routed once each, in parallel (`prepare`), a route's corridor probes and fine
+corridors in parallel, the features with exact host samples while the GPU runs pass A (no
+settle rounds). 64 tiles at z12 take 11 s (86 s before), a 960×540 view from 3 km 33 s (834 s);
+routing is still most of a cold z12 batch's host time (probes: `macro_at` and the relief).
 
 ## Stills
 

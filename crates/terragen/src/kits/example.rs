@@ -33,6 +33,7 @@ pub static KIT: Kit = Kit {
     astamp: None,
     families: &[Family { name: "example_cones", cell: 40_000.0, jitter: 0.8, reach: 6_000.0, relief: true, exists: cone_exists }],
     host: Some(host),
+    prepare: None,
     replaces_towns: false,
     replaces_roads: false,
 };

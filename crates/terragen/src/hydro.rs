@@ -9,7 +9,9 @@
 //! there from the basin-filling lake model).
 
 use super::*;
+use crate::memo::Memo;
 use std::cell::RefCell;
+use std::sync::Arc;
 
 /// One drainage edge (channel segment), surface points in ECEF.
 #[derive(Clone, Copy, Debug)]
@@ -48,7 +50,7 @@ pub struct RiverHit {
     pub reach: f64,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct FlowPt {
     s: DVec3,
     h: f64,
@@ -65,7 +67,36 @@ thread_local! {
     static TGT: RefCell<FxHashMap<LatticeKey, Option<Cell>>> = RefCell::new(FxHashMap::default());
     static SRC: RefCell<FxHashMap<LatticeKey, bool>> = RefCell::new(FxHashMap::default());
     static MAIN: RefCell<FxHashMap<LatticeKey, Option<Cell>>> = RefCell::new(FxHashMap::default());
-    static PIECES: RefCell<FxHashMap<LatticeKey, std::rc::Rc<[Seg]>>> = RefCell::new(FxHashMap::default());
+    static PIECES: RefCell<FxHashMap<LatticeKey, Arc<[Seg]>>> = RefCell::new(FxHashMap::default());
+}
+
+// (shared behind the per-thread maps: the host threads of a batch work on neighbouring areas)
+static PTS_SHARED: Memo<LatticeKey, FlowPt> = Memo::new(1 << 20);
+static PIECES_SHARED: Memo<LatticeKey, Arc<[Seg]>> = Memo::new(1 << 18);
+/// The pieces near a query cell (`point_pieces`).
+static NEAR_SHARED: Memo<LatticeKey, Arc<[NearPiece]>> = Memo::new(1 << 17);
+/// Results of the wider queries (`river_segments_of`): tiles, sites and routes ask for the same
+/// area again (settle rounds of the GPU generator, neighbouring tiles of a site).
+type QueryKey = (u64, [u64; 4], u32, u32);
+static QUERIES: Memo<QueryKey, Arc<Vec<Seg>>> = Memo::new(1 << 13);
+
+/// Queries of at most this radius (m; point evaluations: 0) take their pieces from the lists of
+/// their query cell (`point_pieces`).
+const POINT_R: f64 = 100.0;
+/// Side of a query cell (lattice cells of the level).
+const QUERY_CELL: f64 = 0.25;
+/// Side of a node block (lattice cells; `node_block`).
+const NODE_BLOCK: i64 = 4;
+/// The active lattice points per node block.
+static NODES_SHARED: Memo<LatticeKey, Arc<[(Cell, DVec3)]>> = Memo::new(1 << 16);
+
+/// A drainage piece near a query cell, with the lattice cell and surface point of the node that
+/// owns it (the selection of `river_segments_of`).
+#[derive(Clone, Copy)]
+struct NearPiece {
+    seg: Seg,
+    node: Cell,
+    s: DVec3,
 }
 
 /// The junction angle of a tributary with the main stem: its inflow direction's angle to the
@@ -110,6 +141,18 @@ impl World {
         if let Some(p) = PTS.with(|m| m.borrow().get(&key).copied()) {
             return p;
         }
+        let fp = PTS_SHARED.get_or(key, || self.flow_point_uncached(lvl, c));
+        PTS.with(|m| {
+            let mut m = m.borrow_mut();
+            if m.len() > 400_000 {
+                m.clear();
+            }
+            m.insert(key, fp);
+        });
+        fp
+    }
+
+    fn flow_point_uncached(&self, lvl: usize, c: (i64, i64, i64)) -> FlowPt {
         let cell = self.cfg.hydro.levels[lvl].cell_km * KM;
         let hh = hash3(self.level_key(lvl), c.0, c.1, c.2);
         let p = DVec3::new(
@@ -119,7 +162,7 @@ impl World {
         ) * cell;
         let g = geodesy::ecef2geodetic(p, &self.ell);
         let active = g.h.abs() < 0.5 * cell;
-        let fp = if active {
+        if active {
             let gsd = cell / 4.0;
             let ctx = Ctx::new(g.lat, g.lon, gsd, &self.ell);
             let m = self.macro_at(ctx.p, gsd);
@@ -127,15 +170,7 @@ impl World {
             FlowPt { s: ctx.p, h: t.ground, active: true }
         } else {
             FlowPt { s: DVec3::ZERO, h: 0.0, active: false }
-        };
-        PTS.with(|m| {
-            let mut m = m.borrow_mut();
-            if m.len() > 400_000 {
-                m.clear();
-            }
-            m.insert(key, fp);
-        });
-        fp
+        }
     }
 
     /// Downstream neighbour (steepest descent) of an active point; None for sinks and the sea.
@@ -472,22 +507,29 @@ impl World {
     /// straight start, then the bend at its downstream node (a tributary's last reach to the
     /// main stem), or the last piece into the sea or a closed basin.
     pub(crate) fn node_pieces(&self, lvl: usize, c: Cell, out: &mut Vec<Seg>) {
-        // (memoized per thread: queries of neighbouring areas share most nodes)
+        out.extend_from_slice(&self.node_pieces_arc(lvl, c));
+    }
+
+    /// [`World::node_pieces`], memoized per thread and shared (queries of neighbouring areas
+    /// share most nodes).
+    fn node_pieces_arc(&self, lvl: usize, c: Cell) -> Arc<[Seg]> {
         let key = (self.level_key(lvl) ^ self.cache_key ^ 0x91EC, c.0, c.1, c.2);
         if let Some(v) = PIECES.with(|m| m.borrow().get(&key).cloned()) {
-            out.extend_from_slice(&v);
-            return;
+            return v;
         }
-        let first = out.len();
-        self.node_pieces_uncached(lvl, c, out);
-        let v: std::rc::Rc<[Seg]> = out[first..].into();
+        let v = PIECES_SHARED.get_or(key, || {
+            let mut out = Vec::new();
+            self.node_pieces_uncached(lvl, c, &mut out);
+            out.into()
+        });
         PIECES.with(|m| {
             let mut m = m.borrow_mut();
             if m.len() > 60_000 {
                 m.clear();
             }
-            m.insert(key, v);
+            m.insert(key, v.clone());
         });
+        v
     }
 
     fn node_pieces_uncached(&self, lvl: usize, c: Cell, out: &mut Vec<Seg>) {
@@ -585,56 +627,175 @@ impl World {
 
     /// [`World::river_segments`] of the drainage levels `levels` only.
     pub fn river_segments_of(&self, center: DVec3, radius: f64, gsd: f64, levels: std::ops::Range<usize>) -> Vec<Seg> {
-        let mut out = Vec::new();
         if !self.cfg.hydro.rivers {
+            return Vec::new();
+        }
+        // the levels to visit: skip levels far below the resolution (the carve fades out per
+        // pixel before that, see `World::terrain_impl`, so tiles at slightly different GSD agree)
+        let mut mask = 0u32;
+        for (lvl, lc) in self.cfg.hydro.levels.iter().enumerate() {
+            if levels.contains(&lvl) && !(lc.valley_m < 0.2 * gsd && lc.width_m[1] < 0.15 * gsd) {
+                mask |= 1 << lvl;
+            }
+        }
+        let mut out = Vec::new();
+        if radius <= POINT_R {
+            // point evaluations: from the lists of their query cell
+            for lvl in (0..self.cfg.hydro.levels.len()).filter(|l| mask & (1 << l) != 0) {
+                self.point_segments(lvl, center, radius, &mut out);
+            }
             return out;
         }
-        for (lvl, lc) in self.cfg.hydro.levels.iter().enumerate() {
-            if !levels.contains(&lvl) {
-                continue;
-            }
-            let first = out.len();
-            let cell = lc.cell_km * KM;
-            // skip levels far below the resolution (the carve fades out per pixel before that,
-            // see `World::terrain_impl`, so tiles at slightly different GSD agree)
-            if lc.valley_m < 0.2 * gsd && lc.width_m[1] < 0.15 * gsd {
-                continue;
-            }
-            // a node's channels reach to the middle of its downstream node's outgoing edge
-            // (edges up to 3 cells, see `flow_target`: a curve piece lies up to 4.5 cells from
-            // the node that owns it; a shorter reach dropped pieces in some tiles only, leaving
-            // elevation steps at tile edges)
-            let reach = radius + 4.6 * cell + lc.valley_m;
-            let lo = ((center - DVec3::splat(reach)) / cell).floor();
-            let hi = ((center + DVec3::splat(reach)) / cell).floor();
-            for c in self.shell_cells(center, lo, hi, cell) {
-                if !self.maybe_active(lvl, c, cell) {
-                    continue;
-                }
-                let fp = self.flow_point(lvl, c);
-                if !fp.active || (fp.s - center).length() > reach {
-                    continue;
-                }
-                self.node_pieces(lvl, c, &mut out);
-            }
-            // keep only the pieces that can reach the area: as conservative as selecting by the
-            // owning node within radius + 2.2 cells + valley with ≤ 1.8-cell edges (every piece within
-            // radius + 0.4 cell + valley of the centre), plus the meander warp; the far pieces of the
-            // wide node search cost most of the river queries
-            let keep = radius + 0.4 * cell + 1.4 * lc.valley_m + 0.35 * lc.meander * cell;
-            let mut k = first;
-            for i in first..out.len() {
-                let s = out[i];
-                let ab = s.b - s.a;
-                let u = ((center - s.a).dot(ab) / ab.length_squared().max(1e-9)).clamp(0.0, 1.0);
-                if (center - (s.a + ab * u)).length() <= keep {
-                    out[k] = s;
-                    k += 1;
-                }
-            }
-            out.truncate(k);
+        let key = (self.cache_key, [center.x.to_bits(), center.y.to_bits(), center.z.to_bits(), radius.to_bits()], mask, 0);
+        if let Some(v) = QUERIES.get(&key) {
+            return (*v).clone();
         }
+        for lvl in (0..self.cfg.hydro.levels.len()).filter(|l| mask & (1 << l) != 0) {
+            self.area_segments(lvl, center, radius, &mut out);
+        }
+        QUERIES.insert(key, Arc::new(out.clone()));
         out
+    }
+
+    /// The pieces of level `lvl` whose valley could reach within `radius` of `center` (the
+    /// selection of [`World::river_segments_of`]), appended to `out`.
+    fn area_segments(&self, lvl: usize, center: DVec3, radius: f64, out: &mut Vec<Seg>) {
+        let lc = &self.cfg.hydro.levels[lvl];
+        let first = out.len();
+        let cell = lc.cell_km * KM;
+        // a node's channels reach to the middle of its downstream node's outgoing edge
+        // (edges up to 3 cells, see `flow_target`: a curve piece lies up to 4.5 cells from
+        // the node that owns it; a shorter reach dropped pieces in some tiles only, leaving
+        // elevation steps at tile edges)
+        let reach = radius + 4.6 * cell + lc.valley_m;
+        let lo = ((center - DVec3::splat(reach)) / cell).floor();
+        let hi = ((center + DVec3::splat(reach)) / cell).floor();
+        for c in self.shell_cells(center, lo, hi, cell) {
+            if !self.maybe_active(lvl, c, cell) {
+                continue;
+            }
+            let fp = self.flow_point(lvl, c);
+            if !fp.active || (fp.s - center).length() > reach {
+                continue;
+            }
+            self.node_pieces(lvl, c, out);
+        }
+        // keep only the pieces that can reach the area: as conservative as selecting by the
+        // owning node within radius + 2.2 cells + valley with ≤ 1.8-cell edges (every piece within
+        // radius + 0.4 cell + valley of the centre), plus the meander warp; the far pieces of the
+        // wide node search cost most of the river queries
+        let keep = radius + 0.4 * cell + 1.4 * lc.valley_m + 0.35 * lc.meander * cell;
+        let mut k = first;
+        for i in first..out.len() {
+            let s = out[i];
+            let ab = s.b - s.a;
+            let u = ((center - s.a).dot(ab) / ab.length_squared().max(1e-9)).clamp(0.0, 1.0);
+            if (center - (s.a + ab * u)).length() <= keep {
+                out[k] = s;
+                k += 1;
+            }
+        }
+        out.truncate(k);
+    }
+
+    /// [`World::area_segments`] of a query within [`POINT_R`] of `center`: the same pieces in
+    /// the same order, selected from the list of its query cell ([`World::point_pieces`]).
+    fn point_segments(&self, lvl: usize, center: DVec3, radius: f64, out: &mut Vec<Seg>) {
+        let lc = &self.cfg.hydro.levels[lvl];
+        let cell = lc.cell_km * KM;
+        let q = (center / (QUERY_CELL * cell)).floor();
+        let list = self.point_pieces(lvl, (q.x as i64, q.y as i64, q.z as i64));
+        // (the selection of `area_segments`: the node in the box of lattice cells, within the
+        // reach; the piece within `keep`)
+        let reach = radius + 4.6 * cell + lc.valley_m;
+        let lo = ((center - DVec3::splat(reach)) / cell).floor();
+        let hi = ((center + DVec3::splat(reach)) / cell).floor();
+        let (lo, hi) = ((lo.x as i64, lo.y as i64, lo.z as i64), (hi.x as i64, hi.y as i64, hi.z as i64));
+        let keep = radius + 0.4 * cell + 1.4 * lc.valley_m + 0.35 * lc.meander * cell;
+        for np in list.iter() {
+            let c = np.node;
+            if c.0 < lo.0 || c.0 > hi.0 || c.1 < lo.1 || c.1 > hi.1 || c.2 < lo.2 || c.2 > hi.2 || (np.s - center).length() > reach {
+                continue;
+            }
+            let s = np.seg;
+            let ab = s.b - s.a;
+            let u = ((center - s.a).dot(ab) / ab.length_squared().max(1e-9)).clamp(0.0, 1.0);
+            if (center - (s.a + ab * u)).length() <= keep {
+                out.push(s);
+            }
+        }
+    }
+
+    /// The active lattice points of level `lvl` in the block `b` of [`NODE_BLOCK`]³ lattice cells:
+    /// cell and surface point (shared memo).
+    fn node_block(&self, lvl: usize, b: Cell) -> Arc<[(Cell, DVec3)]> {
+        let key = (self.level_key(lvl) ^ self.cache_key ^ 0xB10C, b.0, b.1, b.2);
+        NODES_SHARED.get_or(key, || {
+            let cell = self.cfg.hydro.levels[lvl].cell_km * KM;
+            let mut v = Vec::new();
+            for z in b.2 * NODE_BLOCK..(b.2 + 1) * NODE_BLOCK {
+                for y in b.1 * NODE_BLOCK..(b.1 + 1) * NODE_BLOCK {
+                    for x in b.0 * NODE_BLOCK..(b.0 + 1) * NODE_BLOCK {
+                        let c = (x, y, z);
+                        if !self.maybe_active(lvl, c, cell) {
+                            continue;
+                        }
+                        let fp = self.flow_point(lvl, c);
+                        if fp.active {
+                            v.push((c, fp.s));
+                        }
+                    }
+                }
+            }
+            v.into()
+        })
+    }
+
+    /// The pieces of level `lvl` that a query within [`POINT_R`] of a point of the query cell
+    /// `qc` (side [`QUERY_CELL`] lattice cells) can select, with their nodes, in the order of
+    /// [`World::area_segments`] (nodes in z, y, x order; shared memo).
+    fn point_pieces(&self, lvl: usize, qc: Cell) -> Arc<[NearPiece]> {
+        let key = (self.level_key(lvl) ^ self.cache_key ^ 0x9E4C, qc.0, qc.1, qc.2);
+        NEAR_SHARED.get_or(key, || {
+            let lc = &self.cfg.hydro.levels[lvl];
+            let cell = lc.cell_km * KM;
+            let q = QUERY_CELL * cell;
+            let q0 = DVec3::new(qc.0 as f64, qc.1 as f64, qc.2 as f64) * q;
+            let qm = q0 + DVec3::splat(0.5 * q);
+            // (bounds over the cell: its half diagonal, and a metre for rounding)
+            let hd = 0.5 * 3f64.sqrt() * q + 1.0;
+            let reach = POINT_R + 4.6 * cell + lc.valley_m;
+            let keep = POINT_R + 0.4 * cell + 1.4 * lc.valley_m + 0.35 * lc.meander * cell;
+            // (every query box lies in this one; its active nodes from the node blocks, in the
+            // z, y, x order of the scan)
+            let lo = ((q0 - DVec3::splat(reach)) / cell).floor();
+            let hi = ((q0 + DVec3::splat(q + reach)) / cell).floor();
+            let (lo, hi) = ((lo.x as i64, lo.y as i64, lo.z as i64), (hi.x as i64, hi.y as i64, hi.z as i64));
+            let mut nodes: Vec<(Cell, DVec3)> = Vec::new();
+            for bz in lo.2.div_euclid(NODE_BLOCK)..=hi.2.div_euclid(NODE_BLOCK) {
+                for by in lo.1.div_euclid(NODE_BLOCK)..=hi.1.div_euclid(NODE_BLOCK) {
+                    for bx in lo.0.div_euclid(NODE_BLOCK)..=hi.0.div_euclid(NODE_BLOCK) {
+                        for &(c, sp) in self.node_block(lvl, (bx, by, bz)).iter() {
+                            if c.0 >= lo.0 && c.0 <= hi.0 && c.1 >= lo.1 && c.1 <= hi.1 && c.2 >= lo.2 && c.2 <= hi.2 && (sp - qm).length() <= reach + hd {
+                                nodes.push((c, sp));
+                            }
+                        }
+                    }
+                }
+            }
+            nodes.sort_unstable_by_key(|&((x, y, z), _)| (z, y, x));
+            let mut v = Vec::new();
+            for (c, sp) in nodes {
+                for &seg in self.node_pieces_arc(lvl, c).iter() {
+                    let ab = seg.b - seg.a;
+                    let u = ((qm - seg.a).dot(ab) / ab.length_squared().max(1e-9)).clamp(0.0, 1.0);
+                    if (qm - (seg.a + ab * u)).length() <= keep + hd {
+                        v.push(NearPiece { seg, node: c, s: sp });
+                    }
+                }
+            }
+            v.into()
+        })
     }
 
     /// Wavelength (m) of the meander warp of drainage level `li` (its shorter octave: × 0.37).
@@ -699,6 +860,47 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The memoized river queries (point queries from their query cell's lists, wider ones
+    /// memoized by their arguments) give exactly the pieces, in the same order, of the direct
+    /// selection over the node search (`area_segments` per level).
+    #[test]
+    fn river_queries_match_the_direct_selection() {
+        let w = World::new(crate::Config::default());
+        let reference = |c: DVec3, r: f64, gsd: f64, lv: std::ops::Range<usize>| {
+            let mut out = Vec::new();
+            for (lvl, lc) in w.cfg.hydro.levels.iter().enumerate() {
+                if lv.contains(&lvl) && !(lc.valley_m < 0.2 * gsd && lc.width_m[1] < 0.15 * gsd) {
+                    w.area_segments(lvl, c, r, &mut out);
+                }
+            }
+            format!("{out:?}")
+        };
+        let (mut n, mut pieces) = (0, 0);
+        for i in 0..300u64 {
+            let h = mix64(0x51E6 ^ i);
+            let lat = (2.0 * u01k(h, 1) - 1.0).asin();
+            let lon = (u01k(h, 2) - 0.5) * std::f64::consts::TAU;
+            let p0 = geodesy::geodetic2ecef(geodesy::Geodetic::new(lat, lon, 0.0), &w.ell);
+            if w.atlas().sample(p0.normalize()).coast_km < -20.0 {
+                continue;
+            }
+            // clusters of points (shared query cells) and a few wider queries
+            for k in 0..12u64 {
+                let hk = mix64(h ^ k);
+                let p = p0 + DVec3::new(u01k(hk, 1) - 0.5, u01k(hk, 2) - 0.5, u01k(hk, 3) - 0.5) * 3000.0;
+                let r = [0.0, 0.0, 0.0, 60.0, 100.0, 2500.0][k as usize % 6];
+                let gsd = [1.0, 20.0, 20.0, 150.0, 800.0][(u01k(hk, 4) * 5.0) as usize];
+                let lv = if k % 4 == 3 { 0..2 } else { 0..3 };
+                let got = w.river_segments_of(p, r, gsd, lv.clone());
+                pieces += got.len();
+                assert_eq!(format!("{got:?}"), reference(p, r, gsd, lv), "query {i}/{k} at {p:?}, radius {r}, gsd {gsd}");
+                n += 1;
+            }
+        }
+        eprintln!("{n} queries, {pieces} pieces");
+        assert!(n > 500 && pieces > 1000);
+    }
 
     /// Channels joining at a node no longer meet tangentially (both bent into the outflow, they
     /// ran side by side for kilometres): pieces of one level that end at the same point meet at

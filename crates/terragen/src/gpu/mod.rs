@@ -870,7 +870,7 @@ impl GpuGenerator {
                 );
             }
             let computed: Vec<(u64, Option<crate::eco::EcoParams>)> =
-                missing.par_iter().map(|&id| (id, sites.get(&id).map(|&site| crate::eco::compute(w, reg, id, site)))).collect();
+                crate::pool::host_run(|| missing.par_iter().map(|&id| (id, sites.get(&id).map(|&site| crate::eco::compute(w, reg, id, site)))).collect());
             for (id, e) in computed {
                 match e {
                     Some(e) => {
@@ -963,8 +963,52 @@ impl GpuGenerator {
         }
     }
 
-    /// The tile pipeline: pass A (and with `full` pass B and the output layers).
+    /// The drainage queries of tiles (centre, radius of the apron's farthest corner, pixel size).
+    fn tile_queries(&self, ids: &[TileId]) -> Vec<DQuery> {
+        let ell = self.world.ell;
+        let mut tq = Vec::with_capacity(ids.len());
+        for id in ids {
+            let (ox, oy) = (id.x as f64 * N as f64, id.y as f64 * N as f64);
+            let (lat_c, lon_c) = pixel_to_latlon(DVec2::new(ox + 128.0, oy + 128.0), id.z, N as u32);
+            let c = Ctx::new(lat_c, lon_c, 1.0, &ell);
+            let radius = [(ox - 2.0, oy - 2.0), (ox + 258.0, oy - 2.0), (ox - 2.0, oy + 258.0), (ox + 258.0, oy + 258.0)]
+                .iter()
+                .map(|&(px, py)| {
+                    let (la, lo) = pixel_to_latlon(DVec2::new(px, py), id.z, N as u32);
+                    (Ctx::new(la, lo, 1.0, &ell).p - c.p).length()
+                })
+                .fold(0.0, f64::max);
+            tq.push(DQuery { center: c.p, radius, gsd: gsd_ew(lat_c, id.z, N as u32, &ell) });
+        }
+        tq
+    }
+
+    /// The tile pipeline: pass A (and with `full` pass B and the output layers). The kits'
+    /// host features (CPU) are built while the GPU runs the passes before pass B.
     fn run(&self, ids: &[TileId], full: bool) -> Result<(Vec<Vec<GTerrain>>, Vec<TileData>)> {
+        let tq = self.tile_queries(ids);
+        std::thread::scope(|sc| {
+            let feats = (full && !ids.is_empty() && crate::features::any()).then(|| {
+                sc.spawn(|| {
+                    // (exact point evaluations on the host: the kits' host code takes the same
+                    // decisions from either backend's samples, see `sites_and_routes_match_the_cpu`,
+                    // and GPU evaluations cost a settle round each step of a chain of decisions)
+                    let areas: Vec<crate::features::Area> =
+                        tq.iter().map(|q| crate::features::Area { center: q.center, radius: q.radius, gsd: q.gsd }).collect();
+                    crate::pool::host_pool().install(|| crate::features::build_areas(&self.world, &areas))
+                })
+            });
+            self.run_passes(ids, full, &tq, feats)
+        })
+    }
+
+    fn run_passes(
+        &self,
+        ids: &[TileId],
+        full: bool,
+        tq: &[DQuery],
+        feats: Option<std::thread::ScopedJoinHandle<'_, Vec<crate::features::Features>>>,
+    ) -> Result<(Vec<Vec<GTerrain>>, Vec<TileData>)> {
         let d = &self.gpu.device;
         let ell = self.world.ell;
         let nt = ids.len();
@@ -987,25 +1031,17 @@ impl GpuGenerator {
         // ---- drainage pieces (on the GPU) and sink lakes per tile
         let mut cache = self.cache.lock().unwrap();
         cache.trim();
-        let mut tq = Vec::with_capacity(nt);
-        for id in ids {
-            let (ox, oy) = (id.x as f64 * N as f64, id.y as f64 * N as f64);
-            let (lat_c, lon_c) = pixel_to_latlon(DVec2::new(ox + 128.0, oy + 128.0), id.z, N as u32);
-            let c = Ctx::new(lat_c, lon_c, 1.0, &ell);
-            let radius = [(ox - 2.0, oy - 2.0), (ox + 258.0, oy - 2.0), (ox - 2.0, oy + 258.0), (ox + 258.0, oy + 258.0)]
-                .iter()
-                .map(|&(px, py)| {
-                    let (la, lo) = pixel_to_latlon(DVec2::new(px, py), id.z, N as u32);
-                    (Ctx::new(la, lo, 1.0, &ell).p - c.p).length()
-                })
-                .fold(0.0, f64::max);
-            tq.push(DQuery { center: c.p, radius, gsd: gsd_ew(lat_c, id.z, N as u32, &ell) });
-        }
-        let drain_out = self.drainage(&tq)?;
+        let drain_out = self.drainage(tq)?;
+        // the kits' pass-A stamps (as the CPU tile's, `tile.rs`; host work, in parallel)
+        let tile_astamps: Vec<Vec<crate::kits::AStamp>> = crate::pool::host_run(|| {
+            use rayon::prelude::*;
+            tq.par_iter().map(|q| crate::kits::astamps(&self.world, q.center, q.radius, q.gsd)).collect()
+        });
         let tile_sinks: Vec<Vec<GSink>> = self.settle(&mut cache, |prep| {
             tq.iter()
                 .zip(&drain_out.sinks)
-                .map(|(q, pieces)| {
+                .zip(&tile_astamps)
+                .map(|((q, pieces), astamps)| {
                     let segs: Vec<crate::world::Seg> = pieces
                         .iter()
                         .map(|&(b, hw)| crate::world::Seg { a: b, b, ha: 0.0, hb: 0.0, level: 0, hw, valley: 0.0, hw_b: hw, sink: true })
@@ -1017,8 +1053,7 @@ impl GpuGenerator {
                             sinks.push(gsink(sid, sc, rad, level));
                         }
                     }
-                    // the kits' pass-A stamps (as the CPU tile's, `tile.rs`)
-                    sinks.extend(crate::kits::astamps(&self.world, q.center, q.radius, q.gsd).iter().map(host::gsink_astamp));
+                    sinks.extend(astamps.iter().map(host::gsink_astamp));
                     sinks
                 })
                 .collect()
@@ -1375,20 +1410,11 @@ impl GpuGenerator {
         let b_ek = storage(d, "ecoregion keys", &ek);
         let b_ev = storage(d, "ecoregions", &ev);
         stamp(&format!("{} ecoregions", ecos.len()));
-        // the kits' host-built features per tile (shared Rust with the CPU; point evaluations
-        // through the settle rounds), binned like the pass-A pixels
-        let (fs, fst, fb, fi) = if crate::features::any() {
-            let feats: Vec<crate::features::Features> = self.settle(&mut cache, |prep| {
-                tq.iter()
-                    .map(|q| {
-                        let area = crate::features::Area { center: q.center, radius: q.radius, gsd: q.gsd };
-                        crate::features::build(&self.world, &mut host::PrepPoints(prep), &area)
-                    })
-                    .collect()
-            })?;
-            feature_tables(&self.world, ids, feats)
-        } else {
-            (vec![], vec![], vec![[0u32; 4]], vec![0u32])
+        // the kits' host-built features per tile (shared Rust with the CPU), binned like the
+        // pass-A pixels
+        let (fs, fst, fb, fi) = match feats {
+            Some(h) => feature_tables(&self.world, ids, h.join().map_err(|_| anyhow::anyhow!("GPU generator: the kits' host features panicked"))?),
+            None => (vec![], vec![], vec![[0u32; 4]], vec![0u32]),
         };
         let b_fs = storage(d, "feature segments", &fs);
         let b_fst = storage(d, "stamps", &fst);

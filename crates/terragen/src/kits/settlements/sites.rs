@@ -768,9 +768,13 @@ pub fn sites_near(ctx: &mut HostCtx, center: DVec3, radius: f64, gsd: f64, out: 
         }
     };
     // place-bound sites: airports, ports, solar farms, dams
+    // (only at the pixel sizes any of them is drawn at, see below and `dams_near`: a low-zoom
+    // tile's disc holds the towns of a continent, each resolved against its neighbours)
     let mut towns: Vec<Place> = Vec::new();
-    for l in TOWN as usize..places::NLEVELS {
-        towns.extend(places::places_near(w, l, center, radius + 32_000.0));
+    if gsd < DAMS_GSD_MAX {
+        for l in TOWN as usize..places::NLEVELS {
+            towns.extend(places::places_near(w, l, center, radius + 32_000.0));
+        }
     }
     for pl in &towns {
         let d = (pl.center - center).length();
@@ -806,12 +810,16 @@ pub fn sites_near(ctx: &mut HostCtx, center: DVec3, radius: f64, gsd: f64, out: 
     }
 }
 
+/// The largest pixel size (m) dams are drawn at (the other place-bound sites, airports, ports
+/// and solar farms, only at finer ones).
+pub const DAMS_GSD_MAX: f64 = 1200.0;
+
 /// The dams and reservoirs whose reach meets the area (`towns`: the places of levels ≥ town
 /// within its radius + 32 km).
 pub fn dams_near(ctx: &mut HostCtx, center: DVec3, radius: f64, gsd: f64, towns: &[Place]) -> Vec<Site> {
     let w = ctx.world;
     let mut out = Vec::new();
-    if gsd >= 1200.0 {
+    if gsd >= DAMS_GSD_MAX {
         return out;
     }
     let mut push = |s: Option<Option<Site>>| {

@@ -28,6 +28,7 @@ pub static KIT: Kit = Kit {
     wgsl: include_str!("../gpu/wgsl/kits/transport.wgsl"),
     layers: &[(slot::BUILT, built), (slot::WATER, water)],
     host: Some(host),
+    prepare: Some(build::prepare),
     replaces_roads: true,
     ..Kit::EMPTY
 };

@@ -294,7 +294,13 @@ impl Generator {
                 }
             }
         }
-        out.par_extend(ids[out.len()..].par_iter().map(|&id| self.tile_cpu(id)));
+        let rest = &ids[out.len()..];
+        if rest.len() > 1 && crate::features::any() {
+            // (the kits' shared host items of the tiles once each, before the tiles in parallel)
+            let areas: Vec<crate::features::Area> = rest.par_iter().map(|&id| self.feature_area(id).0).collect();
+            crate::features::prepare(&self.world, &areas);
+        }
+        out.par_extend(rest.par_iter().map(|&id| self.tile_cpu(id)));
         Ok(out)
     }
 
@@ -548,6 +554,17 @@ impl Generator {
     }
 
     /// Generate one tile on the CPU (parallel over rows internally).
+    /// The area a CPU tile's features are built for, and its pass-A bins.
+    fn feature_area(&self, id: TileId) -> (crate::features::Area, Vec<(DVec3, f64)>) {
+        let (n, z, ell) = (TILE_SIZE, id.z, self.world.ell);
+        let (ox, oy) = (id.x as f64 * n as f64, id.y as f64 * n as f64);
+        let bins = crate::features::tile_bins(&self.world, id);
+        let (lat_c, lon_c) = pixel_to_latlon(DVec2::new(ox + 128.0, oy + 128.0), z, n as u32);
+        let c = Ctx::new(lat_c, lon_c, 1.0, &ell).p;
+        let radius = bins.iter().map(|(b, r)| (*b - c).length() + r).fold(0.0, f64::max);
+        (crate::features::Area { center: c, radius, gsd: gsd_ew(lat_c, z, n as u32, &ell) }, bins)
+    }
+
     pub fn tile_cpu(&self, id: TileId) -> TileData {
         let n = TILE_SIZE;
         let na = n + 2; // pass B, 1-px apron
@@ -610,11 +627,7 @@ impl Generator {
 
         // ---------------- the kits' host-built features of the tile, binned (as the GPU's)
         let feats: Option<crate::features::Binned> = crate::features::any().then(|| {
-            let bins = crate::features::tile_bins(&self.world, id);
-            let (lat_c, lon_c) = pixel_to_latlon(DVec2::new(ox + 128.0, oy + 128.0), z, n as u32);
-            let c = Ctx::new(lat_c, lon_c, 1.0, &ell).p;
-            let radius = bins.iter().map(|(b, r)| (*b - c).length() + r).fold(0.0, f64::max);
-            let area = crate::features::Area { center: c, radius, gsd: gsd_ew(lat_c, z, n as u32, &ell) };
+            let (area, bins) = self.feature_area(id);
             crate::features::bin(crate::features::build(&self.world, &mut crate::features::CpuPoints(&self.world), &area), &bins)
         });
 

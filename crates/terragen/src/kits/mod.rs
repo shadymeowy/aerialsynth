@@ -266,6 +266,11 @@ pub struct Kit {
     pub families: &'static [crate::instances::Family],
     /// its host-built linear features and stamps (`crate::features`)
     pub host: Option<crate::features::HostFn>,
+    /// warm the memo tables `host` reads for a batch of areas (e.g. route every edge near them
+    /// once, in parallel), before the areas' `host` calls run in parallel: concurrent calls
+    /// would compute a shared item each (`crate::features::build_areas`). Must not change what
+    /// `host` returns.
+    pub prepare: Option<fn(&crate::world::World, &[crate::features::Area])>,
     /// the kit draws the settlements: the core's grid towns are off ([`legacy_towns`])
     pub replaces_towns: bool,
     /// the kit draws the road network: the core's noise-network roads are off ([`legacy_roads`];
@@ -287,6 +292,7 @@ impl Kit {
         astamp: None,
         families: &[],
         host: None,
+        prepare: None,
         replaces_towns: false,
         replaces_roads: false,
     };

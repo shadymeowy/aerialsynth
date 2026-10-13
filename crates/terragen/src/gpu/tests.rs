@@ -814,3 +814,40 @@ fn kernels_match_the_cpu() {
         assert!(*bad < 0.005, "{name}: {:.2}% of the samples differ", bad * 100.0);
     }
 }
+
+/// Tiles generated from many threads of rayon's global pool at once (callers that `par_iter`
+/// over tiles, as several kits' LOD tests do) finish: the generator's parallel host work runs
+/// on its own pool (`host_pool`), never waiting for global threads blocked in `tiles`. A
+/// watchdog aborts the process instead of hanging the suite.
+#[test]
+fn parallel_callers_do_not_deadlock() {
+    use rayon::prelude::*;
+    if gpu().is_none() {
+        return;
+    }
+    let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let d = done.clone();
+    std::thread::spawn(move || {
+        let t0 = std::time::Instant::now();
+        while t0.elapsed().as_secs() < 900 {
+            if d.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        eprintln!("parallel_callers_do_not_deadlock: no progress in 15 min (deadlock): aborting");
+        std::process::abort();
+    });
+    // a road network by a city (the transport kit routes, the settlements kit's sites)
+    let parent = geodesy::tiles::tile_for_latlon((-7.657f64).to_radians(), (-16.630f64).to_radians(), 12);
+    let mut ids = vec![parent];
+    ids.extend(parent.children());
+    for c in parent.children() {
+        ids.extend(c.children());
+    }
+    let n: usize = ids.par_iter().map(|&id| gen.tiles(&[id]).unwrap()[0].rgb.len()).sum();
+    done.store(true, std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(n, ids.len() * crate::TILE_SIZE * crate::TILE_SIZE * 3);
+    assert!(gen.backend_name().starts_with("GPU"), "{}", gen.backend_name());
+}

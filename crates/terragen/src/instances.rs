@@ -91,6 +91,14 @@ pub fn site(w: &World, f: &Family, c: (i64, i64, i64)) -> Option<InstSite> {
 
 /// The instances of family `fi` that can reach the disc of radius `r` around `p`, by id.
 pub fn near(w: &World, fi: usize, p: DVec3, r: f64) -> Vec<Instance> {
+    if r == 0.0 {
+        return near_point(w, fi, p);
+    }
+    near_scan(w, fi, p, r)
+}
+
+/// [`near`] by a scan of the lattice cells around the disc.
+fn near_scan(w: &World, fi: usize, p: DVec3, r: f64) -> Vec<Instance> {
     let f = family(fi);
     let rr = r + f.reach;
     let lo = ((p - DVec3::splat(rr + 0.5 * f.cell)) / f.cell).floor();
@@ -112,6 +120,65 @@ pub fn near(w: &World, fi: usize, p: DVec3, r: f64) -> Vec<Instance> {
     out.sort_unstable_by_key(|i| i.id);
     // (as the GPU's lists: the first K by id; more is a family too dense for its cell)
     out.truncate(K);
+    out
+}
+
+/// Side of the query cells of [`near_point`] (lattice cells of the family).
+const QUERY_CELL: f64 = 0.5;
+
+/// An existing instance and its lattice cell.
+type CellInst = ((i64, i64, i64), Instance);
+
+/// The instances a point query from the query cell `q` can find (`near_point`), by id.
+type QueryKey = (u64, usize, i64, i64, i64);
+static QUERY_LISTS: crate::memo::Memo<QueryKey, std::sync::Arc<[CellInst]>> = crate::memo::Memo::new(1 << 17);
+
+/// [`near`] of a point (`r` = 0; host point evaluations, the kits' relief): the same instances,
+/// selected from the list of the point's query cell (half a lattice cell; shared memo) by the
+/// scan's rule.
+fn near_point(w: &World, fi: usize, p: DVec3) -> Vec<Instance> {
+    let f = family(fi);
+    let qs = QUERY_CELL * f.cell;
+    let q = (p / qs).floor();
+    let list = QUERY_LISTS.get_or((w.cache_key, fi, q.x as i64, q.y as i64, q.z as i64), || {
+        // every site the scan of a point of the query cell can visit and keep, by id
+        let q0 = q * qs;
+        let qm = q0 + DVec3::splat(0.5 * qs);
+        let hd = 0.5 * 3f64.sqrt() * qs + 1.0;
+        let rr = f.reach;
+        let lo = ((q0 - DVec3::splat(rr + 0.5 * f.cell)) / f.cell).floor();
+        let hi = ((q0 + DVec3::splat(qs + rr + 0.5 * f.cell)) / f.cell).floor();
+        let mut v: Vec<CellInst> = Vec::new();
+        for z in lo.z as i64..=hi.z as i64 {
+            for y in lo.y as i64..=hi.y as i64 {
+                for x in lo.x as i64..=hi.x as i64 {
+                    let Some(s) = cached_site(w, fi, f, (x, y, z)) else { continue };
+                    if (s.0.center - qm).length() > rr + hd {
+                        continue;
+                    }
+                    if let Some(vv) = s.1 {
+                        v.push(((x, y, z), Instance { id: s.0.id, center: s.0.center, v: vv }));
+                    }
+                }
+            }
+        }
+        v.sort_by_key(|i| i.1.id);
+        v.into()
+    });
+    let rr = f.reach;
+    let lo = ((p - DVec3::splat(rr + 0.5 * f.cell)) / f.cell).floor();
+    let hi = ((p + DVec3::splat(rr + 0.5 * f.cell)) / f.cell).floor();
+    let (lo, hi) = ((lo.x as i64, lo.y as i64, lo.z as i64), (hi.x as i64, hi.y as i64, hi.z as i64));
+    let mut out = Vec::new();
+    for (c, i) in list.iter() {
+        if c.0 < lo.0 || c.0 > hi.0 || c.1 < lo.1 || c.1 > hi.1 || c.2 < lo.2 || c.2 > hi.2 || (i.center - p).length() > rr {
+            continue;
+        }
+        out.push(*i);
+        if out.len() == K {
+            break;
+        }
+    }
     out
 }
 
@@ -193,4 +260,40 @@ pub fn wgsl() -> String {
     }
     s.push_str("        default: { var o: InstOut; o.ok = false; return o; }\n    }\n}\n");
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Point queries from the query cells' lists find the instances of the scan, in its order.
+    #[test]
+    fn point_lists_match_the_scan() {
+        let w = World::new(crate::Config::default());
+        let nf = families().count();
+        let (mut n, mut found) = (0, 0);
+        for i in 0..400u64 {
+            let h = mix64(0x1A57 ^ i);
+            let lat = (2.0 * u01k(h, 1) - 1.0).asin();
+            let lon = (u01k(h, 2) - 0.5) * std::f64::consts::TAU;
+            let p0 = geodesy::geodetic2ecef(geodesy::Geodetic::new(lat, lon, 0.0), &w.ell);
+            for fi in 0..nf {
+                // points near the instances of the area (and random ones)
+                let f = family(fi);
+                let mut at: Vec<DVec3> = near_scan(&w, fi, p0, 6.0 * f.cell).iter().take(3).map(|i| i.center).collect();
+                at.push(p0);
+                for (k, c) in at.iter().enumerate() {
+                    let hk = mix64(h ^ k as u64 ^ ((fi as u64) << 8));
+                    let p = *c + DVec3::new(u01k(hk, 1) - 0.5, u01k(hk, 2) - 0.5, u01k(hk, 3) - 0.5) * (1.6 * f.reach);
+                    let a = near_point(&w, fi, p);
+                    let b = near_scan(&w, fi, p, 0.0);
+                    assert_eq!(format!("{a:?}"), format!("{b:?}"), "family {} at {p:?}", f.name);
+                    n += 1;
+                    found += a.len();
+                }
+            }
+        }
+        eprintln!("{n} point queries, {found} instances");
+        assert!(nf == 0 || found > 100);
+    }
 }
