@@ -324,6 +324,7 @@ struct Surface {
     albedo: vec3<f32>,
     height: f32,
     cls: u32,
+    inst: u32,
     lit: f32,
     emission: vec3<f32>,
 }
@@ -571,6 +572,8 @@ struct FieldOut {
     h: f32,
     cov: f32,
     kind: u32,
+    /// the field (0: none drawn)
+    id: u64,
 }
 
 /// Contiguous cultivation zones: a smooth mask (compared with the cultivated fraction).
@@ -870,6 +873,7 @@ fn field_explicit(r: Region, t: Terrain, q: vec2<f32>, p: vec3<f64>, gsd: f32, f
     o.h = extra_h;
     o.cov = inside;
     o.kind = kind_out;
+    o.id = id;
     return o;
 }
 
@@ -900,6 +904,7 @@ fn field(r: Region, t: Terrain, agri: f32, q: vec2<f32>, p: vec3<f64>, gsd: f32,
         fe.h = 0.0;
         fe.cov = 0.0;
         fe.kind = 0u;
+        fe.id = 0lu;
     }
     let cov_m = lerp(cult * 0.9, fe.cov, k);
     var o: FieldOut;
@@ -912,6 +917,7 @@ fn field(r: Region, t: Terrain, agri: f32, q: vec2<f32>, p: vec3<f64>, gsd: f32,
     o.h = fe.h * k;
     o.cov = cov_m;
     o.kind = fe.kind;
+    o.id = fe.id;
     return o;
 }
 

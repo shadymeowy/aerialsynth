@@ -43,7 +43,9 @@ over SSH X forwarding it runs, but slowly.
 - **Top bar:** the view (Map / Camera), the flight mode and speed, the frame rate and
   generation activity.
 - **Side panel:**
-  - Map: shading (surface, elevation, land cover, relief) and relief exaggeration; a *Display*
+  - Map: shading (surface, elevation, land cover, relief; *height above ground* and
+    *instances* when the store has the optional `dtm` / `instance` layers, `docs/formats.md`)
+    and relief exaggeration; a *Display*
     group with the level-of-detail bias, finest level, tile borders and light; and, when
     orbiting, *Whole planet / Home / North up / Top down*.
   - Camera: the camera and its resolution, *Look forward* (15° down instead of the scenario's
@@ -67,7 +69,7 @@ over SSH X forwarding it runs, but slowly.
 | `--scale F` | ≤ 960 px wide | camera resolution factor (pinhole-type models) |
 | `--supersample N` | 1 | camera supersampling |
 | `--exag`, `--mode` | 1, surface | map relief exaggeration and shading |
-| `--gpu-tiles` | 1536 | map tiles on the GPU (768 KB each) |
+| `--gpu-tiles` | 1536 | map tiles on the GPU (1 MB each) |
 | `--snapshot PNG --view … --wait S --size WxH` | `--view 20,10,16000,0,0`, `--wait 600`, `--size 1280x800` | a headless map view into a PNG (below) |
 | `--record DIR --path FILE --fps N --until S` | 25 fps | a headless keyframed map flight into PNG frames (below) |
 
@@ -152,7 +154,7 @@ keys:     # the orbit camera: target lat / lon (deg), distance (km), heading / t
   - { t: 0,  lat: 20, lon: 40,   km: 15000 }
   - { t: 8,  lat: 10, lon: -70,  km: 13000 }
   - { t: 20, lat: 7,  lon: -102, km: 3, heading: 90, tilt: 63 }
-look:     # switches of the shading mode and tile borders, dissolving over `fade` seconds
+look:     # switches of the shading mode (surface, elevation, landcover, relief, height, instance) and tile borders, dissolving over `fade` seconds
   - { t: 0,   mode: surface }
   - { t: 2.2, mode: elevation, fade: 0.7 }
   - { t: 8.2, borders: true, fade: 0.6 }

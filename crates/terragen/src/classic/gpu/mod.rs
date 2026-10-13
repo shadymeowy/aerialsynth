@@ -1088,6 +1088,8 @@ impl GpuGenerator {
                     normal: vec![0; n * 3],
                     landcover: vec![0; n],
                     emission: vec![0; n * 3],
+                    dtm: vec![],
+                    instance: vec![],
                     elev_min: from_orderable(!ranges[2 * t]),
                     elev_max: from_orderable(ranges[2 * t + 1]),
                 };

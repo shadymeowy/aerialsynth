@@ -75,6 +75,8 @@ pub struct Surface {
     /// DSM elevation (m above ellipsoid).
     pub height: f64,
     pub class: u8,
+    /// Instance id (building lot, field, tree stand; 0: none) of the layer that set the class.
+    pub instance: u32,
     /// 1 = fully sunlit, 0 = fully in cast shadow.
     pub lit: f64,
     pub is_water: bool,

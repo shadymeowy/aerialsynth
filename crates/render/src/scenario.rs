@@ -229,6 +229,23 @@ pub struct TilesConfig {
     /// Where tiles are generated: `auto` (the GPU when it has 64-bit shaders, else the CPU),
     /// `gpu` or `cpu`. Both build the same world (tiles agree to f32 precision).
     pub generator: terragen::Backend,
+    /// Optional layers of a new tile store besides the base ones (docs/formats.md): `dtm` (bare
+    /// ground, f32) and `instance` (instance ids: building lots, fields, tree stands; u32). Off
+    /// by default: they make the store about 50 % larger. An existing store keeps its layers.
+    pub layers: Vec<String>,
+}
+
+impl TilesConfig {
+    /// The optional layers of `layers`.
+    pub fn optional_layers(&self) -> Result<Vec<tilestore::Layer>> {
+        self.layers
+            .iter()
+            .map(|n| match tilestore::Layer::from_name(n) {
+                Some(l) if l.optional() => Ok(l),
+                _ => bail!("tiles.layers: {n:?} is not an optional layer (dtm, instance)"),
+            })
+            .collect()
+    }
 }
 
 impl Default for TilesConfig {
@@ -242,6 +259,7 @@ impl Default for TilesConfig {
             lazy: false,
             cache_tiles: 2000,
             generator: terragen::Backend::Auto,
+            layers: Vec::new(),
         }
     }
 }
@@ -386,6 +404,7 @@ impl Scenario {
         if steps > MAX_SAMPLES as f64 {
             bail!("trajectory.synth: duration_s / dt_s = {steps:.3e} integration steps (at most {MAX_SAMPLES}): shorten the flight or raise dt_s");
         }
+        self.tiles.optional_layers()?;
         let (z0, z1) = (self.tiles.min_zoom, self.tiles.max_zoom);
         if z0 > z1 || z1 > geodesy::MAX_ZOOM {
             bail!("tiles: min_zoom {z0} .. max_zoom {z1} is not a zoom range (0 <= min_zoom <= max_zoom <= {})", geodesy::MAX_ZOOM);

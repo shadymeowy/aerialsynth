@@ -303,6 +303,8 @@ pub struct Ev {
     pub sw: f64,
     pub along: f64,
     pub sid: u64,
+    /// the lot of the building at the position (0: no building): the instance id's hash
+    pub bid: u64,
     pub major: bool,
     pub street: f64,
     pub zone: u32,
@@ -799,6 +801,8 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     let mut col = c_asphalt();
     let mut h = 0.0;
     let mut cls = crate::landcover::URBAN;
+    // the building's lot (the instance; whole blocks where there is no finer lot)
+    let mut lot_id = blk.id;
     let inside = blk.u >= 0.0 && blk.v >= 0.0 && blk.u < blk.bw && (blk.v < blk.bd || pattern == pat::LINEAR);
     let ublk = DVec2::new(blk.u, blk.v);
     // the lot density at the block centre / lot centre (not per pixel: lots stay whole)
@@ -995,6 +999,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                 let si = (a / seg).floor();
                 let ar = a - (si + 0.5) * seg;
                 let sh = hash2(rh, si as i64, 1);
+                lot_id = sh;
                 let dbc = dens_at(DVec2::ZERO);
                 cov_lot = 1.0;
                 col = mixc(yard, c_asphalt() * 1.15, 0.3 * u01k(sh, 4));
@@ -1031,6 +1036,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                 // dense tiny roofs in alleys, thinning out with the footprint (per roof cell)
                 let dbc = dens_at(wc.point - q);
                 if u01k(wc.id, 7) < dbc.powf(0.8) * 1.15 {
+                    lot_id = wc.id;
                     cov_lot = 1.0;
                     col = srgb(128.0, 110.0, 90.0);
                     cls = crate::landcover::RESIDENTIAL;
@@ -1136,6 +1142,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         9.0
                     };
                     let (lh, lr) = bsp(blk.id, blk.u, blk.v, blk.bw, blk.bd, depth, min_side);
+                    lot_id = lh;
                     let lc = DVec2::new(0.5 * (lr[0] + lr[2]), 0.5 * (lr[1] + lr[3]));
                     let lot_dq = rot2(lc - ublk, -theta);
                     let dl = dens_at(lot_dq);
@@ -1539,6 +1546,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     o.col = col;
     o.h = h;
     o.cls = cls;
+    o.bid = if cls == crate::landcover::BUILDING || cls == crate::landcover::BUILDING_TALL { lot_id } else { 0 };
     o.roof = roof;
     o.rim = rim;
     o.win = win;

@@ -30,6 +30,8 @@ struct Draw {
 @group(0) @binding(2) var elev_tex: texture_2d_array<f32>;
 @group(0) @binding(3) var grad_tex: texture_2d_array<f32>;
 @group(0) @binding(4) var samp: sampler;
+// optional layers: height above ground (dm, u16 in r, g), instance (16 bits in b, a; 0: none)
+@group(0) @binding(5) var extra_tex: texture_2d_array<f32>;
 @group(1) @binding(0) var<uniform> d: Draw;
 
 const CAP: u32 = 0xffffffffu;
@@ -89,6 +91,43 @@ fn palette(c: u32) -> vec3<f32> {
 }
 
 // hypsometric tint, sea level to ~5 km
+// the optional layers of the nearest texel: (height above ground in m, instance bits)
+fn extra_at(ci: vec2<i32>, layer: u32) -> vec2<f32> {
+    let x = textureLoad(extra_tex, ci, layer, 0) * 255.0;
+    return vec2<f32>((round(x.r) + 256.0 * round(x.g)) * 0.1, round(x.b) + 256.0 * round(x.a));
+}
+
+// height above ground: dark at the ground, green (low vegetation), yellow, orange (trees,
+// houses), red, white (towers) on a log scale
+fn height_ramp(h: f32) -> vec3<f32> {
+    let t = clamp(log2(1.0 + h) / log2(301.0), 0.0, 1.0);
+    let c0 = vec3<f32>(0.05, 0.05, 0.06);
+    let c1 = vec3<f32>(0.10, 0.45, 0.12);
+    let c2 = vec3<f32>(0.85, 0.80, 0.15);
+    let c3 = vec3<f32>(0.85, 0.25, 0.08);
+    let c4 = vec3<f32>(1.0, 1.0, 1.0);
+    if (t < 0.25) {
+        return mix(c0, c1, t / 0.25);
+    } else if (t < 0.5) {
+        return mix(c1, c2, (t - 0.25) / 0.25);
+    } else if (t < 0.75) {
+        return mix(c2, c3, (t - 0.5) / 0.25);
+    }
+    return mix(c3, c4, (t - 0.75) / 0.25);
+}
+
+// a colour per instance (dark grey: none)
+fn instance_color(v: f32) -> vec3<f32> {
+    if (v < 0.5) {
+        return vec3<f32>(0.08);
+    }
+    var h = u32(v) * 0x9E3779B1u;
+    h ^= h >> 15u;
+    h *= 0x85EBCA77u;
+    h ^= h >> 13u;
+    return vec3<f32>(f32(h & 255u), f32((h >> 8u) & 255u), f32((h >> 16u) & 255u)) / 255.0 * 0.8 + 0.1;
+}
+
 fn hypso(h: f32, water: bool) -> vec3<f32> {
     if (water) {
         return srgb_to_linear(vec3<f32>(0.16, 0.32, 0.55));
@@ -165,6 +204,8 @@ fn fs(i: VOut) -> @location(0) vec4<f32> {
             case 1u: { base = hypso(elev_at(i.suv, d.layer), water); }
             case 2u: { base = palette(lc); }
             case 3u: { base = vec3<f32>(0.6); }
+            case 4u: { base = height_ramp(extra_at(ci, d.layer).x); }
+            case 5u: { base = instance_color(extra_at(ci, d.layer).y); }
             default: { base = c.rgb; }
         }
     }

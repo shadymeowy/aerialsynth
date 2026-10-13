@@ -16,7 +16,33 @@ Both files are HDF5 and open in h5py or any HDF5 reader. `terrain info FILE` sum
 /levels/<z>/normal       i8  [N,256,256,3]  ENU unit normal * 127
 /levels/<z>/landcover    u8  [N,256,256]    class id (land-cover classes below)
 /levels/<z>/emission     u8  [N,256,256,3]  night lights, linear = 16 (v/255)^3
+  optional (tiles.layers):
+/levels/<z>/dtm          f32 [N,256,256]    bare ground (DTM), m above ellipsoid
+/levels/<z>/instance     u32 [N,256,256]    instance id (building lot, field, forest stand; 0 none)
 ```
+
+- **Format version 2** (root attribute `format_version`): version 1 plus the optional layers.
+  The root attribute `layers` lists the layers a store holds; readers take it from there, so
+  version-1 stores open as before and report the optional layers as absent (the Rust
+  `StoreMeta::has`, the bindings' `World.layers` / `as_has_layer`). A store of a newer version
+  is refused with a message.
+- **Optional layers:** `tiles.layers: [dtm, instance]` (scenario or bindings config) adds them
+  to a **new** store; an existing store keeps its layers (a note names the ones it lacks).
+  Off by default: they add about half to a store (2911 tiles of six survey views, z2–z18:
+  the base layers 390 KB per tile compressed, `dtm` 155 KB, `instance` 52 KB; the DTM's f32
+  heights compress like the DSM's). Both backends of the generator (`next`, the composite
+  stack) make them identically (the GPU / CPU parity tests compare them like the other
+  layers); a generator that does not make them (the frozen `classic` one) is for stores
+  without them. The renderers read only the base layers.
+  - `dtm`: the bare ground under buildings and vegetation (the bed under water; pits and ponds
+    below the ground: their surface), so `elevation - dtm` is the height of buildings, trees and
+    water depth (nDSM ground truth).
+  - `instance`: one id per building lot (settlements kit: the lot of a building; one block where
+    no finer lot exists), field (core fields and the agriculture kit's parcels; not their hedges
+    and tracks) and forest stand (the canopy's ~240 m stands; not shrubs). Ids are hashes in
+    [2^23, 2^30), stable across tiles and zooms; 0 = no instance. A pixel takes the instance
+    of its land-cover class's first sub-sample. `terrain view` shows both (map shading
+    *Height above ground*, *Instances*) when the store has them.
 
 - **Chunks:** one tile per chunk, compressed with shuffle + deflate. Compression runs in parallel
   and is written with HDF5 direct chunk I/O. The bundled HDF5 is 2.2.0 (via `hdf5-metno-sys`).
@@ -114,16 +140,24 @@ display colour and material of every class. The shaders get it as generated WGSL
 
 - **Ids are stable:** 0–17 are the classes of the first release and keep their meaning; new
   classes are appended in per-group ranges and never renumbered. Ids are below 128; 255 is the
-  sky in sequence outputs. The generator emits classes 0–17 today; the others are reserved for
-  the coming terrain kits (their data is in the table already).
+  sky in sequence outputs. The kits emit most of the v2 classes.
 - **Groups** (stable ids): 0 unknown, 1 water, 2 wetland, 3 bare, 4 snow-ice, 5 vegetation,
   6 forest, 7 agriculture, 8 disturbed, 9 built, 10 transport.
 - **Legacy class:** every class names the class among 0–17 that stands for it, so readers of
   the first classes keep working (`output.landcover: legacy`).
-- **Material** (used by both renderers): glint weight (sky reflection with Schlick Fresnel and
-  sun glint; 1 on open water, as before v2), specular F0, roughness (glint exponent
-  2 / roughness² − 2, 300 on water) and night-time self-emission. Classes not listed below as
-  glinting or emissive are matte.
+- **Material** (used by both renderers; the shaders get the table as generated WGSL):
+  - glint weight: the mirror-like reflection (the sky, or the banks where the DSM rises above
+    the reflected ray, with Schlick Fresnel from the specular F0) and the sun glint (normalized
+    Blinn-Phong with Fresnel at the half vector, exponent 2 / roughness² − 2: 300 on water).
+    Water, wet tidal flats, sea ice, glaciers, frozen water, greenhouses, solar panels and tall
+    (glass) buildings glint; the walls of glass towers and greenhouses reflect with the wall's
+    normal (`render.walls`);
+  - forward: the snow BRDF, a broad forward-scattering lobe towards the sun's mirror direction
+    at grazing views (snow and seasonal snow 0.5, glaciers and sea ice 0.3, frozen water 0.15);
+  - self-emission (lava) shows with the night lights. Artificial lights (towns, airports,
+    ports, stadiums, flares, wind-turbine beacons, lit greenhouses) are the `emission` layer's.
+
+  Classes not listed below as glinting, emissive or forward-scattering are matte.
 
 | id | name | label | group | legacy | colour | material |
 |---|---|---|---|---|---|---|
@@ -134,7 +168,7 @@ display colour and material of every class. The shaders get it as generated WGSL
 | 4 | `beach` | beach | bare | 4 | `#f0dca0` |  |
 | 5 | `sand` | sand | bare | 5 | `#dcbe78` |  |
 | 6 | `rock` | rock | bare | 6 | `#82786e` |  |
-| 7 | `snow` | snow | snow-ice | 7 | `#fafaff` |  |
+| 7 | `snow` | snow | snow-ice | 7 | `#fafaff` | forward 0.5 |
 | 8 | `grass` | grass | vegetation | 8 | `#8cbe50` |  |
 | 9 | `shrub` | shrub | vegetation | 9 | `#969646` |  |
 | 10 | `forest` | forest | forest | 10 | `#1e6428` |  |
@@ -151,9 +185,9 @@ display colour and material of every class. The shaders get it as generated WGSL
 | 23 | `aquaculture` | aquaculture / salt pond | water | 2 | `#5a96aa` | water glint |
 | 24 | `tidal_flat` | tidal flat | wetland | 14 | `#968c6e` | glint 0.5 |
 | 25 | `coral_reef` | coral reef (shallow) | water | 1 | `#3cbebe` | water glint |
-| 26 | `sea_ice` | sea ice | snow-ice | 7 | `#dcebf5` | glint 0.4 |
-| 27 | `glacier` | glacier | snow-ice | 7 | `#c8e6fa` | glint 0.25 |
-| 28 | `frozen_water` | frozen water | snow-ice | 7 | `#b4d2eb` | glint 0.6 |
+| 26 | `sea_ice` | sea ice | snow-ice | 7 | `#dcebf5` | glint 0.4, forward 0.3 |
+| 27 | `glacier` | glacier | snow-ice | 7 | `#c8e6fa` | glint 0.25, forward 0.3 |
+| 28 | `frozen_water` | frozen water | snow-ice | 7 | `#b4d2eb` | glint 0.6, forward 0.15 |
 | 29 | `dry_riverbed` | dry riverbed / wash | bare | 5 | `#c8b48c` |  |
 | 30 | `salt_flat` | salt flat / playa | bare | 16 | `#f5f0e1` |  |
 | 31 | `lava` | lava | bare | 6 | `#281e1e` | emissive 1.0 |
@@ -184,7 +218,7 @@ display colour and material of every class. The shaders get it as generated WGSL
 | 72 | `vineyard` | vineyard | agriculture | 11 | `#8c5a8c` |  |
 | 73 | `plantation` | plantation | agriculture | 11 | `#468232` |  |
 | 74 | `pasture` | pasture | agriculture | 8 | `#aad264` |  |
-| 75 | `greenhouse` | greenhouse | agriculture | 12 | `#dce6f0` | glint 0.6, emissive 0.3 |
+| 75 | `greenhouse` | greenhouse | agriculture | 12 | `#dce6f0` | glint 0.6 |
 | 76 | `fallow` | fallow / ploughed | agriculture | 11 | `#966e46` |  |
 | 77 | `hedgerow` | hedgerow / shelterbelt | forest | 10 | `#3c7832` |  |
 | 78 | `farmyard` | farmyard | built | 17 | `#be8c6e` |  |
@@ -208,7 +242,7 @@ display colour and material of every class. The shaders get it as generated WGSL
 | 106 | `taxiway` | taxiway / apron | transport | 13 | `#50505f` |  |
 | 107 | `bridge` | bridge | transport | 13 | `#c8c83c` |  |
 | 108 | `dam` | dam | built | 12 | `#a0a0b4` |  |
-| 110 | `seasonal_snow` | seasonal snow | snow-ice | 7 | `#ebf0fa` |  |
+| 110 | `seasonal_snow` | seasonal snow | snow-ice | 7 | `#ebf0fa` | forward 0.5 |
 
 **In sequence files:** `output.landcover` (`v2` by default, `legacy`, `group`) chooses the values
 the `landcover` datasets hold. Their attributes describe the values written:

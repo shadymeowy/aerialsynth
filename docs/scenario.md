@@ -142,3 +142,35 @@ output: { file: out/seq.h5, pose: { path: /pose, rate_hz: 200 } }
 | `render.atmosphere.visibility_km`, `inscatter` | haze |
 | `cameras[].rgb.sensor.exposure.target` | overall brightness |
 | `cameras[].rgb.sensor.tone` | `saturation`, `white_balance`, `curve` (`srgb`/`filmic`/`gamma`/`linear`) |
+| `render.water_glint` | the reflections of the glossy classes (water, glass, greenhouses, solar panels, wet tidal flats, ice; the class table's materials, [`formats.md`](formats.md)) |
+| `render.walls` | steep walls (facades, cliffs, steep canopy) get a wall material (floors and windows, lit windows at night; rock strata; canopy sides) instead of the top-down texture stretched down them (default on) |
+
+Walls (`render.walls`; before | after, GPU renders over the same tiles): CBD towers 100 m
+above the ground, tower karst from 300 m. Glossy water: the reflection of a river in forest
+(600 m, 20° down) was the bright horizon (silvery lines), now the banks where they rise above
+the reflected ray. Night (the `emission` layer, 22:00): airport (apron floods, blue taxiway
+edge lights), port, a gas flare, CBD facades with lit windows, wind turbines' red beacons near
+a village, lit greenhouses.
+
+![walls: CBD](images/render_walls_cbd.jpg)
+![walls: tower karst](images/render_walls_karst.jpg)
+![river reflection](images/render_river_reflection.jpg)
+![night sources](images/render_night_sources.jpg)
+
+### Seasons
+
+The season of a render is its date: with `render.lighting.mode: clock` the sun and the moon
+follow `date` and `time_utc` (the sun's height and path, day length, twilight, the night lights
+coming on). Nothing in the renderer depends on the season otherwise, and the ground is the
+world's: one look per world (an annual-mean, late-summer state; crops at the phase of their
+culture, snow and ice from the annual climate). There is no `world.season` setting yet (the
+design's `world.season.day_of_year`, `docs/design/terrain-next.md` §12): a winter scene has
+winter light over the summer ground.
+
+```yaml
+render:
+  lighting:
+    mode: clock
+    date: 2026-12-21          # winter solstice: a low sun all day in the north
+    time_utc: "10:00:00"      # (the sun's local time is time_utc + longitude / 15°)
+```

@@ -87,16 +87,21 @@ pub struct Material {
     /// Weight 0..1 of the mirror-like reflection (sky reflection + sun glint, Schlick Fresnel).
     /// 1 on open water; 0 for matte classes (no specular term at all, as before v2).
     pub glint: f32,
-    /// Self-emission at night (lava, lit greenhouses): added to the illumination in units of the
-    /// artificial-light level, so it shows with the lights.
+    /// Self-emission at night (lava): added to the illumination in units of the artificial-light
+    /// level, so it shows with the lights. (Artificial lights are the `emission` layer's.)
     pub emissive: f32,
+    /// Weight 0..1 of the broad forward-scattering lobe of snow and ice (the snow BRDF of the
+    /// renderers: brighter towards the sun's mirror direction at grazing views); 0: Lambertian.
+    pub forward: f32,
 }
 
 impl Material {
     /// Matte (Lambertian only): every class without a glint.
-    pub const MATTE: Material = Material { roughness: 0.9, specular: 0.04, glint: 0.0, emissive: 0.0 };
+    pub const MATTE: Material = Material { roughness: 0.9, specular: 0.04, glint: 0.0, emissive: 0.0, forward: 0.0 };
     /// Open water: the sky reflection with Fresnel from 2 % and a sun glint of exponent 300.
-    pub const WATER: Material = Material { roughness: 0.081_378_85, specular: 0.02, glint: 1.0, emissive: 0.0 };
+    pub const WATER: Material = Material { roughness: 0.081_378_85, specular: 0.02, glint: 1.0, emissive: 0.0, forward: 0.0 };
+    /// Snow: matte with a strong forward-scattering lobe.
+    pub const SNOW: Material = Material { forward: 0.5, ..Material::MATTE };
 
     /// Blinn-Phong exponent of the glint lobe: 2 / roughness² − 2, rounded (water: 300).
     pub fn shininess(&self) -> f32 {
@@ -106,7 +111,12 @@ impl Material {
 }
 
 const fn mat(roughness: f32, specular: f32, glint: f32, emissive: f32) -> Material {
-    Material { roughness, specular, glint, emissive }
+    Material { roughness, specular, glint, emissive, forward: 0.0 }
+}
+
+/// Ice: a glint and a weaker forward lobe than snow's.
+const fn ice(roughness: f32, glint: f32, forward: f32) -> Material {
+    Material { roughness, specular: 0.03, glint, emissive: 0.0, forward }
 }
 
 /// One land-cover class.
@@ -149,7 +159,7 @@ classes! {
     4 BEACH "beach" "beach" Bare BEACH [240, 220, 160] M;
     5 SAND "sand" "sand" Bare SAND [220, 190, 120] M;
     6 ROCK "rock" "rock" Bare ROCK [130, 120, 110] M;
-    7 SNOW "snow" "snow" SnowIce SNOW [250, 250, 255] M;
+    7 SNOW "snow" "snow" SnowIce SNOW [250, 250, 255] Material::SNOW;
     8 GRASS "grass" "grass" Vegetation GRASS [140, 190, 80] M;
     9 SHRUB "shrub" "shrub" Vegetation SHRUB [150, 150, 70] M;
     10 FOREST "forest" "forest" Forest FOREST [30, 100, 40] M;
@@ -166,9 +176,9 @@ classes! {
     23 AQUACULTURE "aquaculture" "aquaculture / salt pond" Water LAKE [90, 150, 170] W;
     24 TIDAL_FLAT "tidal_flat" "tidal flat" Wetland WETLAND [150, 140, 110] mat(0.15, 0.02, 0.5, 0.0);
     25 CORAL_REEF "coral_reef" "coral reef (shallow)" Water OCEAN [60, 190, 190] W;
-    26 SEA_ICE "sea_ice" "sea ice" SnowIce SNOW [220, 235, 245] mat(0.2, 0.03, 0.4, 0.0);
-    27 GLACIER "glacier" "glacier" SnowIce SNOW [200, 230, 250] mat(0.3, 0.03, 0.25, 0.0);
-    28 FROZEN_WATER "frozen_water" "frozen water" SnowIce SNOW [180, 210, 235] mat(0.12, 0.03, 0.6, 0.0);
+    26 SEA_ICE "sea_ice" "sea ice" SnowIce SNOW [220, 235, 245] ice(0.2, 0.4, 0.3);
+    27 GLACIER "glacier" "glacier" SnowIce SNOW [200, 230, 250] ice(0.3, 0.25, 0.3);
+    28 FROZEN_WATER "frozen_water" "frozen water" SnowIce SNOW [180, 210, 235] ice(0.12, 0.6, 0.15);
     29 DRY_RIVERBED "dry_riverbed" "dry riverbed / wash" Bare SAND [200, 180, 140] M;
     30 SALT_FLAT "salt_flat" "salt flat / playa" Bare BARE [245, 240, 225] M;
     31 LAVA "lava" "lava" Bare ROCK [40, 30, 30] mat(0.9, 0.04, 0.0, 1.0);
@@ -199,7 +209,7 @@ classes! {
     72 VINEYARD "vineyard" "vineyard" Agriculture CROP [140, 90, 140] M;
     73 PLANTATION "plantation" "plantation" Agriculture CROP [70, 130, 50] M;
     74 PASTURE "pasture" "pasture" Agriculture GRASS [170, 210, 100] M;
-    75 GREENHOUSE "greenhouse" "greenhouse" Agriculture BUILDING [220, 230, 240] mat(0.12, 0.08, 0.6, 0.3);
+    75 GREENHOUSE "greenhouse" "greenhouse" Agriculture BUILDING [220, 230, 240] mat(0.12, 0.08, 0.6, 0.0);
     76 FALLOW "fallow" "fallow / ploughed" Agriculture CROP [150, 110, 70] M;
     77 HEDGEROW "hedgerow" "hedgerow / shelterbelt" Forest FOREST [60, 120, 50] M;
     78 FARMYARD "farmyard" "farmyard" Built URBAN [190, 140, 110] M;
@@ -223,7 +233,7 @@ classes! {
     106 TAXIWAY "taxiway" "taxiway / apron" Transport ROAD [80, 80, 95] M;
     107 BRIDGE "bridge" "bridge" Transport ROAD [200, 200, 60] M;
     108 DAM "dam" "dam" Built BUILDING [160, 160, 180] M;
-    110 SEASONAL_SNOW "seasonal_snow" "seasonal snow" SnowIce SNOW [235, 240, 250] M;
+    110 SEASONAL_SNOW "seasonal_snow" "seasonal snow" SnowIce SNOW [235, 240, 250] Material::SNOW;
 }
 
 /// Names of the legacy classes 0–17 (the first release's `class_names`).
@@ -493,7 +503,9 @@ mod tests {
         for k in CLASSES {
             let m = k.material;
             assert!((0.0..=1.0).contains(&m.glint) && (0.0..=1.0).contains(&m.specular) && m.roughness > 0.0 && m.roughness <= 1.0, "{}", k.name);
-            assert!(m.emissive >= 0.0);
+            assert!(m.emissive >= 0.0 && (0.0..=1.0).contains(&m.forward));
+            // snow and ice scatter forward, nothing else
+            assert_eq!(m.forward > 0.0, k.group == Group::SnowIce, "{}", k.name);
             // every open water class glints
             if k.group == Group::Water {
                 assert_eq!(m, Material::WATER, "{}", k.name);

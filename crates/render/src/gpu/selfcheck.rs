@@ -97,6 +97,8 @@ fn tile(id: TileId) -> TileData {
         normal: (0..n).flat_map(|_| [0i8, 0, 127]).collect(),
         landcover: check.iter().map(|&c| if c { 8 } else { 10 }).collect(),
         emission: vec![0; 3 * n],
+        dtm: vec![0.0; n],
+        instance: vec![0; n],
         elev_min: 0.0,
         elev_max: 0.0,
     }

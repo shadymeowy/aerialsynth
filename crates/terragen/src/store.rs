@@ -72,30 +72,56 @@ pub fn generator_of(m: &StoreMeta) -> Option<GeneratorKind> {
 }
 
 impl Generator {
-    /// Metadata of a new store for this world.
+    /// Metadata of a new store for this world (the base layers).
     pub fn store_meta(&self) -> StoreMeta {
+        self.store_meta_with(&[])
+    }
+
+    /// Metadata of a new store for this world with the base layers and the optional layers
+    /// `extra` ([`Layer::OPTIONAL`]: `dtm`, `instance`); the classic generator makes none of
+    /// them (its stores never have them).
+    pub fn store_meta_with(&self, extra: &[Layer]) -> StoreMeta {
         let ell = self.ell();
+        let next = self.config().generator != GeneratorKind::Classic;
         StoreMeta {
             ellipsoid_a: ell.a,
             ellipsoid_b: ell.b,
             generator_config: serde_yaml::to_string(&world_value(self.config())).unwrap_or_default(),
             seed: self.config().seed,
             generator_version: self.version(),
-            layers: Layer::ALL.to_vec(),
+            layers: Layer::ALL.into_iter().filter(|l| !l.optional() || (next && extra.contains(l))).collect(),
+            format_version: tilestore::FORMAT_VERSION,
         }
     }
 
     /// Open `path` for adding tiles of this world, creating it if missing. An existing store
     /// must hold this world (an empty one is re-stamped).
     pub fn open_store_rw(&self, path: &std::path::Path) -> Result<TileStore> {
+        self.open_store_rw_with(path, &[])
+    }
+
+    /// [`Generator::open_store_rw`]; a new store also gets the optional layers `extra`. An
+    /// existing store keeps its layers (a note names those it lacks).
+    pub fn open_store_rw_with(&self, path: &std::path::Path, extra: &[Layer]) -> Result<TileStore> {
         if !path.exists() {
-            return TileStore::create(path, self.store_meta());
+            if self.config().generator == GeneratorKind::Classic && !extra.is_empty() {
+                eprintln!("note: the classic generator makes none of the optional layers (tiles.layers needs world.generator: next)");
+            }
+            return TileStore::create(path, self.store_meta_with(extra));
         }
         let mut st = TileStore::open_rw(path)?;
         if st.is_empty() {
             st.set_generator(&self.store_meta())?;
         } else {
             self.check_store(&st, true)?;
+        }
+        if self.config().generator == GeneratorKind::Classic && !extra.is_empty() {
+            eprintln!("note: the classic generator makes none of the optional layers (tiles.layers needs world.generator: next)");
+            return Ok(st);
+        }
+        let lacking: Vec<&str> = extra.iter().filter(|l| !st.meta().has(**l)).map(|l| l.name()).collect();
+        if !lacking.is_empty() {
+            eprintln!("note: tile store {} was created without the layer(s) {} (tiles.layers applies to new stores)", path.display(), lacking.join(", "));
         }
         Ok(st)
     }
@@ -231,6 +257,8 @@ mod tests {
             normal: vec![0; 3 * n],
             landcover: vec![1; n],
             emission: vec![0; 3 * n],
+            dtm: vec![],
+            instance: vec![],
             elev_min: 0.0,
             elev_max: 0.0,
         }

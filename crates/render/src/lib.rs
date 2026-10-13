@@ -27,6 +27,7 @@ pub mod scenario;
 pub mod sensor;
 pub mod stars;
 pub mod trajectory;
+mod walls;
 
 pub use camera::{CameraConfig, CameraModel, Extrinsics};
 pub use raster::{FrameOut, RenderSettings, Renderer, Shading};

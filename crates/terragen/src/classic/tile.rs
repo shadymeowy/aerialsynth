@@ -787,6 +787,6 @@ impl Generator {
                 }
             }
         }
-        TileData { id, rgb, albedo, elevation, normal, landcover, emission, elev_min: emin, elev_max: emax }
+        TileData { id, rgb, albedo, elevation, normal, landcover, emission, dtm: vec![], instance: vec![], elev_min: emin, elev_max: emax }
     }
 }

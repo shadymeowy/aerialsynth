@@ -14,6 +14,7 @@ use crate::camera::CameraModel;
 use crate::lighting::{LightingConfig, SunState};
 use crate::lod::{LodParams, Selector, Unit};
 use crate::trajectory::CamPose;
+use crate::walls;
 use geodesy::tiles::{gsd_ew, TileId};
 use geodesy::Ellipsoid;
 use glam::{DVec2, DVec3};
@@ -53,8 +54,13 @@ pub struct RenderSettings {
     pub atmosphere: AtmoParams,
     /// Max anisotropic texture taps.
     pub max_aniso: u32,
-    /// Specular sun glint on water (relit mode).
+    /// Specular reflection (sky and sun glint) of the glossy classes: water, glass, greenhouses,
+    /// solar panels, wet tidal flats, ice (relit mode; the class table's materials).
     pub water_glint: bool,
+    /// Steep walls (building facades, cliffs, steep canopy) get a wall material (facades with
+    /// floors and windows, rock strata, canopy sides) instead of the top-down texture stretched
+    /// down them.
+    pub walls: bool,
     /// auto (the GPU when there is one), cpu (reference) or gpu (wgpu, headless; needs the
     /// `gpu` feature of the render crate)
     pub backend: Backend,
@@ -107,6 +113,7 @@ impl Default for RenderSettings {
             atmosphere: AtmoParams::default(),
             max_aniso: 8,
             water_glint: true,
+            walls: true,
             backend: Backend::Auto,
             stars: Default::default(),
         }
@@ -455,6 +462,20 @@ impl TileView {
             gx *= 0.5;
             gy *= 0.5;
         }
+    }
+
+    /// DSM height of the texel holding (gx, gy) at zoom z (no fallback; `elev_texel` in
+    /// shade.wgsl).
+    fn elev_texel(&self, z: u8, gx: f64, gy: f64) -> Option<f64> {
+        let n = 1i64 << z;
+        let (gx, gy) = (gx.floor() as i64, gy.floor() as i64);
+        let ty = gy.div_euclid(256);
+        if ty < 0 || ty >= n {
+            return None;
+        }
+        let tx = gx.div_euclid(256).rem_euclid(n);
+        let t = self.tiles.get(&TileId::new(z, tx as u32, ty as u32))?;
+        t.elevation.get((gy.rem_euclid(256) * 256 + gx.rem_euclid(256)) as usize).map(|&h| h as f64)
     }
 
     fn landcover(&self, z: u8, gx: f64, gy: f64) -> u8 {
@@ -977,18 +998,21 @@ impl Renderer {
                             lcs[ox] = view.landcover(z, gx, gy);
                         }
                         let reuse = matches!(&ctx, Some(c) if (range - c.range).abs() < 0.03 * c.range);
+                        // height of the sample (wall patterns)
+                        let hs = walls::sample_height(cam_geo.h, dir_w.dot(cam_up), range);
                         if !reuse {
                             let shadow = if do_shadow { self.sun_visibility(&view, z, gx, gy, sun_state) } else { 1.0 };
-                            let pc = self.pixel_shade(&view, &atmo, sun_state, z, gx, gy, range, dir_w, alpha, cam.pos, cam_geo.h, shadow);
+                            let n_geo = if self.settings.walls { cam.r_ecef_cam * self.geo_normal(&gbuf, x, y) } else { DVec3::ZERO };
+                            let pc = self.pixel_shade(&view, &atmo, sun_state, z, gx, gy, range, dir_w, alpha, cam.pos, cam_geo.h, shadow, n_geo, hs);
                             if ctx.is_none() {
                                 ctx = Some(pc);
                             } else {
-                                add(&mut acc, &pc, self.texture(&view, &pc, z, gx, gy));
+                                add(&mut acc, &pc, self.texture(&view, &pc, z, gx, gy, hs));
                                 continue;
                             }
                         }
                         let pc = ctx.as_ref().unwrap();
-                        add(&mut acc, pc, self.texture(&view, pc, z, gx, gy));
+                        add(&mut acc, pc, self.texture(&view, pc, z, gx, gy, hs));
                     }
                     let n = (ss * ss) as f64;
                     for ch in 0..3 {
@@ -1038,6 +1062,44 @@ impl Renderer {
             out.flicker_sin.extend(r.fs);
         }
         Ok(out)
+    }
+
+    /// Geometric normal (camera frame, facing the camera; zero when unknown) of the rendered
+    /// surface at supersampled pixel (x, y): the cross product of the steps to its neighbours'
+    /// points, on each axis to the next pixel, or from the previous one where that is missing or
+    /// across a silhouette (farther than a tenth of the range). `shade.wgsl`: `geo_normal`.
+    fn geo_normal(&self, gbuf: &[GSample], x: usize, y: usize) -> DVec3 {
+        let (w, h) = (self.model_ss.width() as usize, self.model_ss.height() as usize);
+        let point = |k: usize| -> Option<DVec3> {
+            let (g, r) = (gbuf[k], self.rays[k]);
+            if g.unit == NO_UNIT || r == [0.0; 3] {
+                return None;
+            }
+            Some(DVec3::new(r[0] as f64, r[1] as f64, r[2] as f64) * g.z as f64)
+        };
+        let k = y * w + x;
+        let Some(c) = point(k) else { return DVec3::ZERO };
+        let lim = 0.01 * c.length_squared();
+        let step = |lo: Option<usize>, hi: Option<usize>| -> Option<DVec3> {
+            if let Some(b) = hi.and_then(point).map(|p| p - c).filter(|b| b.length_squared() < lim) {
+                return Some(b);
+            }
+            lo.and_then(point).map(|p| c - p).filter(|a| a.length_squared() < lim)
+        };
+        let (Some(dx), Some(dy)) = (step((x > 0).then(|| k - 1), (x + 1 < w).then_some(k + 1)), step((y > 0).then(|| k - w), (y + 1 < h).then_some(k + w)))
+        else {
+            return DVec3::ZERO;
+        };
+        let n = dx.cross(dy);
+        let l = n.length();
+        if l < 1e-12 {
+            return DVec3::ZERO;
+        }
+        if n.dot(c) > 0.0 {
+            -n / l
+        } else {
+            n / l
+        }
     }
 
     /// Fraction of direct sunlight reaching a surface point (1 = lit): march the DSM towards the
@@ -1142,6 +1204,8 @@ impl Renderer {
         cam_pos: DVec3,
         h_cam: f64,
         shadow: f64,
+        n_geo: DVec3,
+        hs: f64,
     ) -> PixShade {
         let lat = lat_of(gy, z);
         let lon = lon_of(gx, z);
@@ -1164,6 +1228,53 @@ impl Renderer {
         let hdir = DVec2::new(v_enu.x, -v_enu.y);
         let hdir = if hdir.length_squared() > 1e-12 { hdir.normalize() } else { DVec2::X };
         let sky_amb = DVec3::new(0.80, 0.90, 1.10) * 0.32 * sun_state.sky;
+        let relit = self.settings.shading == Shading::Relit;
+        // a steep wall (walls.rs): the geometric normal's slope; its kind, base colour, ground
+        // and top heights from the DSM in and against the direction it faces
+        let mut w = Wall { kind: walls::NONE, weight: 0.0, base: DVec3::ZERO, ground: 0.0, top: 0.0, tan: DVec2::ZERO, cls_top: 0 };
+        let ng = DVec3::new(n_geo.dot(east), n_geo.dot(north), n_geo.dot(up));
+        let hz = DVec2::new(ng.x, -ng.y);
+        let wt = walls::weight(ng.z);
+        if wt > 0.0 && hz.length_squared() > 1e-6 {
+            let out = hz.normalize();
+            // (the DSM texels at the top and at the foot of the wall; the sample's own height
+            // where a tile is missing)
+            let e = |d: f64| view.elev_texel(z, gx + out.x * d, gy + out.y * d).unwrap_or(hs);
+            let (tx, ty) = (gx - out.x * 2.5, gy - out.y * 2.5);
+            w.cls_top = view.landcover(z, tx, ty);
+            w.kind = walls::kind(w.cls_top, view.landcover(z, gx, gy));
+            // (nearest texels, as shade.wgsl)
+            let which = if relit { Which::Albedo } else { Which::Rgb };
+            let base = if w.kind == walls::BUILT || w.kind == walls::GLASS || w.kind == walls::VEG {
+                view.texel(z, tx.floor() as i64, ty.floor() as i64, which)
+            } else {
+                let k = z.min(2);
+                let s = 0.5f64.powi(k as i32);
+                view.texel(z - k, (gx * s).floor() as i64, (gy * s).floor() as i64, which)
+            };
+            w.base = base.unwrap_or(DVec3::splat(0.2));
+            w.top = e(-2.5);
+            w.ground = e(2.5);
+            w.tan = DVec2::new(-out.y, out.x);
+            w.weight = wt;
+        }
+        // the class's material (landcover::Material; the same table as `lc_material` in
+        // shade.wgsl): self-emission with the lights, the snow BRDF, and the glint of water (sky
+        // reflection with Schlick Fresnel, sun glint) and other glossy classes (walls: the glass
+        // of towers and greenhouses glints with the wall's normal, natural walls are matte)
+        // (walls: the glass of towers and greenhouses glints with the wall's normal, natural
+        // walls are matte)
+        let mat = if !relit {
+            terragen::landcover::Material::MATTE
+        } else if w.weight > 0.5 {
+            if w.kind == walls::GLASS {
+                terragen::landcover::material(w.cls_top)
+            } else {
+                terragen::landcover::Material::MATTE
+            }
+        } else {
+            terragen::landcover::material(view.landcover(z, gx, gy))
+        };
         let (mut mul, mut add) = match self.settings.shading {
             Shading::Satellite => {
                 // baked lighting; dimmed by the current daylight
@@ -1173,9 +1284,19 @@ impl Renderer {
             Shading::Relit => {
                 let n_enu = view.sample3(z, gx, gy, Which::Normal).unwrap_or(DVec3::Z);
                 let n = (east * n_enu.x + north * n_enu.y + up * n_enu.z).normalize();
+                // on walls the rendered face's own normal
+                let n = (n * (1.0 - w.weight) + n_geo * w.weight).normalize();
                 let ndl = n.dot(atmo.sun_dir).max(0.0);
                 let ndm = n.dot(atmo.moon_dir).max(0.0);
-                (atmo.sun_color() * (ndl * 1.25 * shadow) + atmo.moon_color() * (ndm * 1.25) + sky_amb * (0.6 + 0.4 * n.dot(up)), DVec3::ZERO)
+                // snow and ice: a broad forward-scattering lobe towards the sun's mirror
+                // direction, strongest at grazing views (`lobe` in shade.wgsl)
+                let lobe = if mat.forward > 0.0 {
+                    let r = n * (2.0 * n.dot(atmo.sun_dir)) - atmo.sun_dir;
+                    1.0 + 2.0 * mat.forward as f64 * r.dot(v).max(0.0).powi(4) * (1.0 - n.dot(v).clamp(0.0, 1.0))
+                } else {
+                    1.0
+                };
+                (atmo.sun_color() * (ndl * 1.25 * shadow * lobe) + atmo.moon_color() * (ndm * 1.25) + sky_amb * (0.6 + 0.4 * n.dot(up)), DVec3::ZERO)
             }
         };
         // light of the nearby lamps falling on everything around them (walls, roofs, yards, trees):
@@ -1188,26 +1309,36 @@ impl Renderer {
                 mul += e * (0.2 * sun_state.lights);
             }
         }
-        // the class's material (landcover::Material; the same table as `lc_material` in
-        // shade.wgsl): self-emission with the lights, and the glint of water (sky reflection
-        // with Schlick Fresnel, sun glint) and other glossy classes
-        let mat = if self.settings.shading == Shading::Relit {
-            terragen::landcover::material(view.landcover(z, gx, gy))
-        } else {
-            terragen::landcover::Material::MATTE
-        };
         if mat.emissive > 0.0 && sun_state.lights > 1e-3 {
             mul += DVec3::splat(mat.emissive as f64 * sun_state.lights);
         }
         if self.settings.water_glint && mat.glint > 0.0 {
             let (g, f0) = (mat.glint as f64, mat.specular as f64);
             let sun = atmo.sun_dir;
+            let nm = if w.weight > 0.0 { (up * (1.0 - w.weight) + n_geo * w.weight).normalize() } else { up };
             let hv = (v + sun).normalize();
-            let nh = up.dot(hv).max(0.0);
-            let fres = f0 + (1.0 - f0) * (1.0 - v.dot(up).max(0.0)).powi(5);
-            let sky_c = atmo.sky((dir_w - up * 2.0 * dir_w.dot(up)).normalize(), up);
+            let nh = nm.dot(hv).max(0.0);
+            let schlick = |c: f64| f0 + (1.0 - f0) * (1.0 - c.clamp(0.0, 1.0)).powi(5);
+            let fres = schlick(v.dot(nm));
+            // the sun glint: normalized Blinn-Phong with the Fresnel term at the half vector (a
+            // sunlit white Lambertian is 1.25), capped
+            let n_exp = mat.shininess() as f64;
+            let glint = (schlick(v.dot(hv)) * (n_exp + 8.0) / 8.0 * nh.powf(n_exp) * nm.dot(sun).max(0.0) * 1.25).min(GLINT_MAX);
+            // the reflection: the sky, or the banks where they rise above the reflected ray
+            // (narrow rivers in forest reflected the bright horizon: silvery lines)
+            let mut env = atmo.sky((dir_w - nm * 2.0 * dir_w.dot(nm)).normalize(), up);
+            if w.weight <= 0.0 {
+                let vis = reflection_visibility(view, z, gx, gy, hdir, v_enu.z, texel);
+                if vis < 1.0 {
+                    let k = ((20.0 / texel).log2().ceil().max(0.0) as u8).min(z);
+                    let s = 0.5f64.powi(k as i32);
+                    let which = if relit { Which::Albedo } else { Which::Rgb };
+                    let bank = view.sample3(z - k, gx * s, gy * s, which).unwrap_or(DVec3::splat(0.1)) * mul;
+                    env = bank + (env - bank) * vis;
+                }
+            }
             mul *= 1.0 - g * fres;
-            add += (sky_c * fres + atmo.sun_color() * (shadow * 1.5 * nh.powf(mat.shininess() as f64))) * g;
+            add += (env * fres + atmo.sun_color() * (shadow * glint)) * g;
         }
         // height of the point above the ellipsoid (closed form given its geodetic latitude)
         let p_w = cam_pos - v * range;
@@ -1231,13 +1362,39 @@ impl Renderer {
         } else {
             (1.0, (0.0, 0.0))
         };
-        PixShade { flicker, flicker_mod, z, range, lam, aniso, hdir, major_texels: major / texel, mul: mul * t, add: add * t + ins, emis: t * sun_state.lights }
+        PixShade {
+            flicker,
+            flicker_mod,
+            z,
+            range,
+            lam,
+            aniso,
+            hdir,
+            major_texels: major / texel,
+            mul: mul * t,
+            add: add * t + ins,
+            emis: t * sun_state.lights,
+            wall: w,
+            texel,
+            foot: 2.0 * minor,
+        }
     }
 
     /// Filtered texture fetch (trilinear across pyramid levels, anisotropic taps) for a sample
     /// of zoom `z` at global pixel coords (gx, gy), with the pixel's shading context.
     /// Returns (lit surface colour, lamp emission before flicker).
-    fn texture(&self, view: &TileView, ps: &PixShade, z: u8, gx: f64, gy: f64) -> (DVec3, DVec3) {
+    fn texture(&self, view: &TileView, ps: &PixShade, z: u8, gx: f64, gy: f64, hs: f64) -> (DVec3, DVec3) {
+        // a wall's material (walls.rs) at the sample's height and position along the wall
+        let w = &ps.wall;
+        let (mut wc, mut we) = (DVec3::ZERO, DVec3::ZERO);
+        if w.weight > 0.0 {
+            let tz = ps.texel * 2f64.powi(ps.z as i32 - z as i32);
+            let s = (gx.rem_euclid(walls::WRAP) * w.tan.x + gy.rem_euclid(walls::WRAP) * w.tan.y) * tz;
+            (wc, we) = walls::texel(w.kind, w.base, s, hs, w.ground, w.top, ps.foot);
+            if w.weight >= 1.0 {
+                return (wc * ps.mul + ps.add, we * ps.emis);
+            }
+        }
         let which = match self.settings.shading {
             Shading::Satellite => Which::Rgb,
             Shading::Relit => Which::Albedo,
@@ -1291,10 +1448,49 @@ impl Renderer {
                 }
             }
         }
-        let e0 = if ewsum > 0.0 { emis / ewsum } else { DVec3::ZERO };
-        let c0 = if wsum > 0.0 { col / wsum } else { DVec3::splat(0.2) };
+        let mut e0 = if ewsum > 0.0 { emis / ewsum } else { DVec3::ZERO };
+        let mut c0 = if wsum > 0.0 { col / wsum } else { DVec3::splat(0.2) };
+        if w.weight > 0.0 {
+            c0 += (wc - c0) * w.weight;
+            e0 += (we - e0) * w.weight;
+        }
         (c0 * ps.mul + ps.add, e0 * ps.emis)
     }
+}
+
+/// The brightest sun glint (in units of a sunlit white Lambertian surface).
+const GLINT_MAX: f64 = 6.0;
+
+/// Visibility 0..1 of the sky along the ray reflected at a water surface at (gx, gy) of zoom z
+/// seen from the direction `hdir` (texel space, towards the camera) at elevation sine `e`: the
+/// DSM texels 4, 10, 25 and 60 m along the reflected ray against its height (steep views:
+/// 1). `reflection_visibility` in shade.wgsl.
+fn reflection_visibility(view: &TileView, z: u8, gx: f64, gy: f64, hdir: DVec2, e: f64, texel: f64) -> f64 {
+    if e > 0.5 {
+        return 1.0;
+    }
+    let Some(h0) = view.elev_texel(z, gx, gy) else { return 1.0 };
+    let tan_e = e / (1.0 - e * e).sqrt().max(1e-3);
+    let mut vis: f64 = 1.0;
+    for d in [4.0, 10.0, 25.0, 60.0] {
+        let t = d / texel;
+        if let Some(h) = view.elev_texel(z, gx - hdir.x * t, gy - hdir.y * t) {
+            vis = vis.min(1.0 - ((h - h0 - d * tan_e) / 2.0).clamp(0.0, 1.0));
+        }
+    }
+    vis
+}
+
+/// A steep wall at a pixel (see `walls`): kind, weight, base colour, ground and top heights,
+/// direction along it (texel space), class at its top.
+struct Wall {
+    kind: u32,
+    weight: f64,
+    base: DVec3,
+    ground: f64,
+    top: f64,
+    tan: DVec2,
+    cls_top: u8,
 }
 
 /// Per-pixel shading context (see `Renderer::pixel_shade`).
@@ -1312,6 +1508,11 @@ struct PixShade {
     flicker: f64,
     /// (depth, phase) of that cell's modulation, for the cos / sin split
     flicker_mod: (f64, f64),
+    wall: Wall,
+    /// metres per texel of zoom `z`
+    texel: f64,
+    /// footprint (m) of the wall patterns' filter (two sub-samples)
+    foot: f64,
 }
 
 /// Rasterize one triangle into a band of the G-buffer (rows [y0, y0+rows)).

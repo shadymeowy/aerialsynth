@@ -7,8 +7,9 @@ use crate::world::Terrain;
 use glam::{DVec2, DVec3};
 
 impl SurfaceModel {
-    /// Agricultural field at rotated local coords. Returns (colour, extra height, coverage, kind)
-    /// where kind 0 = crop, 1 = hedge, 2 = track.
+    /// Agricultural field at rotated local coords. Returns (colour, extra height, coverage, kind,
+    /// field id) where kind 0 = crop, 1 = hedge, 2 = track; the id is 0 where no field is drawn
+    /// (the regional mean).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn field(
         &self,
@@ -21,7 +22,7 @@ impl SurfaceModel {
         gsd: f64,
         fw: f64,
         pf: &PixFields,
-    ) -> Option<(DVec3, f64, f64, u8)> {
+    ) -> Option<(DVec3, f64, f64, u8, u64)> {
         let pal = &self.pal;
         let cult = smoothstep(0.02, 0.45, agri);
         let tint = DVec3::new(1.0 + 0.08 * (r.palette - 0.5), 1.0, 1.0 - 0.06 * (r.palette - 0.5));
@@ -32,14 +33,14 @@ impl SurfaceModel {
         let tropic = smoothstep(19.0, 25.0, t.temp) * smoothstep(0.5, 0.7, t.moist);
         let mean = mixc(pal.crop_mean, srgb(78.0, 100.0, 58.0), tropic) * tint * (1.0 + 0.10 * self.pf_lazy(pf, PF_FIELD_VAR));
         let fwe = fw.max(0.6 * gsd); // edge filter never sharper than ~half a pixel
-        let (c, h, cov, kind) = self.field_explicit(cache, r, t, q, p, gsd, fwe, cult, tint, pf).unwrap_or((mean, 0.0, 0.0, 0));
+        let (c, h, cov, kind, id) = self.field_explicit(cache, r, t, q, p, gsd, fwe, cult, tint, pf).unwrap_or((mean, 0.0, 0.0, 0, 0));
         let cult_mean = cult * 0.9;
         let cov_m = lerp(cult_mean, cov, k);
         if cov_m <= 0.0 {
             return None;
         }
         let col = if cov > 0.0 { mixc(mean, c, k) } else { mean };
-        Some((col, h * k, cov_m, kind))
+        Some((col, h * k, cov_m, kind, id))
     }
 
     /// Contiguous cultivation zones: a smooth mask (compared with the cultivated fraction).
@@ -60,7 +61,7 @@ impl SurfaceModel {
         cult: f64,
         tint: DVec3,
         pf: &PixFields,
-    ) -> Option<(DVec3, f64, f64, u8)> {
+    ) -> Option<(DVec3, f64, f64, u8, u64)> {
         let pal = &self.pal;
         // field id, within-field coords (along, across), distance to boundary
         let (id, fx, fy, edge, inside, fc) = match r.style {
@@ -294,7 +295,7 @@ impl SurfaceModel {
                 col = mixc(col, mixc(pal.grass_dry, pal.grass_wet, t.moist), bcov * 0.7);
             }
         }
-        Some((col, extra_h, inside, kind_out))
+        Some((col, extra_h, inside, kind_out, id))
     }
 }
 
@@ -316,7 +317,7 @@ pub fn layer(s: &mut crate::stack::Stack) {
         return;
     }
     let (p, gsd, fw, q) = (s.ctx.p, s.ctx.gsd, s.l.fw, s.q_rot);
-    let Some((fcol, fh, cov, edge_kind)) = s.sm.field(s.cache, &r, t, agri, q, p, gsd, fw, s.pf) else { return };
+    let Some((fcol, fh, cov, edge_kind, id)) = s.sm.field(s.cache, &r, t, agri, q, p, gsd, fw, s.pf) else { return };
     // a field is there or not: a crisp cutoff (fields faded out over gentle valley sides left
     // washed, half-transparent bands; a noisy threshold left specks of open ground)
     let keep = m.natural_ok * m.flat_ok * (1.0 - m.riparian) * (1.0 - m.woodlot) * m.shore_keep;
@@ -328,5 +329,7 @@ pub fn layer(s: &mut crate::stack::Stack) {
         _ => lc::CROP,
     };
     // tilled fields are smoother than natural ground
-    s.composite(Layer { cov: a, albedo: fcol, dh: fh - 0.6 * m.micro, hmode: hmode::ADD, cls, ..Default::default() });
+    // (the field is the instance; not its hedges and tracks, nor the regional mean)
+    let inst = if cls == lc::CROP && id != 0 { crate::stack::instance_id(id) } else { 0 };
+    s.composite(Layer { cov: a, albedo: fcol, dh: fh - 0.6 * m.micro, hmode: hmode::ADD, cls, inst, ..Default::default() });
 }

@@ -226,6 +226,11 @@ impl World {
     fn max_zoom(&self) -> u32 {
         self.max_zoom
     }
+    /// Names of the layers the store holds (the base layers; `dtm`, `instance` when created
+    /// with them).
+    fn layers(&self) -> PyResult<Vec<&'static str>> {
+        Ok(self.get()?.layers().into_iter().map(|l| l.name()).collect())
+    }
     #[getter]
     fn generator(&self) -> &'static str {
         self.generator

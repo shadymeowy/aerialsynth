@@ -65,6 +65,10 @@ pub enum Mode {
     Elevation,
     Landcover,
     Relief,
+    /// height above ground (DSM - DTM; stores with the optional `dtm` layer)
+    Height,
+    /// instances (stores with the optional `instance` layer)
+    Instance,
 }
 
 /// What the user controls.
@@ -207,6 +211,7 @@ pub struct Globe {
     color: wgpu::Texture,
     elev: wgpu::Texture,
     grad: wgpu::Texture,
+    extra: wgpu::Texture,
     capacity: u32,
     index: wgpu::Buffer,
     index_count: u32,
@@ -248,6 +253,7 @@ impl Globe {
         let color = tex_array(device, "tile color", capacity, wgpu::TextureFormat::Rgba8UnormSrgb);
         let elev = tex_array(device, "tile elevation", capacity, wgpu::TextureFormat::R32Float);
         let grad = tex_array(device, "tile slope", capacity, wgpu::TextureFormat::Rg16Float);
+        let extra = tex_array(device, "tile optional layers", capacity, wgpu::TextureFormat::Rgba8Unorm);
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals"),
             size: std::mem::size_of::<Globals>() as u64,
@@ -292,6 +298,7 @@ impl Globe {
                 tex_entry(2, false),
                 tex_entry(3, true),
                 wgpu::BindGroupLayoutEntry { binding: 4, visibility: vis, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+                tex_entry(5, false),
             ],
         });
         let bgl1 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -307,7 +314,7 @@ impl Globe {
                 count: None,
             }],
         });
-        let (cv, ev, gv) = (array_view(&color), array_view(&elev), array_view(&grad));
+        let (cv, ev, gv, xv) = (array_view(&color), array_view(&elev), array_view(&grad), array_view(&extra));
         let bg0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("globe bg0"),
             layout: &bgl0,
@@ -317,6 +324,7 @@ impl Globe {
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&ev) },
                 wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&gv) },
                 wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&sampler) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&xv) },
             ],
         });
         let bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -416,6 +424,7 @@ impl Globe {
             color,
             elev,
             grad,
+            extra,
             capacity,
             index,
             index_count: idx.len() as u32,
@@ -563,6 +572,7 @@ impl Globe {
         w(&self.color, &p.color, 4);
         w(&self.elev, bytemuck::cast_slice(&p.elev), 4);
         w(&self.grad, bytemuck::cast_slice(&p.grad), 4);
+        w(&self.extra, &p.extra, 4);
     }
 
     fn ensure_target(&mut self, w: u32, h: u32, renderer: Option<&mut egui_wgpu::Renderer>) {
@@ -662,6 +672,8 @@ impl Globe {
                     Mode::Elevation => 1.0,
                     Mode::Landcover => 2.0,
                     Mode::Relief => 3.0,
+                    Mode::Height => 4.0,
+                    Mode::Instance => 5.0,
                 },
                 s.borders as u8 as f32,
                 350_000.0,

@@ -64,6 +64,13 @@ pub mod hmode {
     pub const ABS: u8 = 4;
 }
 
+/// An instance id from a hash: 30 bits with bit 23 set (in [2^23, 2^30): never 0, and a normal
+/// f32 bit pattern for the GPU's float buffers). WGSL: `instance_id`.
+pub fn instance_id(h: u64) -> u32 {
+    let h = (h ^ (h >> 32)) as u32;
+    (h & 0x3F7F_FFFF) | 0x0080_0000
+}
+
 /// One layer at a sample.
 #[derive(Clone, Copy, Debug)]
 pub struct Layer {
@@ -76,6 +83,9 @@ pub struct Layer {
     pub hmode: u8,
     /// land-cover class where `cov` > 0.5 (0: keep the one below)
     pub cls: u8,
+    /// instance id taken with `cls` (0: none; [`instance_id`]: a building lot, field or tree
+    /// stand; the optional `instance` tile layer)
+    pub inst: u32,
     /// emission added (already weighted by the coverage)
     pub emit: DVec3,
     /// cast-shadow factor (min-composited; 1: none)
@@ -100,6 +110,7 @@ impl Default for Layer {
             dh: 0.0,
             hmode: hmode::NONE,
             cls: 0,
+            inst: 0,
             emit: DVec3::ZERO,
             lit: 1.0,
             relit: 0.0,
@@ -207,6 +218,8 @@ pub struct Stack<'a> {
     pub col: DVec3,
     pub height: f64,
     pub class: u8,
+    /// instance id of the layer that set the class (0: none)
+    pub instance: u32,
     pub lit: f64,
     pub emission: DVec3,
     pub is_water: bool,
@@ -233,11 +246,12 @@ pub struct Deferred {
     lb: f64,
     lmin: f64,
     cls: u8,
+    inst: u32,
 }
 
 impl Default for Deferred {
     fn default() -> Self {
-        Deferred { k: 1.0, c: DVec3::ZERO, kh: 1.0, ch: 0.0, la: 1.0, lb: 0.0, lmin: 1.0, cls: 0 }
+        Deferred { k: 1.0, c: DVec3::ZERO, kh: 1.0, ch: 0.0, la: 1.0, lb: 0.0, lmin: 1.0, cls: 0, inst: 0 }
     }
 }
 
@@ -283,6 +297,7 @@ impl<'a> Stack<'a> {
         d.lmin = d.lmin.min(ly.lit);
         if a > 0.5 && ly.cls != 0 {
             d.cls = ly.cls;
+            d.inst = ly.inst;
         }
     }
 
@@ -294,6 +309,7 @@ impl<'a> Stack<'a> {
         self.lit = (self.lit * d.la + d.lb).min(d.lmin);
         if d.cls != 0 {
             self.class = d.cls;
+            self.instance = d.inst;
         }
         self.deferred = Deferred::default();
     }
@@ -318,6 +334,7 @@ impl<'a> Stack<'a> {
         self.lit = self.lit.min(ly.lit);
         if a > 0.5 && ly.cls != 0 {
             self.class = ly.cls;
+            self.instance = ly.inst;
         }
         if a > 0.5 && ly.water {
             self.is_water = true;
@@ -448,6 +465,7 @@ pub fn eval(sm: &SurfaceModel, world: &World, cache: &mut Caches, ctx: &Ctx, l: 
         col: DVec3::ZERO,
         height: l.ground,
         class: crate::landcover::UNKNOWN,
+        instance: 0,
         lit: 1.0,
         emission: DVec3::ZERO,
         is_water: false,
@@ -519,6 +537,7 @@ impl Stack<'_> {
             albedo: if self.is_water { self.col } else { self.col.max(DVec3::ZERO) },
             height: self.height,
             class: self.class,
+            instance: self.instance,
             lit: self.lit,
             is_water: self.is_water,
             emission: self.emission,

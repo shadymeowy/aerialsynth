@@ -238,6 +238,7 @@ struct StEv {
     sw: f32,
     along: f32,
     sid: u64,
+    bid: u64,
     major: bool,
     street: f32,
     zone: u32,
@@ -261,6 +262,7 @@ fn st_ev_none() -> StEv {
     o.sw = 0.0;
     o.along = 0.0;
     o.sid = 0lu;
+    o.bid = 0lu;
     o.major = false;
     o.street = 0.0;
     o.zone = 0u;
@@ -853,6 +855,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     var col = st_asphalt();
     var h = 0.0;
     var cls = LC_URBAN;
+    var lot_id = blk.id;
     let inside = blk.u >= 0.0 && blk.v >= 0.0 && blk.u < blk.bw && (blk.v < blk.bd || pattern == SP_LINEAR);
     let ublk = vec2<f32>(blk.u, blk.v);
     var roof = 0.0;
@@ -1057,6 +1060,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             let si = floor(a / seg);
             let ar = a - (si + 0.5) * seg;
             let sh = hash2(rh, i64(si), 1li);
+            lot_id = sh;
             let dbc = st_dens_at(pl, q, vec2<f32>(0.0), e.n, dmul);
             cov_lot = 1.0;
             col = mixc(yard, st_asphalt() * 1.15, 0.3 * u01k(sh, 4lu));
@@ -1097,6 +1101,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         } else if (pattern == SP_INFORMAL) {
             let dbc = st_dens_at(pl, q, wc.point - q, e.n, dmul);
             if (u01k(wc.id, 7lu) < pow(dbc, 0.8) * 1.15) {
+                lot_id = wc.id;
                 cov_lot = 1.0;
                 col = srgb(128.0, 110.0, 90.0);
                 cls = LC_RESIDENTIAL;
@@ -1216,6 +1221,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             }
             let lot = st_bsp(blk.id, blk.u, blk.v, blk.bw, blk.bd, depth, min_side);
             let lh = lot.h;
+            lot_id = lh;
             let lr = lot.r;
             let lc = vec2<f32>(0.5 * (lr.x + lr.z), 0.5 * (lr.y + lr.w));
             let lot_dq = st_rot2(lc - ublk, -theta);
@@ -1626,6 +1632,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     o.col = col;
     o.h = h;
     o.cls = cls;
+    if (cls == LC_BUILDING || cls == LC_BUILDING_TALL) {
+        o.bid = lot_id;
+    }
     o.roof = roof;
     o.rim = rim;
     o.win = win;
@@ -2572,6 +2581,9 @@ fn st_place(s: ptr<function, Stack>, pl: StPl, rel: f32, n: f32, q: vec2<f32>, s
     ly.emit = emit;
     ly.lit = 1.0 - shade * e_blk;
     ly.clear = 1.0;
+    if (e_blk >= 0.5 && ev.bid != 0lu) {
+        ly.inst = instance_id(ev.bid);
+    }
     composite(s, ly);
     if (ev.tree > 0.0 && e_blk > 0.0) {
         let tc = spal(s, BP_CROWN_DECID) * 0.9 * (0.85 + 0.3 * u01k(ev.sid ^ 0x7EElu, 1lu));
