@@ -55,9 +55,20 @@ const NEXT_ONLY_RELIEF: [&str; 2] = ["tectonic_mountains", "belt_mountains"];
 fn stored_generator(raw: &Value, version: u32) -> Result<GeneratorKind> {
     match raw.get("generator") {
         Some(g) => Ok(serde_yaml::from_value(g.clone())?),
-        None if version == 0 || version <= CLASSIC_GENERATOR_VERSION => Ok(GeneratorKind::Classic),
+        // (0: not recorded, the oldest stores)
+        None if version <= CLASSIC_GENERATOR_VERSION => Ok(GeneratorKind::Classic),
         None => Ok(GeneratorKind::Next),
     }
+}
+
+/// The generator whose tiles a store holds (`None`: its world config does not say, or does
+/// not parse).
+pub fn generator_of(m: &StoreMeta) -> Option<GeneratorKind> {
+    if m.generator_config.trim().is_empty() {
+        return None;
+    }
+    let raw: Value = serde_yaml::from_str(&m.generator_config).ok()?;
+    stored_generator(&raw, m.generator_version).ok()
 }
 
 impl Generator {

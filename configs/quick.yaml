@@ -2,6 +2,7 @@
 # ground, tiles up to zoom 15: ~75 tiles. About a minute on 4 CPU cores without a GPU (mostly
 # the ~20 coarse tiles from zoom 0 down), seconds with one.
 world:
+  generator: classic   # classic (the default, v0.2.0's terrain) | next (the modular generator, a preview)
   seed: 1
 tiles:
   file: out/quick/world.h5

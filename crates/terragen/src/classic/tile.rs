@@ -3,9 +3,9 @@
 //! Pass B interpolates pass A between pixel centres, so its apron pixels need pass-A values one
 //! pixel further out; the normals of the edge pixels use pass B's apron.
 
-use crate::config::Config;
 use crate::classic::surface::{l2s, Caches, Local, PixFields, Surface, SurfaceModel};
 use crate::classic::world::{water, Ctx, Macro, NearSegs, Pre, Terrain, World};
+use crate::config::Config;
 use geodesy::tiles::{gsd_ew, gsd_ns, pixel_to_latlon, TileId};
 use glam::{DVec2, DVec3};
 use rayon::prelude::*;

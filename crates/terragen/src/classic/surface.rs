@@ -5,9 +5,9 @@
 //! `s` is resolvable at the pixel GSD; otherwise its expected (mean) contribution is used, so a coarse
 //! zoom level looks like the average of the finer one.
 
-use crate::landcover as lc;
 use crate::classic::noise::*;
 use crate::classic::world::{water, Ctx, Terrain, World};
+use crate::landcover as lc;
 use glam::{DVec2, DVec3};
 
 /// Linear-light colour from sRGB 0..255.

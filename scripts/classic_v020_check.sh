@@ -51,7 +51,15 @@ world: { seed: 1 }
 tiles: { file: $store, generator: $backend, max_zoom: 18 }
 EOF
     echo "== $who ($backend): $(wc -l < "$out/tiles.txt") tiles"
-    "$bin" tiles -c "$out/${who}_$backend.yaml" --list "$out/tiles.txt"
+    rc=0
+    "$bin" tiles -c "$out/${who}_$backend.yaml" --list "$out/tiles.txt" || rc=$?
+    if (( rc == 139 )) && [[ $who == v020 && $backend == gpu ]]; then
+      # v0.2.0's NVIDIA exit segfault (the driver unloaded under its threads; fixed since): it
+      # comes after the tiles are written and the store is closed
+      echo "(v0.2.0 crashed at exit, after writing the store: the exit segfault fixed since v0.2.0)"
+    elif (( rc != 0 )); then
+      exit $rc
+    fi
   done
   echo "== v0.2.0 vs classic ($backend)"
   "$diff_bin" "$out/v020_$backend.h5" "$out/classic_$backend.h5" || fail=1

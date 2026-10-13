@@ -52,6 +52,7 @@ struct World {
     path: PathBuf,
     seed: u64,
     max_zoom: u32,
+    generator: &'static str,
 }
 
 impl World {
@@ -63,13 +64,14 @@ impl World {
 #[pymethods]
 impl World {
     #[new]
-    #[pyo3(signature = (tiles_file, config=None, seed=None, cache_mb=core::DEFAULT_CACHE_MB))]
-    fn new(py: Python<'_>, tiles_file: PathBuf, config: Option<PathBuf>, seed: Option<u64>, cache_mb: usize) -> PyResult<Self> {
-        let w = py.detach(|| core::World::open(&tiles_file, config.as_deref(), seed)).map_err(to_py)?;
+    #[pyo3(signature = (tiles_file, config=None, seed=None, cache_mb=core::DEFAULT_CACHE_MB, generator=None))]
+    fn new(py: Python<'_>, tiles_file: PathBuf, config: Option<PathBuf>, seed: Option<u64>, cache_mb: usize, generator: Option<String>) -> PyResult<Self> {
+        let w = py.detach(|| core::World::open_generator(&tiles_file, config.as_deref(), seed, generator.as_deref())).map_err(to_py)?;
         w.set_cache_mb(cache_mb);
         Ok(World {
             path: w.path().to_path_buf(),
             seed: w.seed(),
+            generator: w.generator(),
             max_zoom: w.max_zoom(),
             inner: Mutex::new(Some(Arc::new(w))),
             cameras: Mutex::new(Vec::new()),
@@ -223,6 +225,10 @@ impl World {
     #[getter]
     fn max_zoom(&self) -> u32 {
         self.max_zoom
+    }
+    #[getter]
+    fn generator(&self) -> &'static str {
+        self.generator
     }
 }
 
@@ -397,5 +403,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("DEFAULT_CACHE_MB", core::DEFAULT_CACHE_MB)?;
     m.add("MAX_PREFETCH_TILES", core::MAX_PREFETCH_TILES)?;
     m.add("GENERATOR_VERSION", core::GENERATOR_VERSION)?;
+    m.add("CLASSIC_GENERATOR_VERSION", core::CLASSIC_GENERATOR_VERSION)?;
+    m.add("GENERATORS", core::GENERATORS.to_vec())?;
     Ok(())
 }

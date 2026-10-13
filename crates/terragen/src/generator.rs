@@ -159,7 +159,8 @@ impl Generator {
 
 /// The classic generator's pass A as the next generator's `Terrain` (the fields both have).
 fn classic_terrain(t: &crate::classic::world::Terrain) -> crate::world::Terrain {
-    let site = |s: &crate::classic::world::Site| crate::world::Site { id: s.id, id2: s.id2, center: s.center, dist: s.dist, edge: s.edge, ..Default::default() };
+    let site =
+        |s: &crate::classic::world::Site| crate::world::Site { id: s.id, id2: s.id2, center: s.center, dist: s.dist, edge: s.edge, ..Default::default() };
     crate::world::Terrain {
         ground: t.ground,
         water: t.water,

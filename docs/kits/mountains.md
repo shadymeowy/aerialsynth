@@ -1,5 +1,10 @@
 # Mountains kit: karst, folded ridges, fault blocks, canyons, badlands, glacial troughs, fjords, fans
 
+> [!NOTE]
+> This kit belongs to the **next** generator (`world.generator: next`, a preview; see
+> [`docs/simulation.md`](../simulation.md)). The default generator, `classic` (v0.2.0's), has no
+> kits: worlds made with it do not show what this page describes.
+
 `crates/terragen/src/kits/mountains.rs` (zones, relief, carve hook, fan family, layer, tests), its
 WGSL twins `src/gpu/wgsl/kits/mountains_relief.wgsl` (fields, zones, relief, carve hook, fan family;
 in every module with pass A) and `mountains.wgsl` (the layer). No biomes and no kernels (design:

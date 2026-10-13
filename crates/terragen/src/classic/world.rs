@@ -3,8 +3,8 @@
 //! Evaluated once per pixel centre. All functions are smooth at sub-pixel scale (band-limited by the
 //! pixel GSD), so the fine detail pass ("pass B", `surface.rs`) can interpolate these values.
 
-use crate::config::Config;
 use crate::classic::noise::*;
+use crate::config::Config;
 use geodesy::{Ellipsoid, Geodetic};
 use glam::{DVec2, DVec3};
 

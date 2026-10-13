@@ -5,12 +5,58 @@
 Generated on the GPU when it supports 64-bit shaders, else on the CPU (`tiles.generator`; both
 build the same world, see `docs/gpu.md`).
 
+Two generators build worlds, chosen by `world.generator` (`--generator` on the command line, the
+`generator` argument of the bindings); a tile store holds the tiles of one of them:
+
+- **`classic`** (the default): the generator of v0.2.0, unchanged (`crates/terragen/src/classic`,
+  generator version 3). Its tiles are bit-identical to v0.2.0's for the same config and seed
+  (`scripts/classic_v020_check.sh`), and v0.2.0 tile stores open with it. It reads the settings
+  v0.2.0 had (`ecoregions`, `biomes`, `atlas`, `relief.tectonic_mountains` and
+  `relief.belt_mountains` are not used). Its land-cover classes are the first 18 (0–17), which
+  keep their ids in land cover v2.
+- **`next`**: the modular generator (generator version 4): planetary atlas, biome registry,
+  ecoregions and cultures, and the kits (`docs/kits/`). A **preview**: it has known limits
+  (field mosaics, merged towns, broken lakes in places; each kit lists its own) and may change
+  between releases.
+
+Both share the GPU device and its handling (`AERIALSYNTH_GPU`, `AERIALSYNTH_GPU_STRICT`, stall
+and device-lost errors), the compile notices and the pipeline cache (`docs/gpu.md`).
+
 - **Determinism:** a pure function of (seed, config, position), using f64 3D noise on the
   ellipsoid surface. There are no seams or pole problems.
 - **Band limiting:** fields are band-limited by the pixel's ground sample distance (GSD), so coarse zooms approximate the
   average of fine ones. Large-scale fields are sampled on a 16-px grid aligned to tile corners.
   Whether a field comes from the grid or per pixel depends on the zoom only, so neighbouring
   tiles always take the same path.
+### Classic generator (`world.generator: classic`, the default)
+
+- **Landforms:**
+  - continents and shelves, home-region land bias
+  - mountain belts (ridged multifractal with domain warp) carved by dendritic erosion gullies
+  - hills with varying roughness, plateaus, arid mesas, dunes in sand seas
+- **Water:**
+  - rivers as a downhill flow graph with 3 levels (rivers, tributaries, streams; see
+    `world.hydro.levels`): dendritic, always draining downhill, meandering
+  - valleys, floodplains and riparian woods; wet or dry beds
+  - lakes filled to their spill level, oceans with shallows and surf, beaches
+- **Climate:** latitude, lapse rate, subtropical (Hadley-cell) dryness, coast and noise. It drives biomes: snow, rock,
+  tundra, boreal, temperate and tropical forests, steppe, savanna, desert, wetlands.
+- **Vegetation:** individual tree crowns in 3 layers plus shrubs, with explicit crowns and canopy
+  heights in the DSM. They are prefiltered when unresolved and cast shadows in the baked
+  imagery.
+- **Farmland:**
+  - per-region field systems: grid, irregular, strips, centre pivots
+  - seasonal crop palettes, crop rows, tramlines, headlands, wet/bare patches
+  - hedges and tracks along field edges
+- **Farmsteads:** house, barn, gravel yard and yard lamp.
+- **Settlements:**
+  - towns and villages with street grids (organic in old centres)
+  - lots, pitched or flat roofs, building heights in the DSM, parks and industry
+  - street lamps in the emission layer
+- **Roads:** curvy inter-town roads and region-border tracks.
+
+### Next generator (`world.generator: next`, a preview)
+
 - **Architecture** (generator version 4; design: `docs/design/terrain-next.md`): pass B is a
   fixed **composite stack** of layers (zonal ground, altitudinal zone, azonal overrides,
   disturbance, agriculture, canopy, linear infrastructure, built, water, seasonal), each
@@ -200,7 +246,8 @@ cargo test --release
 
 - **Geodesy:** checked against pymap3d.
 - **h5:** round trips, raw chunks, concurrency, error stacks.
-- **Tile store:** round trip, rejection of invalid tiles and of tiles of another world.
+- **Tile store:** round trip, rejection of invalid tiles and of tiles of another world or
+  generator; v0.2.0 stores (no `generator` key, version 3) open with the classic generator.
 - **Camera models and trajectories:** includes NED/ECEF CSV formats.
 - **LOD and dynamics.**
 - **Sensor:** auto-exposure ODE.
@@ -214,12 +261,20 @@ cargo test --release
   windward slopes wetter than leeward ones, Köppen classes, the build time, WGSL sampling
   against the CPU's.
 - **Generator invariants:** determinism, seamless east-west and north-south tile borders, parent ≈
-  mean of its children (on the default backend: the GPU).
+  mean of its children (on the default backend: the GPU), for both generators
+  (`tests/classic_invariants.rs`, `tests/invariants.rs`).
 - **GPU generator:** noise, pass A (the macro-scale world model: relief, drainage, sites) and
-  whole tiles (z7–z16) against the CPU generator.
+  whole tiles (z7–z16) against the CPU generator, for both generators (the classic ones are
+  v0.2.0's, `classic/gpu/tests.rs`); the next generator's kits each have LOD, seam,
+  determinism and parity tests at their places.
+- **Classic = v0.2.0:** `scripts/classic_v020_check.sh V020_TERRAIN` generates 24 tiles
+  (zooms 6–16 at four places) on the CPU and on the GPU with a v0.2.0 binary and with this
+  checkout, and compares them byte by byte (`tilediff`). Not part of `cargo test` (it needs
+  the v0.2.0 build).
 - **Flight camera:** level flight holds height and heading, banked turns at g·tan(bank)/V, the
   ground stops the camera.
 - **Bindings** (`bindings/`): tiles generated once then read, stores of other worlds refused,
+  both generators (by config and by argument; a store of one refuses the other),
   bad arguments; rendering on the CPU (image shapes, depth and land cover, sky, time of day,
   determinism, mounts, scenario cameras, the store kept open by cameras) and GPU against CPU;
   the C API, its header and its examples (`tile.c`, `render.c`); the Python package by

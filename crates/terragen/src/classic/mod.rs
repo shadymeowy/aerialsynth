@@ -18,13 +18,13 @@
 //! * the backends and point results ([`crate::tile::Backend`], [`crate::tile::PointTerrain`]).
 //!
 //! [`crate::Generator`] picks this generator or the next one from `world.generator`.
-//! `tests/classic_v020.rs` compares its tiles with those of the v0.2.0 binary.
+//! `scripts/classic_v020_check.sh` compares its tiles with those of the v0.2.0 binary.
 
-pub mod world;
-pub mod surface;
-pub mod noise;
-pub mod tile;
 #[cfg(feature = "gpu")]
 pub mod gpu;
+pub mod noise;
+pub mod surface;
+pub mod tile;
+pub mod world;
 
 pub use tile::Generator;
