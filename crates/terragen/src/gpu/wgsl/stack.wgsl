@@ -452,7 +452,7 @@ fn layer_zonal(s: ptr<function, Stack>) {
     var soil = mixc(spal(s, BP_SOIL + i0), spal(s, BP_SOIL + i0 + 1u), soil_i - f32(i0));
     let lat_w = min(0.75 * sveg(s, VEG_LATERITE), 1.0);
     soil = mixc(soil, spal(s, BP_LATERITE), lat_w * smoothstep1(19.0, 25.0, temp) * smoothstep1(0.45, 0.7, wet));
-    let grass_green = mixc(spal(s, BP_GRASS_DRY), spal(s, BP_GRASS_WET), smoothstep1(0.25, 0.75, wet + 0.15 * patchv));
+    let grass_green = mixc(spal(s, BP_GRASS_DRY), spal(s, BP_GRASS_WET), smoothstep1(0.25, 0.75, wet + 0.15 * patchv + 0.18 * (1.0 - smoothstep1(6.0, 14.0, temp))));
     var grass = mixc(spal(s, BP_GRASS_COLD), grass_green, smoothstep1(-2.0, 8.0, temp));
     grass = grass * vec3<f32>(1.0 + 0.10 * (st.y - 0.5), 1.0 + 0.06 * (st.w - 0.5), 1.0 - 0.08 * (st.y - 0.5));
     let land_n = (*s).pf.f[PF_LAND];

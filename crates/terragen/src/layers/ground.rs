@@ -24,7 +24,8 @@ pub fn zonal(s: &mut Stack) {
     // red laterite soils in hot, wet climates
     let lat_w = (0.75 * s.veg(|v| v.laterite)).min(1.0);
     let soil = mixc(soil, s.pal(pal::LATERITE), lat_w * smoothstep(19.0, 25.0, temp) * smoothstep(0.45, 0.7, wet));
-    let grass_green = mixc(s.pal(pal::GRASS_DRY), s.pal(pal::GRASS_WET), smoothstep(0.25, 0.75, wet + 0.15 * patch));
+    // (cool summers keep the grass green at less rain: little evaporation)
+    let grass_green = mixc(s.pal(pal::GRASS_DRY), s.pal(pal::GRASS_WET), smoothstep(0.25, 0.75, wet + 0.15 * patch + 0.18 * (1.0 - smoothstep(6.0, 14.0, temp))));
     let grass = mixc(s.pal(pal::GRASS_COLD), grass_green, smoothstep(-2.0, 8.0, temp));
     // hue drift per region so neighbouring areas differ
     let grass = grass * DVec3::new(1.0 + 0.10 * (st[1] - 0.5), 1.0 + 0.06 * (st[3] - 0.5), 1.0 - 0.08 * (st[1] - 0.5));

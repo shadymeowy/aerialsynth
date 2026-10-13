@@ -76,7 +76,8 @@
 - id: steppe
   group: vegetation
   koppen: [BSk, BSh, Dfa, Dfb, Dsa]
-  envelope: { precip_mm: [150, 700] }
+  # (cold-winter steppes are drier than ~500 mm: at 600 mm and 7 °C the land is forest)
+  envelope: { precip_mm: [150, 520] }
   weight: 0.8
   palette:
     grass_dry: [168, 158, 112]

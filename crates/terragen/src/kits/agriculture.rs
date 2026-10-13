@@ -677,7 +677,8 @@ fn draw(s: &mut Stack, pl: &Plan) {
         moist: s.t.moist,
         slope,
         ground: s.l.ground,
-        soil: s.pal(pal::SOIL + 1),
+        // (a brown of the biome's soils: its second one alone, a red, drew maroon ploughland)
+        soil: mixc(mixc(s.pal(pal::SOIL), s.pal(pal::SOIL + 2), 0.5), s.pal(pal::SOIL + 1), 0.3),
         grass: s.pal(pal::GRASS_WET),
         grass_dry: s.pal(pal::GRASS_DRY),
         crown: s.pal(pal::CROWN_DECID),
