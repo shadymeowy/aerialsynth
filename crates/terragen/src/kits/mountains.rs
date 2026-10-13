@@ -534,14 +534,14 @@ pub fn linear(s: &mut Stack) {
         let kb = (ground / bandh + 0.6 * rn).floor();
         let h = hash1(SEED + 40, kb as i64);
         let pal = [
-            srgb(204.0, 194.0, 176.0),
-            srgb(168.0, 112.0, 84.0),
-            srgb(216.0, 198.0, 160.0),
-            srgb(168.0, 140.0, 118.0),
-            srgb(184.0, 132.0, 108.0),
-            srgb(188.0, 172.0, 148.0),
+            srgb(196.0, 176.0, 154.0),
+            srgb(178.0, 135.0, 108.0),
+            srgb(202.0, 178.0, 146.0),
+            srgb(178.0, 149.0, 125.0),
+            srgb(186.0, 145.0, 120.0),
+            srgb(188.0, 165.0, 140.0),
         ];
-        let col = pal[(u01k(h, 1) * 5.999) as usize] * (0.9 + 0.2 * u01k(h, 2));
+        let col = pal[(u01k(h, 1) * 5.999) as usize] * (0.94 + 0.12 * u01k(h, 2));
         let floor_col = srgb(190.0, 176.0, 150.0);
         let col = mixc(floor_col, col, 0.8 * smoothstep(0.25, 0.6, slope));
         s.composite(Layer { cov: cb, albedo: col, cls: if z.badland > 0.2 { cls::BADLANDS } else { cls::CLIFF }, clear: 1.0, ..Default::default() });

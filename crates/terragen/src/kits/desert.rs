@@ -764,11 +764,11 @@ pub fn azonal(s: &mut Stack) {
         // the stony pavement between the barchans: varnished gravel, sand sheets streaked
         // along the wind
         let soil = s.pal(pal::SOIL + 1);
-        let mut pav = mixc(soil, s.pal(pal::ROCK), 0.3) * 0.82;
+        let mut pav = mixc(soil, s.pal(pal::ROCK), 0.3) * 0.9;
         let vn = perlin3(seed ^ S_VARN, p / 420.0) + 0.5 * perlin3(seed ^ S_VARN ^ 1, p / 130.0) * band(130.0, gsd);
         let ve = smoothstep(1.2 * gsd, 3.0 * gsd, 130.0);
         let varn = ve * smoothstep(0.2, 0.3, vn) + (1.0 - ve) * 0.3;
-        pav = mixc(pav, pav * DVec3::new(0.55, 0.5, 0.48), 0.8 * varn);
+        pav = mixc(pav, pav * DVec3::new(0.72, 0.68, 0.66), 0.7 * varn);
         let sb = band(45.0, gsd);
         let mut streak = 0.2;
         if sb > 0.0 {
@@ -817,7 +817,7 @@ pub fn barchan_field(s: &mut Stack) {
     let (cov, dh) = barchans(w, w.seed, c.p, c.east, c.north, wd, zb, c.gsd, s.l.fw);
     if cov > 0.0 {
         let cls = if s.bio.style.litho == 3 { LC_VOLCANIC_ASH } else { LC_SAND };
-        let sc = sand_colour(s) * 1.06;
+        let sc = sand_colour(s) * 0.98;
         s.composite(Layer { cov, albedo: sc, dh, hmode: hmode::ADD, cls, clear: 1.0, ..Default::default() });
     }
 }

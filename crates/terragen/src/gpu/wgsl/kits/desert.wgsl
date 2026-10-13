@@ -210,11 +210,11 @@ fn desert_slot_azonal(s: ptr<function, Stack>) {
     let fringe = (1.0 - erg) * smoothstep1(0.0, 0.08, t.sand);
     if (fringe > 0.0) {
         let soil = spal(s, BP_SOIL + 1u);
-        var pav = mixc(soil, spal(s, BP_ROCK), 0.3) * 0.82;
+        var pav = mixc(soil, spal(s, BP_ROCK), 0.3) * 0.9;
         let vn = perlin3(cfg.seed ^ DS_VARN, p / 420.0lf) + 0.5 * perlin3(cfg.seed ^ DS_VARN ^ 1lu, p / 130.0lf) * band(130.0, gsd);
         let ve = smoothstep1(1.2 * gsd, 3.0 * gsd, 130.0);
         let varn = ve * smoothstep1(0.2, 0.3, vn) + (1.0 - ve) * 0.3;
-        pav = mixc(pav, pav * vec3<f32>(0.55, 0.5, 0.48), 0.8 * varn);
+        pav = mixc(pav, pav * vec3<f32>(0.72, 0.68, 0.66), 0.7 * varn);
         let sb = band(45.0, gsd);
         var streak = 0.2;
         if (sb > 0.0) {
@@ -267,7 +267,7 @@ fn desert_slot_disturbance(s: ptr<function, Stack>) {
         if ((*s).bio.st.litho == 3u) {
             cls = LC_VOLCANIC_ASH;
         }
-        var ly = layer_paint(b.x, desert_sand_colour(s) * 1.06, cls);
+        var ly = layer_paint(b.x, desert_sand_colour(s) * 0.98, cls);
         ly.dh = b.y;
         ly.hmode = HM_ADD;
         ly.clear = 1.0;
