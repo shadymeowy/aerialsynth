@@ -799,12 +799,12 @@ fn layer_canopy(s: ptr<function, Stack>) {
     let cold = (1.0 - smoothstep1(0.0, 8.0, temp)) * (1.0 - smoothstep1(0.15, 0.4, t.mountain));
     let base_cover = smoothstep1(0.3 - 0.14 * cold, 0.68 - 0.24 * cold, wet) * smoothstep1(-6.0, 2.0, temp) * td * trees_mult;
     let fpu = 0.5 + 0.5 * (*s).pf.f[PF_FOREST];
-    let clear = 1.0 - 0.85 * smoothstep1(0.05, 0.4, s_agri(s)) * (1.0 - smoothstep1(0.45, 0.7, slope));
-    let forest = max(smoothstep1(-0.03, 0.03, base_cover * clear - fpu), m.woodlot * smoothstep1(0.05, 0.4, s_agri(s)));
+    let forest = max(smoothstep1(-0.03, 0.03, base_cover - fpu), m.woodlot * smoothstep1(0.05, 0.4, s_agri(s)));
     let savanna = smoothstep1(0.18, 0.35, wet) * (1.0 - smoothstep1(0.55, 0.7, wet)) * smoothstep1(12.0, 20.0, temp) * 0.12 * sveg(s, VEG_SAVANNA);
     let groves = 0.04 * smoothstep1(0.15, 0.3, wet) * sveg(s, VEG_GROVES);
     let base = m.natural_ok * (1.0 - m.field_cov) * td;
-    var dens = (forest * 0.9 + savanna + groves) * base;
+    let clear = 1.0 - 0.85 * smoothstep1(0.05, 0.4, s_agri(s)) * (1.0 - smoothstep1(0.45, 0.7, slope)) * (1.0 - m.woodlot);
+    var dens = (forest * 0.9 * clear + savanna + groves) * base;
     var dens_sav = savanna * base;
     dens = max(dens, 0.8 * m.riparian * td);
     let gully_scrub = 0.55 * smoothstep1(0.2, 0.9, -t.gully) * smoothstep1(0.2, 0.5, wet) * m.natural_ok * (1.0 - m.field_cov);
