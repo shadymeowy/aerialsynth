@@ -114,8 +114,11 @@ fn prepare(w: &crate::world::World, areas: &[Area]) {
         let ext = places::LEVELS[level].radius[1] * 1.15 * 1.62 * 1.62 + if level <= 1 { places::WALDHUFEN_STRIP } else { 0.0 };
         // (towns and larger: also the sites' town lists, 32 km around the area)
         let more = |a: &Area| if level >= places::TOWN as usize && a.gsd < sites::DAMS_GSD_MAX { 32_000.0 } else { 0.0 };
-        let mut cells: Vec<places::Cell> =
-            areas.par_iter().filter(|a| a.gsd < GSD_MAX[level]).flat_map_iter(|a| places::cells_near(w, level, a.center, a.radius + (1.42 * ext).max(more(a)))).collect();
+        let mut cells: Vec<places::Cell> = areas
+            .par_iter()
+            .filter(|a| a.gsd < GSD_MAX[level])
+            .flat_map_iter(|a| places::cells_near(w, level, a.center, a.radius + (1.42 * ext).max(more(a))))
+            .collect();
         cells.sort_unstable();
         cells.dedup();
         if cells.is_empty() {

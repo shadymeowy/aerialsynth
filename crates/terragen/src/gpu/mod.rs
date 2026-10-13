@@ -993,7 +993,8 @@ impl GpuGenerator {
                     // (exact point evaluations on the host: the kits' host code takes the same
                     // decisions from either backend's samples, see `sites_and_routes_match_the_cpu`,
                     // and GPU evaluations cost a settle round each step of a chain of decisions)
-                    let areas: Vec<crate::features::Area> = tq.iter().map(|q| crate::features::Area { center: q.center, radius: q.radius, gsd: q.gsd }).collect();
+                    let areas: Vec<crate::features::Area> =
+                        tq.iter().map(|q| crate::features::Area { center: q.center, radius: q.radius, gsd: q.gsd }).collect();
                     crate::pool::host_pool().install(|| crate::features::build_areas(&self.world, &areas))
                 })
             });

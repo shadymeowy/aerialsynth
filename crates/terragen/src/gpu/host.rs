@@ -525,4 +525,3 @@ pub(crate) fn site_ctx(w: &World, pt: DVec3, gsd: f64) -> Ctx {
     let g = geodesy::ecef2geodetic(pt, &w.ell);
     Ctx::new(g.lat, g.lon, gsd, &w.ell)
 }
-

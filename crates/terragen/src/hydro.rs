@@ -162,7 +162,7 @@ impl World {
         ) * cell;
         let g = geodesy::ecef2geodetic(p, &self.ell);
         let active = g.h.abs() < 0.5 * cell;
-        let fp = if active {
+        if active {
             let gsd = cell / 4.0;
             let ctx = Ctx::new(g.lat, g.lon, gsd, &self.ell);
             let m = self.macro_at(ctx.p, gsd);
@@ -170,8 +170,7 @@ impl World {
             FlowPt { s: ctx.p, h: t.ground, active: true }
         } else {
             FlowPt { s: DVec3::ZERO, h: 0.0, active: false }
-        };
-        fp
+        }
     }
 
     /// Downstream neighbour (steepest descent) of an active point; None for sinks and the sea.

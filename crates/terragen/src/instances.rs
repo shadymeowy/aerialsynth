@@ -130,7 +130,8 @@ const QUERY_CELL: f64 = 0.5;
 type CellInst = ((i64, i64, i64), Instance);
 
 /// The instances a point query from the query cell `q` can find (`near_point`), by id.
-static QUERY_LISTS: crate::memo::Memo<(u64, usize, i64, i64, i64), std::sync::Arc<[CellInst]>> = crate::memo::Memo::new(1 << 17);
+type QueryKey = (u64, usize, i64, i64, i64);
+static QUERY_LISTS: crate::memo::Memo<QueryKey, std::sync::Arc<[CellInst]>> = crate::memo::Memo::new(1 << 17);
 
 /// [`near`] of a point (`r` = 0; host point evaluations, the kits' relief): the same instances,
 /// selected from the list of the point's query cell (half a lattice cell; shared memo) by the

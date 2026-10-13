@@ -31,4 +31,3 @@ pub(crate) fn host_run<T: Send>(f: impl FnOnce() -> T + Send) -> T {
     }
     std::thread::scope(|s| s.spawn(|| pool.install(f)).join()).unwrap_or_else(|e| std::panic::resume_unwind(e))
 }
-
