@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Confluences at an angle.** All the channels draining into a drainage node were bent into its
+  outflow by the same quadratic curve, so they met tangentially and ran side by side for
+  kilometres before joining (two rivers 100–200 m apart over 1–2 km). Now the main stem (the
+  inflow that continues straightest into the outflow) keeps the bend, and every other channel's
+  last reach is a cubic from the middle of its edge (entered along its own direction) to a
+  junction on the main stem's bend, met at 35–80° to the main stem; the tributaries of one node
+  join at different points (by rank). CPU `World::node_pieces` and WGSL `node_pieces` alike
+  (`lat_main`, `trib_controls`); the pieces stay zoom-independent. Test
+  `tributaries_join_at_an_angle` (no two channels of a level meet at < 12°; 26 of 421 before).
+
 - **Qanats** (desert kit, design P2): dotted lines of shaft mounds (pale spoil rings around a
   dark shaft every 30–55 m) from the piedmont down to a common outlet, 1–3 lines of 3–8 km per
   group; host segments (`qanat_group`, 9 km lattice, by culture, aridity and the smooth relief's
