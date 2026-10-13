@@ -307,7 +307,11 @@ pub fn compute(w: &World, reg: &Registry, id: u64, site: DVec3) -> EcoParams {
     let dry = dry_months(&s);
     let climate = SiteClimate { temp_c: temp, precip_mm: s.precip_mm, temp_range_c: s.temp_range_c, dry_months: dry, koppen: k as u32 };
     let arch = s.archetype as usize;
-    let biome = reg.pick(k as u32, temp, s.precip_mm, dry, s.regime, s.temp_range_c, s.litho as u8, u01k(id, 0xB10), |_| 1.0);
+    // cold steppes are open taiga (Köppen's dry threshold makes the larch and spruce forests of
+    // cold continental interiors, Yakutia, interior Alaska, "arid"): their biome is the
+    // subarctic forest's
+    let kb = if matches!(k, atlas::Koppen::BSk | atlas::Koppen::BWk) && temp < 3.0 && s.precip_mm > 150.0 { atlas::Koppen::Dfc } else { k };
+    let biome = reg.pick(kb as u32, temp, s.precip_mm, dry, s.regime, s.temp_range_c, s.litho as u8, u01k(id, 0xB10), |_| 1.0);
     let style = draw_style(id, &s, arch, temp);
     EcoParams { id, site: surface, climate, biome, culture: s.culture, style }
 }
