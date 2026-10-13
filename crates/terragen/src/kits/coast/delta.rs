@@ -218,7 +218,7 @@ fn find(w: &World, c: (i64, i64, i64)) -> Option<AStamp> {
         return None;
     }
     let (mut a, mut b) = (xs[i], xs[i + 1]);
-    for _ in 0..8 {
+    for _ in 0..14 {
         let m = 0.5 * (a + b);
         if height(w, drawn(w, at(m).0)) >= 0.0 {
             a = m;

@@ -198,7 +198,7 @@ fn cone_h(c: &Cell3, p: DVec3, east: DVec3, north: DVec3, kind: u32) -> f64 {
     } else {
         // (a tower: a round top and walls that steepen towards the foot, `√(1 − x^2.5)`)
         if tower {
-            hh * (1.0 - x * x * x.sqrt()).sqrt()
+            hh * (1.0 - x * x * x.sqrt()).sqrt() * smoothstep(1.0, 0.97, x)
         } else {
             hh * (1.0 - x)
         }

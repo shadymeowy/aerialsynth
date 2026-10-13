@@ -120,7 +120,7 @@ fn mt_cone_h(c: Cell3, p: vec3<f64>, east: vec3<f32>, north: vec3<f32>, kind: u3
         return 0.0;
     }
     if (tower) {
-        return hh * sqrt(1.0 - x * x * sqrt(x));
+        return hh * sqrt(1.0 - x * x * sqrt(x)) * smoothstep1(1.0, 0.97, x);
     }
     return hh * (1.0 - x);
 }
