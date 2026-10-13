@@ -1261,9 +1261,9 @@ impl Renderer {
             w.weight = wt;
         }
         // the class's material (landcover::Material; the same table as `lc_material` in
-        // shade.wgsl): self-emission with the lights, and the glint of water (sky reflection
-        // with Schlick Fresnel, sun glint) and other glossy classes (walls: the glass of towers
-        // and greenhouses glints with the wall's normal, natural walls are matte)
+        // shade.wgsl): self-emission with the lights, the snow BRDF, and the glint of water (sky
+        // reflection with Schlick Fresnel, sun glint) and other glossy classes (walls: the glass
+        // of towers and greenhouses glints with the wall's normal, natural walls are matte)
         // (walls: the glass of towers and greenhouses glints with the wall's normal, natural
         // walls are matte)
         let mat = if !relit {
@@ -1290,7 +1290,15 @@ impl Renderer {
                 let n = (n * (1.0 - w.weight) + n_geo * w.weight).normalize();
                 let ndl = n.dot(atmo.sun_dir).max(0.0);
                 let ndm = n.dot(atmo.moon_dir).max(0.0);
-                (atmo.sun_color() * (ndl * 1.25 * shadow) + atmo.moon_color() * (ndm * 1.25) + sky_amb * (0.6 + 0.4 * n.dot(up)), DVec3::ZERO)
+                // snow and ice: a broad forward-scattering lobe towards the sun's mirror
+                // direction, strongest at grazing views (`lobe` in shade.wgsl)
+                let lobe = if mat.forward > 0.0 {
+                    let r = n * (2.0 * n.dot(atmo.sun_dir)) - atmo.sun_dir;
+                    1.0 + 2.0 * mat.forward as f64 * r.dot(v).max(0.0).powi(4) * (1.0 - n.dot(v).clamp(0.0, 1.0))
+                } else {
+                    1.0
+                };
+                (atmo.sun_color() * (ndl * 1.25 * shadow * lobe) + atmo.moon_color() * (ndm * 1.25) + sky_amb * (0.6 + 0.4 * n.dot(up)), DVec3::ZERO)
             }
         };
         // light of the nearby lamps falling on everything around them (walls, roofs, yards, trees):
@@ -1312,10 +1320,27 @@ impl Renderer {
             let nm = if w.weight > 0.0 { (up * (1.0 - w.weight) + n_geo * w.weight).normalize() } else { up };
             let hv = (v + sun).normalize();
             let nh = nm.dot(hv).max(0.0);
-            let fres = f0 + (1.0 - f0) * (1.0 - v.dot(nm).clamp(0.0, 1.0)).powi(5);
-            let sky_c = atmo.sky((dir_w - nm * 2.0 * dir_w.dot(nm)).normalize(), up);
+            let schlick = |c: f64| f0 + (1.0 - f0) * (1.0 - c.clamp(0.0, 1.0)).powi(5);
+            let fres = schlick(v.dot(nm));
+            // the sun glint: normalized Blinn-Phong with the Fresnel term at the half vector (a
+            // sunlit white Lambertian is 1.25), capped
+            let n_exp = mat.shininess() as f64;
+            let glint = (schlick(v.dot(hv)) * (n_exp + 8.0) / 8.0 * nh.powf(n_exp) * nm.dot(sun).max(0.0) * 1.25).min(GLINT_MAX);
+            // the reflection: the sky, or the banks where they rise above the reflected ray
+            // (narrow rivers in forest reflected the bright horizon: silvery lines)
+            let mut env = atmo.sky((dir_w - nm * 2.0 * dir_w.dot(nm)).normalize(), up);
+            if w.weight <= 0.0 {
+                let vis = reflection_visibility(view, z, gx, gy, hdir, v_enu.z, texel);
+                if vis < 1.0 {
+                    let k = ((20.0 / texel).log2().ceil().max(0.0) as u8).min(z);
+                    let s = 0.5f64.powi(k as i32);
+                    let which = if relit { Which::Albedo } else { Which::Rgb };
+                    let bank = view.sample3(z - k, gx * s, gy * s, which).unwrap_or(DVec3::splat(0.1)) * mul;
+                    env = bank + (env - bank) * vis;
+                }
+            }
             mul *= 1.0 - g * fres;
-            add += (sky_c * fres + atmo.sun_color() * (shadow * 1.5 * nh.powf(mat.shininess() as f64))) * g;
+            add += (env * fres + atmo.sun_color() * (shadow * glint)) * g;
         }
         // height of the point above the ellipsoid (closed form given its geodetic latitude)
         let p_w = cam_pos - v * range;
@@ -1433,6 +1458,29 @@ impl Renderer {
         }
         (c0 * ps.mul + ps.add, e0 * ps.emis)
     }
+}
+
+/// The brightest sun glint (in units of a sunlit white Lambertian surface).
+const GLINT_MAX: f64 = 6.0;
+
+/// Visibility 0..1 of the sky along the ray reflected at a water surface at (gx, gy) of zoom z
+/// seen from the direction `hdir` (texel space, towards the camera) at elevation sine `e`: the
+/// DSM texels 4, 10, 25 and 60 m along the reflected ray against its height (steep views:
+/// 1). `reflection_visibility` in shade.wgsl.
+fn reflection_visibility(view: &TileView, z: u8, gx: f64, gy: f64, hdir: DVec2, e: f64, texel: f64) -> f64 {
+    if e > 0.5 {
+        return 1.0;
+    }
+    let Some(h0) = view.elev_texel(z, gx, gy) else { return 1.0 };
+    let tan_e = e / (1.0 - e * e).sqrt().max(1e-3);
+    let mut vis: f64 = 1.0;
+    for d in [4.0, 10.0, 25.0, 60.0] {
+        let t = d / texel;
+        if let Some(h) = view.elev_texel(z, gx - hdir.x * t, gy - hdir.y * t) {
+            vis = vis.min(1.0 - ((h - h0 - d * tan_e) / 2.0).clamp(0.0, 1.0));
+        }
+    }
+    vis
 }
 
 /// A steep wall at a pixel (see `walls`): kind, weight, base colour, ground and top heights,

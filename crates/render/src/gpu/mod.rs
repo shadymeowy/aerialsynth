@@ -715,9 +715,15 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
     Ok(out)
 }
 
-/// The shading shader: the land-cover class table (generated WGSL) and `shade.wgsl`.
+/// The shading shader: the land-cover class table (generated WGSL), the renderer's own
+/// `lc_forward` (the snow BRDF's weight per class, from the same table) and `shade.wgsl`.
 fn shade_source() -> String {
-    format!("{}{}", terragen::landcover::WGSL, include_str!("shade.wgsl"))
+    let mut fwd = String::from("\n// snow / ice forward-scattering weight of class c (landcover::Material::forward)\nfn lc_forward(c: u32) -> f32 {\n    switch c {\n");
+    for k in terragen::landcover::CLASSES.iter().filter(|k| k.material.forward > 0.0) {
+        fwd.push_str(&format!("        case {}u: {{ return {:?}; }}\n", k.id, k.material.forward));
+    }
+    fwd.push_str("        default: { return 0.0; }\n    }\n}\n\n");
+    format!("{}{}{}", terragen::landcover::WGSL, fwd, include_str!("shade.wgsl"))
 }
 
 /// Cold compile time of the renderer's pipelines (shading; `RENDER_SHADE_WGSL=FILE`: that

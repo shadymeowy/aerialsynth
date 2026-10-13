@@ -6,8 +6,8 @@
 //!
 //!     cargo run --release -p render --example render_bench -- STORE.h5 LAT LON [AGL_M] [PITCH_DEG] [N] [WxH] [cpu|gpu] [OUT.png]
 //!
-//! `RENDER_PROFILE=1` prints the renderer's timings per frame, `BENCH_WALLS=0` turns
-//! `render.walls` off.
+//! `RENDER_PROFILE=1` prints the renderer's timings per frame, `BENCH_WALLS=0` and
+//! `BENCH_GLINT=0` turn `render.walls` and `render.water_glint` off.
 use render::camera::{CameraConfig, Extrinsics, Mount};
 use render::raster::Backend;
 use render::scenario::{CameraSpec, Scenario};
@@ -38,6 +38,7 @@ fn main() -> anyhow::Result<()> {
     };
     // (BENCH_WALLS=0: without the wall materials)
     scn.render.walls = std::env::var("BENCH_WALLS").map_or(true, |v| v != "0");
+    scn.render.water_glint = std::env::var("BENCH_GLINT").map_or(true, |v| v != "0");
     let mut spec = CameraSpec::example();
     spec.intrinsics = CameraConfig::pinhole_hfov(w, h, 70.0);
     spec.extrinsics = Extrinsics { mount: Mount::Forward, pitch_deg: pitch, ..Extrinsics::default() };

@@ -107,16 +107,24 @@ display colour and material of every class. The shaders get it as generated WGSL
 
 - **Ids are stable:** 0–17 are the classes of the first release and keep their meaning; new
   classes are appended in per-group ranges and never renumbered. Ids are below 128; 255 is the
-  sky in sequence outputs. The generator emits classes 0–17 today; the others are reserved for
-  the coming terrain kits (their data is in the table already).
+  sky in sequence outputs. The kits emit most of the v2 classes.
 - **Groups** (stable ids): 0 unknown, 1 water, 2 wetland, 3 bare, 4 snow-ice, 5 vegetation,
   6 forest, 7 agriculture, 8 disturbed, 9 built, 10 transport.
 - **Legacy class:** every class names the class among 0–17 that stands for it, so readers of
   the first classes keep working (`output.landcover: legacy`).
-- **Material** (used by both renderers): glint weight (sky reflection with Schlick Fresnel and
-  sun glint; 1 on open water, as before v2), specular F0, roughness (glint exponent
-  2 / roughness² − 2, 300 on water) and night-time self-emission. Classes not listed below as
-  glinting or emissive are matte.
+- **Material** (used by both renderers; the shaders get the table as generated WGSL):
+  - glint weight: the mirror-like reflection (the sky, or the banks where the DSM rises above
+    the reflected ray, with Schlick Fresnel from the specular F0) and the sun glint (normalized
+    Blinn-Phong with Fresnel at the half vector, exponent 2 / roughness² − 2: 300 on water).
+    Water, wet tidal flats, sea ice, glaciers, frozen water, greenhouses, solar panels and tall
+    (glass) buildings glint; the walls of glass towers and greenhouses reflect with the wall's
+    normal (`render.walls`);
+  - forward: the snow BRDF, a broad forward-scattering lobe towards the sun's mirror direction
+    at grazing views (snow and seasonal snow 0.5, glaciers and sea ice 0.3, frozen water 0.15);
+  - self-emission (lava) shows with the night lights. Artificial lights (towns, airports,
+    ports, stadiums, flares, wind-turbine beacons, lit greenhouses) are the `emission` layer's.
+
+  Classes not listed below as glinting, emissive or forward-scattering are matte.
 
 | id | name | label | group | legacy | colour | material |
 |---|---|---|---|---|---|---|
@@ -127,7 +135,7 @@ display colour and material of every class. The shaders get it as generated WGSL
 | 4 | `beach` | beach | bare | 4 | `#f0dca0` |  |
 | 5 | `sand` | sand | bare | 5 | `#dcbe78` |  |
 | 6 | `rock` | rock | bare | 6 | `#82786e` |  |
-| 7 | `snow` | snow | snow-ice | 7 | `#fafaff` |  |
+| 7 | `snow` | snow | snow-ice | 7 | `#fafaff` | forward 0.5 |
 | 8 | `grass` | grass | vegetation | 8 | `#8cbe50` |  |
 | 9 | `shrub` | shrub | vegetation | 9 | `#969646` |  |
 | 10 | `forest` | forest | forest | 10 | `#1e6428` |  |
@@ -144,9 +152,9 @@ display colour and material of every class. The shaders get it as generated WGSL
 | 23 | `aquaculture` | aquaculture / salt pond | water | 2 | `#5a96aa` | water glint |
 | 24 | `tidal_flat` | tidal flat | wetland | 14 | `#968c6e` | glint 0.5 |
 | 25 | `coral_reef` | coral reef (shallow) | water | 1 | `#3cbebe` | water glint |
-| 26 | `sea_ice` | sea ice | snow-ice | 7 | `#dcebf5` | glint 0.4 |
-| 27 | `glacier` | glacier | snow-ice | 7 | `#c8e6fa` | glint 0.25 |
-| 28 | `frozen_water` | frozen water | snow-ice | 7 | `#b4d2eb` | glint 0.6 |
+| 26 | `sea_ice` | sea ice | snow-ice | 7 | `#dcebf5` | glint 0.4, forward 0.3 |
+| 27 | `glacier` | glacier | snow-ice | 7 | `#c8e6fa` | glint 0.25, forward 0.3 |
+| 28 | `frozen_water` | frozen water | snow-ice | 7 | `#b4d2eb` | glint 0.6, forward 0.15 |
 | 29 | `dry_riverbed` | dry riverbed / wash | bare | 5 | `#c8b48c` |  |
 | 30 | `salt_flat` | salt flat / playa | bare | 16 | `#f5f0e1` |  |
 | 31 | `lava` | lava | bare | 6 | `#281e1e` | emissive 1.0 |
@@ -201,7 +209,7 @@ display colour and material of every class. The shaders get it as generated WGSL
 | 106 | `taxiway` | taxiway / apron | transport | 13 | `#50505f` |  |
 | 107 | `bridge` | bridge | transport | 13 | `#c8c83c` |  |
 | 108 | `dam` | dam | built | 12 | `#a0a0b4` |  |
-| 110 | `seasonal_snow` | seasonal snow | snow-ice | 7 | `#ebf0fa` |  |
+| 110 | `seasonal_snow` | seasonal snow | snow-ice | 7 | `#ebf0fa` | forward 0.5 |
 
 **In sequence files:** `output.landcover` (`v2` by default, `legacy`, `group`) chooses the values
 the `landcover` datasets hold. Their attributes describe the values written:

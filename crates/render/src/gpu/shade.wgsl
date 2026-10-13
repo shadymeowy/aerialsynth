@@ -688,6 +688,39 @@ fn geo_normal(x: i32, y: i32, c: vec3<f32>) -> vec3<f32> {
     return select(n / l, -n / l, dot(n, c) > 0.0);
 }
 
+// ---------------------------------------------------------------- glossy surfaces
+
+const GLINT_MAX: f32 = 6.0;
+
+fn schlick(f0: f32, c: f32) -> f32 {
+    let m = 1.0 - clamp(c, 0.0, 1.0);
+    return f0 + (1.0 - f0) * m * m * m * m * m;
+}
+
+// visibility of the sky along the ray reflected at a water surface (raster.rs
+// `reflection_visibility`): the DSM texels 4, 10, 25 and 60 m along it against its height
+fn reflection_visibility(p: GP, hdir: vec2<f32>, e: f32, texel: f32) -> f32 {
+    if e > 0.5 {
+        return 1.0;
+    }
+    let e0 = elev_texel(p.z, p.ix, p.iy);
+    if e0.y == 0.0 {
+        return 1.0;
+    }
+    let tan_e = e / max(sqrt(1.0 - e * e), 1e-3);
+    var vis = 1.0;
+    let ds = array<f32, 4>(4.0, 10.0, 25.0, 60.0);
+    for (var i = 0; i < 4; i++) {
+        let d = ds[i];
+        let q = gp_add(p, -hdir * (d / texel));
+        let h = elev_texel(q.z, q.ix, q.iy);
+        if h.y > 0.0 {
+            vis = min(vis, 1.0 - clamp((h.x - e0.x - d * tan_e) / 2.0, 0.0, 1.0));
+        }
+    }
+    return vis;
+}
+
 // ---------------------------------------------------------------- shading
 
 struct PS {
@@ -771,16 +804,20 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32
         wtan = vec2<f32>(-out.y, out.x);
         ww = wt;
     }
-    // the class's material (lc_material, generated from terragen::landcover): self-emission
-    // with the lights, the glint of water and other glossy classes (as raster.rs)
+    // the class's material (lc_material, lc_forward: generated from terragen::landcover):
+    // self-emission with the lights, the snow BRDF, the glint of water and other glossy classes
+    // (as raster.rs)
     var mat = vec4<f32>(0.0);
+    var forward = 0.0;
     if has(F_RELIT) {
         if ww > 0.5 {
             if wk == WK_GLASS {
                 mat = lc_material(cls_top);
             }
         } else {
-            mat = lc_material(landcover(p));
+            let c = landcover(p);
+            mat = lc_material(c);
+            forward = lc_forward(c);
         }
     }
     var mul: vec3<f32>;
@@ -794,7 +831,14 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32
         let n = normalize(normalize(east * n_enu.x + north * n_enu.y + up * n_enu.z) * (1.0 - ww) + n_geo * ww);
         let ndl = max(dot(n, u.sun_dir.xyz), 0.0);
         let ndm = max(dot(n, u.moon_dir.xyz), 0.0);
-        mul = u.sun_col.xyz * (ndl * 1.25 * shadow) + u.moon_col.xyz * (ndm * 1.25) + sky_amb * (0.6 + 0.4 * dot(n, up));
+        // snow and ice: the forward-scattering lobe
+        var lobe = 1.0;
+        if forward > 0.0 {
+            let r = n * (2.0 * dot(n, u.sun_dir.xyz)) - u.sun_dir.xyz;
+            let rv = max(dot(r, v), 0.0);
+            lobe = 1.0 + 2.0 * forward * rv * rv * rv * rv * (1.0 - clamp(dot(n, v), 0.0, 1.0));
+        }
+        mul = u.sun_col.xyz * (ndl * 1.25 * shadow * lobe) + u.moon_col.xyz * (ndm * 1.25) + sky_amb * (0.6 + 0.4 * dot(n, up));
     } else {
         mul = vec3<f32>(min(0.75 * u.sun.x + 0.25 * u.sun.y, 1.0));
     }
@@ -816,10 +860,22 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32
         }
         let hv = normalize(v + sun);
         let nh = max(dot(nm, hv), 0.0);
-        let fres = mat.y + (1.0 - mat.y) * pow(1.0 - clamp(dot(v, nm), 0.0, 1.0), 5.0);
-        let sky_c = sky(normalize(dir_w - nm * 2.0 * dot(dir_w, nm)), up);
+        let fres = schlick(mat.y, dot(v, nm));
+        // the sun glint: normalized Blinn-Phong with the Fresnel term at the half vector, capped
+        let glint = min(schlick(mat.y, dot(v, hv)) * (mat.z + 8.0) / 8.0 * pow(nh, mat.z) * max(dot(nm, sun), 0.0) * 1.25, GLINT_MAX);
+        // the reflection: the sky, or the banks where they rise above the reflected ray
+        var env = sky(normalize(dir_w - nm * 2.0 * dot(dir_w, nm)), up);
+        if ww <= 0.0 {
+            let vis = reflection_visibility(p, hdir, v_enu.z, texel);
+            if vis < 1.0 {
+                let k = min(i32(max(ceil(log2(20.0 / texel)), 0.0)), p.z);
+                let b = sample3(gp_coarser(p, k), 0u);
+                let bank = select(vec3<f32>(0.1), b.xyz, b.w > 0.0) * mul;
+                env = bank + (env - bank) * vis;
+            }
+        }
         mul *= 1.0 - mat.x * fres;
-        add += (sky_c * fres + u.sun_col.xyz * (shadow * 1.5 * pow(nh, mat.z))) * mat.x;
+        add += (env * fres + u.sun_col.xyz * (shadow * glint)) * mat.x;
     }
     let p_w = u.cam_pos.xyz - v * range;
     var h_pt: f32;
