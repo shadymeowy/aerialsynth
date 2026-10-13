@@ -225,6 +225,12 @@ try's 600 m, entries 600 m off the chord). Of it, the scenes (drainage, lakes) t
 analytic routes (probes with the carved valleys and the lakes, the check, the sampled steps
 near water) ~70 %, the sites stage 5–25 %.
 
+After the perf round (Tesla P4, 6 host threads, 39.9N 32.8E, cold process): the edges near a
+GPU batch are routed once each, in parallel (`prepare`), a route's corridor probes and fine
+corridors in parallel, the features with exact host samples while the GPU runs pass A (no
+settle rounds). 64 tiles at z12 take 11 s (86 s before), a 960×540 view from 3 km 33 s (834 s);
+routing is still most of a cold z12 batch's host time (probes: `macro_at` and the relief).
+
 ## Stills
 
 GPU-generated (`terrain survey --places`, default world, 10:30 local on the equinox; nadir and

@@ -441,6 +441,7 @@ pub struct FStamp { // an oriented box: centre, axes, half sizes, template (kit-
     pub template: u32, pub h: f32, pub v: [f32; 8],   // (WGSL: `tmpl`, `cls`: reserved words)
 }
 pub host: Option<fn(&mut HostCtx, &Area) -> Features>   // in `Kit`
+pub prepare: Option<fn(&World, &[Area])>                // in `Kit`: warm what a batch shares
 ```
 
 `HostCtx` gives the world and point evaluations of the terrain (`ctx.terrain(lat, lon, gsd)`:

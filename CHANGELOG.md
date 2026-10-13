@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **Host work no longer stalls the GPU** (outputs bit-identical: `tilediff` of the 738 tiles of
+  two views and 64 z16 tiles at 39.9N 32.8E against the previous master; parity and
+  determinism tests pass). The kits' host features of a GPU batch are built in parallel on the
+  host while the GPU runs pass A, with exact host point evaluations (the kits re-take close
+  decisions exactly, so either backend's samples give the same features; the GPU rounds took
+  20–30 settle rounds per cold batch), on a thread pool of the generator's own (`crate::pool`).
+  A new `Kit::prepare` hook computes what a batch's tiles share once, in parallel (transport:
+  every edge near the batch routed once; settlements: the places, top-down); a route's
+  corridor probes and fine corridors run in parallel. Point queries of the drainage
+  (`World::river_segments_of`, radius ≤ 100 m) and of instance families (`instances::near`,
+  `r = 0`) filter short per-query-cell lists instead of scanning hundreds of lattice cells;
+  wider drainage queries, flow points, node pieces, lake levels, places and `edges_near` are
+  memoized in shared sharded tables (`memo::Memo`). Sites list the towns of an area only at
+  pixel sizes where a site is drawn (a zoom-2 tile resolved every town of a continent). The
+  tile store writes a batch while the next one is generated; the planner estimates a tile's
+  children with it (one GPU evaluation instead of five). Fixed a deadlock when tiles are
+  generated from rayon's pool while the generator's host work used it
+  (`parallel_callers_do_not_deadlock`). Tesla P4, 960×540 nadir views at 39.9N 32.8E: 3 km
+  834 → 33 s, 10 km 827 → 41–46 s (v0.2.0: 50 / 56 s), the GPU busy 90–95 % of the time;
+  64 cold tiles z12 / z14 / z16: 86 / 39 / 31 → 11.2 / 6.5 / 5.6 s (v0.2.0: 3.8 / 3.4 /
+  2.9 s; most of the rest is the kits' pass B on the GPU and the cold area's routes); survey
+  of 3 places × 3/9/16 km views 253 → 161 s; `places_stay_on_the_gpu` > 60 min → 73 s,
+  `glow_keeps_the_mean` 12 → 3 min.
+
 - **Deltas** (coast kit, design §5.5): fan and bird's-foot deltas (2–12 km) at the mouths of the
   major rivers, found where the river meets the *drawn* coast (host, exact f64 samples along the
   meander-warped centre line, the same for both backends; `kits/coast/delta.rs`): lobate flat

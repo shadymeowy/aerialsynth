@@ -152,6 +152,14 @@ kernel parity test).
 
 ## Compile time and performance
 
+Host work (after the perf round, Tesla P4, 6 host threads): the kit's `prepare` hook resolves a
+batch's places once per lattice cell, in parallel and top-down by level; sites list towns only
+below 1.2 km pixels (`sites::DAMS_GSD_MAX`); hamlets' and villages' water tests take their
+drainage from per-query-cell piece lists. `places_stay_on_the_gpu` (z2–z16 at every place)
+takes 73 s (over an hour before: a zoom-2 tile resolved every town of a continent for its
+sites, one core), `glow_keeps_the_mean` 181 s (12 min; now bound by the core's land-use regions
+of the z5–z6 tiles on the GPU), `towns_avoid_lakes` 38 s.
+
 After the leftover round (water, exact sites, glow; all kits): P4 cold pass B 31.4 / 28.6 / 19.7
 / 26.0 s (the glow adds ~1.4 s to the linear–built stage; the first stage, unchanged, varies
 ±1.5 s with the farm's load), points 22.7 s, drainage heights 17.3 s. The water test costs ~7 %
