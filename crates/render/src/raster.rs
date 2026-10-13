@@ -1247,7 +1247,7 @@ impl Renderer {
             w.kind = walls::kind(w.cls_top, view.landcover(z, gx, gy));
             // (nearest texels, as shade.wgsl)
             let which = if relit { Which::Albedo } else { Which::Rgb };
-            let base = if w.kind == walls::BUILT || w.kind == walls::GLASS {
+            let base = if w.kind == walls::BUILT || w.kind == walls::GLASS || w.kind == walls::VEG {
                 view.texel(z, tx.floor() as i64, ty.floor() as i64, which)
             } else {
                 let k = z.min(2);

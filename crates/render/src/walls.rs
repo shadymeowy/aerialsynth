@@ -12,7 +12,8 @@
 //!   mullions and spandrels, reflecting the sky with the wall's normal;
 //! * **rock** (bare ground or cliff at or above the wall): the local mean colour with strata
 //!   (beds of hashed brightness, shaded towards their base, wavy) and vertical joints;
-//! * **vegetation**: the local mean colour, darker (the side of the canopy), in clumps;
+//! * **vegetation**: the colour at the top (the crown's own), darker (the side of the canopy),
+//!   in clumps;
 //! * **snow and ice**: the local mean colour, slightly blue.
 //!
 //! The patterns are functions of the sample's height (from its range along the view ray) and
@@ -99,7 +100,7 @@ fn inside(f: f64, a: f64, b: f64) -> f64 {
 }
 
 /// Colour (linear albedo) and night emission of a wall sample: `kind`, the base colour (the
-/// roof's for buildings, the local mean otherwise), `s` metres along the wall, height `h` (m
+/// top's for buildings and vegetation, the local mean for rock and snow), `s` metres along the wall, height `h` (m
 /// above the ellipsoid), the ground and top heights at the wall, the pixel footprint `foot` (m).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn texel(kind: u32, base: DVec3, s: f64, h: f64, ground: f64, top: f64, foot: f64) -> (DVec3, DVec3) {
@@ -141,7 +142,7 @@ pub(crate) fn texel(kind: u32, base: DVec3, s: f64, h: f64, ground: f64, top: f6
             };
             // fade the pattern where the footprint cannot resolve the windows
             let k = ((1.4 - foot) / 0.7).clamp(0.0, 1.0) * body;
-            let e = e_col * (0.9 * (win * lit * k + wf * lit_p * (1.0 - k)) * body);
+            let e = e_col * (0.3 * (win * lit * k + wf * lit_p * (1.0 - k)) * body);
             (mix(mean, col, k), e)
         }
         ROCK => {
@@ -160,7 +161,7 @@ pub(crate) fn texel(kind: u32, base: DVec3, s: f64, h: f64, ground: f64, top: f6
         VEG => {
             let c = hash((s / 3.0).floor() as i32, (h / 3.0).floor() as i32);
             let k = ((4.0 - foot) / 2.5).clamp(0.0, 1.0);
-            (base * (0.8 * (1.0 + (0.5 * c - 0.25) * k)), DVec3::ZERO)
+            (base * (0.9 * (1.0 + (0.3 * c - 0.15) * k)), DVec3::ZERO)
         }
         _ => (base * DVec3::new(0.95, 0.97, 1.0), DVec3::ZERO),
     }

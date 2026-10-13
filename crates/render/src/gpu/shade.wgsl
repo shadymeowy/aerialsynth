@@ -582,7 +582,7 @@ fn wall_texel(kind: u32, base: vec3<f32>, s: f32, h: f32, ground: f32, top: f32,
             e_col = vec3<f32>(1.0, 0.78, 0.5);
         }
         let k = clamp((1.4 - foot) / 0.7, 0.0, 1.0) * body;
-        let e = e_col * (0.9 * (win * lit * k + wf * lit_p * (1.0 - k)) * body);
+        let e = e_col * (0.3 * (win * lit * k + wf * lit_p * (1.0 - k)) * body);
         return TX(mix(mean, col, k), e);
     }
     if kind == WK_ROCK {
@@ -601,7 +601,7 @@ fn wall_texel(kind: u32, base: vec3<f32>, s: f32, h: f32, ground: f32, top: f32,
     if kind == WK_VEG {
         let c = wall_hash(i32(floor(s / 3.0)), i32(floor(h / 3.0)));
         let k = clamp((4.0 - foot) / 2.5, 0.0, 1.0);
-        return TX(base * (0.8 * (1.0 + (0.5 * c - 0.25) * k)), vec3<f32>(0.0));
+        return TX(base * (0.9 * (1.0 + (0.3 * c - 0.15) * k)), vec3<f32>(0.0));
     }
     return TX(base * vec3<f32>(0.95, 0.97, 1.0), vec3<f32>(0.0));
 }
@@ -792,7 +792,7 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32
         cls_top = wall_lc(et, pt);
         wk = wall_kind(cls_top, wall_lc(e0, p));
         var b: vec4<f32>;
-        if wk == WK_BUILT || wk == WK_GLASS {
+        if wk == WK_BUILT || wk == WK_GLASS || wk == WK_VEG {
             b = wall_col(et, pt);
         } else {
             let pc = gp_coarser(p, min(p.z, 2));
