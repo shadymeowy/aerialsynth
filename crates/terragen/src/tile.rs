@@ -385,8 +385,47 @@ impl NextGenerator {
         let t = self.world.terrain(&ctx);
         let e = self.surface.eco.params(&self.world, &self.surface.registry, &mut Caches::default(), t.eco.id, t.eco.center);
         let sys = crate::kits::agriculture_system(&e, t.region.id);
+        // the sample's biome(s) (ecotone, altitudinal zone) and its land cover
+        let local = Local {
+            t: &t,
+            ground: t.ground,
+            water: t.water,
+            water_kind: t.water_kind,
+            river_d: t.river_d.min(1e7),
+            river_hw: t.river_hw,
+            river_level: t.river_level,
+            eco_edge: t.eco.edge,
+            inst: &[],
+            feat: None,
+            road_major: t.road_major.min(1e7),
+            road_minor: t.road_minor.min(1e7),
+            slope: 0.0,
+            grad: [0.0; 2],
+            fw: gsd,
+        };
+        let mut caches = Caches::default();
+        let pf = self.surface.pixel_fields(ctx.p, gsd);
+        let bio = crate::registry::BioSample::at(&self.world, &self.surface, &mut caches, &ctx, &local, &pf);
+        let names = &self.surface.registry.biomes;
+        let sample = format!(
+            "sample {} / {} w {:.2} temp {:.1} range {:.1} moist {:.2} class {}",
+            names[bio.a as usize].name,
+            names[bio.b as usize].name,
+            bio.w,
+            t.temp,
+            t.temp_range,
+            t.moist,
+            self.surface.eval(&self.world, &mut caches, &ctx, &local, &pf).class
+        );
+        // the relief and landmark instances whose reach covers the point
+        let mut inst = String::new();
+        for (fi, f) in crate::instances::families().enumerate() {
+            for it in crate::instances::near(&self.world, fi, ctx.p, 0.0) {
+                inst += &format!(" {}@{:.1}km", f.name, (it.center - ctx.p).length() / 1000.0);
+            }
+        }
         format!(
-            "biome {} koppen {} site temp {:.1} precip {:.0} dry {:.1} arch {:?} dev {:.2} agri {:.2} habit {:.2} region {} system {} eco_edge {:.1} km",
+            "biome {} koppen {} site temp {:.1} precip {:.0} dry {:.1} arch {:?} dev {:.2} agri {:.2} habit {:.2} region {} system {} eco_edge {:.2} km; {sample};{}",
             self.surface.registry.biomes[e.biome as usize].name,
             e.climate.koppen,
             e.climate.temp_c,
@@ -398,7 +437,8 @@ impl NextGenerator {
             t.habit,
             t.region.id,
             sys,
-            t.eco.edge,
+            t.eco.edge / 1000.0,
+            inst,
         )
     }
 

@@ -47,6 +47,30 @@
     bisection to 1 cm instead of a fixed-point iteration, which oscillated on steep ground (the
     boreal upland's far corner: 1575 ↔ 1992 m).
 
+- **`next` towards v0.2.0's look** (A/B at the v0.2.0 showcase poses and at places of the same
+  landscape type in next's world: `scripts/ab_v020.py`, `scripts/ab_v020/*.yaml`, reference
+  stills `docs/ab/v020/`, sheets `docs/ab/next_quality/`; `probe_px info LAT LON` names a
+  point's biome, Köppen class, culture, field system and relief instances).
+  - **Fields** (agriculture kit, core): the irregular systems (bocage, smallholder plots,
+    terraces, groves, the core's irregular style) were a Voronoi honeycomb with thick dark
+    hedges; now cadastral blocks cut by recursive splits into four-sided fields of varied size
+    and orientation (`part_cad`; open-field furlongs are those blocks). Hedges 2–4 m, on half
+    the bocage borders; pasture paddocks 420 × 300 m with hay and crops; colours 25 % towards
+    their grey, mottled per parcel, with v0.2.0's growth zones; no chevrons at the headland.
+  - **Towns** (settlements kit): one street pattern per zone ring and town, one layout per
+    pattern (blocks run on across district borders), arterials only between different layouts,
+    density 0.8–1 per district (0.55–1); yards take after the ground around. Towns no longer look
+    glued together from patches of different cities.
+  - **No winter ecoregions** (cold kit): 35 % of the ecoregions were dated in winter (snowy
+    taiga as grey ground with black dots, frozen grey lakes in summer datasets); every date is
+    now mid May .. late September. Kettle lakes have bays and points.
+  - **Boreal forest:** cold steppes (BSk / BWk below 3 °C, > 150 mm) take the subarctic forest's
+    biomes; the canopy closes at lower moisture below 8 °C in the lowlands (taiga of dry
+    continental interiors); altitudinal zones follow a continentality-corrected temperature
+    (krummholz no longer covers the hills of hot-summer continental climates), dithered ±2 °C.
+  - **Look:** cinder cones twice as steep relative to their size and without light baked into
+    their albedo; muted gobi gravel, desert pavement and barchans; softer canyon strata.
+
 - **Example `camera-footprint`** (`examples/camera-footprint`, `cargo run --release -p
   camera-footprint`): a teaching program, read top to bottom, that makes the coordinate frames
   explicit (geodetic ↔ ECEF ↔ ENU ↔ camera ↔ pixels; fractional XYZ tiles ↔ stitched-map pixels).

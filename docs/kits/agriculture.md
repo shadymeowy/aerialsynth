@@ -22,7 +22,7 @@ share for the core's fields. Systems change at region and ecoregion borders, nev
 | section grid | 1-mile sections, quarter sections, centre pivots where dry, farmsteads, section-line roads |
 | shelterbelt steppe | huge fields bordered by tree belts, strip-fallow stripes |
 | open-field strips | furlongs of long narrow strips, each its own crop, reverse-S curves |
-| bocage | small irregular pastures and fields inside hedgerows, trees in the hedges |
+| bocage | small irregular pastures and fields (cadastral blocks) inside hedgerows on about half their borders, trees in the hedges |
 | smallholder mosaic | tiny irregular plots, scattered trees, homestead compounds |
 | rice paddies | bunded plots, flooded / transplanted / green / ripe by season; contour terraces on slopes; canals, fish ponds |
 | dry terraces | stone-walled benches with grain, olives and orchards on contours |
@@ -108,6 +108,14 @@ kit's `KITS` entry commented out (mean of two runs, tiles/s; shared machine, +-3
 
 ## Known limits
 
+* Irregular systems (bocage, smallholder plots, terraces, groves, the core's irregular style)
+  are cadastral blocks (~2.6 parcel sizes, turned by up to ±13°) cut by up to five recursive
+  splits: four-sided fields of varied size, straight borders; no curved field edges following
+  streams or contours (terraces follow the contours inside their parcels only). (They were
+  Voronoi cells: a honeycomb.)
+* Field colours are muted 25 % towards their grey and mottled per parcel (24 m, 35 m, 55 m
+  growth zones); at 1 km and above many parcels still read flatter than v0.2.0's fields, whose
+  core texture had more octaves.
 * Smallholder mosaics read as a fine speckle at 10 km: their 20–60 m plots are just above the
   pixel there, so each pixel takes one plot's colour (salt and pepper) instead of a smoother mean.
 * Bright parcels (greenhouses, fallow, fresh stubble) read as white quadrilaterals in high

@@ -225,8 +225,12 @@ villages and farmsteads as points.
   still reach into a lake or river.
 * Confluences and river mouths get no extra bonus beyond the river's proximity (the coast bonus
   is the atlas coast distance).
-* Streets are not connected between districts (district edges are arterials) nor to the core's
-  rural roads; the transport kit's graph will link places.
+* A town draws one street pattern per zone ring (old core, inner, outer, suburbs, peri-urban),
+  drawn per town; the districts of one pattern share one street layout (their blocks run on
+  across district borders). Arterials follow district borders only where the layouts differ:
+  between rings of different patterns, around industrial estates and superblocks (each its
+  own layout). Buildings next to such an arterial are cut by its verge, and the pattern
+  changes there abruptly. Streets are not connected to the core's rural roads.
 * Towers cast shadows only within their own block (3 steps of 3.5 m); tall towers' long shadows
   across streets are missing.
 * Reservoirs fill every ground below the water level within their reach upstream of the dam,
