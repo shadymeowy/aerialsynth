@@ -65,9 +65,6 @@ mod cls {
 
 // ============================================================================= climate
 
-/// Share of the ecoregions whose date is in winter.
-const WINTER_SHARE: f64 = 0.35;
-
 /// The cold kit's climate at a sample.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ColdClimate {
@@ -80,16 +77,12 @@ pub(crate) struct ColdClimate {
 }
 
 /// The date of an ecoregion (fraction of the year from 1 January, northern-hemisphere
-/// convention: the coldest day is at 0.04): its season (0 spring … 1 autumn) mapped to March …
-/// October, or for [`WINTER_SHARE`] of the ecoregions (a hash of the site climate) a date between
-/// mid November and mid February.
-pub(crate) fn year_date(site_t: f64, site_p: f64, site_r: f64, season: f64) -> f64 {
-    let u = (0.731 * site_t + 0.01173 * site_p + 0.377 * site_r).rem_euclid(1.0);
-    if u < WINTER_SHARE {
-        (0.88 + 0.3 * u / WINTER_SHARE).rem_euclid(1.0)
-    } else {
-        0.17 + 0.66 * season
-    }
+/// convention: the coldest day is at 0.04): its season (0 spring … 1 autumn) mapped to mid May …
+/// late September, the season of the world's crops and canopies. (A share of the ecoregions in
+/// winter painted whole regions white in summer datasets — snowy taiga, frozen grey lakes —
+/// with hard borders to their summer neighbours.)
+pub(crate) fn year_date(season: f64) -> f64 {
+    0.37 + 0.37 * season
 }
 
 /// The climate at a sample.
@@ -99,9 +92,7 @@ pub(crate) fn climate(s: &Stack) -> ColdClimate {
     let ts = t.temp - lapse * (s.l.ground.max(0.0) - t.ground.max(0.0)) * 0.001;
     // (the atlas' warmest − coldest month, interpolated: continuous)
     let half = 0.5 * t.temp_range;
-    let site = &s.bio.site;
-    let f = |x: f64| x as f32 as f64;
-    let d = year_date(f(site.temp_c), f(site.precip_mm), f(site.temp_range_c), s.bio.style.season);
+    let d = year_date(s.bio.style.season);
     // (the date's effect fades to the ecoregion border over the ecotone, where both sides meet at
     // the annual mean: no patches of a winter and a spring ecoregion in the border mosaic)
     let date = ts - half * (std::f64::consts::TAU * (d - 0.04)).cos() * smoothstep(0.0, 10.0, s.bio.edge_km);
@@ -210,8 +201,8 @@ pub(crate) const LAKE_LATS: [LakeLat; 2] = [
 ];
 
 /// Largest elongation and shore noise of a lake (its reach: `r1 · LAKE_EL · LAKE_WN`).
-const LAKE_EL: f64 = 2.1;
-const LAKE_WN: f64 = 1.13;
+const LAKE_EL: f64 = 1.85;
+const LAKE_WN: f64 = 1.26;
 
 /// The lake of a lattice at a point.
 #[derive(Clone, Copy, Debug, Default)]
@@ -254,7 +245,7 @@ pub(crate) fn lake_at(lat: &LakeLat, p: DVec3, sc: f64, fw: f64) -> LakeHit {
                 ) * lat.cell;
                 let rel = p - c;
                 let r = lat.r0 + (lat.r1 - lat.r0) * u01k(h, 5);
-                let el = 1.3 + 0.8 * u01k(h, 6);
+                let el = 1.25 + 0.6 * u01k(h, 6);
                 let lim = r * el * LAKE_WN * sc + fw;
                 if rel.length_squared() > lim * lim {
                     continue;
@@ -275,8 +266,8 @@ pub(crate) fn lake_at(lat: &LakeLat, p: DVec3, sc: f64, fw: f64) -> LakeHit {
                 if rho > LAKE_WN * sc + fw / b {
                     continue;
                 }
-                // ragged shore: noise in the lake's own frame
-                let se = sc * (1.0 + 0.12 * perlin3(h, DVec3::new(2.0 * x, 2.0 * y, 0.37)));
+                // ragged shore (bays and points): noise in the lake's own frame
+                let se = sc * (1.0 + 0.24 * perlin3(h, DVec3::new(2.6 * x, 2.6 * y, 0.37)));
                 // distance to the shore (m): the index over its gradient in the plane
                 let gr = ((x / a) * (x / a) + (y / b) * (y / b)).sqrt() / rho.max(1e-6);
                 let dist = (se - rho) / gr.max(1e-9);
@@ -990,13 +981,11 @@ mod tests {
 
     #[test]
     fn dates() {
-        for k in 0..200 {
-            let d = year_date(-20.0 + 0.3 * k as f64, 150.0 + 7.0 * k as f64, 20.0, 0.5);
-            assert!((0.0..1.0).contains(&d));
+        // every ecoregion in the warm half of the year
+        for k in 0..=10 {
+            let d = year_date(0.1 * k as f64);
+            assert!((std::f64::consts::TAU * (d - 0.04)).cos() < -0.25, "{d}");
         }
-        // a summer ecoregion: the warm half of the year
-        let d = 0.17 + 0.66 * 0.5;
-        assert!((std::f64::consts::TAU * (d - 0.04)).cos() < -0.9);
     }
 
     /// Places of the default world where the kit draws, by feature (for stills):

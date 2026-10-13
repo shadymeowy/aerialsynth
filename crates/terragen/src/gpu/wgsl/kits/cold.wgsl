@@ -2,12 +2,11 @@
 
 const COLD_LC_LAKE: u32 = 2u;
 const COLD_LC_TUNDRA: u32 = 15u;
-const COLD_WINTER_SHARE: f32 = 0.35;
 const COLD_SEED_SNOW: u64 = 0xC01D5E00lu;
 const COLD_SEED_ICE: u64 = 0xC01D1CE0lu;
 const COLD_SEED_FLOE: u64 = 0xC01DF10Elu;
-const COLD_LAKE_EL: f32 = 2.1;
-const COLD_LAKE_WN: f32 = 1.13;
+const COLD_LAKE_EL: f32 = 1.85;
+const COLD_LAKE_WN: f32 = 1.26;
 
 // ---------------------------------------------------------------- climate
 
@@ -17,20 +16,15 @@ struct ColdClimate {
     date: f32,
 }
 
-fn cold_year_date(site_t: f32, site_p: f32, site_r: f32, season: f32) -> f32 {
-    let u = fract(0.731 * site_t + 0.01173 * site_p + 0.377 * site_r);
-    if (u < COLD_WINTER_SHARE) {
-        return fract(0.88 + 0.3 * u / COLD_WINTER_SHARE);
-    }
-    return 0.17 + 0.66 * season;
+fn cold_year_date(season: f32) -> f32 {
+    return 0.37 + 0.37 * season;
 }
 
 fn cold_climate(s: ptr<function, Stack>) -> ColdClimate {
     let t = (*s).t;
     let ts = t.temp - cfg.lapse * (max((*s).l.ground, 0.0) - max(t.ground, 0.0)) * 0.001;
     let half = 0.5 * t.temp_range;
-    let site = (*s).bio.site;
-    let d = cold_year_date(site.x, site.y, site.z, (*s).bio.st.land.x);
+    let d = cold_year_date((*s).bio.st.land.x);
     var c: ColdClimate;
     c.t = ts;
     c.summer = ts + 0.95 * half;
@@ -183,7 +177,7 @@ fn cold_lake_at(lat: ColdLakeLat, p: vec3<f64>, sc: f32, fw: f32) -> ColdLake {
                 let c = vec3<f64>(f64(cx) + 0.5lf + 0.8lf * (u01kd(h, 1lu) - 0.5lf), f64(cy) + 0.5lf + 0.8lf * (u01kd(h, 2lu) - 0.5lf), f64(cz) + 0.5lf + 0.8lf * (u01kd(h, 3lu) - 0.5lf)) * lat.cell;
                 let rel = vec3<f32>(p - c);
                 let r = lat.r0 + (lat.r1 - lat.r0) * u01k(h, 5lu);
-                let el = 1.3 + 0.8 * u01k(h, 6lu);
+                let el = 1.25 + 0.6 * u01k(h, 6lu);
                 let lim = r * el * COLD_LAKE_WN * sc + fw;
                 if (dot(rel, rel) > lim * lim) {
                     continue;
@@ -208,7 +202,7 @@ fn cold_lake_at(lat: ColdLakeLat, p: vec3<f64>, sc: f32, fw: f32) -> ColdLake {
                 if (rho > COLD_LAKE_WN * sc + fw / b) {
                     continue;
                 }
-                let se = sc * (1.0 + 0.12 * perlin3(h, vec3<f64>(vec3<f32>(2.0 * x, 2.0 * y, 0.37))));
+                let se = sc * (1.0 + 0.24 * perlin3(h, vec3<f64>(vec3<f32>(2.6 * x, 2.6 * y, 0.37))));
                 let gr = sqrt((x / a) * (x / a) + (y / b) * (y / b)) / max(rho, 1e-6);
                 let dist = (se - rho) / max(gr, 1e-9);
                 let cov = clamp(dist / fw + 0.5, 0.0, 1.0);
