@@ -24,7 +24,6 @@
 use crate::noise::*;
 use crate::world::World;
 use glam::DVec3;
-use std::sync::RwLock;
 
 /// A settlement (the transport kit's view).
 #[derive(Clone, Debug, PartialEq)]
@@ -569,24 +568,10 @@ fn quant(s: f64) -> u32 {
 type Key = (u64, u8, bool, i64, i64, i64);
 
 /// Shared cache of base and final places (pure functions of the world and the cell).
-static CACHE: RwLock<Option<FxHashMap<Key, Option<Place>>>> = RwLock::new(None);
+static CACHE: crate::memo::Memo<Key, Option<Place>> = crate::memo::Memo::new(1 << 20);
 
 fn cached(w: &World, level: usize, fin: bool, c: (i64, i64, i64), f: impl FnOnce() -> Option<Place>) -> Option<Place> {
-    let key = (w.cache_key, level as u8, fin, c.0, c.1, c.2);
-    {
-        let g = CACHE.read().unwrap();
-        if let Some(v) = g.as_ref().and_then(|m| m.get(&key)) {
-            return *v;
-        }
-    }
-    let v = f();
-    let mut g = CACHE.write().unwrap();
-    let m = g.get_or_insert_with(FxHashMap::default);
-    if m.len() > 600_000 {
-        m.clear();
-    }
-    m.insert(key, v);
-    v
+    CACHE.get_or((w.cache_key, level as u8, fin, c.0, c.1, c.2), f)
 }
 
 fn base(w: &World, level: usize, c: (i64, i64, i64)) -> Option<Place> {
@@ -655,7 +640,7 @@ fn resolve(w: &World, level: usize, c: (i64, i64, i64)) -> Option<Place> {
 /// Clear the shared cache (tests).
 #[cfg(test)]
 pub fn clear_cache() {
-    *CACHE.write().unwrap() = None;
+    CACHE.clear();
 }
 
 #[cfg(test)]

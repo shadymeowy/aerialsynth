@@ -657,17 +657,20 @@ fn corridor(w: &World, a: DVec3, b: DVec3, na: usize, nc: usize, half: f64, pr: 
     let lat = (a + b).normalize().cross(b - a).normalize_or_zero();
     let gsd = 0.5 * step_a;
     let sc = sc.local(w, a, b, c as f64 * dy + 0.5 * step_a);
+    // (the nodes' probes in parallel: a long edge has thousands)
+    use rayon::prelude::*;
     let mut pos = vec![DVec3::ZERO; na * nc];
     let mut nd_: Vec<Option<Probe>> = vec![None; na * nc];
-    for i in 0..na {
-        let t = i as f64 / (na - 1) as f64;
-        let taper = (std::f64::consts::PI * t).sin().sqrt();
-        let base = a + (b - a) * t;
-        for j in 0..nc {
-            let k = i * nc + j;
+    let probes: Vec<(usize, DVec3, Probe)> = (0..na * nc)
+        .into_par_iter()
+        .filter_map(|k| {
+            let (i, j) = (k / nc, k % nc);
             if (i == 0 || i == na - 1) && j != c {
-                continue;
+                return None;
             }
+            let t = i as f64 / (na - 1) as f64;
+            let taper = (std::f64::consts::PI * t).sin().sqrt();
+            let base = a + (b - a) * t;
             let p = if i == 0 {
                 a
             } else if i == na - 1 {
@@ -675,53 +678,55 @@ fn corridor(w: &World, a: DVec3, b: DVec3, na: usize, nc: usize, half: f64, pr: 
             } else {
                 surface(w, base + lat * ((j as f64 - c as f64) * dy * taper))
             };
-            pos[k] = p;
             let mut o = probe(w, &sc, p, gsd);
             if i == 0 || i == na - 1 {
                 // (the ends are where they are)
                 o.block = false;
             }
-            nd_[k] = Some(o);
-        }
+            Some((k, p, o))
+        })
+        .collect();
+    for (k, p, o) in probes {
+        pos[k] = p;
+        nd_[k] = Some(o);
     }
     // the standing water between the nodes of a step, sampled where a lake's outline or a
     // reservoir is near (a coarse step jumps a lake between two dry nodes)
     const DJ: i64 = 2;
-    let mut between = vec![0.0f64; na * nc * (2 * DJ + 1) as usize];
+    let nd = (2 * DJ + 1) as usize;
+    let mut between = vec![0.0f64; na * nc * nd];
     if !sc.lakes.is_empty() || !sc.res.is_empty() {
-        for i in 0..na - 1 {
-            for j in 0..nc {
-                let k0 = i * nc + j;
-                if nd_[k0].is_none() {
+        between.par_chunks_mut(nd).enumerate().for_each(|(k0, out)| {
+            let (i, j) = (k0 / nc, k0 % nc);
+            if i + 1 >= na || nd_[k0].is_none() {
+                return;
+            }
+            for dj in -DJ..=DJ {
+                let j1 = j as i64 + dj;
+                if j1 < 0 || j1 >= nc as i64 || nd_[(i + 1) * nc + j1 as usize].is_none() {
                     continue;
                 }
-                for dj in -DJ..=DJ {
-                    let j1 = j as i64 + dj;
-                    if j1 < 0 || j1 >= nc as i64 || nd_[(i + 1) * nc + j1 as usize].is_none() {
-                        continue;
-                    }
-                    let (p0, p1) = (pos[k0], pos[(i + 1) * nc + j1 as usize]);
-                    let near = sc.lakes.iter().any(|l| super::net::chord_dist(p0, p1, l.pt.normalize() * p0.length()) < 2.4 * l.rad)
-                        || sc.res.iter().any(|r| seg_dist(p0, p1, r.a, r.b) < r.hw as f64);
-                    if !near {
-                        continue;
-                    }
-                    let l = (p1 - p0).length();
-                    if l < 300.0 {
-                        // (short steps: the nodes see the lakes)
-                        continue;
-                    }
-                    let ns = (l / (l / 8.0).clamp(100.0, 300.0)).ceil().max(2.0) as usize;
-                    let wet = (1..ns)
-                        .filter(|&k| {
-                            let o = probe(w, &sc, surface(w, p0 + (p1 - p0) * (k as f64 / ns as f64)), gsd);
-                            o.stand || o.res
-                        })
-                        .count();
-                    between[k0 * (2 * DJ + 1) as usize + (dj + DJ) as usize] = l * wet as f64 / (ns - 1) as f64;
+                let (p0, p1) = (pos[k0], pos[(i + 1) * nc + j1 as usize]);
+                let near = sc.lakes.iter().any(|l| super::net::chord_dist(p0, p1, l.pt.normalize() * p0.length()) < 2.4 * l.rad)
+                    || sc.res.iter().any(|r| seg_dist(p0, p1, r.a, r.b) < r.hw as f64);
+                if !near {
+                    continue;
                 }
+                let l = (p1 - p0).length();
+                if l < 300.0 {
+                    // (short steps: the nodes see the lakes)
+                    continue;
+                }
+                let ns = (l / (l / 8.0).clamp(100.0, 300.0)).ceil().max(2.0) as usize;
+                let wet = (1..ns)
+                    .filter(|&k| {
+                        let o = probe(w, &sc, surface(w, p0 + (p1 - p0) * (k as f64 / ns as f64)), gsd);
+                        o.stand || o.res
+                    })
+                    .count();
+                out[(dj + DJ) as usize] = l * wet as f64 / (ns - 1) as f64;
             }
-        }
+        });
     }
     let first = corridor_dp(&pos, &nd_, &between, na, nc, dy, pr, &sc, pr.smooth_turns);
     first.or_else(|| if pr.smooth_turns { corridor_dp(&pos, &nd_, &between, na, nc, dy, pr, &sc, false) } else { None })
