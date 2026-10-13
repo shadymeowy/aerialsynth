@@ -1,5 +1,10 @@
 # Cold kit: glacial, periglacial and ice
 
+> [!NOTE]
+> This kit belongs to the **next** generator (`world.generator: next`, a preview; see
+> [`docs/simulation.md`](../simulation.md)). The default generator, `classic` (v0.2.0's), has no
+> kits: worlds made with it do not show what this page describes.
+
 `crates/terragen/src/kits/cold.rs` (layer functions, kernel, drumlin family, tests), its WGSL
 twin `src/gpu/wgsl/kits/cold.wgsl` (+ `cold_relief.wgsl`), and its biomes
 `crates/terragen/biomes/cold.yaml` (design: [terrain-next.md §5.4](../design/terrain-next.md),

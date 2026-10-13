@@ -1,9 +1,9 @@
-//! Generator invariants: determinism, seamless tile borders, LOD consistency.
+//! NextGenerator invariants: determinism, seamless tile borders, LOD consistency.
 use geodesy::tiles::{tile_for_latlon, TileId};
-use terragen::{Config, Generator, TILE_SIZE};
+use terragen::{Config, NextGenerator, TILE_SIZE};
 
-fn gen() -> Generator {
-    Generator::new(Config { tile_supersample: 1, ..Config::default() })
+fn gen() -> NextGenerator {
+    NextGenerator::new(Config { tile_supersample: 1, ..Config::default() })
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn lod_consistency_of_colour_and_classes() {
 /// of several times shows; the per-zoom budgets are measured with `examples/zoom_bench`).
 #[test]
 fn tiles_are_reasonably_fast_on_the_cpu() {
-    let g = Generator::with_backend(Config { tile_supersample: 1, ..Config::default() }, terragen::Backend::Cpu);
+    let g = NextGenerator::with_backend(Config { tile_supersample: 1, ..Config::default() }, terragen::Backend::Cpu);
     for (z, limit_s) in [(14u8, 30.0), (10, 30.0), (6, 60.0)] {
         let id = tile_for_latlon(39.9f64.to_radians(), 32.8f64.to_radians(), z);
         let t = std::time::Instant::now();

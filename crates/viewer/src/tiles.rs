@@ -14,7 +14,7 @@ use rayon::prelude::*;
 use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use terragen::tile::Generator;
+use terragen::Generator;
 use tilestore::{Layer, TileData, TileStore, TILE_SIZE};
 
 pub const N: usize = TILE_SIZE;

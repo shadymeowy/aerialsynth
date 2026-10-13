@@ -1,5 +1,10 @@
 # Agriculture kit
 
+> [!NOTE]
+> This kit belongs to the **next** generator (`world.generator: next`, a preview; see
+> [`docs/simulation.md`](../simulation.md)). The default generator, `classic` (v0.2.0's), has no
+> kits: worlds made with it do not show what this page describes.
+
 `crates/terragen/src/kits/agriculture.rs` (catalogue, shading, tests), its WGSL twin
 `src/gpu/wgsl/kits/agriculture.wgsl` (the tables are generated from the Rust file) and
 `biomes/agriculture.yaml` (empty: the systems are code). Design:

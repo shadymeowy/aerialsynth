@@ -820,7 +820,7 @@ mod tests {
                 return;
             }
         };
-        let cpu = crate::Generator::new(cfg);
+        let cpu = crate::NextGenerator::new(cfg);
         for (name, z) in [
             ("tower_karst", 14u8),
             ("tower_karst", 16),
@@ -856,7 +856,7 @@ mod tests {
     /// Parent ≈ mean of its children (elevation, albedo) where the kit draws.
     #[test]
     fn lod_consistent_at_places() {
-        let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+        let g = crate::NextGenerator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let n = crate::TILE_SIZE;
         for (name, z) in [
             ("tower_karst", 12u8),
@@ -902,7 +902,7 @@ mod tests {
     /// continuous across tiles.
     #[test]
     fn seamless_at_places() {
-        let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+        let g = crate::NextGenerator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let n = crate::TILE_SIZE;
         for (name, z) in [
             ("tower_karst", 14u8),
@@ -946,8 +946,8 @@ mod tests {
     #[test]
     fn deterministic_at_places() {
         let cfg = crate::Config { tile_supersample: 1, ..crate::Config::default() };
-        let a = crate::Generator::new(cfg.clone());
-        let b = crate::Generator::new(cfg);
+        let a = crate::NextGenerator::new(cfg.clone());
+        let b = crate::NextGenerator::new(cfg);
         for (name, z) in [("tower_karst", 14u8), ("folded_ridges", 13), ("fjord", 13)] {
             let id = tile_at(name, z);
             let (x, y) = (a.tile(id), b.tile(id));
@@ -979,7 +979,7 @@ mod tests {
         if g.check_generator().is_err() {
             return;
         }
-        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
         for &(name, lat, lon) in PLACES {
             let ids: Vec<_> = [6u8, 8, 10, 12, 14, 16].iter().map(|&z| geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)).collect();
             if let Err(e) = gen.tiles(&ids) {
@@ -1152,7 +1152,7 @@ mod tests {
         let v = std::env::var("MT_TILE").unwrap_or("fault_blocks,12".into());
         let (name, z) = v.split_once(',').unwrap();
         let z: u8 = z.parse().unwrap();
-        let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+        let g = crate::NextGenerator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let t = g.tile(tile_at(name, z));
         let n = crate::TILE_SIZE;
         let (mut lo, mut hi) = (f32::MAX, f32::MIN);
@@ -1206,7 +1206,7 @@ mod tests {
         let mut it = v.split(',');
         let (lat, lon): (f64, f64) = (it.next().unwrap().parse().unwrap(), it.next().unwrap().parse().unwrap());
         let z: u8 = it.next().unwrap().parse().unwrap();
-        let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+        let g = crate::NextGenerator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let id = geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z);
         let a = g.tile(id);
         let b = g.tile(geodesy::tiles::TileId::new(z, id.x + 1, id.y));
@@ -1237,7 +1237,7 @@ mod tests {
         let z: u8 = it.next().unwrap().parse().unwrap();
         let cfg = crate::Config::default();
         let gpu = crate::gpu::GpuGenerator::new(cfg.clone()).unwrap();
-        let cpu = crate::Generator::new(cfg);
+        let cpu = crate::NextGenerator::new(cfg);
         let id = geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z);
         let g = gpu.tiles(&[id]).unwrap().remove(0);
         let c = cpu.tile_cpu(id);

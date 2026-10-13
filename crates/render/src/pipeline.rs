@@ -99,7 +99,7 @@ pub fn generator_range_estimator(gen: &Generator) -> impl Fn(TileId) -> (f32, f3
         let mut sizes = Vec::with_capacity(ids.len());
         for t in &ids {
             let b = t.bounds();
-            let size = (b.lon_max - b.lon_min).abs() * gen.world.ell.a * ((b.lat_min + b.lat_max) * 0.5).cos();
+            let size = (b.lon_max - b.lon_min).abs() * gen.ell().a * ((b.lat_min + b.lat_max) * 0.5).cos();
             let gsd = (size / 4.0).max(30.0);
             sizes.push(size);
             for j in 0..4 {

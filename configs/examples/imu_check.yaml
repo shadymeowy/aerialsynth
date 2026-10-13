@@ -1,7 +1,7 @@
 # IMU only (no cameras): 1 kHz flight record and body poses, 200 Hz IMU with a lever arm and a
 # rotated mount; /pose is fine enough to rebuild the IMU truth from it.
 #   terrain run -c configs/examples/imu_check.yaml
-world: { seed: 1 }
+world: { generator: classic, seed: 1 }   # generator: classic (default) | next (preview)
 tiles: { file: out/imu_check/world.h5, lazy: true }
 trajectory:
   file: out/imu_check/traj.csv

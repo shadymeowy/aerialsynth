@@ -1,7 +1,7 @@
 //! Camera footprint: camera ↔ geodesy ↔ XYZ tile coordinates, step by step.
 //!
 //! One camera position, two orientations:
-//! * an **oblique** camera (looking 40° below the horizon, turned and slightly banked), and
+//! * an **oblique** camera (looking 32° below the horizon, heading 60°), and
 //! * a **nadir** camera at the same position: straight down, north up, east right.
 //!
 //! The example renders both, casts the rays of the oblique camera's 4 image corners onto the
@@ -22,14 +22,14 @@
 //!                               integer part = XYZ tile, x east, y south   pixel (i, j) covers [i, i+1) × [j, j+1)
 //! ```
 //!
-//! Run from the workspace root: `cargo run --release -p camera-footprint [OUT_DIR]`
-//! (default `out/camera-footprint`; the tiles are generated into `OUT_DIR/world.h5`).
+//! Run from the workspace root: `cargo run --release -p camera-footprint [OUT_DIR] [GENERATOR] [ALT]`
+//! (default `out/camera-footprint`; the tiles are generated into `OUT_DIR/world.h5`; GENERATOR:
+//! `classic`, the default, or `next`; ALT: the camera height in metres above the ellipsoid
+//! instead of [`ALT`], e.g. for another generator's ground).
 
 use aerialsynth_core::{Camera, CameraDef, Frame, Layer, Mount, Outputs, Pinhole, Pose, World, TILE_PX};
 use anyhow::{bail, ensure, Context, Result};
-use geodesy::{
-    ecef2geodetic, geodetic2ecef, latlon_to_uv, ray_ellipsoid, up_vector, uv_to_latlon, DMat3, DVec2, DVec3, Ellipsoid, Geodetic, LocalConvention, LocalFrame,
-};
+use geodesy::{ecef2geodetic, geodetic2ecef, latlon_to_uv, uv_to_latlon, DMat3, DVec2, DVec3, Ellipsoid, Geodetic, LocalConvention, LocalFrame};
 use image::{Rgb, RgbImage};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -39,24 +39,27 @@ use std::sync::Arc;
 // The scene: change these
 // ============================================================================================
 
-/// Capture time, UTC (places the sun): a June morning, ~10:00 local solar time here.
-const TIME: &str = "2026-06-21T09:00:00Z";
+/// Capture time, UTC (places the sun): midsummer noon (the v0.2.0 showcase's "boreal" shot).
+const TIME: &str = "2026-06-21T12:00:00Z";
 /// Camera position: geodetic latitude / longitude (degrees, WGS84) and height above the WGS84
-/// ellipsoid (metres). Over boreal forest with ponds and clearings on the west shore of a lake,
-/// ~830 m above the ground; the oblique camera looks east-south-east over the shore and the lake.
-const LAT: f64 = 59.7458;
-const LON: f64 = 15.2480;
-const ALT: f64 = 900.0;
+/// ellipsoid (metres). The pose of the v0.2.0 showcase's "boreal" shot (spruce, bogs and rivers
+/// at 53°N): 900 m above the ground, which is at 1751.7 m here in the default (classic) world
+/// (the surface height below the camera, `World::surface_height`).
+const LAT: f64 = 52.97924;
+const LON: f64 = -16.41426;
+const ALT: f64 = 2651.7;
 /// Orientation of the oblique camera (degrees), as rotations away from the nadir camera.
 /// (0, 0, 0) = looking straight down with north at the image top and east at the image right.
 /// The angles are the aerospace yaw-pitch-roll (Z-Y-X) of an aircraft whose camera looks out
 /// of its belly with the image top towards the nose (see [`r_enu_cam`]):
 /// * YAW: heading of the image top, clockwise from north;
-/// * PITCH: nose up, i.e. the view tilts from nadir towards the image top (50° = 40° below the horizon);
+/// * PITCH: nose up, i.e. the view tilts from nadir towards the image top (58° = 32° below the horizon);
 /// * ROLL: right wing down (the view tilts to the left of the image).
-const YAW: f64 = 115.0;
-const PITCH: f64 = 50.0;
-const ROLL: f64 = 4.0;
+///
+/// The showcase's camera: heading 60°, 32° below the horizon, level.
+const YAW: f64 = 60.0;
+const PITCH: f64 = 58.0;
+const ROLL: f64 = 0.0;
 /// Pinhole camera without distortion: image size (pixels) and focal length (pixels); the
 /// principal point is the image centre.
 const WIDTH: u32 = 1024;
@@ -66,24 +69,35 @@ const FOCAL_PX: f64 = 900.0;
 const LOD: u8 = 15;
 /// Zoom level of the elevation tiles the corner rays are intersected with (coarser = fewer tiles).
 const ELEV_LOD: u8 = 13;
-/// Fixed iterations of the ray / terrain intersection per corner.
-const RAY_ITERATIONS: usize = 6;
+/// The ray / terrain intersection: march along the ray in steps of this fraction of an
+/// elevation pixel (so no ridge between two samples is missed), then bisect the step that
+/// crosses the ground until the ray is this close to the terrain (metres), giving up beyond a
+/// range (metres).
+const RAY_STEP_PX: f64 = 0.25;
+const RAY_TOLERANCE_M: f64 = 0.01;
+const RAY_MAX_RANGE_M: f64 = 200_000.0;
 /// World seed: 1 is the default world (terragen's default config).
 const SEED: u64 = 1;
+/// Terrain generator when the command line names none: the default, `classic` (`next`: the
+/// modular generator, a preview).
+const GENERATOR: &str = "classic";
 /// Width (map pixels) of the red footprint outline.
 const LINE_PX: f64 = 3.0;
 
 fn main() -> Result<()> {
     let out_dir = PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| "out/camera-footprint".into()));
+    let generator = std::env::args().nth(2).unwrap_or_else(|| GENERATOR.into());
+    // (another world's ground is elsewhere: its camera height can be given, metres above the ellipsoid)
+    let alt: f64 = std::env::args().nth(3).map(|a| a.parse().with_context(|| format!("ALT {a:?}: metres expected"))).transpose()?.unwrap_or(ALT);
     std::fs::create_dir_all(&out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
     let ell = Ellipsoid::WGS84;
 
     // ----------------------------------------------------------------------------------------
     println!("== 0. World and time");
-    let world = Arc::new(World::open(&out_dir.join("world.h5"), None, Some(SEED))?);
+    let world = Arc::new(World::open_generator(&out_dir.join("world.h5"), None, Some(SEED), Some(&generator))?);
     world.set_verbose(true);
     let unix_time = parse_time(TIME)?;
-    println!("world seed {} (default config), tiles in {}", world.seed(), world.path().display());
+    println!("world seed {} (default config), generator {}, tiles in {}", world.seed(), world.generator(), world.path().display());
     println!("time {TIME} = {unix_time:.0} s Unix");
 
     // ----------------------------------------------------------------------------------------
@@ -103,11 +117,11 @@ fn main() -> Result<()> {
 
     // ----------------------------------------------------------------------------------------
     println!("\n== 2. Extrinsics: one position, two rotations");
-    let position = Geodetic::from_deg(LAT, LON, ALT);
+    let position = Geodetic::from_deg(LAT, LON, alt);
     let oblique = CameraPose::new(position, r_enu_cam(YAW, PITCH, ROLL), ell);
     let nadir = CameraPose::new(position, r_enu_cam(0.0, 0.0, 0.0), ell);
     let ground_below = world.surface_height(LAT, LON)?;
-    println!("position  geodetic {}  ({:.1} m above the ground at {ground_below:.1} m)", fmt_geo(position), ALT - ground_below);
+    println!("position  geodetic {}  ({:.1} m above the ground at {ground_below:.1} m)", fmt_geo(position), alt - ground_below);
     println!("          ECEF     {}", fmt_v(oblique.ecef));
     for (name, cam) in [("nadir", &nadir), ("oblique", &oblique)] {
         let r = cam.r_enu_cam;
@@ -116,7 +130,7 @@ fn main() -> Result<()> {
 
     // ----------------------------------------------------------------------------------------
     println!("\n== 3. Render both cameras");
-    let pose = |yaw, pitch, roll| Pose { lat_deg: LAT, lon_deg: LON, height_m: ALT, yaw_deg: yaw, pitch_deg: pitch, roll_deg: roll };
+    let pose = |yaw, pitch, roll| Pose { lat_deg: LAT, lon_deg: LON, height_m: alt, yaw_deg: yaw, pitch_deg: pitch, roll_deg: roll };
     let t0 = std::time::Instant::now();
     let img_oblique = camera.render(&pose(YAW, PITCH, ROLL), Some(unix_time), Outputs { rgb: true, depth: true, landcover: false })?;
     let img_nadir = camera.render(&pose(0.0, 0.0, 0.0), Some(unix_time), Outputs::default())?;
@@ -137,16 +151,22 @@ fn main() -> Result<()> {
     save(&frame_image(&img_nadir)?, &out_dir, "2_nadir_camera.png")?;
 
     // ----------------------------------------------------------------------------------------
-    println!("\n== 4. Corner rays of the oblique camera ∩ terrain (elevation tiles at zoom {ELEV_LOD}, {RAY_ITERATIONS} iterations)");
-    let corners_px = image_corners();
     let mut elev = ElevationSampler::new(&world, ELEV_LOD);
+    let step = RAY_STEP_PX * elev.pixel_size(position.lat, &ell);
+    println!(
+        "\n== 4. Corner rays of the oblique camera ∩ terrain (elevation tiles at zoom {ELEV_LOD}: steps of {step:.2} m, bisection to {RAY_TOLERANCE_M} m)"
+    );
+    let corners_px = image_corners();
     let mut ground = Vec::new();
     for (name, px) in CORNER_NAMES.iter().zip(corners_px) {
         let ray = oblique.ray_ecef(intr.pixel_to_ray(px));
-        let hit = intersect_terrain(oblique.ecef, ray, &mut elev, ground_below, RAY_ITERATIONS, &ell)?;
+        let hit = intersect_terrain(oblique.ecef, ray, step, &ell, |g| elev.height_at(g))?;
         let enu = oblique.enu.geodetic_to_local(hit.point);
         println!("{name:12} pixel ({:7.1}, {:6.1})", px.x, px.y);
-        println!("             heights {}", hit.heights.iter().map(|h| format!("{h:.2}")).collect::<Vec<_>>().join(" -> "));
+        println!(
+            "             marched {} steps to {:.1} m (ray {:.2} m above the terrain) .. {:.1} m ({:.2} m below), {} bisections: residual {:+.4} m",
+            hit.steps, hit.bracket[0].0, hit.bracket[0].1, hit.bracket[1].0, -hit.bracket[1].1, hit.bisections, hit.residual
+        );
         println!("             GPS  {}", fmt_geo(hit.point));
         println!("             ECEF {}", fmt_v(geodetic2ecef(hit.point, &ell)));
         println!("             ENU  {}  (range {:.0} m)", fmt_v(enu), enu.length());
@@ -356,6 +376,12 @@ impl<'a> ElevationSampler<'a> {
         Ok(self.tiles[&key][(gy % ts * ts + gx % ts) as usize])
     }
 
+    /// East-west size (m) of an elevation pixel at latitude `lat` (radians): the equator's
+    /// circumference over the pixels around it, times cos(lat).
+    fn pixel_size(&self, lat: f64, ell: &Ellipsoid) -> f64 {
+        2.0 * std::f64::consts::PI * ell.a * lat.cos() / (TILE_PX as f64 * (1u64 << self.z) as f64)
+    }
+
     /// Elevation at (lat, lon): fractional tile → global pixel → bilinear between pixel centres
     /// (pixel (i, j) covers [i, i+1) × [j, j+1), its value sits at (i + ½, j + ½)).
     fn height_at(&mut self, g: Geodetic) -> Result<f64> {
@@ -369,39 +395,65 @@ impl<'a> ElevationSampler<'a> {
     }
 }
 
-/// A ray / terrain intersection and the terrain heights it went through.
+/// A ray / terrain intersection: the ground point, and how it was found.
 struct TerrainHit {
     point: Geodetic,
-    heights: Vec<f64>,
+    /// steps marched along the ray before it went below the terrain
+    steps: usize,
+    /// the step that crossed the ground: (distance along the ray in m, ray height minus terrain
+    /// height in m) before and after
+    bracket: [(f64, f64); 2],
+    /// bisections of that step, and the final ray height minus terrain height (m)
+    bisections: usize,
+    residual: f64,
 }
 
-/// The point of the ray `origin + t·dir` (ECEF, t > 0) at geodetic height `h`: the inflated
-/// ellipsoid (`ray_ellipsoid`) gives a first guess, two Newton steps on the exact geodetic
-/// height make it exact (dh/dt = dir · up).
-fn point_on_ray_at_height(origin: DVec3, dir: DVec3, h: f64, ell: &Ellipsoid) -> Option<DVec3> {
-    let mut t = ray_ellipsoid(origin, dir, ell, h)?;
-    for _ in 0..2 {
+/// Intersect the ray `origin + t·dir` (ECEF, `dir` a unit vector, t ≥ 0 in metres) with the
+/// terrain `height(lat, lon)` (metres above the ellipsoid): the first point where the ray's
+/// geodetic height drops to the terrain's.
+///
+/// 1. **March**: f(t) = (ray height − terrain height) at t = 0, step, 2·step, … until f ≤ 0.
+///    The step is a fraction of an elevation pixel, so the bilinear terrain cannot rise above
+///    the ray and fall again between two samples unnoticed (steep or not).
+/// 2. **Bisect** the last step [t₀, t₁] (f(t₀) > 0 ≥ f(t₁)) until |f| < `RAY_TOLERANCE_M`.
+fn intersect_terrain(origin: DVec3, dir: DVec3, step: f64, ell: &Ellipsoid, mut height: impl FnMut(Geodetic) -> Result<f64>) -> Result<TerrainHit> {
+    // ray height minus terrain height at distance t, and the ray's point there
+    let mut f = |t: f64| -> Result<(f64, Geodetic)> {
         let g = ecef2geodetic(origin + t * dir, ell);
-        t -= (g.h - h) / dir.dot(up_vector(g.lat, g.lon));
+        Ok((g.h - height(g)?, g))
+    };
+    let (f0, _) = f(0.0)?;
+    ensure!(f0 > 0.0, "the camera is {:.1} m below the terrain", -f0);
+    // 1. march until the ray is at or below the terrain
+    let (mut t0, mut f_t0) = (0.0, f0);
+    let mut steps = 0;
+    let (mut t1, f_t1) = loop {
+        steps += 1;
+        let t = steps as f64 * step;
+        if t > RAY_MAX_RANGE_M {
+            bail!("a corner ray does not reach the ground within {RAY_MAX_RANGE_M} m (it points above the horizon)");
+        }
+        let (ft, _) = f(t)?;
+        if ft <= 0.0 {
+            break (t, ft);
+        }
+        (t0, f_t0) = (t, ft);
+    };
+    let bracket = [(t0, f_t0), (t1, f_t1)];
+    // 2. bisect [t0, t1], keeping f(t0) > 0 >= f(t1)
+    let (mut fm, mut point) = f(t1)?;
+    let mut bisections = 0;
+    while fm.abs() >= RAY_TOLERANCE_M && bisections < 64 {
+        bisections += 1;
+        let tm = 0.5 * (t0 + t1);
+        (fm, point) = f(tm)?;
+        if fm > 0.0 {
+            t0 = tm;
+        } else {
+            t1 = tm;
+        }
     }
-    Some(origin + t * dir)
-}
-
-/// Intersect a ray with the terrain by a fixed number of iterations:
-/// start at height `h_ref`; then: point on the ray at height h → terrain elevation below that
-/// point → new h. (Converges on fairly level ground: the error shrinks by about
-/// slope / tan(ray depression) per step.)
-fn intersect_terrain(origin: DVec3, dir: DVec3, elev: &mut ElevationSampler, h_ref: f64, iterations: usize, ell: &Ellipsoid) -> Result<TerrainHit> {
-    let mut h = h_ref;
-    let mut heights = vec![h];
-    for _ in 0..iterations {
-        let Some(p) = point_on_ray_at_height(origin, dir, h, ell) else { bail!("a corner ray does not reach the ground (it points above the horizon)") };
-        h = elev.height_at(ecef2geodetic(p, ell))?;
-        heights.push(h);
-    }
-    // the final point: on the ray at the last height
-    let p = point_on_ray_at_height(origin, dir, h, ell).context("a corner ray does not reach the ground")?;
-    Ok(TerrainHit { point: ecef2geodetic(p, ell), heights })
+    Ok(TerrainHit { point, steps, bracket, bisections, residual: fm })
 }
 
 // ============================================================================================
@@ -823,13 +875,29 @@ mod tests {
     }
 
     #[test]
-    fn ray_hits_flat_ground_at_its_height() {
-        // the ray to a point on the ellipsoid surface of height 600 m found by point_on_ray_at_height
+    fn ray_finds_the_first_crossing_of_steep_terrain() {
+        // a sawtooth of 400 m ridges every 300 m: the first ridge the ray meets is the hit, even
+        // where the ray passes over lower terrain behind it
         let ell = Ellipsoid::WGS84;
-        let cam = CameraPose::new(Geodetic::from_deg(LAT, LON, ALT), r_enu_cam(YAW, PITCH, ROLL), ell);
-        let target = geodetic2ecef(Geodetic::from_deg(LAT + 0.02, LON + 0.03, 600.0), &ell);
-        let dir = (target - cam.ecef).normalize();
-        let p = point_on_ray_at_height(cam.ecef, dir, 600.0, &ell).unwrap();
-        assert!((p - target).length() < 1e-4, "{}", (p - target).length());
+        let cam = CameraPose::new(Geodetic::from_deg(LAT, LON, 2000.0), r_enu_cam(YAW, PITCH, ROLL), ell);
+        let terrain = |g: Geodetic| -> Result<f64> {
+            let x = (g.lon.to_degrees() - LON) * 111_000.0 * LAT.to_radians().cos() + (g.lat.to_degrees() - LAT) * 111_000.0;
+            Ok(1000.0 + 400.0 * (x / 300.0).rem_euclid(1.0))
+        };
+        let dir = cam.ray_ecef(DVec3::new(0.0, 0.0, 1.0));
+        let hit = intersect_terrain(cam.ecef, dir, 2.0, &ell, terrain).unwrap();
+        assert!(hit.residual.abs() < RAY_TOLERANCE_M, "{}", hit.residual);
+        assert!((hit.point.h - terrain(hit.point).unwrap()).abs() < RAY_TOLERANCE_M);
+        // nothing earlier on the ray is below the terrain (fine sampling)
+        let t_hit = (geodetic2ecef(hit.point, &ell) - cam.ecef).length();
+        let mut t = 0.0;
+        while t < t_hit - 0.05 {
+            let g = ecef2geodetic(cam.ecef + t * dir, &ell);
+            assert!(g.h > terrain(g).unwrap(), "the ray is below the terrain at {t} m, before the hit at {t_hit} m");
+            t += 0.05;
+        }
+        // a camera below the terrain is an error
+        let low = CameraPose::new(Geodetic::from_deg(LAT, LON, 900.0), r_enu_cam(YAW, PITCH, ROLL), ell);
+        assert!(intersect_terrain(low.ecef, dir, 2.0, &ell, terrain).is_err());
     }
 }

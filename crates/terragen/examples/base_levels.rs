@@ -15,7 +15,7 @@ fn main() -> anyhow::Result<()> {
         _ => terragen::Backend::Auto,
     };
     let t0 = Instant::now();
-    let gen = terragen::Generator::try_with_backend(terragen::Config::default(), backend)?;
+    let gen = terragen::NextGenerator::try_with_backend(terragen::Config::default(), backend)?;
     eprintln!("generator on {} ready in {:.2} s", gen.backend_name(), t0.elapsed().as_secs_f64());
     let t_all = Instant::now();
     for z in 0..=zmax {

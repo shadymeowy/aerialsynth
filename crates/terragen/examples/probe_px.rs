@@ -9,7 +9,7 @@
 //! closed basins within about `R_KM` km.
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let g = terragen::Generator::new(terragen::Config::default());
+    let g = terragen::NextGenerator::new(terragen::Config::default());
     if args[0] == "sinks" {
         let a: Vec<f64> = args[1..].iter().map(|s| s.parse().unwrap()).collect();
         let ctx = terragen::world::Ctx::new(a[0].to_radians(), a[1].to_radians(), 50.0, &g.world.ell);

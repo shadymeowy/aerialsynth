@@ -1083,7 +1083,7 @@ mod tests {
     /// Parent ≈ mean of its children (elevation, albedo) where the kit draws: glaciers, lakes.
     #[test]
     fn lod_consistent_at_cold_places() {
-        let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+        let g = crate::NextGenerator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let n = crate::TILE_SIZE;
         for (name, z) in [("valley_glaciers", 12u8), ("polygon_lakes", 13)] {
             let parent = tile_at(name, z);
@@ -1116,7 +1116,7 @@ mod tests {
     /// No seam between neighbouring tiles where the kit draws.
     #[test]
     fn seamless_at_cold_places() {
-        let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+        let g = crate::NextGenerator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let n = crate::TILE_SIZE;
         for (name, z) in [("valley_glaciers", 14u8), ("polygon_lakes", 15)] {
             let id = tile_at(name, z);
@@ -1146,7 +1146,7 @@ mod tests {
                 return;
             }
         };
-        let cpu = crate::Generator::new(cfg);
+        let cpu = crate::NextGenerator::new(cfg);
         for (name, z) in [
             ("valley_glaciers", 15u8),
             ("valley_glaciers", 12),
@@ -1177,7 +1177,7 @@ mod tests {
         if g.check_generator().is_err() {
             return;
         }
-        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
         for &(name, lat, lon) in PLACES {
             let ids: Vec<_> = [6u8, 8, 10, 12, 14, 16].iter().map(|&z| geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)).collect();
             if let Err(e) = gen.tiles(&ids) {
@@ -1194,7 +1194,7 @@ mod tests {
     #[test]
     #[ignore]
     fn bench_places() {
-        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
         gen.tiles(&[geodesy::tiles::TileId::new(3, 4, 3)]).unwrap();
         for z in [8u8, 10, 12, 14, 16] {
             let mut ids = Vec::new();

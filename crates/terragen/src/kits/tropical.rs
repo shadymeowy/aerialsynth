@@ -1069,7 +1069,7 @@ mod tests {
         }
         let cfg = crate::Config::default();
         let gen = crate::gpu::GpuGenerator::new(cfg.clone()).unwrap();
-        let cpu = crate::Generator::new(cfg);
+        let cpu = crate::NextGenerator::new(cfg);
         let mut worst = 0.0f64;
         for (i, &(name, lat, lon)) in PLACES.iter().enumerate() {
             let z = [16u8, 14, 12][i % 3];
@@ -1095,7 +1095,7 @@ mod tests {
         if g.check_generator().is_err() {
             return;
         }
-        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
         for &(name, lat, lon) in PLACES {
             let ids: Vec<_> = [6u8, 8, 10, 12, 14, 16].iter().map(|&z| geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)).collect();
             if let Err(e) = gen.tiles(&ids) {
@@ -1112,7 +1112,7 @@ mod tests {
     #[test]
     #[ignore]
     fn bench_places() {
-        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
         gen.tiles(&[geodesy::tiles::TileId::new(3, 4, 3)]).unwrap();
         for z in [8u8, 10, 12, 14, 16] {
             let mut ids = Vec::new();
@@ -1141,7 +1141,7 @@ mod tests {
     #[test]
     #[ignore]
     fn find_places() {
-        let gen = crate::Generator::new(crate::Config::default());
+        let gen = crate::NextGenerator::new(crate::Config::default());
         let w = crate::world::World::new(crate::Config::default());
         let reg = crate::registry::Registry::builtin().unwrap();
         let mut found = std::collections::BTreeMap::<String, Vec<String>>::new();

@@ -1,5 +1,10 @@
 # Transport kit: roads, railways, power lines
 
+> [!NOTE]
+> This kit belongs to the **next** generator (`world.generator: next`, a preview; see
+> [`docs/simulation.md`](../simulation.md)). The default generator, `classic` (v0.2.0's), has no
+> kits: worlds made with it do not show what this page describes.
+
 `crates/terragen/src/kits/transport.rs` (the kit, slots 7 and 8), `transport/net.rs` (the graph),
 `transport/route.rs` (routing), `transport/build.rs` (the features of an area: profiles,
 segments, crossings, interchanges, stations, yards, site roads, power lines), `transport/px.rs`

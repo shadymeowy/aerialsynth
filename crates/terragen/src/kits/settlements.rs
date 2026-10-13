@@ -636,7 +636,7 @@ mod tests {
                 return;
             }
         };
-        let cpu = crate::Generator::new(cfg);
+        let cpu = crate::NextGenerator::new(cfg);
         let mut worst: f64 = 0.0;
         for (name, z) in [
             ("metro", 12u8),
@@ -684,7 +684,7 @@ mod tests {
     /// Parent ≈ mean of children where the kit draws (elevation, albedo).
     #[test]
     fn lod_consistent_at_places() {
-        let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+        let g = crate::NextGenerator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let n = crate::TILE_SIZE;
         for (name, z) in
             [("metro", 11u8), ("metro", 13), ("metro_outer", 12), ("survey_city", 14), ("desert_town", 13), ("waldhufen", 13), ("airport", 13), ("dam", 12)]
@@ -719,7 +719,7 @@ mod tests {
     /// No seam between neighbouring tiles where the kit draws (E-W and N-S).
     #[test]
     fn seamless_at_places() {
-        let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+        let g = crate::NextGenerator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let n = crate::TILE_SIZE;
         for (name, z) in [("metro", 14u8), ("survey_city", 15), ("desert_town", 16), ("waldhufen", 14), ("linear", 15)] {
             let id = tile_at(name, z);
@@ -748,11 +748,11 @@ mod tests {
     #[test]
     fn deterministic_at_places() {
         let cfg = crate::Config { tile_supersample: 1, ..crate::Config::default() };
-        let a = crate::Generator::new(cfg.clone());
+        let a = crate::NextGenerator::new(cfg.clone());
         let ta: Vec<_> = [("metro", 15u8), ("desert_town", 16), ("linear", 15)].iter().map(|&(nm, z)| a.tile(tile_at(nm, z))).collect();
         places::clear_cache();
         sites::clear_cache();
-        let b = crate::Generator::new(cfg);
+        let b = crate::NextGenerator::new(cfg);
         for (k, &(nm, z)) in [("metro", 15u8), ("desert_town", 16), ("linear", 15)].iter().enumerate() {
             let y = b.tile(tile_at(nm, z));
             let x = &ta[k];
@@ -768,7 +768,7 @@ mod tests {
         if g.check_generator().is_err() {
             return;
         }
-        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
         for &(name, lat, lon) in PLACES {
             let ids: Vec<_> = [2u8, 4, 6, 8, 10, 12, 14, 16].iter().map(|&z| geodesy::tiles::tile_for_latlon(lat.to_radians(), lon.to_radians(), z)).collect();
             if let Err(e) = gen.tiles(&ids) {
@@ -784,7 +784,7 @@ mod tests {
     #[test]
     #[ignore]
     fn bench_places() {
-        let gen = crate::Generator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
+        let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), crate::Backend::Gpu).unwrap();
         gen.tiles(&[geodesy::tiles::TileId::new(3, 4, 3)]).unwrap();
         for z in [8u8, 10, 12, 14, 16] {
             let mut ids = Vec::new();
@@ -815,7 +815,7 @@ mod tests {
         let spec = std::env::var("SETTLE_SPEC").unwrap_or_default();
         let backend = if std::env::var("SETTLE_GPU").is_ok() { crate::Backend::Gpu } else { crate::Backend::Cpu };
         let night = std::env::var("SETTLE_NIGHT").is_ok();
-        let gen = crate::Generator::try_with_backend(crate::Config::default(), backend).unwrap();
+        let gen = crate::NextGenerator::try_with_backend(crate::Config::default(), backend).unwrap();
         for item in spec.split(';').filter(|s| !s.is_empty()) {
             let (name, rest) = item.split_once(':').unwrap();
             let v: Vec<f64> = rest.split(',').map(|x| x.trim().parse().unwrap()).collect();
@@ -855,7 +855,7 @@ mod tests {
     fn debug_class_lod() {
         let spec = std::env::var("SETTLE_SPEC").unwrap_or("47.092,-2.889,12".into());
         let v: Vec<f64> = spec.split(',').map(|x| x.trim().parse().unwrap()).collect();
-        let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
+        let g = crate::NextGenerator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let parent = geodesy::tiles::tile_for_latlon(v[0].to_radians(), v[1].to_radians(), v[2] as u8);
         let p = g.tile(parent);
         let mut hp = [0f64; 256];

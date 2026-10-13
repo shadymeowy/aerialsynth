@@ -6,7 +6,8 @@ stored yet is generated (on the GPU when there is a suitable one, else on the CP
 returned::
 
     import aerialsynth
-    with aerialsynth.World("out/world.h5") as w:          # created if missing
+    with aerialsynth.World("out/world.h5") as w:          # created if missing; generator="next"
+                                                          # for the modular generator (preview)
         rgb = w.tile(12, 2200, 1500, "rgb")              # uint8 (256, 256, 3)
         h = w.tile(12, 2200, 1500, "elevation")          # float32 (256, 256), m above WGS84
         block = w.tiles([(12, x, y) for y in range(1500, 1504) for x in range(2200, 2204)])
@@ -53,6 +54,7 @@ __all__ = [
     "DEFAULT_MAX_ZOOM",
     "DEFAULT_CACHE_MB",
     "MAX_PREFETCH_TILES",
+    "GENERATORS",
     "CacheInfo",
     "MAX_IMAGE_SIZE",
     "SKY",
@@ -70,6 +72,9 @@ DEFAULT_MAX_ZOOM: int = _native.DEFAULT_MAX_ZOOM
 DEFAULT_CACHE_MB: int = _native.DEFAULT_CACHE_MB
 #: Most tiles :meth:`World.prefetch` takes (its box over its zooms).
 MAX_PREFETCH_TILES: int = _native.MAX_PREFETCH_TILES
+#: The terrain generators (``World(generator=...)``, ``world.generator``): ``"classic"`` (the
+#: default, v0.2.0's terrain) and ``"next"`` (the modular generator, a preview).
+GENERATORS: tuple = tuple(_native.GENERATORS)
 
 #: Largest image width or height of a camera.
 MAX_IMAGE_SIZE: int = _native.MAX_IMAGE_SIZE
@@ -127,6 +132,10 @@ class World:
         ``tiles.max_zoom`` the zoom limit, default 18; other sections are ignored) or a bare world
         config; ``None`` is the default world. Like ``terrain -c``.
     :param seed: overrides the config's seed (like ``terrain --seed``).
+    :param generator: overrides the config's terrain generator (``world.generator``, like
+        ``terrain --generator``): ``"classic"`` (the default: the generator of v0.2.0) or
+        ``"next"`` (the modular generator with the biome kits, a preview). A store holds the
+        tiles of one generator.
     :param cache_mb: size of the in-memory cache of decoded tiles in MiB (0: no cache; see
         :attr:`cache_mb`).
     :param verbose: report tile generation on stderr (see :attr:`verbose`).
@@ -146,13 +155,16 @@ class World:
         seed: Optional[int] = None,
         cache_mb: int = DEFAULT_CACHE_MB,
         verbose: bool = False,
+        generator: Optional[str] = None,
     ) -> None:
+        if generator is not None and generator not in GENERATORS:
+            raise ValueError(f"unknown generator {generator!r} (one of {', '.join(GENERATORS)})")
         if seed is not None:
             seed = _int(seed, "seed")
             if not 0 <= seed < 2**64:
                 raise ValueError(f"seed {seed} is out of range 0 .. 2**64 - 1")
         cache_mb = _index(cache_mb, "cache_mb")
-        self._w = _native.World(os.fspath(tiles_file), None if config is None else os.fspath(config), seed, cache_mb)
+        self._w = _native.World(os.fspath(tiles_file), None if config is None else os.fspath(config), seed, cache_mb, generator)
         self._w.verbose = bool(verbose)
 
     def tile(self, z: int, x: int, y: int, layer: LayerName = "rgb") -> np.ndarray:
@@ -334,6 +346,11 @@ class World:
         """The highest zoom served (the config's ``tiles.max_zoom``, default 18)."""
         return self._w.max_zoom
 
+    @property
+    def generator(self) -> str:
+        """The world's terrain generator: ``"classic"`` or ``"next"``."""
+        return self._w.generator
+
     def __enter__(self) -> "World":
         return self
 
@@ -341,7 +358,7 @@ class World:
         self.close()
 
     def __repr__(self) -> str:
-        state = "closed" if self.closed else f"seed {self.seed}, max zoom {self.max_zoom}"
+        state = "closed" if self.closed else f"seed {self.seed}, {self.generator} generator, max zoom {self.max_zoom}"
         return f"aerialsynth.World({self.path!r}, {state})"
 
 

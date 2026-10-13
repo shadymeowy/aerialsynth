@@ -3,7 +3,7 @@
 A teaching example in one file ([`src/main.rs`](src/main.rs)), read top to bottom. It takes one
 camera position and
 
-1. renders an **oblique** pinhole image (40° below the horizon, turned and slightly banked),
+1. renders an **oblique** pinhole image (32° below the horizon, heading 60°),
 2. renders a **nadir** image from the same position (straight down, north up, east right),
 3. casts the rays of the oblique image's 4 corners onto the terrain,
 4. converts the 4 ground points to fractional Web-Mercator **XYZ tile** coordinates,
@@ -16,11 +16,13 @@ Every step prints what it computes.
 ```sh
 cargo run --release -p camera-footprint            # images in out/camera-footprint/
 cargo run --release -p camera-footprint -- DIR     # ... or in DIR
+cargo run --release -p camera-footprint -- DIR next 1529.4   # the next generator (preview), its own camera height
 cargo test --release -p camera-footprint           # conversions and homography
 ```
 
 The tiles are generated on first use into `out/camera-footprint/world.h5` (the default world,
-seed 1), on the GPU when there is one. The scene is set by the constants at the top of
+seed 1, with the default terrain generator, `classic`; the second argument picks `next`, the
+third sets the camera height above the ellipsoid instead of `ALT`), on the GPU when there is one. The scene is set by the constants at the top of
 `main.rs`: `TIME`, `LAT`, `LON`, `ALT`, `YAW`, `PITCH`, `ROLL`, the image size and focal length,
 the map zoom `LOD`, the zoom of the elevation used for the corner rays, and the seed.
 
@@ -45,7 +47,7 @@ geodetic (lat, lon, h) ──▶ ECEF (x, y, z) ──▶ ENU (e, n, u) at the c
 top north, image right east. Other angles rotate away from it like an aircraft carrying the
 camera in its belly with the image top towards the nose: aerospace Z-Y-X angles of the body in
 north-east-down, so YAW is the heading of the image top (clockwise from north), PITCH (nose up)
-tilts the view from nadir towards the image top (50° = 40° below the horizon), ROLL (right wing
+tilts the view from nadir towards the image top (58° = 32° below the horizon), ROLL (right wing
 down) tilts it to the left:
 
 ```text
@@ -61,11 +63,11 @@ computed.
 ## Steps
 
 **Corner rays ∩ terrain.** A corner pixel's ray is `R_ecef_cam · normalize(K⁻¹ (u, v, 1))` from
-the camera centre. A fixed number of iterations finds where it meets the ground: start at the
-ground height below the camera; then *point on the ray at height h → elevation of the terrain
-below that point (elevation tiles at a coarser zoom, bilinear) → new h*. On fairly level ground
-the error shrinks by about slope / tan(ray depression) per step; the printed heights show it
-settle.
+the camera centre. Along it, f(t) = (the ray's geodetic height − the terrain's height below it)
+at distance t (elevation tiles at a coarser zoom, bilinear). The example **marches** t = 0,
+s, 2s, … with s a quarter of an elevation pixel (2.9 m here) until f ≤ 0, so the first ridge the
+ray meets is found even on steep ground (no ridge fits between two samples), then **bisects** that
+step until |f| < 1 cm. It prints the steps, the bracketing step and the final residual per corner.
 
 **Tiles.** The ground points become fractional tile coordinates at `LOD`; the integer parts give
 the block of whole tiles to fetch (`World::tiles_into`, generated if missing), stitched with tile
@@ -85,61 +87,72 @@ the 4 corners. `8_check_oblique_vs_warped.png` alternates squares of the render 
 
 All in `out/camera-footprint/` (PNG, full size; the images here are small JPEG copies).
 
-The scene: boreal forest with ponds and clearings on the west shore of a lake in the default
-world (59.746° N, 15.248° E), 900 m above the ellipsoid (834 m above the ground), a June
-morning; the oblique camera turned to 115° (east-south-east), tilted 50° from nadir and banked
-4°; 1024 × 768 pixels, f = 900 px (59° wide); map tiles at zoom 15 (2.4 m pixels).
+The scene: the pose of the v0.2.0 showcase's "boreal" shot in the default world (classic
+generator, seed 1): 52.979° N, 16.414° W, 2651.7 m above the ellipsoid (900 m above the ground
+at 1751.7 m), midsummer noon; the oblique camera heads 60° (east-north-east), 32° below the
+horizon, level; 1024 × 768 pixels, f = 900 px (59° wide); map tiles at zoom 15 (2.6 m pixels).
+A spruce upland: conifer forest, bare and rocky clearings, meadows with scattered trees, rivers
+and a late snow patch.
 
 | | |
 |---|---|
 | ![](images/1_oblique_camera.jpg) **1** oblique camera | ![](images/2_nadir_camera.jpg) **2** nadir camera, same position: north up, east right |
-| ![](images/3_map_albedo.jpg) **3** stitched albedo, tiles 15/17772..17776/9561..9565 | ![](images/4_map_albedo_footprint.jpg) **4** with the oblique camera's footprint |
+| ![](images/3_map_albedo.jpg) **3** stitched albedo, tiles 15/14890..14898/10670..10677 | ![](images/4_map_albedo_footprint.jpg) **4** with the oblique camera's footprint |
 | ![](images/5_map_warped_into_oblique.jpg) **5** the map warped into the oblique camera by the homography | ![](images/8_check_oblique_vs_warped.jpg) **8** check: squares of 1 and 5 alternating |
-| ![](images/6_map_elevation.jpg) **6** stitched elevation, 63 m (black) .. 269 m (white) | ![](images/7_map_elevation_footprint.jpg) **7** with the footprint |
+| ![](images/6_map_elevation.jpg) **6** stitched elevation, 1290 m (black) .. 2116 m (white) | ![](images/7_map_elevation_footprint.jpg) **7** with the footprint |
 
-**Known defects in these images.** They show bugs in the current generator and renderer,
-not intended looks: the lakes and ponds come out as flat grey or silvery sheets with hard edges,
-there is a white streak and a light-blue band along the big lake's shore, and the nadir view has
-a striped green ellipse (a clearing). Renders at the same poses looked different with v0.2.0.
-The coordinates, tiles, footprint and homography do not depend on these defects.
+**Steep ground.** This upland is rough: the far corners' rays graze slopes and cross 1300–2000 m
+of relief on their way, which a fixed-point iteration (point at height h → terrain height → new
+h) did not settle on (the earlier version of this example: the top-left corner oscillated between
+1575 and 1992 m); marching and bisection find the first crossing to a centimetre. The homography
+is still only an approximation here: the plane through the 4 corners stands in for terrain of
+1300–2010 m, so the warp is off by a median 33 px (over the level lowland of an earlier
+scene: 1.4–18 px).
+
+**The next generator** (`world.generator: next`, a preview) builds another world from the same
+seed: here a lowland at 629 m, rendered from 900 m above it (`... DIR next 1529.4`). It shows
+dry olive grassland with scattered trees and a few fields at 53° N, and a hard, circular biome
+border in the oblique view: one of its known limits.
+
+| | |
+|---|---|
+| ![](images/next_1_oblique_camera.jpg) next: oblique camera | ![](images/next_2_nadir_camera.jpg) next: nadir camera |
 
 What it prints (excerpt):
 
 ```text
 == 2. Extrinsics: one position, two rotations
-position  geodetic lat 59.745800°, lon 15.248000°, h 900.00 m  (833.7 m above the ground at 66.3 m)
-          ECEF     (3108625.26, 847391.94, 5487039.97) m
+position  geodetic lat 52.979240°, lon -16.414260°, h 2651.70 m  (900.0 m above the ground at 1751.7 m)
+          ECEF     (3693204.37, -1087968.03, 5071269.96) m
 nadir     camera axes in ENU: x(right) (+1.000, +0.000, +0.000)  y(down) (-0.000, -1.000, +0.000)  z(optical) (+0.000, +0.000, -1.000)
-oblique   camera axes in ENU: x(right) (-0.373, -0.927, -0.045)  y(down) (-0.583, +0.272, -0.766)  z(optical) (+0.722, -0.260, -0.641)
+oblique   camera axes in ENU: x(right) (+0.500, -0.866, +0.000)  y(down) (-0.459, -0.265, -0.848)  z(optical) (+0.734, +0.424, -0.530)
 ...
-oblique   renderer's pose vs ours: position 0.00e0 m, rotation 5.00e-16
+oblique   renderer's pose vs ours: position 0.00e0 m, rotation 1.11e-16
 ...
-== 4. Corner rays of the oblique camera ∩ terrain (elevation tiles at zoom 13, 6 iterations)
+== 4. Corner rays of the oblique camera ∩ terrain (elevation tiles at zoom 13: steps of 2.88 m, bisection to 0.01 m)
 top-left     pixel (   -0.5,   -0.5)
-             heights 66.31 -> 239.88 -> 236.34 -> 236.02 -> 235.99 -> 235.99 -> 235.99
-             GPS  lat 59.748920°, lon 15.296405°, h 235.99 m
-             ECEF (3107295.89, 849850.39, 5486641.55) m
-             ENU  (2721.52, 348.65, -664.60) m  (range 2823 m)
+             marched 2211 steps to 6356.9 m (ray 0.98 m above the terrain) .. 6359.8 m (0.06 m below), 4 bisections: residual +0.0065 m
+             GPS  lat 53.027173°, lon -16.364389°, h 1783.65 m
+             ECEF (3689559.56, -1083405.08, 5073787.83) m
+             ENU  (3347.03, 5336.98, -871.16) m  (range 6360 m)
 top-right    pixel ( 1023.5,   -0.5)
-             heights 66.31 -> 63.43 -> 63.43 -> 63.43 -> 63.43 -> 63.43 -> 63.43
-             GPS  lat 59.725834°, lon 15.281202°, h 63.43 m
+             marched 2270 steps to 6526.6 m (ray 0.23 m above the terrain) .. 6529.5 m (0.30 m below), 4 bisections: residual -0.0004 m
+             GPS  lat 52.981323°, lon -16.318077°, h 1760.76 m
+             ECEF (3694333.05, -1081563.91, 5070698.23) m
+             ENU  (6462.05, 236.21, -894.21) m  (range 6528 m)
 ...
 == 5. Ground corners -> fractional XYZ tiles at zoom 15
-top-left     tile (x, y) = (17776.3127, 9561.3506)  -> in tile 15/17776/9561 at (80.1, 89.8) px
-top-right    tile (x, y) = (17774.9290, 9565.5203)  -> in tile 15/17774/9565 at (237.8, 133.2) px
-bottom-right tile (x, y) = (17772.2586, 9562.8195)  -> in tile 15/17772/9562 at (66.2, 209.8) px
-bottom-left  tile (x, y) = (17772.8016, 9561.4134)  -> in tile 15/17772/9561 at (205.2, 105.8) px
-coverage at zoom 15: x 17772..=17776 , y 9561..=9565  (5 x 5 tiles, 1280 x 1280 px)
+top-left     tile (x, y) = (14894.4769, 10670.1251)  -> in tile 15/14894/10670 at (122.1, 32.0) px
+top-right    tile (x, y) = (14898.6924, 10677.0605)  -> in tile 15/14898/10677 at (177.3, 15.5) px
+bottom-right tile (x, y) = (14891.1930, 10677.6534)  -> in tile 15/14891/10677 at (49.4, 167.3) px
+bottom-left  tile (x, y) = (14890.3009, 10676.2240)  -> in tile 15/14890/10676 at (77.0, 57.3) px
+coverage at zoom 15: x 14890..=14898 , y 10670..=10677  (9 x 8 tiles, 2304 x 2048 px)
 ...
 == 9. Check: does the warped map line up with the rendered image?
-221 grid pixels: homography vs rendered ground point: median 17.9 px, 90% 29.8 px, max 43.0 px (at (0, 256))
-(the plane through the 4 corners stands in for terrain of 63 .. 253 m: relief, trees and buildings shift points)
+221 grid pixels: homography vs rendered ground point: median 33.0 px, 90% 98.1 px, max 132.5 px (at (831, 447))
+(the plane through the 4 corners stands in for terrain of 1302 .. 2010 m: relief, trees and buildings shift points)
 ```
 
-The render and the warped map show the same scene: the lake shore, the ponds and clearings
-continue across the squares of image 8, offset by up to a few tens of pixels. The ground here is
-not a plane: the far left corner lies on the upland north of the lake at 236 m, the far right one
-on the lake at 63 m, and the plane through the 4 corners cuts through the terrain between them,
-so points off that plane land elsewhere in the warp (median 18 px, worst at the left edge).
-Over level ground the offsets shrink to a few pixels (a camera looking over the lowland and the
-lake alone gave a median of 1.4 px). In the render the trees also stand up in 3D.
+The render and the warped map show the same scene (the forest edges and the river continue
+across the squares of image 8), but offset by tens of pixels: the ground is far from a plane
+here, and the uncertain far corner tilts the plane. In the render the trees also stand up in 3D.

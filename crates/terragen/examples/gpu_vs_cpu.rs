@@ -17,7 +17,7 @@ fn main() -> anyhow::Result<()> {
         .collect();
     let cfg = terragen::Config::default();
     let gpu = terragen::gpu::GpuGenerator::new(cfg.clone())?;
-    let cpu = terragen::Generator::with_backend(cfg, terragen::Backend::Cpu);
+    let cpu = terragen::NextGenerator::with_backend(cfg, terragen::Backend::Cpu);
     let n = 256u32;
     let mut img = image::RgbImage::new(4 * n, n * ids.len() as u32);
     for (r, &id) in ids.iter().enumerate() {

@@ -31,6 +31,9 @@ pub struct Common {
     /// Override world.seed.
     #[arg(long)]
     pub seed: Option<u64>,
+    /// Override world.generator: classic (the default) or next (the modular generator, a preview).
+    #[arg(long, value_name = "classic|next")]
+    pub generator: Option<terragen::GeneratorKind>,
     /// Number of worker threads (default: all cores).
     #[arg(long, short = 'j')]
     pub threads: Option<usize>,
