@@ -1241,7 +1241,11 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             let lc = vec2<f32>(0.5 * (lr.x + lr.z), 0.5 * (lr.y + lr.w));
             let lot_dq = st_rot2(lc - ublk, -theta);
             let dl = st_dens_at(pl, q, lot_dq, e.n, dmul);
-            let built = u01k(lh, 3lu) < pow(dl, 0.7) * 1.05;
+            var edge = 1.0;
+            if (fm == SF_CITY) {
+                edge = smoothstep1(0.3, 0.42, dl);
+            }
+            let built = u01k(lh, 3lu) < pow(dl, 0.7) * 1.05 * edge;
             let a = pl.arch;
             let ut = u01k(lh, 12lu);
             let euro = a == 3u || a == 5u || a == 6u || a == 8u || a == 9u || a == 11u || a == 4u;

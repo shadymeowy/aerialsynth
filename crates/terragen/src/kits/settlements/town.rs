@@ -1172,7 +1172,10 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     let lc = DVec2::new(0.5 * (lr[0] + lr[2]), 0.5 * (lr[1] + lr[3]));
                     let lot_dq = rot2(lc - ublk, -theta);
                     let dl = dens_at(lot_dq);
-                    let built = u01k(lh, 3) < dl.powf(0.7) * 1.05;
+                    // (a town's lots end where its streets do: houses strewn over the fields
+                    // beyond read as a broken town)
+                    let edge = if fm == form::CITY as u32 { smoothstep(0.3, 0.42, dl) } else { 1.0 };
+                    let built = u01k(lh, 3) < dl.powf(0.7) * 1.05 * edge;
                     // typology
                     let a = pl.arch;
                     let ut = u01k(lh, 12);
