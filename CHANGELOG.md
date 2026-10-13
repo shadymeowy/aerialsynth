@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Example `camera-footprint`** (`examples/camera-footprint`, `cargo run --release -p
+  camera-footprint`): a teaching program, read top to bottom, that makes the coordinate frames
+  explicit (geodetic ↔ ECEF ↔ ENU ↔ camera ↔ pixels; fractional XYZ tiles ↔ stitched-map pixels).
+  It renders an oblique and a nadir pinhole image from one position (with the bindings'
+  `Camera`), intersects the oblique image's corner rays with the elevation tiles, prints the
+  corners in GPS / ECEF and as fractional tiles with the tile range, stitches the albedo and
+  elevation tiles, draws the footprint, and warps the map into the camera by the homography of
+  the 4 corners (DLT); a check against the rendered depth measures the alignment.
+
 - **Visual polish, round B** (see the kits' Known limits): tower karst on a rounder, taller profile with forest paint on
   the walls; fjords as narrow troughs (new `Carve::narrow` in the carve hook: the valley's extent from the walls alone);
   folds and fault blocks taller, with coherent regional strike, fault basins flat; canyon depth 400-1500 m
