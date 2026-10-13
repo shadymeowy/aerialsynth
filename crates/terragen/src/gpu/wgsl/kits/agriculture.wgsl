@@ -626,8 +626,19 @@ fn agri_draw(s: ptr<function, Stack>, pl: Plan) {
     var ly = layer_paint(a, col, cls);
     ly.dh = dh * k - 0.6 * m.micro;
     ly.hmode = HM_ADD;
+    // lit greenhouses
+    if (pl.sys == AG_GREENH) {
+        var lit = 0.0;
+        if (cls == LC_GREENHOUSE && u01k(pc.id, 41lu) < AG_GH_LIT) {
+            lit = cov;
+        }
+        ly.emit = AG_GH_GLOW * (lerp(cult * 0.9 * inside_mean * d.kw.x * AG_GH_LIT, lit, k) * keep);
+    }
     composite(s, ly);
 }
+
+const AG_GH_LIT: f32 = 0.35;
+const AG_GH_GLOW: vec3<f32> = vec3<f32>(0.9, 0.5, 0.2);
 
 // ---------------------------------------------------------------- parcels
 

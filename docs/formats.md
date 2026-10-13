@@ -185,7 +185,7 @@ display colour and material of every class. The shaders get it as generated WGSL
 | 72 | `vineyard` | vineyard | agriculture | 11 | `#8c5a8c` |  |
 | 73 | `plantation` | plantation | agriculture | 11 | `#468232` |  |
 | 74 | `pasture` | pasture | agriculture | 8 | `#aad264` |  |
-| 75 | `greenhouse` | greenhouse | agriculture | 12 | `#dce6f0` | glint 0.6, emissive 0.3 |
+| 75 | `greenhouse` | greenhouse | agriculture | 12 | `#dce6f0` | glint 0.6 |
 | 76 | `fallow` | fallow / ploughed | agriculture | 11 | `#966e46` |  |
 | 77 | `hedgerow` | hedgerow / shelterbelt | forest | 10 | `#3c7832` |  |
 | 78 | `farmyard` | farmyard | built | 17 | `#be8c6e` |  |

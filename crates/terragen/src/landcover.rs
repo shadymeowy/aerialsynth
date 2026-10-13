@@ -209,7 +209,7 @@ classes! {
     72 VINEYARD "vineyard" "vineyard" Agriculture CROP [140, 90, 140] M;
     73 PLANTATION "plantation" "plantation" Agriculture CROP [70, 130, 50] M;
     74 PASTURE "pasture" "pasture" Agriculture GRASS [170, 210, 100] M;
-    75 GREENHOUSE "greenhouse" "greenhouse" Agriculture BUILDING [220, 230, 240] mat(0.12, 0.08, 0.6, 0.3);
+    75 GREENHOUSE "greenhouse" "greenhouse" Agriculture BUILDING [220, 230, 240] mat(0.12, 0.08, 0.6, 0.0);
     76 FALLOW "fallow" "fallow / ploughed" Agriculture CROP [150, 110, 70] M;
     77 HEDGEROW "hedgerow" "hedgerow / shelterbelt" Forest FOREST [60, 120, 50] M;
     78 FARMYARD "farmyard" "farmyard" Built URBAN [190, 140, 110] M;

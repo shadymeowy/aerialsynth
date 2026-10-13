@@ -730,8 +730,20 @@ fn draw(s: &mut Stack, pl: &Plan) {
     };
     let a = cov_m * keep;
     s.m.field_cov = a;
-    s.composite(Layer { cov: a, albedo: col, dh: dh * k - 0.6 * m.micro, hmode: hmode::ADD, cls, ..Default::default() });
+    // lit greenhouses (horticultural lamps; design §8 emission): an orange glow through the
+    // roofs of some, the system's mean where the parcels are not resolved
+    let glow = if pl.sys == sys::GREENH {
+        let lit = if cls == CLS_GREENHOUSE && u01k(pc.id, 41) < GH_LIT { cov } else { 0.0 };
+        lerp(cult * 0.9 * inside_mean * d.kw[0] * GH_LIT, lit, k) * keep
+    } else {
+        0.0
+    };
+    s.composite(Layer { cov: a, albedo: col, dh: dh * k - 0.6 * m.micro, hmode: hmode::ADD, cls, emit: GH_GLOW * glow, ..Default::default() });
 }
+
+/// Share of the greenhouses lit at night, and their glow (emission, linear: sodium lamps).
+const GH_LIT: f64 = 0.35;
+const GH_GLOW: DVec3 = DVec3::new(0.9, 0.5, 0.2);
 
 /// The share of quarter sections with a pivot (dry ecoregions).
 fn pivot_share(e: &EcoV) -> f64 {
