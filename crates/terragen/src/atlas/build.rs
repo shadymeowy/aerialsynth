@@ -220,9 +220,14 @@ struct WindIn {
 
 /// The latitude whose circulation belt (ITCZ, trades, subtropical high, westerlies) lies at
 /// `lat` in a season (`season` +1 July, −1 January): the belts follow the sun, more over land.
+
 fn belt_latitude(ac: &crate::config::AtlasConfig, lat: f64, coast_km: f64, season: f64) -> f64 {
     let landness = smoothstep(-300.0, 1500.0, coast_km);
-    (lat - (4.0 + 7.0 * landness * ac.monsoon.min(1.5)) * season).clamp(-90.0, 90.0)
+    // (the heated continents pull the belts far only in the tropics and subtropics: shifted by
+    // 11° at 55° too, the winter polar easterlies dried the continents' interiors into a
+    // monsoon climate up to the Arctic)
+    let lo = 1.0 - smoothstep(35.0, 50.0, lat.abs());
+    (lat - (4.0 + 7.0 * landness * lo * ac.monsoon.min(1.5)) * season).clamp(-90.0, 90.0)
 }
 
 /// Prevailing surface wind (m/s, tangent vector) in a season: `season` +1 July (belts shifted
@@ -304,7 +309,7 @@ fn advect(
         // winter: the storm tracks bring their rain to the west coasts)
         let lw = gauss(lat.abs(), 18.0, 14.0) * lf * ac.monsoon;
         let interior = gauss(lat.abs(), 42.0, 16.0) * lf * smoothstep(200.0, 1200.0, wi.coast_km);
-        let mons = if summer { 1.0 + 1.2 * lw + 0.8 * interior } else { 1.0 / (1.0 + lw + 1.5 * interior) };
+        let mons = if summer { 1.0 + 1.2 * lw + 0.5 * interior } else { 1.0 / (1.0 + lw + 0.8 * interior) };
         let stab = 1.0 - 0.85 * cold2[k];
         let high = if summer { 1.0 - 0.7 * lf } else { 1.0 };
         let rate = rain_rate(le, high) * stab * mons * (0.45 * moist2[k]).exp() * (-K_DESCENT * (hb - h).max(0.0)).exp();
@@ -870,7 +875,9 @@ fn draw_archetype(k: Koppen, elev: f64, u: f64) -> Archetype {
         Cwa | Cwb | Cwc => vec![(MonsoonPaddy, 4.0), (SavannaPastoral, 1.0), (Highland, 1.0)],
         Cfa | Cfb | Cfc => vec![(TemperateVillage, 3.0), (SurveyGrid, 3.0), (MonsoonPaddy, 1.0)],
         Dsa | Dsb | Dsc | Dsd => vec![(SteppeNomadic, 2.0), (Highland, 1.0), (TemperateVillage, 1.0)],
-        Dwa | Dwb | Dwc | Dwd => vec![(MonsoonPaddy, 2.0), (SteppeNomadic, 2.0), (Boreal, 1.0)],
+        Dwa | Dwb => vec![(MonsoonPaddy, 2.0), (SteppeNomadic, 2.0), (Boreal, 1.0)],
+        // (no paddies in the subarctic: the cold dry-winter forests are the taiga's)
+        Dwc | Dwd => vec![(Boreal, 4.0), (SteppeNomadic, 1.0)],
         Dfa | Dfb => vec![(TemperateVillage, 3.0), (SurveyGrid, 3.0), (Boreal, 1.0)],
         Dfc | Dfd => vec![(Boreal, 4.0), (Arctic, 1.0)],
         ET | EF => vec![(Arctic, 4.0), (Boreal, 1.0)],
