@@ -77,38 +77,57 @@ pub fn frame_times(scn: &Scenario, spec: &CameraSpec, win: Window) -> Result<Vec
     uniform_times(win, spec.time_offset, spec.frame_rate, scn.output.max_frames)
 }
 
-/// Rough per-tile elevation range from the generator (pass A at a coarse grid) + margins.
+/// Rough per-tile elevation range from the generator (pass A at a coarse grid) + margins. A
+/// tile's children are estimated with it, in the same evaluation (the selection refines most
+/// tiles it visits: one GPU round trip instead of five).
 pub fn generator_range_estimator(gen: &Generator) -> impl Fn(TileId) -> (f32, f32) + Sync + '_ {
     let cache: Mutex<HashMap<TileId, (f32, f32)>> = Mutex::new(HashMap::new());
     move |id: TileId| {
         if let Some(r) = cache.lock().get(&id) {
             return *r;
         }
-        let b = id.bounds();
-        let size = (b.lon_max - b.lon_min).abs() * gen.world.ell.a * ((b.lat_min + b.lat_max) * 0.5).cos();
-        let gsd = (size / 4.0).max(30.0);
-        let mut pts = Vec::with_capacity(16);
-        for j in 0..4 {
-            for i in 0..4 {
-                let v = (j as f64 + 0.5) / 4.0;
-                let y = id.y as f64 + v;
-                let lat = ((std::f64::consts::PI * (1.0 - 2.0 * y / (1u64 << id.z) as f64)).sinh()).atan();
-                let lon = b.lon_min + (b.lon_max - b.lon_min) * (i as f64 + 0.5) / 4.0;
-                pts.push((lat, lon, gsd));
+        let mut ids = vec![id];
+        if id.z < geodesy::tiles::MAX_ZOOM {
+            for k in 0..4u32 {
+                let c = TileId::new(id.z + 1, 2 * id.x + (k & 1), 2 * id.y + (k >> 1));
+                if !cache.lock().contains_key(&c) {
+                    ids.push(c);
+                }
+            }
+        }
+        let mut pts = Vec::with_capacity(16 * ids.len());
+        let mut sizes = Vec::with_capacity(ids.len());
+        for t in &ids {
+            let b = t.bounds();
+            let size = (b.lon_max - b.lon_min).abs() * gen.world.ell.a * ((b.lat_min + b.lat_max) * 0.5).cos();
+            let gsd = (size / 4.0).max(30.0);
+            sizes.push(size);
+            for j in 0..4 {
+                for i in 0..4 {
+                    let v = (j as f64 + 0.5) / 4.0;
+                    let y = t.y as f64 + v;
+                    let lat = ((std::f64::consts::PI * (1.0 - 2.0 * y / (1u64 << t.z) as f64)).sinh()).atan();
+                    let lon = b.lon_min + (b.lon_max - b.lon_min) * (i as f64 + 0.5) / 4.0;
+                    pts.push((lat, lon, gsd));
+                }
             }
         }
         // (a failed GPU evaluation leaves the range wide open)
-        let (mut lo, mut hi) = match gen.terrain_points(&pts) {
-            Ok(t) => t.iter().map(|t| t.surface()).fold((f64::MAX, f64::MIN), |(lo, hi), g| (lo.min(g), hi.max(g))),
-            Err(_) => (-11_000.0, 9_000.0),
-        };
-        if lo > hi {
-            (lo, hi) = (-11_000.0, 9_000.0);
+        let ts = gen.terrain_points(&pts).ok();
+        let mut c = cache.lock();
+        for (k, t) in ids.iter().enumerate() {
+            let (mut lo, mut hi) = match &ts {
+                Some(ts) => ts[16 * k..16 * (k + 1)].iter().map(|t| t.surface()).fold((f64::MAX, f64::MIN), |(lo, hi), g| (lo.min(g), hi.max(g))),
+                None => (-11_000.0, 9_000.0),
+            };
+            if lo > hi {
+                (lo, hi) = (-11_000.0, 9_000.0);
+            }
+            let span = hi - lo;
+            let size = sizes[k];
+            c.insert(*t, ((lo - 40.0 - 0.3 * span) as f32, (hi + 60.0 + 0.3 * span + 0.02 * size) as f32));
         }
-        let span = hi - lo;
-        let r = ((lo - 40.0 - 0.3 * span) as f32, (hi + 60.0 + 0.3 * span + 0.02 * size) as f32);
-        cache.lock().insert(id, r);
-        r
+        c[&id]
     }
 }
 

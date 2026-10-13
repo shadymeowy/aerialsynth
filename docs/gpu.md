@@ -154,9 +154,13 @@ and builds the same world:
     holds their heights, flow targets (steepest descent) and sources; each query's channel
     pieces are gathered from it in the CPU's lattice order.
   * **Host** (`gpu/host.rs`): only site lists remain: lake levels (minimum over the rim), sink
-    lakes, land-use regions, towns and their overlaps, ecoregions, the kits' linear features
-    and stamps. Their inputs come from batched GPU point evaluations, cached across batches.
-    The GPU reports which lakes, regions, town cells and ecoregions a batch needs.
+    lakes, land-use regions, towns and their overlaps, ecoregions. Their inputs come from
+    batched GPU point evaluations, cached across batches. The GPU reports which lakes, regions,
+    town cells and ecoregions a batch needs. The kits' linear features and stamps are built on
+    a host thread while the GPU runs pass A (`features::build_areas`: the kits' `prepare` hooks,
+    then the tiles in parallel), with exact host point evaluations (`World::terrain`, as the
+    CPU backend: the kits re-take close decisions exactly, so either backend's samples give the
+    same features, and GPU evaluations cost a round trip per step of a chain of decisions).
   * **Tables** (world-constant, group 0): the atlas (binding 5) and the biome registry —
     biomes, crown layers, zones, kernel layers with their calibrated means, per-GSD-band layer
     lists (bindings 6–11). Per batch (group 1): ecoregions, features and their bins.

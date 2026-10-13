@@ -444,7 +444,9 @@ pub host: Option<fn(&mut HostCtx, &Area) -> Features>   // in `Kit`
 ```
 
 `HostCtx` gives the world and point evaluations of the terrain (`ctx.terrain(lat, lon, gsd)`:
-`None` while the GPU evaluates it — return what you have; the host re-runs you), identical on
+exact host evaluations on both backends; a point source may still answer `None` while it
+evaluates elsewhere, as the GPU-rounds parity test's does — return what you have; the host
+re-runs you; `ctx.points.exact()` tells whether the samples are exact), identical on
 both backends. Lists are cached per area; a feature must be a pure function of the world and
 its own neighbourhood (never of the tile). The area of a low-zoom tile spans thousands of
 kilometres (`area.radius`): return nothing where your features are far below its pixel
@@ -452,6 +454,27 @@ kilometres (`area.radius`): return nothing where your features are far below its
 visits hundreds of millions of lattice cells: minutes per tile). Per sample, `s.segments()` / `s.stamps()` (WGSL
 `feat_seg_*`, `feat_stamp_*`) give the bin's features, and `features::seg_frame(seg, p)` the
 signed distance, along-distance and fraction — the `aux` of the `linear` and `stamp` kernels.
+
+**Host performance.** Host work is on the critical path of the GPU generator (the GPU waits
+for a batch's features), so keep it cheap, parallel and computed once:
+
+* Memoize pure functions of the world in shared tables, not thread-local maps: the tiles of a
+  batch are built in parallel and neighbours share most items. `crate::memo::Memo<K, V>`
+  (a static, sharded, bounded table: `static M: Memo<K, V> = Memo::new(cap)`, `M.get_or(key,
+  || compute())`; put `world.cache_key` in the key). A value may be computed twice by two
+  threads at once (it must not matter); a thread-local map in front pays only for hot lookups
+  of cheap values.
+* Items that many areas of a batch share and that cost much (the transport kit's routes) belong
+  in `Kit::prepare(world, areas)`: it runs before the batch's `host` calls and computes each
+  item once, in parallel (e.g. the union of the areas' edges, longest first); `host` then finds
+  them memoized. It must not change what `host` returns.
+* Point queries of the world come with per-query-cell lists: `World::river_segments_of` with a
+  radius ≤ 100 m (a point evaluation) filters the pieces its query cell can select,
+  `instances::near` with `r = 0` the instances of its query cell — prefer them to wider
+  queries per point.
+* Ask for everything you will need at once (one evaluation per item, not per step of a search),
+  and list nothing a tile does not draw at its pixel size (`area.gsd`): a low-zoom tile's disc
+  holds a continent.
 
 ---
 
