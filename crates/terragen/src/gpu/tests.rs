@@ -244,6 +244,9 @@ pub(crate) fn compare_tiles(g: &tilestore::TileData, c: &tilestore::TileData) ->
     push("emission", stats(&g.emission, &c.emission, 2.0, |v| v as f64));
     push("normal", stats(&g.normal, &c.normal, 2.0, |v| v as f64));
     push("landcover", stats(&g.landcover, &c.landcover, 0.5, |v| v as f64));
+    push("dtm", stats(&g.dtm, &c.dtm, 0.05, |v| v as f64));
+    // (ids: equal or not)
+    push("instance", stats(&g.instance, &c.instance, 0.5, |v| v as f64));
     out
 }
 
@@ -306,8 +309,9 @@ fn planet_tiles() {
     for (name, mean, bad, mx) in compare_tiles(&g, &c) {
         eprintln!("  {name:10} mean {mean:8.4} off {:7.3}% max {mx:8.2}", bad * 100.0);
         // (the elevation of z4 tiles differs by up to ~2 m at a few pixels per thousand, with
-        // or without the cut: 0.24 % here, 0.67 % at 4/8/5; the colours as at high zooms)
-        let tol = if name == "elevation" { 0.01 } else { 0.001 };
+        // or without the cut: 0.24 % here, 0.67 % at 4/8/5, and so does the bare ground under
+        // it; the colours as at high zooms)
+        let tol = if name == "elevation" || name == "dtm" { 0.01 } else { 0.001 };
         assert!(bad < tol, "tile {id}: {name} differs at {:.3}% of the pixels", bad * 100.0);
     }
 }

@@ -304,9 +304,10 @@ pub fn generator(scn: &Scenario) -> Result<Generator> {
     Generator::try_with_backend(scn.world.clone(), scn.tiles.generator)
 }
 
-/// The scenario's tile store for adding tiles (created if missing); it must hold this world.
+/// The scenario's tile store for adding tiles (created if missing, with the optional layers
+/// of `tiles.layers`); it must hold this world.
 pub fn open_or_create_store(scn: &Scenario, gen: &Generator) -> Result<TileStore> {
-    gen.open_store_rw(&scn.tiles.file)
+    gen.open_store_rw_with(&scn.tiles.file, &scn.tiles.optional_layers()?)
 }
 
 /// Where [`render_sequence`] and [`render_events`] report tiles generated lazily (`tiles.lazy`):

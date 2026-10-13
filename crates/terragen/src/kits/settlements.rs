@@ -316,7 +316,9 @@ fn place(s: &mut Stack, pl: &town::Pl, rel: f64, n: f64, q: DVec2, sun: DVec3) {
     let windows = ev.win * (0.55 * ev.rim * win_lit * band(2.6, gsd));
     let emit = (lamp * (1.0 - ev.roof) + windows + ev.em * e_blk) * dev;
     let in_dsm = if world.cfg.landuse.buildings_in_dsm { hmode::BLEND } else { hmode::NONE };
-    s.composite(Layer { cov, albedo: col, dh: h, hmode: in_dsm, cls, emit, lit: 1.0 - shade * e_blk, clear: 1.0, ..Default::default() });
+    // (the building's lot is the instance)
+    let inst = if e_blk >= 0.5 && ev.bid != 0 { crate::stack::instance_id(ev.bid) } else { 0 };
+    s.composite(Layer { cov, albedo: col, dh: h, hmode: in_dsm, cls, inst, emit, lit: 1.0 - shade * e_blk, clear: 1.0, ..Default::default() });
     if ev.tree > 0.0 && e_blk > 0.0 {
         let tc = crown(s) * (0.85 + 0.3 * u01k(ev.sid ^ 0x7EE, 1));
         s.composite(Layer { cov: ev.tree * e_blk, albedo: tc, dh: ev.tree_h, hmode: hmode::BLEND, ..Default::default() });
@@ -669,14 +671,19 @@ mod tests {
             let el = off(&g.elevation, &c.elevation, 0.05, |v| v as f64);
             let lc = off(&g.landcover, &c.landcover, 0.5, |v| v as f64);
             let em = off(&g.emission, &c.emission, 2.0, |v| v as f64);
+            // (the optional layers: bare ground, building lots)
+            let dtm = off(&g.dtm, &c.dtm, 0.05, |v| v as f64);
+            let inst = off(&g.instance, &c.instance, 0.5, |v| v as f64);
             eprintln!(
-                "{name} z{z}: rgb off {:.3}% elevation off {:.3}% landcover off {:.3}% emission off {:.3}%",
+                "{name} z{z}: rgb off {:.3}% elevation off {:.3}% landcover off {:.3}% emission off {:.3}% dtm off {:.3}% instance off {:.3}%",
                 rgb * 100.0,
                 el * 100.0,
                 lc * 100.0,
-                em * 100.0
+                em * 100.0,
+                dtm * 100.0,
+                inst * 100.0
             );
-            worst = worst.max(rgb).max(el).max(lc).max(em);
+            worst = worst.max(rgb).max(el).max(lc).max(em).max(dtm).max(inst);
         }
         assert!(worst < 0.005, "worst {:.3}%", worst * 100.0);
     }

@@ -46,6 +46,15 @@ pixel-centre registered, channels last, little-endian:
 | normal | i8 | 3 | unit surface normal (east, north, up) × 127 |
 | landcover | u8 | 1 | class id: 0 unknown, 1 ocean, 2 lake, 3 river, 4 beach, 5 sand, 6 rock, 7 snow, 8 grass, 9 shrub, 10 forest, 11 crop, 12 building, 13 road, 14 wetland, 15 tundra, 16 bare, 17 urban; classes v2 add 20–110 (`docs/formats.md`) |
 | emission | u8 | 3 | night-time artificial light, linear radiance = 16 (v/255)³ |
+| dtm | f32 | 1 | *optional:* bare ground (DTM), metres above the WGS84 ellipsoid (the bed under water); `elevation - dtm` = heights above ground |
+| instance | u32 | 1 | *optional:* instance id (building lot, field, forest stand; hashed, in [2^23, 2^30)); 0 = none |
+
+The optional layers are in a store only when it was created with them (by the `next`
+generator: `world.generator: next`; the classic generator makes none): `tiles.layers: [dtm,
+instance]` in the config given to `as_open` / `World(...)` (a scenario's `tiles` section), off by
+default (they add about half to the store). `as_has_layer` / `World.layers` tell what a store
+holds; a layer it lacks is refused (`AS_ERR_INVALID_ARGUMENT` / `ValueError`). Stores of format
+version 1 (before the optional layers) open as before, without them (`docs/formats.md`).
 
 A generated tile is stored with all its layers, so the other layers of it are read, not
 generated. Tiles are deterministic: the same world gives the same bytes.
@@ -221,6 +230,7 @@ as_close(w);
 | `size_t as_layer_size(as_layer layer)` | bytes of a tile of `layer` (0: unknown layer) |
 | `int as_layer_describe(as_layer layer, as_layer_info *info)` | name, dtype, channels, element size, size |
 | `int as_max_zoom(const as_world *w)` | the world's max zoom |
+| `int as_has_layer(const as_world *w, as_layer layer)` | 1 if the store holds `layer` (the optional `AS_LAYER_DTM`, `AS_LAYER_INSTANCE`), 0 if not |
 | `int as_surface_height(const as_world *w, double lat_deg, double lon_deg, double *height_m)` | DSM height at a point (m above WGS84) |
 | `as_camera *as_camera_pinhole(const as_world *w, uint32_t width, uint32_t height, double hfov_deg, as_mount mount, as_backend backend)` | a pinhole camera (`AS_MOUNT_FORWARD` / `AS_MOUNT_NADIR`); NULL on error |
 | `as_camera *as_camera_open(const as_world *w, const char *scenario_yaml, const char *camera, as_backend backend)` | a scenario camera (`camera`: "/cam0", "0" or NULL = the first); NULL on error |

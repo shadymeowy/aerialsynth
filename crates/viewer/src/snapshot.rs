@@ -284,8 +284,8 @@ pub(crate) fn record(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Generat
         bail!("{}: key at t = {}: km must be > 0, fov in (0, 180), every value finite", path.display(), k.t);
     }
     for m in look.iter().filter_map(|k| k.mode.as_deref()) {
-        if !["surface", "elevation", "landcover", "relief"].contains(&m) {
-            bail!("{}: unknown mode {m:?} (surface, elevation, landcover, relief)", path.display());
+        if !["surface", "elevation", "landcover", "relief", "height", "instance"].contains(&m) {
+            bail!("{}: unknown mode {m:?} (surface, elevation, landcover, relief, height, instance)", path.display());
         }
     }
     if !(fps > 0.0 && fps.is_finite()) {

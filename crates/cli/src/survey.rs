@@ -636,7 +636,8 @@ struct Stills {
 
 impl Stills {
     fn new(scn: Scenario, gen: Arc<Generator>, tiles: &Path, plan: &Plan, hfov: f64) -> Result<Self> {
-        let store = Arc::new(gen.open_store_rw(tiles).with_context(|| format!("opening the tile store {}", tiles.display()))?);
+        let store =
+            Arc::new(gen.open_store_rw_with(tiles, &scn.tiles.optional_layers()?).with_context(|| format!("opening the tile store {}", tiles.display()))?);
         let mut spec = CameraSpec::example();
         spec.path = "/survey".into();
         spec.intrinsics = CameraConfig::pinhole_hfov(plan.size.0, plan.size.1, hfov);

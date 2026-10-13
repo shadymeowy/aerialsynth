@@ -7,6 +7,8 @@ struct Layer {
     dh: f32,
     hmode: u32,
     cls: u32,
+    /// instance id taken with `cls` (`Layer::inst`)
+    inst: u32,
     emit: vec3<f32>,
     lit: f32,
     relit: f32,
@@ -24,6 +26,7 @@ fn layer_none() -> Layer {
     l.dh = 0.0;
     l.hmode = HM_NONE;
     l.cls = 0u;
+    l.inst = 0u;
     l.emit = vec3<f32>(0.0);
     l.lit = 1.0;
     l.relit = 0.0;
@@ -71,6 +74,12 @@ struct Masks {
     veg: f32,
 }
 
+/// An instance id from a hash (`stack::instance_id`): 30 bits with bit 23 set.
+fn instance_id(h: u64) -> u32 {
+    let v = u32(h ^ (h >> 32u));
+    return (v & 0x3F7FFFFFu) | 0x00800000u;
+}
+
 /// The composite of layers 6–7 as a function of what lies below (`Deferred`).
 struct Deferred {
     k: f32,
@@ -81,6 +90,7 @@ struct Deferred {
     lb: f32,
     lmin: f32,
     cls: u32,
+    inst: u32,
 }
 
 fn deferred_none() -> Deferred {
@@ -93,6 +103,7 @@ fn deferred_none() -> Deferred {
     d.lb = 0.0;
     d.lmin = 1.0;
     d.cls = 0u;
+    d.inst = 0u;
     return d;
 }
 
@@ -113,6 +124,7 @@ struct Stack {
     col: vec3<f32>,
     height: f32,
     cls: u32,
+    inst: u32,
     lit: f32,
     emission: vec3<f32>,
     is_water: bool,
@@ -142,6 +154,7 @@ fn st_apply(s: ptr<function, Stack>, ly: Layer) {
     (*s).lit = min((*s).lit, ly.lit);
     if (a > 0.5 && ly.cls != 0u) {
         (*s).cls = ly.cls;
+        (*s).inst = ly.inst;
     }
     if (a > 0.5 && ly.water) {
         (*s).is_water = true;
@@ -179,6 +192,7 @@ fn st_defer(s: ptr<function, Stack>, ly: Layer) {
     d.lmin = min(d.lmin, ly.lit);
     if (a > 0.5 && ly.cls != 0u) {
         d.cls = ly.cls;
+        d.inst = ly.inst;
     }
     (*s).def = d;
 }
@@ -202,6 +216,7 @@ fn st_flush(s: ptr<function, Stack>) {
     (*s).lit = min((*s).lit * d.la + d.lb, d.lmin);
     if (d.cls != 0u) {
         (*s).cls = d.cls;
+        (*s).inst = d.inst;
     }
     (*s).def = deferred_none();
 }
@@ -607,6 +622,9 @@ fn layer_agriculture(s: ptr<function, Stack>) {
     var ly = layer_paint(a, fr.col, cls);
     ly.dh = fr.h - 0.6 * m.micro;
     ly.hmode = HM_ADD;
+    if (cls == LC_CROP && fr.id != 0lu) {
+        ly.inst = instance_id(fr.id);
+    }
     composite(s, ly);
 }
 
@@ -869,6 +887,9 @@ fn layer_canopy(s: ptr<function, Stack>) {
         }
         var ly = layer_paint(tr.cov, tc, cls);
         ly.dh = tr.h;
+        if (cls != LC_SHRUB) {
+            ly.inst = instance_id(stand);
+        }
         if ((cfg.flags & CF_TREES_DSM) != 0u) {
             ly.hmode = HM_MAX;
         }
@@ -1046,6 +1067,7 @@ fn stack_new(c: Ctx, t: Terrain, l: Local, pf: PixFields) -> Stack {
     s.col = vec3<f32>(0.0);
     s.height = l.ground;
     s.cls = LC_UNKNOWN;
+    s.inst = 0u;
     s.lit = 1.0;
     s.emission = vec3<f32>(0.0);
     s.is_water = false;
@@ -1142,6 +1164,7 @@ fn stack_surface(sp: ptr<function, Stack>) -> Surface {
     }
     o.height = (*sp).height;
     o.cls = (*sp).cls;
+    o.inst = (*sp).inst;
     o.lit = (*sp).lit;
     o.emission = (*sp).emission;
     return o;

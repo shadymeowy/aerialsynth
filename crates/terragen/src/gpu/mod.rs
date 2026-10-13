@@ -48,7 +48,7 @@ const NA: usize = N + 2;
 /// pass-A grid side (tile + 2-pixel apron)
 const NA2: usize = N + 4;
 const PB_F: usize = 12;
-const OUT_U: usize = 6;
+const OUT_U: usize = 8;
 const NBIN: usize = 17;
 const NODE_F: usize = 84;
 const NODE_IDS: usize = 10;
@@ -102,7 +102,7 @@ pub(crate) fn read_back<T: bytemuck::Pod>(g: &Gpu, buf: &wgpu::Buffer, n: usize)
     enc.copy_buffer_to_buffer(buf, 0, &rb, 0, bytes);
     g.queue.submit([enc.finish()]);
     g.map_read(&[rb.slice(..)])?;
-    let out = bytemuck::cast_slice::<u8, T>(&rb.slice(..).get_mapped_range()?).to_vec();
+    let out = bytemuck::pod_collect_to_vec::<u8, T>(&rb.slice(..).get_mapped_range()?);
     rb.unmap();
     Ok(out)
 }
@@ -258,7 +258,7 @@ const PB_STATE_FULL: bool = {
     }
     full
 };
-const PB_ST_F: usize = if PB_STATE_FULL { 52 } else { 28 };
+const PB_ST_F: usize = if PB_STATE_FULL { 55 } else { 29 };
 const _: () = {
     // stages start at step 0, increase, and the last holds at least step 9 (and 10: water)
     assert!(PB_STAGE_STEPS[0] == 0);
@@ -269,7 +269,7 @@ const _: () = {
     }
 };
 const PB_PFW: usize = 20;
-const PB_ACCW: usize = 5;
+const PB_ACCW: usize = 21;
 
 /// The slot of each stack step.
 const STEP_SLOTS: [usize; 11] = {
@@ -1494,6 +1494,8 @@ impl GpuGenerator {
                     normal: vec![0; n * 3],
                     landcover: vec![0; n],
                     emission: vec![0; n * 3],
+                    dtm: vec![0.0; n],
+                    instance: vec![0; n],
                     elev_min: from_orderable(!ranges[2 * t]),
                     elev_max: from_orderable(ranges[2 * t + 1]),
                 };
@@ -1507,6 +1509,8 @@ impl GpuGenerator {
                     }
                     td.elevation[k] = f32::from_bits(w[4]);
                     td.landcover[k] = w[5] as u8;
+                    td.dtm[k] = f32::from_bits(w[6]);
+                    td.instance[k] = w[7];
                 }
                 td
             })

@@ -736,7 +736,18 @@ fn draw(s: &mut Stack, pl: &Plan) {
     let col = field_tone(col) * (fv + mottle);
     let a = cov_m * keep;
     s.m.field_cov = a;
-    s.composite(Layer { cov: a, albedo: col, dh: dh * k - 0.6 * m.micro, hmode: hmode::ADD, cls, ..Default::default() });
+    // lit greenhouses (horticultural lamps; design §8 emission): an orange glow through the
+    // roofs of some, the system's mean where the parcels are not resolved; gone at coarse pixels
+    // (> ~300 m: the low zooms' town glow keeps its mean without them)
+    let glow = if pl.sys == sys::GREENH && gsd < GH_GSD {
+        let lit = if cls == CLS_GREENHOUSE && u01k(pc.id, 41) < GH_LIT { cov } else { 0.0 };
+        lerp(cult * 0.9 * inside_mean * d.kw[0] * GH_LIT, lit, k) * keep * (1.0 - smoothstep(0.5 * GH_GSD, GH_GSD, gsd))
+    } else {
+        0.0
+    };
+    // the parcel is the instance (its crops, not its borders, yards and ponds)
+    let inst = if cov > 0.0 && crate::landcover::group(cls) == crate::landcover::Group::Agriculture { crate::stack::instance_id(pc.id) } else { 0 };
+    s.composite(Layer { cov: a, albedo: col, dh: dh * k - 0.6 * m.micro, hmode: hmode::ADD, cls, inst, emit: GH_GLOW * glow, ..Default::default() });
 }
 
 /// A field colour, muted: 25 % towards its luminance.
@@ -744,6 +755,12 @@ fn field_tone(c: DVec3) -> DVec3 {
     let y = c.dot(DVec3::new(0.2126, 0.7152, 0.0722));
     mixc(c, DVec3::splat(y), 0.25)
 }
+
+/// Share of the greenhouses lit at night, their glow (emission, linear: sodium lamps) and the
+/// pixel size where it is gone.
+const GH_LIT: f64 = 0.2;
+const GH_GLOW: DVec3 = DVec3::new(0.25, 0.14, 0.05);
+const GH_GSD: f64 = 300.0;
 
 /// The share of quarter sections with a pivot (dry ecoregions).
 fn pivot_share(e: &EcoV) -> f64 {
@@ -1766,12 +1783,15 @@ mod tests {
     /// Per-pixel comparison of two tiles: (layer, share of pixels off) (rgb > 2 DN, elevation
     /// > 5 cm, class differs; `gpu::tests::compare_tiles` is private to the gpu module).
     #[cfg(feature = "gpu")]
-    fn off(g: &crate::TileData, c: &crate::TileData) -> [(&'static str, f64); 3] {
+    fn off(g: &crate::TileData, c: &crate::TileData) -> [(&'static str, f64); 5] {
         let n = g.elevation.len() as f64;
         let e = g.elevation.iter().zip(&c.elevation).filter(|(a, b)| (**a - **b).abs() > 0.05).count() as f64 / n;
         let r = g.rgb.iter().zip(&c.rgb).filter(|(a, b)| (**a as i32 - **b as i32).abs() > 2).count() as f64 / g.rgb.len() as f64;
         let l = g.landcover.iter().zip(&c.landcover).filter(|(a, b)| a != b).count() as f64 / n;
-        [("elevation", e), ("rgb", r), ("landcover", l)]
+        // (the optional layers: the emission of lit greenhouses, the parcels as instances)
+        let em = g.emission.iter().zip(&c.emission).filter(|(a, b)| (**a as i32 - **b as i32).abs() > 2).count() as f64 / g.emission.len() as f64;
+        let i = g.instance.iter().zip(&c.instance).filter(|(a, b)| a != b).count() as f64 / n;
+        [("elevation", e), ("rgb", r), ("landcover", l), ("emission", em), ("instance", i)]
     }
 
     /// The systems' tiles on the GPU are the CPU's (both backends: at most 0.5 % of the pixels

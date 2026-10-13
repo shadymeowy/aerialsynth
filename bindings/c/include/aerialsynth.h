@@ -25,7 +25,7 @@
 /**
  * Number of layers (valid layers are 0 .. AS_LAYER_COUNT - 1).
  */
-#define AS_LAYER_COUNT 6
+#define AS_LAYER_COUNT 8
 
 /**
  * Success.
@@ -177,6 +177,19 @@ typedef struct as_layer_info {
 #define AS_LAYER_EMISSION 5
 
 /**
+ * Optional: bare ground (DTM) in metres above the WGS84 ellipsoid at pixel centres (the bed under
+ * water); elevation - dtm = heights above ground. f32 x 1. Only in stores created with it
+ * (`tiles.layers: [dtm]`; `as_has_layer`).
+ */
+#define AS_LAYER_DTM 6
+
+/**
+ * Optional: instance id (hashed building lot, field or forest stand; 0 = none). u32 x 1. Only in
+ * stores created with it (`tiles.layers: [instance]`; `as_has_layer`).
+ */
+#define AS_LAYER_INSTANCE 7
+
+/**
  * unsigned 8-bit
  */
 #define AS_DTYPE_U8 0
@@ -190,6 +203,11 @@ typedef struct as_layer_info {
  * little-endian IEEE 754 binary32
  */
 #define AS_DTYPE_F32 2
+
+/**
+ * little-endian unsigned 32-bit
+ */
+#define AS_DTYPE_U32 3
 
 /**
  * The scenario's `render.backend` (`AS_BACKEND_AUTO` without a scenario).
@@ -378,6 +396,18 @@ int as_set_cache_mb(const struct as_world *w, size_t mb);
  * `w` is NULL or a handle from `as_open`.
  */
 int as_set_verbose(const struct as_world *w, int on);
+
+/**
+ * Does world `w`'s store hold `layer`? 1 yes, 0 no, `AS_ERR_INVALID_ARGUMENT` (`w` is NULL, an
+ * unknown layer). The base layers (0-5) always; the optional `AS_LAYER_DTM` and
+ * `AS_LAYER_INSTANCE` only when the store was created with them (`tiles.layers` of the config;
+ * never in stores of format version 1). `as_tile` and `as_tiles` refuse a layer the store lacks
+ * (`AS_ERR_INVALID_ARGUMENT`).
+ *
+ * # Safety
+ * `w` is NULL or a handle from `as_open`.
+ */
+int as_has_layer(const struct as_world *w, as_layer layer);
 
 /**
  * The highest zoom the world serves (`tiles.max_zoom` of its config, default 18), or -1 if `w`
