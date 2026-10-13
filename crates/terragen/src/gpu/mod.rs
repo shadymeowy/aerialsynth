@@ -102,7 +102,7 @@ pub(crate) fn read_back<T: bytemuck::Pod>(g: &Gpu, buf: &wgpu::Buffer, n: usize)
     enc.copy_buffer_to_buffer(buf, 0, &rb, 0, bytes);
     g.queue.submit([enc.finish()]);
     g.map_read(&[rb.slice(..)])?;
-    let out = bytemuck::cast_slice::<u8, T>(&rb.slice(..).get_mapped_range()?).to_vec();
+    let out = bytemuck::pod_collect_to_vec::<u8, T>(&rb.slice(..).get_mapped_range()?);
     rb.unmap();
     Ok(out)
 }

@@ -392,7 +392,7 @@ mod tests {
         g.map_read(&slices)?;
         let mut out = Vec::with_capacity(data.len());
         for s in &slices {
-            out.extend_from_slice(bytemuck::cast_slice(&s.get_mapped_range()?));
+            out.extend(bytemuck::pod_collect_to_vec::<u8, u32>(&s.get_mapped_range()?));
         }
         drop(slices);
         rbs.iter().for_each(|rb| rb.unmap());
