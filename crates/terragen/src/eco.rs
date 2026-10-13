@@ -247,9 +247,12 @@ pub fn ecotone_pick(w: &World, p: DVec3, gsd: f64, edge: f64) -> f64 {
     // (ragged patches: a strong 80 m octave; with a weak one the patches of a strongly
     // different neighbour read as smooth, hard-edged discs. A blended edge was tried: it broke
     // the LOD of the DSM, crowns and vegetation of two biomes do not blend linearly)
-    let n = 0.75 * perlin3(s ^ 0xEC7, p / 220.0) + 0.6 * perlin3(s ^ 0xEC8, p / 80.0) * band(80.0, gsd);
+    let b80 = band(80.0, gsd);
+    let n = 0.75 * perlin3(s ^ 0xEC7, p / 220.0) + 0.6 * perlin3(s ^ 0xEC8, p / 80.0) * b80;
     // ~uniform 0..1 (logistic of the noise over its spread)
-    let u = 1.0 / (1.0 + (-1.7 * n / 0.336).exp());
+    // (normalized by the spread of the octaves present: u stays uniform, so the patches cover
+    // the probability at every pixel size and a parent matches its children)
+    let u = 1.0 / (1.0 + (-1.7 * n / (0.3504 * (0.5625 + 0.36 * b80 * b80).sqrt())).exp());
     let crisp = if u < pb { 1.0 } else { 0.0 };
     pb + (crisp - pb) * ex
 }
