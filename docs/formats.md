@@ -28,9 +28,12 @@ Both files are HDF5 and open in h5py or any HDF5 reader. `terrain info FILE` sum
   is refused with a message.
 - **Optional layers:** `tiles.layers: [dtm, instance]` (scenario or bindings config) adds them
   to a **new** store; an existing store keeps its layers (a note names the ones it lacks).
-  Off by default: together they add about a quarter to a store (a z15–z17 town tile: ~0.35 MB
-  more on ~1.3 MB). Both backends generate them identically (the GPU / CPU parity tests compare
-  them like the other layers).
+  Off by default: they add about half to a store (2911 tiles of six survey views, z2–z18:
+  the base layers 390 KB per tile compressed, `dtm` 155 KB, `instance` 52 KB; the DTM's f32
+  heights compress like the DSM's). Both backends of the generator (`next`, the composite
+  stack) make them identically (the GPU / CPU parity tests compare them like the other
+  layers); a generator that does not make them (the frozen `classic` one) is for stores
+  without them. The renderers read only the base layers.
   - `dtm`: the bare ground under buildings and vegetation (the bed under water; pits and ponds
     below the ground: their surface), so `elevation - dtm` is the height of buildings, trees and
     water depth (nDSM ground truth).

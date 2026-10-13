@@ -138,6 +138,18 @@ output: { file: out/seq.h5, pose: { path: /pose, rate_hz: 200 } }
 | `render.water_glint` | the reflections of the glossy classes (water, glass, greenhouses, solar panels, wet tidal flats, ice; the class table's materials, [`formats.md`](formats.md)) |
 | `render.walls` | steep walls (facades, cliffs, steep canopy) get a wall material (floors and windows, lit windows at night; rock strata; canopy sides) instead of the top-down texture stretched down them (default on) |
 
+Walls (`render.walls`; before | after, GPU renders over the same tiles): CBD towers 100 m
+above the ground, tower karst from 300 m. Glossy water: the reflection of a river in forest
+(600 m, 20° down) was the bright horizon (silvery lines), now the banks where they rise above
+the reflected ray. Night (the `emission` layer, 22:00): airport (apron floods, blue taxiway
+edge lights), port, a gas flare, CBD facades with lit windows, wind turbines' red beacons near
+a village, lit greenhouses.
+
+![walls: CBD](images/render_walls_cbd.jpg)
+![walls: tower karst](images/render_walls_karst.jpg)
+![river reflection](images/render_river_reflection.jpg)
+![night sources](images/render_night_sources.jpg)
+
 ### Seasons
 
 The season of a render is its date: with `render.lighting.mode: clock` the sun and the moon

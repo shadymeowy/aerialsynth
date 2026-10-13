@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- **Rendering side** (design §8). *Walls:* steep faces (the geometric normal of the rendered
+  mesh from the G-buffer, slope > ~52–66°) get a wall material instead of the top-down texture
+  stretched down them: building facades from the roof's colour with floors, window bays and
+  lit windows at night (hashed), glass curtain walls on tall buildings and greenhouses
+  (reflecting with the wall's normal), rock strata on cliffs and karst towers, crown-coloured
+  canopy sides; lit with the geometric normal (`render.walls`, both renderers,
+  `render::walls`). *Materials:* the sun glint is Fresnel-weighted and normalized (Blinn-Phong,
+  capped), reflections show the banks where the DSM rises above the reflected ray (narrow
+  rivers in forest were silvery lines of horizon sky), snow and ice scatter forward
+  (`Material::forward`, a renderer-only `lc_forward` table). *Emission:* lit greenhouses through
+  the `emission` layer (35 % of them, sodium orange; the greenhouse material is no longer
+  self-emissive); runway / taxiway lights, port and stadium floods, flares and turbine beacons
+  were there. *Optional tile layers* (tile store format 2): `dtm` (bare ground) and `instance`
+  (building lots, fields, forest stands; `Layer::inst` through the stack, per-sample ids in
+  pass B) with `tiles.layers` (off by default: about +50 % store size); identical on both
+  backends (parity tests: ≤ 0.008 % of the pixels off); readable from Rust, C
+  (`AS_LAYER_DTM`, `AS_LAYER_INSTANCE`, `as_has_layer`) and Python (`World.layers`); viewer
+  modes *Height above ground*, *Instances*; version-1 stores open without them. Seasons are
+  the render date (documented; no `world.season` yet). Tesla P4, 960×540, GPU shading pass
+  18 → 20–21 ms (CBD), 22–23 → 26–27 ms (karst), whole frames +3–5 % (75–90 ms with read-back);
+  shade pipeline cold compile 0.39 → 0.65 s; pass B cold compile within the farm's noise in
+  stages 0, 1, 3 (+0.4–0.9 s), stage 2 +~3 s (A/B on one P4 under load: 40.0 / 41.8 / 27.0 /
+  35.4 → 40.9 / 42.2 / 30.3 / 35.8 s).
+
 - **Visual polish, round B** (see the kits' Known limits): tower karst on a rounder, taller profile with forest paint on
   the walls; fjords as narrow troughs (new `Carve::narrow` in the carve hook: the valley's extent from the walls alone);
   folds and fault blocks taller, with coherent regional strike, fault basins flat; canyon depth 400-1500 m

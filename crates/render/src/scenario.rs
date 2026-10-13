@@ -231,7 +231,7 @@ pub struct TilesConfig {
     pub generator: terragen::Backend,
     /// Optional layers of a new tile store besides the base ones (docs/formats.md): `dtm` (bare
     /// ground, f32) and `instance` (instance ids: building lots, fields, tree stands; u32). Off
-    /// by default: they make the store about 25 % larger. An existing store keeps its layers.
+    /// by default: they make the store about 50 % larger. An existing store keeps its layers.
     pub layers: Vec<String>,
 }
 

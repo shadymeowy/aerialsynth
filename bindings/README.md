@@ -47,7 +47,7 @@ pixel-centre registered, channels last, little-endian:
 
 The optional layers are in a store only when it was created with them: `tiles.layers: [dtm,
 instance]` in the config given to `as_open` / `World(...)` (a scenario's `tiles` section), off by
-default (they add about a quarter to the store). `as_has_layer` / `World.layers` tell what a store
+default (they add about half to the store). `as_has_layer` / `World.layers` tell what a store
 holds; a layer it lacks is refused (`AS_ERR_INVALID_ARGUMENT` / `ValueError`). Stores of format
 version 1 (before the optional layers) open as before, without them (`docs/formats.md`).
 
