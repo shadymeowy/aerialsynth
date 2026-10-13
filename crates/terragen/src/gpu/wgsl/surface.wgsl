@@ -631,20 +631,14 @@ fn field_explicit(r: Region, t: Terrain, q: vec2<f32>, p: vec3<f64>, gsd: f32, f
         fc = vec2<f32>(x0 + 0.5 * cw - shift, y0 + k * sh + 0.5 * sh);
         id = mix64(hc ^ u64(max(k, 0.0)));
     } else if (r.style == 1u) {
-        // irregular fields: Voronoi cells in a stretched frame, cell size varying over the region
-        let aspect = 1.0 + 2.2 * u01k(seed, 21lu);
-        let qs = vec2<f32>(q.x / aspect, q.y);
-        let scale = 0.7 + 0.6 * (0.5 + 0.5 * perlin3(seed ^ 0x5CA1lu, p * (1.0lf / 2500.0lf)));
-        let cell = r.fw / sqrt(aspect) * scale;
-        let wc = worley2(seed, qs, cell, 0.85);
-        let dn = wc.point2 - wc.point;
-        let nrm = length(vec2<f32>(dn.x / aspect, dn.y)) / max(length(dn), 1e-9);
-        edge = worley2_edge_dist(wc, qs) / max(nrm, 1e-6);
-        let rel = q - vec2<f32>(wc.point.x * aspect, wc.point.y);
-        id = wc.id;
-        fx = rel.x;
-        fy = rel.y;
-        fc = vec2<f32>(wc.point.x * aspect, wc.point.y);
+        // irregular fields: cadastral blocks cut into fields of varied size (the agriculture
+        // kit's partition)
+        let pc = agri_part_cad(seed, q, r.fw, 1.0 + 0.8 * u01k(seed, 21lu));
+        edge = pc.edge;
+        id = pc.id;
+        fx = pc.fx;
+        fy = pc.fy;
+        fc = pc.fc;
     } else {
         // centre pivots
         let s = r.fw;

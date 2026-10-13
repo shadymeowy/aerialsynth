@@ -114,7 +114,7 @@ pub mod kind {
 /// How a system's area is cut into parcels.
 mod part {
     pub const GRID: u32 = 0;
-    pub const VOR: u32 = 1;
+    pub const VOR: u32 = 1; // cadastral blocks (`part_cad`)
     pub const STRIP: u32 = 2;
     pub const PIVOT: u32 = 3;
     pub const SECTION: u32 = 4;
@@ -159,7 +159,7 @@ const SYS: [SysDef; sys::N] = {
         SysDef { part: SECTION, size: [402.336, 402.336], kinds: [CROP, PASTURE, FALLOW, POND], kw: [0.84, 0.07, 0.07, 0.02], borders: [BELT, DITCH], bp: [0.06, 0.08], ..D },
         SysDef { part: GRID, size: [1300.0, 900.0], kinds: [CROP, FALLOW, PASTURE, HAY], kw: [0.68, 0.22, 0.06, 0.04], borders: [BELT, TRACK], bp: [0.82, 0.1], ..D },
         SysDef { part: STRIP, size: [520.0, 24.0], kinds: [CROP, FALLOW, HAY, PASTURE], kw: [0.72, 0.12, 0.12, 0.04], borders: [MARGIN, MARGIN], bp: [1.0, 0.0], ..D },
-        SysDef { part: VOR, size: [170.0, 1.5], kinds: [PASTURE, CROP, HAY, FALLOW], kw: [0.5, 0.3, 0.14, 0.06], borders: [HEDGE, WALL], bp: [0.88, 0.06], slope: [0.3, 0.42], ..D },
+        SysDef { part: VOR, size: [170.0, 1.5], kinds: [PASTURE, CROP, HAY, FALLOW], kw: [0.5, 0.3, 0.14, 0.06], borders: [HEDGE, WALL], bp: [0.55, 0.06], slope: [0.3, 0.42], ..D },
         SysDef { part: VOR, size: [48.0, 1.8], kinds: [CROP, FALLOW, PASTURE, YARD], kw: [0.6, 0.24, 0.1, 0.06], borders: [MARGIN, HEDGE], bp: [0.6, 0.08], slope: [0.3, 0.42], trees: 0.3, ..D },
         SysDef { part: GRID, size: [130.0, 90.0], kinds: [PADDY, POND, CROP, YARD], kw: [0.9, 0.025, 0.065, 0.01], borders: [NONE, CANAL], bp: [0.75, 0.25], slope: [0.7, 0.9], terraces: 1.0, ..D },
         SysDef { part: VOR, size: [110.0, 1.3], kinds: [CROP, OLIVE, FALLOW, ORCHARD], kw: [0.42, 0.28, 0.2, 0.1], borders: [WALL, MARGIN], bp: [0.75, 0.25], slope: [0.7, 0.9], terraces: 1.0, ..D },
@@ -167,7 +167,7 @@ const SYS: [SysDef; sys::N] = {
         SysDef { part: VOR, size: [190.0, 1.4], kinds: [OLIVE, ORCHARD, CROP, FALLOW], kw: [0.55, 0.2, 0.15, 0.1], borders: [WALL, MARGIN], bp: [0.5, 0.5], slope: [0.6, 0.8], ..D },
         SysDef { part: GRID, size: [480.0, 360.0], kinds: [PALM, RUBBER, TEA, CROP], kw: [0.45, 0.22, 0.15, 0.18], borders: [TRACK, MARGIN], bp: [0.9, 0.1], slope: [0.6, 0.8], ..D },
         SysDef { part: GRID, size: [95.0, 60.0], kinds: [GREENH, CROP, FALLOW, POND], kw: [0.76, 0.13, 0.09, 0.02], borders: [TRACK, MARGIN], bp: [0.25, 0.75], ..D },
-        SysDef { part: GRID, size: [850.0, 650.0], kinds: [PASTURE, HAY, FALLOW, POND], kw: [0.82, 0.12, 0.04, 0.02], borders: [MARGIN, HEDGE], bp: [0.85, 0.15], slope: [0.38, 0.5], ..D },
+        SysDef { part: GRID, size: [420.0, 300.0], kinds: [PASTURE, HAY, CROP, POND], kw: [0.6, 0.22, 0.16, 0.02], borders: [MARGIN, HEDGE], bp: [0.8, 0.2], slope: [0.38, 0.5], ..D },
         SysDef { part: PIVOT, size: [805.0, 805.0], kinds: [CROP, FALLOW, CROP, CROP], kw: [0.75, 0.25, 0.0, 0.0], borders: [NONE, NONE], bp: [1.0, 0.0], ..D },
         SysDef { part: GRID, size: [2200.0, 1500.0], kinds: [PASTURE, HAY, FALLOW, POND], kw: [0.86, 0.04, 0.08, 0.02], borders: [TRACK, MARGIN], bp: [0.4, 0.6], slope: [0.38, 0.5], ..D },
     ]
@@ -728,9 +728,21 @@ fn draw(s: &mut Stack, pl: &Plan) {
     } else {
         col
     };
+    // the look of real fields: muted colours (a quarter towards their grey) and a broad variation
+    // of soil and growth across the fields (as the core's)
+    let fv = 1.0 + 0.09 * s.sm.pf_lazy(s.pf, crate::surface::PF_FIELD_VAR);
+    // (and soil and moisture patches of tens of metres within every parcel)
+    let mottle = if cov > 0.0 { 0.11 * perlin3(pc.id ^ 0x3077, p / 24.0) * band(24.0, gsd) } else { 0.0 };
+    let col = field_tone(col) * (fv + mottle);
     let a = cov_m * keep;
     s.m.field_cov = a;
     s.composite(Layer { cov: a, albedo: col, dh: dh * k - 0.6 * m.micro, hmode: hmode::ADD, cls, ..Default::default() });
+}
+
+/// A field colour, muted: 25 % towards its luminance.
+fn field_tone(c: DVec3) -> DVec3 {
+    let y = c.dot(DVec3::new(0.2126, 0.7152, 0.0722));
+    mixc(c, DVec3::splat(y), 0.25)
 }
 
 /// The share of quarter sections with a pivot (dry ecoregions).
@@ -746,7 +758,7 @@ fn parcel(pl: &Plan, d: &SysDef, q: DVec2, p: DVec3, fw: f64) -> Parcel {
         part::GRID => {
             part_grid(seed, q, p, d.size[0] * pl.scale, d.size[1] * pl.scale, if pl.sys == sys::SHELTER || pl.sys == sys::PASTURE { 2.5 } else { 1.0 })
         }
-        part::VOR => part_vor(seed, q, d.size[0] * pl.scale, d.size[1]),
+        part::VOR => part_cad(seed, q, d.size[0] * pl.scale, d.size[1]),
         part::STRIP => part_strip(seed, q, d.size[0] * pl.scale, d.size[1] * pl.scale),
         part::PIVOT => part_pivot(seed, q, if u01k(seed, 4) < 0.5 { 805.0 } else { 402.0 }, fw),
         _ => part_section(seed, q, fw, pivot_share(&pl.e)),
@@ -804,27 +816,100 @@ fn part_grid(seed: u64, q0: DVec2, p: DVec3, w: f64, h: f64, sub: f64) -> Parcel
     }
 }
 
-/// Irregular parcels: Voronoi cells in a frame stretched by up to `aspect`.
-fn part_vor(seed: u64, q: DVec2, cell0: f64, aspect_max: f64) -> Parcel {
-    let aspect = 1.0 + (aspect_max - 1.0) * u01k(seed, 21);
-    let qs = DVec2::new(q.x / aspect, q.y);
-    let cell = cell0 / aspect.sqrt();
-    let wc = worley2(seed, qs, cell, 0.85);
-    let dn = wc.point2 - wc.point;
-    let nrm = DVec2::new(dn.x / aspect, dn.y).length() / dn.length().max(1e-9);
-    let e = worley2_edge_dist(&wc, qs) / nrm.max(1e-6);
-    let c = DVec2::new(wc.point.x * aspect, wc.point.y);
+/// A block of a cadastral lattice: rows of jittered height `b`, each cut into blocks of
+/// jittered width `b` with a per-row offset (T-junctions, no regular quilt). Returns the
+/// block's id, centre (region frame), the sample's offset from it, its size, the distance to
+/// its border.
+fn cad_block(seed: u64, q: DVec2, b: f64) -> (u64, DVec2, DVec2, DVec2, f64) {
+    let mut j = (q.y / b).floor() as i64;
+    if q.y < row_line(seed, j, b) {
+        j -= 1;
+    } else if q.y >= row_line(seed, j + 1, b) {
+        j += 1;
+    }
+    let (y0, y1) = (row_line(seed, j, b), row_line(seed, j + 1, b));
+    let shift = u01(hash1(seed, j)) * b;
+    let x = q.x + shift;
+    let mut i = (x / b).floor() as i64;
+    if x < col_line(seed, j, i, b) {
+        i -= 1;
+    } else if x >= col_line(seed, j, i + 1, b) {
+        i += 1;
+    }
+    let (x0, x1) = (col_line(seed, j, i, b), col_line(seed, j, i + 1, b));
+    let size = DVec2::new(x1 - x0, y1 - y0);
+    let c = DVec2::new(x0 + 0.5 * size.x - shift, y0 + 0.5 * size.y);
     let rel = q - c;
-    Parcel { id: wc.id, fx: rel.x, fy: rel.y, edge: e, fc: c, size: cell0, inside: 1.0, bedge: e, circ: 0.0 }
+    let edge = (0.5 * size.x - rel.x.abs()).min(0.5 * size.y - rel.y.abs());
+    (hash2(seed ^ 0xCAD, i, j), c, rel, size, edge)
 }
 
-/// Furlongs (Voronoi cells of `w`) of parallel strips `sw` wide, along a per-furlong axis, with
-/// a reverse-S in some.
+/// Cadastral parcels (bocage, smallholder plots, terraces, groves): blocks of about 2.6 ×
+/// `cell` (`cad_block`), each in its own frame turned by up to ±13°, cut by up to five
+/// recursive splits (the longer side at 0.3–0.7; with `aspect_max` > 1, sometimes the shorter
+/// one: long strips) into fields of varied size around `cell`. Mostly four-sided fields of
+/// different sizes and orientations, as real field maps, not a Voronoi honeycomb.
+fn part_cad(seed: u64, q: DVec2, cell: f64, aspect_max: f64) -> Parcel {
+    let b = 2.6 * cell;
+    let (hb, c, rel, size, bedge) = cad_block(seed, q, b);
+    let ang = 0.45 * (u01k(hb, 1) - 0.5);
+    let (sa, ca) = ang.sin_cos();
+    // the sample and the block's bounding box in the turned frame
+    let u = rel.x * ca + rel.y * sa;
+    let v = -rel.x * sa + rel.y * ca;
+    let hx = 0.5 * (size.x * ca.abs() + size.y * sa.abs());
+    let hy = 0.5 * (size.x * sa.abs() + size.y * ca.abs());
+    let (mut ax0, mut ay0, mut ax1, mut ay1) = (-hx, -hy, hx, hy);
+    let mut id = hb;
+    let strip_p = 0.6 * (aspect_max - 1.0);
+    for _ in 0..5 {
+        let (w, h) = (ax1 - ax0, ay1 - ay0);
+        let target = cell * (0.65 + 0.7 * u01k(id, 2));
+        if w * h < target * target {
+            break;
+        }
+        // split the longer side, or (strips) the shorter one while it stays wide enough
+        let mut split_x = w >= h;
+        if u01k(id, 4) < strip_p && w.min(h) > 0.9 * target {
+            split_x = !split_x;
+        }
+        let t = 0.3 + 0.4 * u01k(id, 3);
+        if split_x {
+            let xs = ax0 + t * w;
+            if u < xs {
+                ax1 = xs;
+                id = mix64(id ^ 0x11);
+            } else {
+                ax0 = xs;
+                id = mix64(id ^ 0x22);
+            }
+        } else {
+            let ys = ay0 + t * h;
+            if v < ys {
+                ay1 = ys;
+                id = mix64(id ^ 0x33);
+            } else {
+                ay0 = ys;
+                id = mix64(id ^ 0x44);
+            }
+        }
+    }
+    let lc = DVec2::new(0.5 * (ax0 + ax1), 0.5 * (ay0 + ay1));
+    let edge = (u - ax0).min(ax1 - u).min(v - ay0).min(ay1 - v).min(bedge);
+    let fc = c + DVec2::new(lc.x * ca - lc.y * sa, lc.x * sa + lc.y * ca);
+    Parcel { id, fx: u - lc.x, fy: v - lc.y, edge, fc, size: (ax1 - ax0).min(ay1 - ay0), inside: 1.0, bedge, circ: 0.0 }
+}
+
+/// `part_cad` for the core's irregular fields.
+pub(crate) fn cadastral_parcel(seed: u64, q: DVec2, cell: f64, aspect: f64) -> (u64, f64, f64, f64, DVec2) {
+    let pc = part_cad(seed, q, cell, aspect);
+    (pc.id, pc.fx, pc.fy, pc.edge, pc.fc)
+}
+
+/// Furlongs (cadastral blocks of about `w`) of parallel strips `sw` wide, along a per-furlong
+/// axis, with a reverse-S in some.
 fn part_strip(seed: u64, q: DVec2, w: f64, sw0: f64) -> Parcel {
-    let wc = worley2(seed ^ 0x57, q, w, 0.8);
-    let fid = wc.id;
-    let bedge = worley2_edge_dist(&wc, q);
-    let rel = q - wc.point;
+    let (fid, c0, rel, _, bedge) = cad_block(seed ^ 0x57, q, w);
     let ang = if u01k(fid, 1) < 0.5 { 0.0 } else { std::f64::consts::FRAC_PI_2 } + 0.3 * (u01k(fid, 2) - 0.5);
     let (sa, ca) = ang.sin_cos();
     let a = rel.x * ca + rel.y * sa;
@@ -834,7 +919,7 @@ fn part_strip(seed: u64, q: DVec2, w: f64, sw0: f64) -> Parcel {
     let sw = sw0 * (0.6 + 0.8 * u01k(fid, 3));
     let n = (c2 / sw).floor();
     let fy = c2 - n * sw;
-    let fc = wc.point + DVec2::new(-sa, ca) * ((n + 0.5) * sw);
+    let fc = c0 + DVec2::new(-sa, ca) * ((n + 0.5) * sw);
     Parcel { id: hash2(fid ^ 0x5751, n as i64, 0), fx: a, fy, edge: fy.min(sw - fy).min(bedge), fc, size: sw, inside: 1.0, bedge, circ: 0.0 }
 }
 
@@ -1075,22 +1160,21 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
             let (cc, row) = CROPS[c as usize];
             let ph = (px.season + 0.3 * (u01k(id, 20) - 0.5)).clamp(0.0, 1.0);
             col = stage(&cc, ph) * (0.92 + 0.16 * u01k(id, 8));
-            col *= 1.0 + 0.10 * perlin3(id, p / 35.0) * band(35.0, gsd) + 0.07 * perlin3(id ^ 1, p / 120.0) * band(120.0, gsd);
+            col *= 1.0 + 0.2 * perlin3(id, p / 35.0) * band(35.0, gsd) + 0.11 * perlin3(id ^ 1, p / 120.0) * band(120.0, gsd);
             // soil and growth texture (band-limited)
-            col *= 1.0 + 0.09 * perlin3(id ^ 0x7E1, p / 9.0) * band(9.0, gsd) + 0.06 * perlin3(id ^ 0x7E2, p / 2.8) * band(2.8, gsd);
+            col *= 1.0 + 0.15 * perlin3(id ^ 0x7E1, p / 7.0) * band(7.0, gsd) + 0.10 * perlin3(id ^ 0x7E2, p / 2.5) * band(2.5, gsd);
             let gz = perlin3(id ^ 0x6A0, p / 55.0) * band(55.0, gsd);
-            col = mixc(col, col * DVec3::new(1.1, 1.04, 0.84), 0.45 * smoothstep(0.0, 0.6, gz));
-            // headland: the rows turn parallel to the border
+            // growth zones (soil, moisture): yellower and greener patches of tens of metres
+            col = mixc(col, col * DVec3::new(1.12, 1.04, 0.82), 0.55 * smoothstep(0.0, 0.6, gz));
+            col = mixc(col, col * DVec3::new(0.84, 0.92, 0.86), 0.5 * smoothstep(0.0, 0.6, -gz));
+            // headland: a strip along the border driven more often (slightly darker)
             let hw = 8.0 + 10.0 * u01k(id, 11);
+            if pc.edge < hw {
+                col *= 0.96;
+            }
             // pivots: circular rows
             let rc = (pc.fx * pc.fx + pc.fy * pc.fy).sqrt();
-            let u = if pc.circ > 0.0 {
-                rc
-            } else if pc.edge < hw {
-                rv
-            } else {
-                ru
-            };
+            let u = if pc.circ > 0.0 { rc } else { ru };
             col *= 1.0 + row[1] * (std::f64::consts::TAU * u / row[0]).sin() * band(row[0], gsd);
             if pc.edge >= hw && (c == 0 || c == 2 || c == 3) {
                 let sp = 18.0 + 6.0 * (u01k(id, 15) * 3.0).floor();
@@ -1465,15 +1549,21 @@ fn draw_border(b: u32, edge: f64, col: DVec3, dh: f64, cls: u8, pc: &Parcel, px:
         }
         border::HEDGE | border::BELT => {
             let belt = b == border::BELT;
-            let hw = if belt { 6.0 + 4.0 * u01k(hb, 4) } else { 3.0 + 2.5 * u01k(hb, 4) };
+            let hw0 = if belt { 4.0 + 3.0 * u01k(hb, 4) } else { 1.0 + 1.0 * u01k(hb, 4) };
+            if edge.abs() > 1.5 * hw0 + fwb {
+                return (col, dh, cls);
+            }
+            let lam = if belt { 7.0 } else { 5.0 };
+            let clump = perlin3(hb, p / lam);
+            // crowns of different size along the hedge: its width varies (the mean below the pixel)
+            let hw = hw0 * (0.875 + 0.4 * clump * band(lam, gsd));
             let c = band_cov(edge, hw, fwb);
             if c <= 0.0 {
                 return (col, dh, cls);
             }
-            let clump = perlin3(hb, p / if belt { 7.0 } else { 5.0 });
             let tex = 1.0 + 0.18 * perlin3(hb ^ 1, p / 2.2) * band(2.2, gsd);
             let across = (1.0 - (edge.abs() / hw).powi(2)).max(0.0).sqrt();
-            let hc = px.crown * (if belt { 0.78 } else { 0.9 }) * (0.8 + 0.35 * clump) * tex * (0.72 + 0.4 * across);
+            let hc = px.crown * (if belt { 0.82 } else { 0.95 }) * (0.85 + 0.3 * clump) * tex * (0.82 + 0.3 * across);
             let along = 0.55 + 0.45 * (0.5 + 0.5 * clump);
             let h = if belt { 9.0 + 6.0 * u01k(hb, 2) } else { 3.0 + 4.0 * u01k(hb, 2) };
             (mixc(col, hc, c), lerp(dh, h * across * along, c), if c > 0.5 { CLS_HEDGEROW } else { cls })

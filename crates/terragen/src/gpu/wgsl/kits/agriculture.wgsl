@@ -621,6 +621,13 @@ fn agri_draw(s: ptr<function, Stack>, pl: Plan) {
             col = mean;
         }
     }
+    let fv = 1.0 + 0.09 * s_pf_lazy(s, PF_FIELD_VAR);
+    var mottle = 0.0;
+    if (cov > 0.0) {
+        mottle = 0.11 * perlin3(pc.id ^ 0x3077lu, p * (1.0lf / 24.0lf)) * band(24.0, gsd);
+    }
+    let y = dot(col, vec3<f32>(0.2126, 0.7152, 0.0722));
+    col = mixc(col, vec3<f32>(y), 0.25) * (fv + mottle);
     let a = cov_m * keep;
     (*s).m.field_cov = a;
     var ly = layer_paint(a, col, cls);
@@ -641,7 +648,7 @@ fn agri_parcel(pl: Plan, d: AgSys, q: vec2<f32>, p: vec3<f64>, fw: f32) -> Parce
             }
             return agri_part_grid(seed, q, p, d.size.x * pl.scale, d.size.y * pl.scale, sub);
         }
-        case 1u: { return agri_part_vor(seed, q, d.size.x * pl.scale, d.size.y); }
+        case 1u: { return agri_part_cad(seed, q, d.size.x * pl.scale, d.size.y); }
         case 2u: { return agri_part_strip(seed, q, d.size.x * pl.scale, d.size.y * pl.scale); }
         case 3u: {
             var sp = 402.0;
@@ -706,34 +713,109 @@ fn agri_part_grid(seed: u64, q0: vec2<f32>, p: vec3<f64>, w: f32, h: f32, sub: f
     return o;
 }
 
-fn agri_part_vor(seed: u64, q: vec2<f32>, cell0: f32, aspect_max: f32) -> Parcel {
-    let aspect = 1.0 + (aspect_max - 1.0) * u01k(seed, 21lu);
-    let qs = vec2<f32>(q.x / aspect, q.y);
-    let cell = cell0 / sqrt(aspect);
-    let wc = worley2(seed, qs, cell, 0.85);
-    let dn = wc.point2 - wc.point;
-    let nrm = length(vec2<f32>(dn.x / aspect, dn.y)) / max(length(dn), 1e-9);
-    let e = worley2_edge_dist(wc, qs) / max(nrm, 1e-6);
-    let c = vec2<f32>(wc.point.x * aspect, wc.point.y);
-    let rel = q - c;
+struct CadBlock {
+    id: u64,
+    c: vec2<f32>,
+    rel: vec2<f32>,
+    size: vec2<f32>,
+    edge: f32,
+}
+
+fn agri_cad_block(seed: u64, q: vec2<f32>, b: f32) -> CadBlock {
+    var j = i64(floor(q.y / b));
+    if (q.y < agri_row_line(seed, j, b)) {
+        j -= 1li;
+    } else if (q.y >= agri_row_line(seed, j + 1li, b)) {
+        j += 1li;
+    }
+    let y0 = agri_row_line(seed, j, b);
+    let y1 = agri_row_line(seed, j + 1li, b);
+    let shift = u01(hash1(seed, j)) * b;
+    let x = q.x + shift;
+    var i = i64(floor(x / b));
+    if (x < agri_col_line(seed, j, i, b)) {
+        i -= 1li;
+    } else if (x >= agri_col_line(seed, j, i + 1li, b)) {
+        i += 1li;
+    }
+    let x0 = agri_col_line(seed, j, i, b);
+    let x1 = agri_col_line(seed, j, i + 1li, b);
+    var o: CadBlock;
+    o.size = vec2<f32>(x1 - x0, y1 - y0);
+    o.c = vec2<f32>(x0 + 0.5 * o.size.x - shift, y0 + 0.5 * o.size.y);
+    o.rel = q - o.c;
+    o.edge = min(0.5 * o.size.x - abs(o.rel.x), 0.5 * o.size.y - abs(o.rel.y));
+    o.id = hash2(seed ^ 0xCADlu, i, j);
+    return o;
+}
+
+fn agri_part_cad(seed: u64, q: vec2<f32>, cell: f32, aspect_max: f32) -> Parcel {
+    let b = 2.6 * cell;
+    let bl = agri_cad_block(seed, q, b);
+    let ang = 0.45 * (u01k(bl.id, 1lu) - 0.5);
+    let sa = sin(ang);
+    let ca = cos(ang);
+    let u = bl.rel.x * ca + bl.rel.y * sa;
+    let v = -bl.rel.x * sa + bl.rel.y * ca;
+    let hx = 0.5 * (bl.size.x * abs(ca) + bl.size.y * abs(sa));
+    let hy = 0.5 * (bl.size.x * abs(sa) + bl.size.y * abs(ca));
+    var ax0 = -hx;
+    var ay0 = -hy;
+    var ax1 = hx;
+    var ay1 = hy;
+    var id = bl.id;
+    let strip_p = 0.6 * (aspect_max - 1.0);
+    for (var it = 0; it < 5; it++) {
+        let w = ax1 - ax0;
+        let h = ay1 - ay0;
+        let tgt = cell * (0.65 + 0.7 * u01k(id, 2lu));
+        if (w * h < tgt * tgt) {
+            break;
+        }
+        var split_x = w >= h;
+        if (u01k(id, 4lu) < strip_p && min(w, h) > 0.9 * tgt) {
+            split_x = !split_x;
+        }
+        let t = 0.3 + 0.4 * u01k(id, 3lu);
+        if (split_x) {
+            let xs = ax0 + t * w;
+            if (u < xs) {
+                ax1 = xs;
+                id = mix64(id ^ 0x11lu);
+            } else {
+                ax0 = xs;
+                id = mix64(id ^ 0x22lu);
+            }
+        } else {
+            let ys = ay0 + t * h;
+            if (v < ys) {
+                ay1 = ys;
+                id = mix64(id ^ 0x33lu);
+            } else {
+                ay0 = ys;
+                id = mix64(id ^ 0x44lu);
+            }
+        }
+    }
+    let lc = vec2<f32>(0.5 * (ax0 + ax1), 0.5 * (ay0 + ay1));
     var o: Parcel;
-    o.id = wc.id;
-    o.fx = rel.x;
-    o.fy = rel.y;
-    o.edge = e;
-    o.fc = c;
-    o.size = cell0;
+    o.id = id;
+    o.fx = u - lc.x;
+    o.fy = v - lc.y;
+    o.edge = min(min(min(u - ax0, ax1 - u), min(v - ay0, ay1 - v)), bl.edge);
+    o.fc = bl.c + vec2<f32>(lc.x * ca - lc.y * sa, lc.x * sa + lc.y * ca);
+    o.size = min(ax1 - ax0, ay1 - ay0);
     o.inside = 1.0;
-    o.bedge = e;
+    o.bedge = bl.edge;
     o.circ = 0.0;
     return o;
 }
 
 fn agri_part_strip(seed: u64, q: vec2<f32>, w: f32, sw0: f32) -> Parcel {
-    let wc = worley2(seed ^ 0x57lu, q, w, 0.8);
-    let fid = wc.id;
-    let bedge = worley2_edge_dist(wc, q);
-    let rel = q - wc.point;
+    let bl = agri_cad_block(seed ^ 0x57lu, q, w);
+    let fid = bl.id;
+    let bedge = bl.edge;
+    let rel = bl.rel;
     var ang = 0.0;
     if (u01k(fid, 1lu) >= 0.5) {
         ang = 0.5 * PI;
@@ -756,7 +838,7 @@ fn agri_part_strip(seed: u64, q: vec2<f32>, w: f32, sw0: f32) -> Parcel {
     o.fx = a;
     o.fy = fy;
     o.edge = min(min(fy, sw - fy), bedge);
-    o.fc = wc.point + vec2<f32>(-sa, ca) * ((n + 0.5) * sw);
+    o.fc = bl.c + vec2<f32>(-sa, ca) * ((n + 0.5) * sw);
     o.size = sw;
     o.inside = 1.0;
     o.bedge = bedge;
@@ -1059,17 +1141,19 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
             let row = cc[3];
             let ph = clamp(px.season + 0.3 * (u01k(id, 20lu) - 0.5), 0.0, 1.0);
             col = agri_stage(cc, ph) * (0.92 + 0.16 * u01k(id, 8lu));
-            col *= 1.0 + 0.10 * perlin3(id, p * (1.0lf / 35.0lf)) * band(35.0, gsd) + 0.07 * perlin3(id ^ 1lu, p * (1.0lf / 120.0lf)) * band(120.0, gsd);
-            col *= 1.0 + 0.09 * perlin3(id ^ 0x7E1lu, p * (1.0lf / 9.0lf)) * band(9.0, gsd) + 0.06 * perlin3(id ^ 0x7E2lu, p * (1.0lf / 2.8lf)) * band(2.8, gsd);
+            col *= 1.0 + 0.2 * perlin3(id, p * (1.0lf / 35.0lf)) * band(35.0, gsd) + 0.11 * perlin3(id ^ 1lu, p * (1.0lf / 120.0lf)) * band(120.0, gsd);
+            col *= 1.0 + 0.15 * perlin3(id ^ 0x7E1lu, p * (1.0lf / 7.0lf)) * band(7.0, gsd) + 0.10 * perlin3(id ^ 0x7E2lu, p * (1.0lf / 2.5lf)) * band(2.5, gsd);
             let gz = perlin3(id ^ 0x6A0lu, p * (1.0lf / 55.0lf)) * band(55.0, gsd);
-            col = mixc(col, col * vec3<f32>(1.1, 1.04, 0.84), 0.45 * smoothstep1(0.0, 0.6, gz));
+            col = mixc(col, col * vec3<f32>(1.12, 1.04, 0.82), 0.55 * smoothstep1(0.0, 0.6, gz));
+            col = mixc(col, col * vec3<f32>(0.84, 0.92, 0.86), 0.5 * smoothstep1(0.0, 0.6, -gz));
             let hw = 8.0 + 10.0 * u01k(id, 11lu);
+            if (pc.edge < hw) {
+                col *= 0.96;
+            }
             let rc = sqrt(pc.fx * pc.fx + pc.fy * pc.fy);
             var u = ru;
             if (pc.circ > 0.0) {
                 u = rc;
-            } else if (pc.edge < hw) {
-                u = rv;
             }
             col *= 1.0 + row.y * sin(TAU * u / row.x) * band(row.x, gsd);
             if (pc.edge >= hw && (c == 0u || c == 2u || c == 3u)) {
@@ -1437,25 +1521,30 @@ fn agri_border(b: u32, edge: f32, i: Shade, pc: Parcel, px: AgPx) -> Shade {
         }
         case 1u, 2u: {
             let belt = b == AB_BELT;
-            var hw = 3.0 + 2.5 * u01k(hb, 4lu);
+            var hw0 = 1.0 + 1.0 * u01k(hb, 4lu);
             var lam = 5.0;
-            var dark = 0.9;
+            var dark = 0.95;
             var h = 3.0 + 4.0 * u01k(hb, 2lu);
             if (belt) {
-                hw = 6.0 + 4.0 * u01k(hb, 4lu);
+                hw0 = 4.0 + 3.0 * u01k(hb, 4lu);
                 lam = 7.0;
-                dark = 0.78;
+                dark = 0.82;
                 h = 9.0 + 6.0 * u01k(hb, 2lu);
             }
+            if (abs(edge) > 1.5 * hw0 + fwb) {
+                return o;
+            }
+            let clump = perlin3(hb, p * (1.0lf / f64(lam)));
+            // crowns of different size along the hedge: its width varies (the mean below the pixel)
+            let hw = hw0 * (0.875 + 0.4 * clump * band(lam, gsd));
             let c = band_cov(edge, hw, fwb);
             if (c <= 0.0) {
                 return o;
             }
-            let clump = perlin3(hb, p * (1.0lf / f64(lam)));
             let tex = 1.0 + 0.18 * perlin3(hb ^ 1lu, p * (1.0lf / 2.2lf)) * band(2.2, gsd);
             let ea = abs(edge) / hw;
             let across = sqrt(max(1.0 - ea * ea, 0.0));
-            let hc = px.crown * dark * (0.8 + 0.35 * clump) * tex * (0.72 + 0.4 * across);
+            let hc = px.crown * dark * (0.85 + 0.3 * clump) * tex * (0.82 + 0.3 * across);
             let along = 0.55 + 0.45 * (0.5 + 0.5 * clump);
             o.col = mixc(i.col, hc, c);
             o.dh = lerp(i.dh, h * across * along, c);

@@ -103,19 +103,10 @@ impl SurfaceModel {
                 (mix64(hc ^ k as u64), fx, fy2, edge, 1.0, fc)
             }
             1 => {
-                // irregular fields: Voronoi cells in a stretched frame (elongated fields), cell
-                // size modulated across the region
-                let aspect = 1.0 + 2.2 * u01k(r.split.to_bits(), 21);
-                let qs = DVec2::new(q.x / aspect, q.y);
-                let scale = 0.7 + 0.6 * (0.5 + 0.5 * perlin3(r.split.to_bits() ^ 0x5CA1, p / 2500.0));
-                let cell = r.fw / aspect.sqrt() * scale;
-                let wc = worley2(r.split.to_bits(), qs, cell, 0.85);
-                // edge distance back in metres: the bisector normal is stretched by the aspect
-                let dn = wc.point2 - wc.point;
-                let nrm = DVec2::new(dn.x / aspect, dn.y).length() / dn.length().max(1e-9);
-                let e = worley2_edge_dist(&wc, qs) / nrm.max(1e-6) * 1.0;
-                let rel = q - DVec2::new(wc.point.x * aspect, wc.point.y);
-                (wc.id, rel.x, rel.y, e, 1.0, DVec2::new(wc.point.x * aspect, wc.point.y))
+                // irregular fields: cadastral blocks cut into fields of varied size (the
+                // agriculture kit's partition)
+                let pc = crate::kits::cadastral_parcel(r.split.to_bits(), q, r.fw, 1.0 + 0.8 * u01k(r.split.to_bits(), 21));
+                (pc.0, pc.1, pc.2, pc.3, 1.0, pc.4)
             }
             _ => {
                 let s = r.fw;
