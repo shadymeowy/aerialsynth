@@ -526,17 +526,41 @@ pub(crate) fn site_ctx(w: &World, pt: DVec3, gsd: f64) -> Ctx {
     Ctx::new(g.lat, g.lon, gsd, &w.ell)
 }
 
-/// Point evaluations for host-built features (`features::PointSource`): pending until the GPU
-/// evaluated them in a settle round.
-pub(crate) struct PrepPoints<'p, 'a>(pub &'p mut Prep<'a>);
+fn point_terrain(t: &GTerrain) -> crate::tile::PointTerrain {
+    crate::tile::PointTerrain {
+        ground: t.ground as f64,
+        water: if t.water_kind != 0 { t.water as f64 } else { f64::NEG_INFINITY },
+        water_kind: t.water_kind as u8,
+    }
+}
 
-impl crate::features::PointSource for PrepPoints<'_, '_> {
+/// Point evaluations for host-built features (`features::PointSource`), pending until the GPU
+/// evaluated them in a settle round. The tiles' host functions run in parallel: each reads the
+/// evaluations done so far and lists the missing ones, which [`ReadPoints::request`] then asks the
+/// [`Prep`] for in a fixed order (the same requests and answers as running them one after
+/// another).
+pub(crate) struct ReadPoints<'c> {
+    pub points: &'c FxHashMap<PointKey, GTerrain>,
+    pub missing: Vec<Ctx>,
+}
+
+impl crate::features::PointSource for ReadPoints<'_> {
     fn terrain(&mut self, ctx: &Ctx) -> Option<crate::tile::PointTerrain> {
-        let t = self.0.point(MODE_FULL, ctx)?;
-        Some(crate::tile::PointTerrain {
-            ground: t.ground as f64,
-            water: if t.water_kind != 0 { t.water as f64 } else { f64::NEG_INFINITY },
-            water_kind: t.water_kind as u8,
-        })
+        match self.points.get(&PointKey::new(MODE_FULL, ctx)) {
+            Some(t) => Some(point_terrain(t)),
+            None => {
+                self.missing.push(*ctx);
+                None
+            }
+        }
+    }
+}
+
+impl ReadPoints<'_> {
+    /// Ask `prep` for the missing evaluations of `missing`.
+    pub fn request(prep: &mut Prep, missing: &[Ctx]) {
+        for c in missing {
+            prep.point(MODE_FULL, c);
+        }
     }
 }

@@ -253,14 +253,29 @@ pub fn generate(gen: &Generator, store: &TileStore, tiles: &[TileId], force: boo
     let todo: Vec<TileId> = tiles.iter().copied().filter(|t| force || !store.contains(*t)).collect();
     let total = todo.len();
     let batch = (rayon::current_num_threads() * 4).max(8);
-    let mut done = 0;
     progress(0, total);
-    for chunk in todo.chunks(batch) {
-        let data = gen.tiles(chunk)?;
-        store.write_tiles(&data)?;
-        done += chunk.len();
-        progress(done, total);
-    }
+    // a batch is encoded and written while the next one is generated (the store's compression
+    // took a fifth of the host time, with the GPU idle)
+    std::thread::scope(|sc| -> Result<()> {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<(usize, Vec<tilestore::TileData>)>(1);
+        let writer = sc.spawn(move || -> Result<()> {
+            let mut done = 0;
+            for (n, data) in rx {
+                store.write_tiles(&data)?;
+                done += n;
+                progress(done, total);
+            }
+            Ok(())
+        });
+        for chunk in todo.chunks(batch) {
+            let data = gen.tiles(chunk)?;
+            if tx.send((chunk.len(), data)).is_err() {
+                break;
+            }
+        }
+        drop(tx);
+        writer.join().map_err(|_| anyhow::anyhow!("tile writer panicked"))?
+    })?;
     store.flush()?;
     Ok(total)
 }
