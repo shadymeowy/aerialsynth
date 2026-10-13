@@ -71,24 +71,12 @@ pub fn run() -> anyhow::Result<Result<(), String>> {
         let render = |backend| -> anyhow::Result<FrameOut> {
             let mut r = Renderer::new(model.clone(), settings(backend), ell, cache.clone());
             r.stars_in_render = false;
-            if backend == Backend::Gpu && std::env::var_os("DBG_GEOM").is_some() {
-                r.geometry_only = true;
-            }
             let sun = r.settings.lighting.sun_at_utc(UNIX, LAT.to_radians(), LON.to_radians());
             r.try_render(&camera(&ell), &sun)
         };
         let cpu = render(Backend::Cpu)?;
         Ok(match render(Backend::Gpu) {
-            Ok(gpu) => {
-                let mean = |v: &[f32]| v.iter().map(|x| *x as f64).sum::<f64>() / v.len().max(1) as f64;
-                let nan = gpu.radiance.iter().filter(|x| !x.is_finite()).count();
-                let k = (H / 2 * W + W / 2) as usize;
-                eprintln!(
-                    "DBG gpu rad {:.4} (nan {nan}) cpu rad {:.4}; centre gpu depth {} lc {} rad {:?} | cpu depth {} lc {} rad {:?}",
-                    mean(&gpu.radiance), mean(&cpu.radiance), gpu.depth[k], gpu.landcover[k], &gpu.radiance[3 * k..3 * k + 3], cpu.depth[k], cpu.landcover[k], &cpu.radiance[3 * k..3 * k + 3]
-                );
-                compare(&cpu, &gpu)
-            }
+            Ok(gpu) => compare(&cpu, &gpu),
             Err(e) => Err(format!("the GPU render failed: {e:#}")),
         })
     })();

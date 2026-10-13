@@ -20,7 +20,6 @@ env:
 
 jobs:
   fmt:
-    if: false
     name: rustfmt
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -32,7 +31,6 @@ jobs:
       - run: cargo fmt --all --check
 
   python:
-    if: false
     name: Python syntax
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -44,7 +42,6 @@ jobs:
   # zlib: CMake and a C compiler, both on the runner image) and its build-script output is shared
   # between the clippy and the build / test steps instead of being compiled twice.
   test:
-    if: false
     name: clippy + test
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -62,17 +59,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --release -- -D warnings
 
       - name: Build
-        run: cargo build --release -p render --lib --tests
-      - name: Diag
-        shell: bash
-        run: |
-          T="cargo test --release -p render --lib gpu::selfcheck::tests::self_check -- --nocapture"
-          set +e
-          run() { echo "=== $*"; env "$@" $T 2>&1 | grep -E "DBG gpu|self-check [03]|warning|error|panicked|GPU|left" ; }
-          for f in dbg/*.wgsl; do run DBG_SHADE_FILE=$f; done
-          D=$(ls -d "/c/Program Files (x86)/Windows Kits/10/bin/"*/x64 | tail -1); ls -la "$D"/dx*.dll || true
-          PATH="$D:$PATH" run DBG_X=dxc
-          exit 1
+        run: cargo build --release --workspace --all-targets
 
       # `cargo install --path` reuses the workspace's release build
       - name: cargo install
@@ -123,13 +110,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-
+          - { name: macOS arm64, os: macos-latest, gpu_check: pass }
           # The Intel runner's Metal device ("Apple Paravirtual device") renders nothing (depth
           # all non-finite, black images) where the arm64 one matches the CPU renderer. The
           # renderer's self-check must reject it (render.backend auto then renders on the CPU);
           # the tests run with the GPU hidden (AERIALSYNTH_GPU=none), as on Linux without a
           # Vulkan driver, so the GPU tests skip and everything runs on the CPU.
-
+          - { name: macOS x86_64, os: macos-15-intel, gpu: none, gpu_check: fail }
           - { name: Windows x86_64, os: windows-latest, gpu_check: pass }
     steps:
       - uses: actions/checkout@v5
@@ -138,17 +125,7 @@ jobs:
         with:
           save-if: ${{ github.event_name != 'pull_request' }}
       - name: Build
-        run: cargo build --release -p render --lib --tests
-      - name: Diag
-        shell: bash
-        run: |
-          T="cargo test --release -p render --lib gpu::selfcheck::tests::self_check -- --nocapture"
-          set +e
-          run() { echo "=== $*"; env "$@" $T 2>&1 | grep -E "DBG gpu|self-check [03]|warning|error|panicked|GPU|left" ; }
-          for f in dbg/*.wgsl; do run DBG_SHADE_FILE=$f; done
-          D=$(ls -d "/c/Program Files (x86)/Windows Kits/10/bin/"*/x64 | tail -1); ls -la "$D"/dx*.dll || true
-          PATH="$D:$PATH" run DBG_X=dxc
-          exit 1
+        run: cargo build --release --workspace --all-targets
       # the renderer's GPU self-check on the runner's GPU (WARP on Windows), with the expected verdict
       - name: GPU self-check
         env:
@@ -168,7 +145,6 @@ jobs:
   # The Python package: one abi3 wheel (cp310-abi3), built once and tested on the oldest and the
   # newest supported CPython. The C API (header, example) is tested by `cargo test` above.
   python-wheel:
-    if: false
     name: Python wheel (abi3, 3.10 + 3.13)
     runs-on: ubuntu-latest
     timeout-minutes: 60

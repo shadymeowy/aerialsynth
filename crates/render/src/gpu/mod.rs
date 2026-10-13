@@ -493,7 +493,7 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
         (lights && sun_state.flicker.enabled, F_FLICKER),
         (split, F_SPLIT),
         (atmo.p.enabled, F_ATMO),
-        (r.settings.walls && std::env::var_os("DBG_NO_WALLS").is_none(), F_WALLS),
+        (r.settings.walls, F_WALLS),
     ] {
         if on {
             flags |= f;
@@ -741,10 +741,6 @@ fn shade_source() -> String {
         fwd.push_str(&format!("        case {}u: {{ return {:?}; }}\n", k.id, k.material.forward));
     }
     fwd.push_str("        default: { return 0.0; }\n    }\n}\n\n");
-    if let Ok(f) = std::env::var("DBG_SHADE_FILE") {
-        eprintln!("DBG shade file {f}");
-        return format!("{}{}{}", terragen::landcover::WGSL, fwd, std::fs::read_to_string(f).unwrap());
-    }
     format!("{}{}{}", terragen::landcover::WGSL, fwd, include_str!("shade.wgsl"))
 }
 
