@@ -308,7 +308,7 @@ fn advect(
         // winter: the storm tracks bring their rain to the west coasts)
         let lw = gauss(lat.abs(), 18.0, 14.0) * lf * ac.monsoon;
         let interior = gauss(lat.abs(), 42.0, 16.0) * lf * smoothstep(200.0, 1200.0, wi.coast_km);
-        let mons = if summer { 1.0 + 1.2 * lw + 0.5 * interior } else { 1.0 / (1.0 + lw + 0.8 * interior) };
+        let mons = if summer { 1.0 + 1.2 * lw + 0.8 * interior } else { 1.0 / (1.0 + lw + 1.5 * interior) };
         let stab = 1.0 - 0.85 * cold2[k];
         let high = if summer { 1.0 - 0.7 * lf } else { 1.0 };
         let rate = rain_rate(le, high) * stab * mons * (0.45 * moist2[k]).exp() * (-K_DESCENT * (hb - h).max(0.0)).exp();
