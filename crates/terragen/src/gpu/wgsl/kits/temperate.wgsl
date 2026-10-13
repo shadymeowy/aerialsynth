@@ -371,7 +371,7 @@ fn temperate_stands(s: ptr<function, Stack>, fe: f32) {
     let p = (*s).c.p;
     let gsd = (*s).c.gsd;
     let fw = (*s).l.fw;
-    let q = (*s).q_rot + vec2<f32>(perlin3(T_SEED_STAND ^ 0x21lu, p * (1.0lf / 110.0lf)), perlin3(T_SEED_STAND ^ 0x22lu, p * (1.0lf / 110.0lf))) * 24.0;
+    let q = (*s).q_rot + vec2<f32>((*s).pf.f[PF_WARP2], (*s).pf.f[PF_PATCH]) * 24.0;
     let seed = mix64((*s).t.region_id ^ T_SEED_STAND);
     let wc = 150.0 + 150.0 * u01k(seed, 1lu);
     let xc = q.x / wc;
@@ -390,7 +390,7 @@ fn temperate_stands(s: ptr<function, Stack>, fe: f32) {
         let age = 16.0 * pow(uc / pc, 0.6);
         let ex = min(fx, 1.0 - fx) * wc;
         let ey = min(fy, 1.0 - fy) * hr;
-        let en = 14.0 * perlin3(T_SEED_STAND ^ 0x23lu, p * (1.0lf / 45.0lf)) * band(45.0, gsd) + 6.0 * perlin3(T_SEED_STAND ^ 0x24lu, p * (1.0lf / 13.0lf)) * band(13.0, gsd);
+        let en = 18.0 * (*s).pf.f[PF_DETAIL];
         let inside = inside * clamp((min(ex, ey) - 8.0 + en) / fw + 0.5, 0.0, 1.0);
         let mot = perlin3(T_SEED_STAND ^ 0x11lu, p * (1.0lf / 6.0lf)) * band(6.0, gsd) + 0.5 * perlin3(T_SEED_STAND ^ 0x12lu, p * (1.0lf / 2.0lf)) * band(2.0, gsd);
         var col: vec3<f32>;

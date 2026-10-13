@@ -526,7 +526,8 @@ fn stands(s: &mut Stack, fe: f64) {
     }
     let (p, gsd, fw) = (s.ctx.p, s.ctx.gsd, s.l.fw);
     // (the stands' frame warped by ~25 m: straight-edged rectangles read as a plan, not a forest)
-    let q = s.q_rot + DVec2::new(perlin3(SEED_STAND ^ 0x21, p / 110.0), perlin3(SEED_STAND ^ 0x22, p / 110.0)) * 24.0;
+    // (the pixel fields' noise: no extra noise evaluations, pass B's compile time is at its limit)
+    let q = s.q_rot + DVec2::new(s.pf.warp2, s.pf.patch) * 24.0;
     let seed = mix64(s.t.region.id ^ SEED_STAND);
     let wc = 150.0 + 150.0 * u01k(seed, 1);
     let xc = q.x / wc;
@@ -549,7 +550,7 @@ fn stands(s: &mut Stack, fe: f64) {
         let ex = fx.min(1.0 - fx) * wc;
         let ey = fy.min(1.0 - fy) * hr;
         // ragged edges: seed trees and uncut corners left along the border
-        let en = 14.0 * perlin3(SEED_STAND ^ 0x23, p / 45.0) * band(45.0, gsd) + 6.0 * perlin3(SEED_STAND ^ 0x24, p / 13.0) * band(13.0, gsd);
+        let en = 18.0 * s.pf.detail;
         let inside = inside * ((ex.min(ey) - 8.0 + en) / fw + 0.5).clamp(0.0, 1.0);
         let mot = perlin3(SEED_STAND ^ 0x11, p / 6.0) * band(6.0, gsd) + 0.5 * perlin3(SEED_STAND ^ 0x12, p / 2.0) * band(2.0, gsd);
         let (col, clear) = if age < 3.0 {

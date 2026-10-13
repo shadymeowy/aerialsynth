@@ -1582,15 +1582,16 @@ fn draw_border(b: u32, edge: f64, col: DVec3, dh: f64, cls: u8, pc: &Parcel, px:
             let clump = perlin3(hb, p / lam);
             // hedgerow trees: crowns bulging out of the hedge every few tens of metres (a hedge of
             // constant width outlined every field like a drawing)
-            let b11 = band(11.0, gsd);
-            let tb = if belt { 0.0 } else { smoothstep(0.3, 0.6, perlin3(hb ^ 3, p / 11.0)) * b11 + (1.0 - b11) * 0.08 };
+            // (one noise for both the trees and the gaps below: pass B's compile time)
+            let b11 = band(14.0, gsd);
+            let tn = if belt { 0.0 } else { perlin3(hb ^ 3, p / 14.0) };
+            let tb = if belt { 0.0 } else { smoothstep(0.3, 0.6, tn) * b11 + (1.0 - b11) * 0.08 };
             // crowns of different size along the hedge: its width varies (the mean below the pixel)
             let hw = hw0 * (0.875 + 0.4 * clump * band(lam, gsd)) * (1.0 + 2.0 * tb);
             // (the band box-filtered exactly: a band narrower than the filter keeps its area
             // instead of widening to the filter)
             // gaps: gateways and missing stretches
-            let b18 = band(18.0, gsd);
-            let gap = if belt { 1.0 } else { smoothstep(-0.5, -0.2, perlin3(hb ^ 5, p / 18.0)) * b18 + (1.0 - b18) * 0.85 };
+            let gap = if belt { 1.0 } else { smoothstep(-0.5, -0.2, tn) * b11 + (1.0 - b11) * 0.85 };
             let c = gap * ((edge + 0.5 * fwb).min(hw) - (edge - 0.5 * fwb).max(-hw)).max(0.0) / fwb;
             if c <= 0.0 {
                 return (col, dh, cls);

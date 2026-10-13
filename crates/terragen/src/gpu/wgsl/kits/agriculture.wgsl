@@ -1551,18 +1551,16 @@ fn agri_border(b: u32, edge: f32, i: Shade, pc: Parcel, px: AgPx) -> Shade {
                 return o;
             }
             let clump = perlin3(hb, p * (1.0lf / f64(lam)));
-            let b11 = band(11.0, gsd);
+            let b11 = band(14.0, gsd);
             var tb = 0.0;
+            var gap = 1.0;
             if (!belt) {
-                tb = smoothstep1(0.3, 0.6, perlin3(hb ^ 3lu, p * (1.0lf / 11.0lf))) * b11 + (1.0 - b11) * 0.08;
+                let tn = perlin3(hb ^ 3lu, p * (1.0lf / 14.0lf));
+                tb = smoothstep1(0.3, 0.6, tn) * b11 + (1.0 - b11) * 0.08;
+                gap = smoothstep1(-0.5, -0.2, tn) * b11 + (1.0 - b11) * 0.85;
             }
             // crowns of different size along the hedge: its width varies (the mean below the pixel)
             let hw = hw0 * (0.875 + 0.4 * clump * band(lam, gsd)) * (1.0 + 2.0 * tb);
-            let b18 = band(18.0, gsd);
-            var gap = 1.0;
-            if (!belt) {
-                gap = smoothstep1(-0.5, -0.2, perlin3(hb ^ 5lu, p * (1.0lf / 18.0lf))) * b18 + (1.0 - b18) * 0.85;
-            }
             let c = gap * max(min(edge + 0.5 * fwb, hw) - max(edge - 0.5 * fwb, -hw), 0.0) / fwb;
             if (c <= 0.0) {
                 return o;
