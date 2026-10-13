@@ -178,11 +178,13 @@ impl<'a> Prep<'a> {
             for (key, (ctx, mode)) in pending {
                 if mode != MODE_FULL || !self.w.cfg.hydro.rivers {
                     let before = self.missing;
+                    let mut sinks = vec![];
                     if mode == MODE_FULL {
                         self.lattice_lakes_at(ctx.p);
+                        sinks = point_astamps(self.w, &ctx);
                     }
                     if self.missing == before {
-                        self.need.insert(key, PointReq { ctx, mode, sinks: vec![] });
+                        self.need.insert(key, PointReq { ctx, mode, sinks });
                     }
                     continue;
                 }
@@ -201,6 +203,7 @@ impl<'a> Prep<'a> {
                     }
                 }
                 self.lattice_lakes_at(ctx.p);
+                sinks.extend(point_astamps(self.w, &ctx));
                 if self.missing == before {
                     self.need.insert(key, PointReq { ctx, mode, sinks });
                 }
@@ -502,6 +505,19 @@ fn lattice_lake_wanted(w: &World, id: u64, pt: DVec3, p: DVec3) -> bool {
 /// A sink lake for the GPU.
 pub(crate) fn gsink(id: u64, c: DVec3, rad: f64, level: Option<f64>) -> GSink {
     GSink { c: [c.x, c.y, c.z, 0.0], id, rad: rad as f32, level: level.map_or(NONE_F, |l| l as f32), _p: [0; 2] }
+}
+
+/// A kit's pass-A stamp as the GPU sees it: a `Sink` with a negative radius (`kits::AStamp`).
+pub(crate) fn gsink_astamp(st: &crate::kits::AStamp) -> GSink {
+    GSink { c: [st.c.x, st.c.y, st.c.z, st.bearing], id: st.id, rad: -(st.r as f32), level: st.v, _p: [0; 2] }
+}
+
+/// The pass-A stamps of a full point evaluation at `ctx` (`World::astamps_at`, as the CPU's).
+pub(crate) fn point_astamps(w: &World, ctx: &Ctx) -> Vec<GSink> {
+    if !crate::kits::has_astamps() {
+        return Vec::new();
+    }
+    w.astamps_at(ctx.p, ctx.gsd).iter().filter(|st| (ctx.p - st.c).length() < st.r).map(gsink_astamp).collect()
 }
 
 /// Context at the surface point below / above an ECEF point.

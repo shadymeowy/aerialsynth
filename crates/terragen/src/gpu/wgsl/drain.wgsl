@@ -5,6 +5,8 @@
 
 const LAT_EMPTY: u64 = 0lu;
 const LAT_NONE: u32 = 0xffffffffu;
+/// (`lat_main`: a neighbour's data is missing)
+const LAT_UNKNOWN: u32 = 0xfffffffeu;
 const LAT_OFF: i32 = 524288;
 
 const LF_ACTIVE: u32 = 1u;
@@ -565,6 +567,84 @@ fn lat_width(lvl: u32, c: vec3<i32>) -> vec2<f32> {
     return vec2<f32>(0.5 * (lc.y + (lc.z - lc.y) * u01k(hh, 1lu)), lc.w * (0.6 + 0.8 * u01k(hh, 2lu)));
 }
 
+/// The main stem into the point at slot `t` (cell `tc`, its point `ts`, its downstream point
+/// `qs`; `World::main_upstream`): of the active points of its 1-ring that drain into it, the one
+/// whose inflow continues straightest into its outflow (the first of the best in z, y, x
+/// order); and the rank of the 1-ring point `c` among the others (`World::tributary_rank`).
+/// x: LAT_NONE: none; LAT_UNKNOWN: a neighbour's data is missing.
+fn lat_main(lvl: u32, t: u32, tc: vec3<i32>, ts: vec3<f64>, qs: vec3<f64>, c: vec3<i32>) -> vec2<u32> {
+    let outv = normalize(vec3<f32>(qs - ts));
+    var best = LAT_NONE;
+    var best_sc = 0.0;
+    var best_before = false;
+    var seen_c = false;
+    var nbefore = 0u;
+    for (var dz = -1; dz <= 1; dz++) {
+        for (var dy = -1; dy <= 1; dy++) {
+            for (var dx = -1; dx <= 1; dx++) {
+                let n = tc + vec3<i32>(dx, dy, dz);
+                if (all(n == c)) {
+                    seen_c = true;
+                }
+                if (dx == 0 && dy == 0 && dz == 0) {
+                    continue;
+                }
+                var o = 0u;
+                let st = neighbour(lvl, n, &o);
+                if (st == 2u) {
+                    return vec2<u32>(LAT_UNKNOWN, 0u);
+                }
+                if (st == 0u) {
+                    continue;
+                }
+                if ((lat_flags[o] & LF_TGT) == 0u) {
+                    return vec2<u32>(LAT_UNKNOWN, 0u);
+                }
+                if (lat_tgt[o] != t) {
+                    continue;
+                }
+                let sc = dot(normalize(vec3<f32>(ts - lat_s[o].xyz)), outv);
+                if (best == LAT_NONE || sc > best_sc) {
+                    best = o;
+                    best_sc = sc;
+                    best_before = !seen_c;
+                }
+                if (!seen_c) {
+                    nbefore += 1u;
+                }
+            }
+        }
+    }
+    // (the rank among the upstreams before `c`, the main stem not counted)
+    return vec2<u32>(best, nbefore - select(0u, 1u, best_before && nbefore > 0u));
+}
+
+/// Where the tributary of rank `r` joins the main stem's bend (`junction` in hydro.rs).
+fn junction(r: u32) -> f32 {
+    return 0.5 + 0.375 * fract(f32(r) * 0.618034);
+}
+
+/// The inner control points of a tributary's last reach (`tributary_controls` in hydro.rs): a
+/// cubic from `p0` (entered along `u_in`) to the junction `j`, met at 35°–80° to the main stem's
+/// direction `tan`.
+fn trib_controls(p0: vec3<f64>, u_in: vec3<f32>, j: vec3<f64>, tan: vec3<f32>) -> array<vec3<f64>, 2> {
+    let up = normalize(vec3<f32>(j));
+    let tn = normalize(tan);
+    let nl = normalize(cross(up, tn));
+    let side = select(-1.0, 1.0, dot(vec3<f32>(p0 - j), nl) >= 0.0);
+    let c = clamp(dot(u_in, tn), 0.17364818, 0.81915204);
+    let s = sqrt(1.0 - c * c);
+    let d = tn * c - nl * (side * s);
+    let l = length(vec3<f32>(j - p0)) / 3.0;
+    return array<vec3<f64>, 2>(p0 + vec3<f64>(u_in * l), j - vec3<f64>(d * l));
+}
+
+/// A cubic Bézier curve at `k`.
+fn cubic64(p: array<vec3<f64>, 4>, k: f64) -> vec3<f64> {
+    let r = 1.0lf - k;
+    return p[0] * (r * r * r) + p[1] * (3.0lf * r * r * k) + p[2] * (3.0lf * r * k * k) + p[3] * (k * k * k);
+}
+
 /// The pieces of the node at box cell `i` that the query keeps: count, and (with `write`)
 /// written from `base`. Sets the incomplete counter when data is missing.
 fn node_pieces(bx: DBox, i: u32, write: bool, base: u32) -> u32 {
@@ -630,19 +710,73 @@ fn node_pieces(bx: DBox, i: u32, write: bool, base: u32) -> u32 {
     if (tt != LAT_NONE) {
         let qs = lat_s[tt].xyz;
         let qh = lat_h[tt];
-        let hw2 = lat_width(lvl, lat_cell(lat_keys_ro[t])).x;
+        let tc = lat_cell(lat_keys_ro[t]);
+        let hw2 = lat_width(lvl, tc).x;
         let mid2 = 0.5lf * (ts + qs);
         let hmid2 = 0.5 * (th + qh);
+        // the main stem into `t` (of its 1-ring: a sea outlet farther away keeps the plain bend);
+        // a tributary joins it at an angle
+        var mn = LAT_NONE;
+        var rank = 0u;
+        let dc = abs(tc - c);
+        if (max(dc.x, max(dc.y, dc.z)) <= 1) {
+            let mr = lat_main(lvl, t, tc, ts, qs, c);
+            mn = mr.x;
+            rank = mr.y;
+            if (mn == LAT_UNKNOWN) {
+                atomicAdd(&dcount[2], 1u);
+                return 0u;
+            }
+        }
+        let trib = mn != LAT_NONE && mn != s;
+        var cp = array<vec3<f64>, 4>(mid, mid, mid, mid);
+        var hb_t = hmid;
+        var wb_t = hw;
+        if (trib) {
+            let ms = lat_s[mn].xyz;
+            let hwm = lat_width(lvl, lat_cell(lat_keys_ro[mn])).x;
+            let midm = 0.5lf * (ms + ts);
+            let hmidm = 0.5 * (lat_h[mn] + th);
+            // the junction on the main stem's bend: a different one for each tributary
+            let tj = junction(rank);
+            let tjd = f64(tj);
+            let j = midm * ((1.0lf - tjd) * (1.0lf - tjd)) + ts * (2.0lf * tjd * (1.0lf - tjd)) + mid2 * (tjd * tjd);
+            let hj = hmidm * (1.0 - tj) * (1.0 - tj) + th * 2.0 * tj * (1.0 - tj) + hmid2 * tj * tj;
+            let wj = hwm + (hw2 - hwm) * tj;
+            let tan = vec3<f32>((ts - midm) * (2.0lf * (1.0lf - tjd)) + (mid2 - ts) * (2.0lf * tjd));
+            let u_in = normalize(vec3<f32>(ts - fs));
+            let ctl = trib_controls(mid, u_in, j, tan);
+            cp = array<vec3<f64>, 4>(mid, ctl[0], ctl[1], j);
+            hb_t = min(hj, hmid);
+            wb_t = min(hw, wj);
+        }
         for (var k = 0u; k < 6u; k++) {
             let t0 = f64(k) / 6.0lf;
             let t1 = f64(k + 1u) / 6.0lf;
-            let pa = mid * ((1.0lf - t0) * (1.0lf - t0)) + ts * (2.0lf * t0 * (1.0lf - t0)) + mid2 * (t0 * t0);
-            let pb = mid * ((1.0lf - t1) * (1.0lf - t1)) + ts * (2.0lf * t1 * (1.0lf - t1)) + mid2 * (t1 * t1);
             let f0 = f32(t0);
             let f1 = f32(t1);
-            let ha = hmid * (1.0 - f0) * (1.0 - f0) + th * 2.0 * f0 * (1.0 - f0) + hmid2 * f0 * f0;
-            let hb = hmid * (1.0 - f1) * (1.0 - f1) + th * 2.0 * f1 * (1.0 - f1) + hmid2 * f1 * f1;
-            let sg = seg_make(pa, pb, ha, hb, hw + (hw2 - hw) * f0, hw + (hw2 - hw) * f1, valley, lvl, false);
+            var pa: vec3<f64>;
+            var pb: vec3<f64>;
+            var ha: f32;
+            var hb: f32;
+            var wa: f32;
+            var wb: f32;
+            if (trib) {
+                pa = cubic64(cp, t0);
+                pb = cubic64(cp, t1);
+                ha = hmid + (hb_t - hmid) * f0;
+                hb = hmid + (hb_t - hmid) * f1;
+                wa = hw + (wb_t - hw) * f0;
+                wb = hw + (wb_t - hw) * f1;
+            } else {
+                pa = mid * ((1.0lf - t0) * (1.0lf - t0)) + ts * (2.0lf * t0 * (1.0lf - t0)) + mid2 * (t0 * t0);
+                pb = mid * ((1.0lf - t1) * (1.0lf - t1)) + ts * (2.0lf * t1 * (1.0lf - t1)) + mid2 * (t1 * t1);
+                ha = hmid * (1.0 - f0) * (1.0 - f0) + th * 2.0 * f0 * (1.0 - f0) + hmid2 * f0 * f0;
+                hb = hmid * (1.0 - f1) * (1.0 - f1) + th * 2.0 * f1 * (1.0 - f1) + hmid2 * f1 * f1;
+                wa = hw + (hw2 - hw) * f0;
+                wb = hw + (hw2 - hw) * f1;
+            }
+            let sg = seg_make(pa, pb, ha, hb, wa, wb, valley, lvl, false);
             if (seg_near(sg, ctr, keep)) {
                 if (write) {
                     out_segs[base + n] = sg;

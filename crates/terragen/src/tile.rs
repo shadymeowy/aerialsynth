@@ -485,8 +485,9 @@ impl Generator {
                 })
                 .fold(0.0, f64::max);
             let gsd_c = gsd_ew(lat_c, z, n as u32, &ell);
-            self.world.river_segments(c.p, radius, gsd_c)
+            (self.world.river_segments(c.p, radius, gsd_c), crate::kits::astamps(&self.world, c.p, radius, gsd_c))
         };
+        let (segs, astamps) = segs;
         let sinks = World::sink_lakes(&segs);
 
         // ---------------- pass A on pixel centres incl. 2px apron
@@ -535,7 +536,7 @@ impl Generator {
                     let inst = if relief_fams { crate::instances::lists(&self.world, center, radius, true, blk_gsd) } else { Vec::new() };
                     for i in i0..i1 {
                         let (ctx, m) = pt(i as f64);
-                        let near = NearSegs { local: &local, h_max, sinks: &sinks, inst: &inst };
+                        let near = NearSegs { local: &local, h_max, sinks: &sinks, inst: &inst, astamps: &astamps };
                         row.push(self.world.terrain_with_near(&ctx, &m, &segs, &near));
                     }
                 }

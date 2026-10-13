@@ -1017,6 +1017,8 @@ impl GpuGenerator {
                             sinks.push(gsink(sid, sc, rad, level));
                         }
                     }
+                    // the kits' pass-A stamps (as the CPU tile's, `tile.rs`)
+                    sinks.extend(crate::kits::astamps(&self.world, q.center, q.radius, q.gsd).iter().map(host::gsink_astamp));
                     sinks
                 })
                 .collect()

@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- **Deltas** (coast kit, design §5.5): fan and bird's-foot deltas (2–12 km) at the mouths of the
+  major rivers, found where the river meets the *drawn* coast (host, exact f64 samples along the
+  meander-warped centre line, the same for both backends; `kits/coast/delta.rs`): lobate flat
+  land 0.5–2 m extending the shoreline over the shelf, a shallow front, distributaries carved
+  below the sea; reed marsh or mud on top (slot 5), mangroves in the tropics (the tropical
+  biomes' land layer). New core hook for pass-A stamps (`Kit::astamps`, `Kit::astamp`: applied
+  after the drainage carve in tiles and points; on the GPU in the sink-lake list with a negative
+  radius). Tests `deltas_sit_at_river_mouths` (301 deltas at 24 coastal regions: 297 on their
+  river at the mouth, 255 grown seaward), `deltas_are_tile_independent`; delta places in the
+  coast kit's GPU/CPU, LOD and seam tests.
+- **Confluences at an angle.** All the channels draining into a drainage node were bent into its
+  outflow by the same quadratic curve, so they met tangentially and ran side by side for
+  kilometres before joining (two rivers 100–200 m apart over 1–2 km). Now the main stem (the
+  inflow that continues straightest into the outflow) keeps the bend, and every other channel's
+  last reach is a cubic from the middle of its edge (entered along its own direction) to a
+  junction on the main stem's bend, met at 35–80° to the main stem; the tributaries of one node
+  join at different points (by rank). CPU `World::node_pieces` and WGSL `node_pieces` alike
+  (`lat_main`, `trib_controls`); the pieces stay zoom-independent. Test
+  `tributaries_join_at_an_angle` (no two channels of a level meet at < 12°; 26 of 421 before).
+- **Road decks are backend-independent.** The engineered profiles' point samples (ground and
+  water level) are quantized to 1 m, from the exact sample where the backend's is within 4 cm of
+  a rounding boundary or near a water decision (`transport::build::deck_sample`), so GPU and CPU
+  build the same decks, bridges, tunnels and portals; `sites_and_routes_match_the_cpu` now
+  compares them too.
+- **Towns and cities stay out of lakes.** The best candidate of a town, city or metropolis gives
+  way to the next where a lattice lake or a closed-basin lake of the major rivers can reach its
+  centre (cheap conservative screens over a few drainage lattice points, no drainage pieces,
+  ~0.05 ms per town: `World::lattice_lake_near`, `World::sink_near_level`). Test
+  `towns_avoid_lakes` (3 of 3000 centres in pass A's water, in streams' ponds; 7 before).
+
 - **Qanats** (desert kit, design P2): dotted lines of shaft mounds (pale spoil rings around a
   dark shaft every 30–55 m) from the piedmont down to a common outlet, 1–3 lines of 3–8 km per
   group; host segments (`qanat_group`, 9 km lattice, by culture, aridity and the smooth relief's

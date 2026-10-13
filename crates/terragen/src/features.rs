@@ -61,6 +61,11 @@ pub struct Area {
 /// again).
 pub trait PointSource {
     fn terrain(&mut self, ctx: &Ctx) -> Option<crate::tile::PointTerrain>;
+    /// Are the samples exact (`World::terrain`, f64: the CPU backend's)? Host code then need
+    /// not re-take close decisions with exact samples.
+    fn exact(&self) -> bool {
+        false
+    }
 }
 
 /// What a host function sees.
@@ -180,6 +185,9 @@ impl PointSource for CpuPoints<'_> {
     fn terrain(&mut self, ctx: &Ctx) -> Option<crate::tile::PointTerrain> {
         let t = self.0.terrain(ctx);
         Some(crate::tile::PointTerrain { ground: t.ground, water: t.water, water_kind: t.water_kind })
+    }
+    fn exact(&self) -> bool {
+        true
     }
 }
 

@@ -469,8 +469,9 @@ mod tests {
 
     /// The sites (airports, ports, dams, quarries, solar, wind, flares) and the transport
     /// network the kits build from GPU point evaluations are the CPU's, bit for bit: close
-    /// decisions are re-taken with exact samples (`sites::TIE_H`). Run alone (it clears the
-    /// shared caches).
+    /// decisions are re-taken with exact samples (`sites::TIE_H`), the engineered profiles'
+    /// samples are quantized (`transport::build::deck_sample`). Run alone (it clears the shared
+    /// caches).
     #[cfg(feature = "gpu")]
     #[test]
     fn sites_and_routes_match_the_cpu() {
@@ -499,9 +500,11 @@ mod tests {
                 sg.ha.to_bits(),
                 sg.hb.to_bits(),
                 sg.v.map(f32::to_bits),
+                // (the engineered profiles: decks, bridge and tunnel flags)
+                [sg.deck_a.to_bits(), sg.deck_b.to_bits(), sg.flags],
             )
         };
-        let (mut nst, mut nsg) = (0, 0);
+        let (mut nst, mut nsg, mut ndeck) = (0, 0, 0);
         for &(name, lat, lon) in PLACES.iter().filter(|p| ["airport", "port", "dam", "solar", "flare", "survey_city"].contains(&p.0)) {
             let center = geodesy::geodetic2ecef(geodesy::Geodetic::new(lat.to_radians(), lon.to_radians(), 0.0), &w.ell);
             let area = crate::features::Area { center, radius: 4_000.0, gsd: 20.0 };
@@ -509,36 +512,28 @@ mod tests {
             let g = GpuRounds { gen: &gen, done: Default::default(), missing: Vec::new() }.features(&w, &area);
             clear();
             let c = crate::features::build(&w, &mut crate::features::CpuPoints(&w), &area);
-            // (tunnel portals come from the engineered profiles' point samples)
-            let portal = |st: &&FStamp| st.template != crate::kits::transport::tpl::PORTAL;
-            let mut gs: Vec<_> = g.stamps.iter().filter(portal).map(key_st).collect();
-            let mut cs: Vec<_> = c.stamps.iter().filter(portal).map(key_st).collect();
+            // (tunnel portals included: their decks come from the engineered profiles)
+            let mut gs: Vec<_> = g.stamps.iter().map(key_st).collect();
+            let mut cs: Vec<_> = c.stamps.iter().map(key_st).collect();
             gs.sort();
             cs.sort();
             assert_eq!(gs.len(), cs.len(), "{name}: {} stamps on the GPU, {} on the CPU", gs.len(), cs.len());
             assert!(gs == cs, "{name}: stamps differ");
-            // (sites' segments and the routes' polylines; the decks of engineered profiles come
-            // from point samples and may differ by centimetres)
+            // (sites' segments, the routes' polylines and their engineered profiles)
             let mut gg: Vec<_> = g.segs.iter().map(key_sg).collect();
             let mut cg: Vec<_> = c.segs.iter().map(key_sg).collect();
-            type SegKey = (u32, u8, [u64; 3], [u64; 3], u32, u32, u32, [u32; 4]);
-            let deckless = |v: &mut Vec<SegKey>| {
-                for x in v.iter_mut() {
-                    if x.0 >= crate::kits::transport::cls::KIND0 {
-                        (x.5, x.6, x.7) = (0, 0, [0; 4]);
-                    }
-                }
-                v.sort();
-            };
-            deckless(&mut gg);
-            deckless(&mut cg);
+            gg.sort();
+            cg.sort();
+            let no_deck = crate::kits::transport::NO_DECK.to_bits();
+            ndeck += gg.iter().filter(|k| k.8[0] != no_deck || k.8[1] != no_deck).count();
             assert_eq!(gg.len(), cg.len(), "{name}: {} segments on the GPU, {} on the CPU", gg.len(), cg.len());
             assert!(gg == cg, "{name}: segments differ");
-            eprintln!("{name}: {} stamps, {} segments identical", gs.len(), gg.len());
+            eprintln!("{name}: {} stamps, {} segments identical (decks included)", gs.len(), gg.len());
             nst += gs.len();
             nsg += gg.len();
         }
-        assert!(nst > 0 && nsg > 0);
+        eprintln!("{ndeck} segments with engineered decks");
+        assert!(nst > 0 && nsg > 0 && ndeck > 0);
     }
 
     /// The glow's WGSL constants are the Rust ones (`places::GLOW_C1`, `GLOW_CAL`).

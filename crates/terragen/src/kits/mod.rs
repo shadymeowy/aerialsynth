@@ -11,6 +11,7 @@
 use crate::kernels::KernelSpec;
 use crate::stack::Stack;
 use crate::world::{Ctx, Macro};
+use glam::DVec3;
 
 // ---- kit modules: replace your line (keep the blank lines between them: merges stay clean)
 
@@ -151,6 +152,81 @@ pub struct Carve {
     pub lake_level: f64,
 }
 
+/// A host-built pass-A stamp (`Kit::astamps`): a landform that needs the drainage or exact
+/// samples to be placed (a delta at the point where a river meets the drawn coast) and shapes
+/// the ground after the drainage carve. On the GPU it travels in the sink-lake list as a
+/// `Sink` with a negative radius: `c` = (centre, `bearing`), `id`, `rad` = −`r`, `level` = `v`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AStamp {
+    /// the owning kit's kind of stamp (in `id`'s low byte: `id & 0xFF`), and its seed
+    pub id: u64,
+    /// centre: a surface point (ECEF)
+    pub c: DVec3,
+    /// its direction: radians from east, counter-clockwise, in the geocentric frame at `c`
+    /// ([`astamp_frame`])
+    pub bearing: f64,
+    /// reach (m): it changes nothing farther than this from `c`
+    pub r: f64,
+    /// a parameter (f32 on the GPU)
+    pub v: f32,
+}
+
+impl AStamp {
+    pub fn kind(&self) -> u8 {
+        (self.id & 0xFF) as u8
+    }
+}
+
+/// The geocentric frame (east, north, up; f32 axes as in WGSL `astamp_frame`) at a stamp's
+/// centre `c`, and its direction unit vector for `bearing`.
+pub fn astamp_frame(c: DVec3, bearing: f64) -> [glam::Vec3; 4] {
+    let up = c.as_vec3().normalize();
+    let east = glam::Vec3::Z.cross(up).normalize();
+    let north = up.cross(east);
+    let (s, co) = (bearing as f32).sin_cos();
+    [east, north, up, east * co + north * s]
+}
+
+/// What a pass-A stamp sees at a pixel (after the drainage carve).
+#[derive(Clone, Copy, Debug)]
+pub struct AStampIn<'a> {
+    pub ctx: &'a Ctx,
+    /// the nearest channel: signed distance to its centre line and its half width (m; 1e6 / 0:
+    /// none)
+    pub river_d: f64,
+    pub river_hw: f64,
+}
+
+/// The kits' pass-A stamps that can reach the disc (`center`, `radius`) at pixel size `gsd`
+/// (the kits' order, then theirs).
+pub fn astamps(w: &crate::world::World, center: DVec3, radius: f64, gsd: f64) -> Vec<AStamp> {
+    let mut out = Vec::new();
+    for k in KITS {
+        if let Some(f) = k.astamps {
+            out.extend(f(w, center, radius, gsd));
+        }
+    }
+    out
+}
+
+/// Do any kits build pass-A stamps?
+pub fn has_astamps() -> bool {
+    KITS.iter().any(|k| k.astamps.is_some())
+}
+
+/// Apply a pass-A stamp to the height `h`.
+#[inline]
+pub fn astamp(w: &crate::world::World, st: &AStamp, ai: &AStampIn, h: &mut f64) {
+    for k in KITS {
+        if let Some(f) = k.astamp {
+            f(w, st, ai, h);
+        }
+    }
+}
+
+/// A kit's host function listing its pass-A stamps (`Kit::astamps`).
+pub type AStampsFn = fn(&crate::world::World, DVec3, f64, f64) -> Vec<AStamp>;
+
 /// A kit's layer function for one stack slot.
 pub type LayerFn = fn(&mut Stack);
 
@@ -178,6 +254,14 @@ pub struct Kit {
     /// profile of the channels (`CarveIn`, `Carve`). WGSL (in `relief_wgsl`): `fn <name>_carve(c:
     /// Ctx, m: Macro, ci: CarveIn, cv: ptr<function, Carve>)`.
     pub carve: Option<fn(&crate::world::World, &CarveIn, &mut Carve)>,
+    /// host-built pass-A stamps (deltas at river mouths): the stamps that can reach the disc
+    /// (centre, radius) at pixel size `gsd`; a pure function of the world (cached by the kit).
+    /// They shape the ground after the drainage carve (`astamp`), in full pass-A evaluations.
+    pub astamps: Option<AStampsFn>,
+    /// a pass-A stamp's relief (`AStampIn`; the kit tells its own stamps by `AStamp::kind`).
+    /// WGSL (in `relief_wgsl`): `fn <name>_astamp(c: Ctx, st: Sink, ai: AStampIn, h: ptr<function,
+    /// f32>)` (the stamp arrives as a `Sink` with a negative radius, see `AStamp`).
+    pub astamp: Option<fn(&crate::world::World, &AStamp, &AStampIn, &mut f64)>,
     /// its instance families (`crate::instances`)
     pub families: &'static [crate::instances::Family],
     /// its host-built linear features and stamps (`crate::features`)
@@ -199,6 +283,8 @@ impl Kit {
         relief: None,
         relief_wgsl: "",
         carve: None,
+        astamps: None,
+        astamp: None,
         families: &[],
         host: None,
         replaces_towns: false,
@@ -300,6 +386,13 @@ pub fn wgsl_relief() -> String {
     for k in KITS {
         if k.relief.is_some() {
             s.push_str(&format!("    {}_relief(c, m, r, h);\n", k.name));
+        }
+    }
+    s.push_str("}\n");
+    s.push_str("fn kits_astamp(c: Ctx, st: Sink, ai: AStampIn, h: ptr<function, f32>) {\n");
+    for k in KITS {
+        if k.astamp.is_some() {
+            s.push_str(&format!("    {}_astamp(c, st, ai, h);\n", k.name));
         }
     }
     s.push_str("}\n");
