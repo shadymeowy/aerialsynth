@@ -214,7 +214,7 @@ const RIDGE_CELL: f64 = 140_000.0;
 /// λ 11-21 km, 900 m) mixed by the share `wf` of fault blocks (continuous: where both zones
 /// overlap the profiles blend). Zero mean; `nw` bends the stripes (cycles), `pl` is the plunge
 /// amplitude 0..1.
-fn ridges(p: DVec3, wf: f64, nw: f64, pl: f64, belt: DVec3, wg: f64) -> f64 {
+fn ridges(p: DVec3, wf: f64, nw: f64, pl: f64) -> f64 {
     let q = p / RIDGE_CELL;
     let i = q.floor();
     let f = q - i;
@@ -233,12 +233,11 @@ fn ridges(p: DVec3, wf: f64, nw: f64, pl: f64, belt: DVec3, wg: f64) -> f64 {
                 let e = DVec3::Z.cross(d);
                 let e = if e.length() < 1e-6 { DVec3::X } else { e.normalize() };
                 let n = d.cross(e);
-                // the strike: the belt's normal (the atlas' uplift gradient, `belt`, weight `wg`),
-                // else a direction shared by blocks of 4 × 4 × 4 corners (560 km) with a little jitter
+                // the strike: a direction shared by blocks of 4 × 4 × 4 corners (560 km) with a little jitter
                 let hb =
                     hash3(SEED + 11, ((ix + dx) as f64 / 4.0).floor() as i64, ((iy + dy) as f64 / 4.0).floor() as i64, ((iz + dz) as f64 / 4.0).floor() as i64);
                 let th = TAU * (u01k(hb, 1) + 0.18 * (u01k(h, 1) - 0.5));
-                let nn = (e * th.cos() + n * th.sin()) * (1.0 - wg) + belt * wg;
+                let nn = e * th.cos() + n * th.sin();
                 let lamk = 0.7 + 0.6 * u01k(h, 2);
                 let along = (p - corner).dot(nn);
                 let ph = u01k(h, 3) + 1.4 * nw;
@@ -378,20 +377,11 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
     // the flattening target: the atlas' smooth elevation (exact and the same in every tile; the
     // pixel's own low-passed relief carries the tile grid's interpolation error: steps of ~10 m
     // between tiles once it is the target of a 85 % blend)
-    // (and, in the folds and fault blocks, the belt's normal: the gradient of the atlas' uplift over
-    // ±25 km, east and north)
-    let want = z.fold + z.fault > 0.0;
-    let mut ae = 0.0;
-    let mut up = [0.0f64; 4];
-    if z.tower + z.cockpit + z.fold + z.fault > 0.0 || r.instances(w, fam_fans()).iter().any(|_| true) {
-        ae = w.atlas().sample(c.p.normalize()).elevation_m;
-    }
-    if want {
-        for (k, u) in up.iter_mut().enumerate() {
-            let (de, dn) = [(25_000.0, 0.0), (-25_000.0, 0.0), (0.0, 25_000.0), (0.0, -25_000.0)][k];
-            *u = w.atlas().sample((c.p + c.east * de + c.north * dn).normalize()).uplift;
-        }
-    }
+    let ae = if z.tower + z.cockpit + z.fold + z.fault > 0.0 || r.instances(w, fam_fans()).iter().any(|_| true) {
+        w.atlas().sample(c.p.normalize()).elevation_m
+    } else {
+        0.0
+    };
     // ---- karst: flattened floors, towers, dolines; drowned near the coast
     if z.tower + z.cockpit > 0.0 {
         let plain = lerp(ae, (-11.0f64).min(ae), z.drown);
@@ -414,11 +404,7 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
         if b > 0.0 {
             let nw = perlin3(SEED + 3, c.p / 38_000.0);
             let pl = smoothstep(-0.55, 0.3, perlin3(SEED + 4, c.p / 26_000.0));
-            let (gx, gy) = (up[0] - up[1], up[2] - up[3]);
-            let gl = (gx * gx + gy * gy).sqrt();
-            let wg = smoothstep(0.02, 0.06, gl);
-            let belt = (c.east * gx + c.north * gy) / gl.max(1e-9);
-            *h += zt * ridges(c.p, wf, nw, pl, belt, wg) * b;
+            *h += zt * ridges(c.p, wf, nw, pl) * b;
         }
     }
     // ---- badlands
@@ -655,7 +641,7 @@ mod tests {
             let (mut sum, mut lo, mut hi) = (0.0, f64::MAX, f64::MIN);
             for i in 0..n {
                 let p = plane(i, 900_000.0);
-                let v = ridges(p, kind as f64, 0.0, 1.0, DVec3::ZERO, 0.0) / [700.0, 1150.0][kind as usize];
+                let v = ridges(p, kind as f64, 0.0, 1.0) / [700.0, 1150.0][kind as usize];
                 sum += v;
                 lo = lo.min(v);
                 hi = hi.max(v);
@@ -667,9 +653,9 @@ mod tests {
             let mut worst: f64 = 0.0;
             let a = DVec3::new(6_371_000.0, 0.0, 0.0);
             let amp = [700.0, 1150.0][kind as usize];
-            let mut prev = ridges(a, kind as f64, 0.0, 1.0, DVec3::ZERO, 0.0) / amp;
+            let mut prev = ridges(a, kind as f64, 0.0, 1.0) / amp;
             for j in 1..30_000 {
-                let v = ridges(a + DVec3::new(0.0, 20.0 * j as f64, 0.0), kind as f64, 0.0, 1.0, DVec3::ZERO, 0.0) / amp;
+                let v = ridges(a + DVec3::new(0.0, 20.0 * j as f64, 0.0), kind as f64, 0.0, 1.0) / amp;
                 worst = worst.max((v - prev).abs());
                 prev = v;
             }

@@ -23,7 +23,7 @@ matters (a tower is there or not); only its extent is smooth.
 | tower karst | carbonate × humid (moisture 0.42-0.58) × warm (15-21 °C), off high mountains, on the shelf | floors flattened (88 %) towards the atlas' smooth elevation; 3D Worley lattice of 420 m cells, 70 % of the cells carry an oval, ragged tower `H (1 - F1/R)^0.6` (H 110-300 m, R 0.4-0.7 cell, profile `H sqrt(1 - x^2.5)`: a round top and steep walls), clipped at the bisector; the calibrated mean (31.5 m) where the cells are below the pixel | dark forest paint over the core's rock on the walls, bare pale cliffs only on slopes > 3.5-6 (cockpit cones: 0.8-1.4) |
 | drowned towers (islands) | the same, near the coast | the plain falls to -11 m within 10 km of the coast (the coast retreats a few km): the towers stand in the sea; no towers beyond 30 km at sea | the core's shallow water and beaches |
 | cockpit karst | carbonate × humid, cooler or drier (moisture 0.28+, 4-12 °C+) | a cone hill in every cell (H 60-160 m, linear flanks), the star-shaped depressions lie between them (mean 15.24 m subtracted: zero-mean) | pale cliffs on the steepest flanks |
-| folded ridges | old orogens (mountain mask with little tectonic uplift) and foreland belts (uplift 0.04-0.5), in the provinces where a 180 km noise is positive (about 45 % of them) | ridges `t^1.6` on an 8-corner lattice of 140 km cells (below), λ 6.3-11.7 km, 700 m, striking along the belt; the old relief is 85 % blended into the atlas' smooth elevation first | the core's rock on slopes |
+| folded ridges | old orogens (mountain mask with little tectonic uplift) and foreland belts (uplift 0.04-0.5), in the provinces where a 180 km noise is positive (about 45 % of them) | ridges `t^1.6` on an 8-corner lattice of 140 km cells (below), λ 6.3-11.7 km, 700 m, striking in a direction shared by 560 km blocks; the old relief is 85 % blended into the atlas' smooth elevation first | the core's rock on slopes |
 | fault blocks | extensional provinces (negative uplift, inland) | tilted sawtooth (flat basin floor on 30 % of the period, the tilted block, a scarp on a fifth), λ 11-21 km, 1150 m, the same lattice (where fold and fault zones overlap the two profiles blend: no switch); basins between the blocks fill with long lakes where they are below the drainage | |
 | badlands | soft sediment (sedimentary, unconsolidated) × arid (moisture < 0.14-0.28) × not in sand seas | three octaves of creased noise (300, 130, 55 m; `|perlin|^0.7`, zero mean; 25-55 m deep) | pale clay floors, strata bands of 9 m (cream, rust, brown) on the gully walls |
 | alluvial fans | family `mountains_fans` (cell 18 km, reach 7.2 km, 40 % of the sites): the atlas' uplift 0.12-0.55 falling by 0.03 over 24 km, dry (moisture index < 0.33), > 5 km from the coast; the fan points down the gradient | a cone `H (1 - r/R)^1.3` (R 2.6-5.6 km, H 1.6-3 % of R) blended 70 % over the smooth elevation in a ±60° sector, a lobed outline | pale gravel with radial streaks, 85 % of the vegetation cleared |
@@ -40,9 +40,9 @@ precision), the profile of every corner is blended by its trilinear weight squar
 bends the stripes (up to 1.4 cycles), a 26 km noise makes the amplitude plunge (a fold nose ends
 where it fades). Folds and fault blocks share the lattice: each corner evaluates both profiles
 (λ 9 / 16 km) and the result blends by the fault share of the zones (no switch where the two
-overlap). The strike follows the belt: the gradient of the atlas' uplift over ±25 km (east, north) is the stripes' normal where it is
-strong (weight 0.02-0.06), else a direction shared by blocks of 4 corners (560 km) with a little jitter; the vectors
-are blended unnormalised, so the stripes fade where they disagree instead of jumping.
+overlap). The strike is a direction shared by blocks of 4 x 4 x 4 corners (560 km) with a little jitter, so belts are coherent over
+hundreds of km. (A strike from the gradient of the atlas' uplift was tried: the 140 km lever arm of the anchored stripe
+coordinate turns the f32 noise of the atlas sample into metres, and the CPU/GPU tile parity failed.)
 
 **Carve hook (core).** `Kit::carve` (`kits::{CarveIn, Carve}`, WGSL `kits_carve`) is called once
 per channel that reaches a pixel (levels 0 and 1; `ReliefIn`-like inputs plus the position along

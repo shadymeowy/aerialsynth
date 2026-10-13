@@ -126,7 +126,7 @@ fn mt_cone_h(c: Cell3, p: vec3<f64>, east: vec3<f32>, north: vec3<f32>, kind: u3
 }
 
 /// `mountains::ridges`.
-fn mt_ridges(p: vec3<f64>, wf: f32, nw: f32, pl: f32, belt: vec3<f32>, wg: f32) -> f32 {
+fn mt_ridges(p: vec3<f64>, wf: f32, nw: f32, pl: f32) -> f32 {
     let q = p / MT_RIDGE_CELL;
     let i = floor(q);
     let f = vec3<f32>(q - i);
@@ -167,7 +167,7 @@ fn mt_ridges(p: vec3<f64>, wf: f32, nw: f32, pl: f32, belt: vec3<f32>, wg: f32) 
                 let n = cross(d, e);
                 let hb = hash3(MT_SEED + 11lu, i64(floor(f64(ix + i64(dx)) / 4.0lf)), i64(floor(f64(iy + i64(dy)) / 4.0lf)), i64(floor(f64(iz + i64(dz)) / 4.0lf)));
                 let th = TAU * (u01k(hb, 1lu) + 0.18 * (u01k(h, 1lu) - 0.5));
-                let nn = (e * cos(th) + n * sin(th)) * (1.0 - wg) + belt * wg;
+                let nn = e * cos(th) + n * sin(th);
                 let lamk = 0.7 + 0.6 * u01k(h, 2lu);
                 let along = dot(vec3<f32>(p - corner), nn);
                 let ph = u01k(h, 3lu) + 1.4 * nw;
@@ -320,35 +320,9 @@ fn mountains_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
     zi.style = perlin3(MT_SEED + 5lu, c.p / 180000.0lf);
     let z = mt_zones(zi, fl.lit, fl.n1, fl.n2);
     let fans = inst_list(FAM_MOUNTAINS_FANS, r.blk, c.p);
-    // (the elevation, and in the folds and fault blocks the uplift at four points ±25 km: one call site)
     var ae = 0.0;
-    var up: array<f32, 4>;
-    let want = z.fold + z.fault > 0.0;
-    var kmax = 0u;
     if (z.tower + z.cockpit + z.fold + z.fault > 0.0 || fans.n > 0u) {
-        kmax = 1u;
-    }
-    if (want) {
-        kmax = 5u;
-    }
-    for (var k = 0u; k < kmax; k++) {
-        var de = 0.0;
-        var dn = 0.0;
-        if (k == 1u) {
-            de = 25000.0;
-        } else if (k == 2u) {
-            de = -25000.0;
-        } else if (k == 3u) {
-            dn = 25000.0;
-        } else if (k == 4u) {
-            dn = -25000.0;
-        }
-        let a = atlas_sample(vec3<f32>(normalize(c.p + vec3<f64>(vec3<f32>(c.east * de + c.north * dn)))));
-        if (k == 0u) {
-            ae = a.elevation;
-        } else {
-            up[k - 1u] = a.uplift;
-        }
+        ae = atlas_sample(vec3<f32>(normalize(c.p))).elevation;
     }
     if (z.tower + z.cockpit > 0.0) {
         let plain = lerp(ae, min(-11.0, ae), z.drown);
@@ -371,12 +345,7 @@ fn mountains_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
         if (b > 0.0) {
             let nw = perlin3(MT_SEED + 3lu, c.p / 38000.0lf);
             let pl = smoothstep1(-0.55, 0.3, perlin3(MT_SEED + 4lu, c.p / 26000.0lf));
-            let gx = up[0] - up[1];
-            let gy = up[2] - up[3];
-            let gl = sqrt(gx * gx + gy * gy);
-            let wg = smoothstep1(0.02, 0.06, gl);
-            let belt = (c.east * gx + c.north * gy) / max(gl, 1e-9);
-            *h += zt * mt_ridges(c.p, wf, nw, pl, belt, wg) * b;
+            *h += zt * mt_ridges(c.p, wf, nw, pl) * b;
         }
     }
     if (z.badland > 0.0) {

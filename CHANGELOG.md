@@ -4,7 +4,7 @@
 
 - **Visual polish, round B** (see the kits' Known limits): tower karst on a rounder, taller profile with forest paint on
   the walls; fjords as narrow troughs (new `Carve::narrow` in the carve hook: the valley's extent from the walls alone);
-  folds and fault blocks taller, striking along the atlas' uplift gradient, fault basins flat; canyon depth 400-1500 m
+  folds and fault blocks taller, with coherent regional strike, fault basins flat; canyon depth 400-1500 m
   by province; volcanic ash in rays, higher shaded cinder cones; settlement districts with wandering borders and fewer
   arterials; softer cotton, smallholder, flowering, fishbone, regrowth, varnish, burn-scar and road-verge colours.
 
