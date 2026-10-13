@@ -30,6 +30,7 @@ pub mod kernels;
 pub mod kits;
 pub mod landcover;
 pub mod layers;
+pub mod memo;
 pub mod noise;
 pub mod registry;
 pub mod stack;
