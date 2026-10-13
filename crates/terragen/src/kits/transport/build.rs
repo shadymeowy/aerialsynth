@@ -645,12 +645,11 @@ fn spacing(gsd: f64) -> f64 {
 
 /// The routes near an area (the graph's edges, spurs to motorways with their crossings, roads and
 /// lines to the sites) and whether point evaluations are pending.
-pub(crate) fn area_routes(ctx: &mut HostCtx, area: &Area) -> (Vec<Routed>, Vec<(Edge, u64, Crossing)>, bool) {
-    let w = ctx.world;
+/// The graph edges near an area (`area_routes`) and the motorways its towns may have spurs to.
+fn graph_edges(w: &World, area: &Area) -> (Vec<Edge>, Vec<Edge>) {
     let gsd = area.gsd;
     let vis = |c: usize| gsd < cls::GSD_MAX[c];
     let margin = 1_500.0;
-    // ---- the graph edges near the area
     let mut edges: Vec<Edge> = Vec::new();
     for n in 0..nw::N {
         if gsd >= net::net_class_max_gsd(n) {
@@ -658,12 +657,53 @@ pub(crate) fn area_routes(ctx: &mut HostCtx, area: &Area) -> (Vec<Routed>, Vec<(
         }
         edges.extend(net::edges_near(w, n, area.center, area.radius + margin).into_iter().filter(|e| vis(e.class)));
     }
+    let mut mways: Vec<Edge> = Vec::new();
+    if vis(cls::TRUNK) {
+        mways = net::edges_near(w, nw::ARTERIAL, area.center, area.radius + 25_000.0);
+        mways.retain(|e| e.class == cls::MOTORWAY);
+    }
+    (edges, mways)
+}
+
+/// The kit's `prepare` hook: route the graph edges and motorways near a batch of areas, each
+/// once and in parallel (longest first), before the areas' features are built in parallel (each
+/// would route the edges it shares with its neighbours itself).
+pub fn prepare(w: &World, areas: &[Area]) {
+    use rayon::prelude::*;
+    if w.cfg.landuse.roads <= 0.0 || w.cfg.landuse.towns <= 0.0 {
+        return;
+    }
+    let lists: Vec<Vec<Edge>> = areas
+        .par_iter()
+        .filter(|a| a.gsd < cls::GSD_MAX[cls::POWER])
+        .map(|a| {
+            let (mut e, m) = graph_edges(w, a);
+            e.extend(m);
+            e
+        })
+        .collect();
+    let mut all: Vec<Edge> = lists.concat();
+    all.sort_unstable_by_key(|e| e.key);
+    all.dedup_by_key(|e| e.key);
+    all.sort_by(|a, b| b.len().total_cmp(&a.len()).then(a.key.cmp(&b.key)));
+    all.par_iter().for_each(|e| {
+        let mut pts = crate::features::CpuPoints(w);
+        let mut ctx = HostCtx { world: w, points: &mut pts };
+        let _ = routed(&mut ctx, e);
+    });
+}
+
+pub(crate) fn area_routes(ctx: &mut HostCtx, area: &Area) -> (Vec<Routed>, Vec<(Edge, u64, Crossing)>, bool) {
+    let w = ctx.world;
+    let gsd = area.gsd;
+    let vis = |c: usize| gsd < cls::GSD_MAX[c];
+    let margin = 1_500.0;
+    // ---- the graph edges near the area
+    let (mut edges, mways) = graph_edges(w, area);
     let mut pending = false;
     // ---- spurs from towns to passing motorways
     let mut spurs: Vec<(Edge, u64, Crossing)> = Vec::new();
     if vis(cls::TRUNK) {
-        let mut mways: Vec<Edge> = net::edges_near(w, nw::ARTERIAL, area.center, area.radius + 25_000.0);
-        mways.retain(|e| e.class == cls::MOTORWAY);
         for m in &mways {
             let ml = match routed(ctx, m) {
                 Some(Some(l)) => l,

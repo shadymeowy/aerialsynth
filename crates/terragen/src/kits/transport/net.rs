@@ -287,8 +287,17 @@ pub fn chord_dist(a: DVec3, b: DVec3, p: DVec3) -> f64 {
     (p - (a + ab * t)).length()
 }
 
+/// Memo of [`edges_near`] by its arguments (the `prepare` hook and the areas' features ask
+/// for the same).
+static EDGES_NEAR: crate::memo::Memo<(u64, usize, [u64; 4]), Arc<Vec<Edge>>> = crate::memo::Memo::new(1 << 14);
+
 /// The edges of network `n` whose route can come within `radius` of `center`.
 pub fn edges_near(w: &World, n: usize, center: DVec3, radius: f64) -> Vec<Edge> {
+    let key = (w.cache_key, n, [center.x.to_bits(), center.y.to_bits(), center.z.to_bits(), radius.to_bits()]);
+    EDGES_NEAR.get_or(key, || Arc::new(edges_near_uncached(w, n, center, radius))).to_vec()
+}
+
+fn edges_near_uncached(w: &World, n: usize, center: DVec3, radius: f64) -> Vec<Edge> {
     let lmax = LMAX[n];
     let mut out: Vec<Edge> = Vec::new();
     // one end of every such edge lies within radius + lmax / 2 + deviation of the centre
@@ -317,6 +326,7 @@ pub fn edges_near(w: &World, n: usize, center: DVec3, radius: f64) -> Vec<Edge> 
 /// Clear the caches (tests).
 #[cfg(test)]
 pub fn clear_cache() {
+    EDGES_NEAR.clear();
     *NB.write().unwrap() = None;
     *TRACK_ENDS.write().unwrap() = None;
 }

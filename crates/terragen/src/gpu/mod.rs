@@ -990,17 +990,11 @@ impl GpuGenerator {
         std::thread::scope(|sc| {
             let feats = (full && !ids.is_empty() && crate::features::any()).then(|| {
                 sc.spawn(|| {
-                    // (the tiles' host functions in parallel, with exact point evaluations on
-                    // the host: the kits' host code takes the same decisions from either
-                    // backend's samples, see `sites_and_routes_match_the_cpu`, and GPU
-                    // evaluations cost a settle round each step of a chain of decisions)
-                    use rayon::prelude::*;
-                    tq.par_iter()
-                        .map(|q| {
-                            let area = crate::features::Area { center: q.center, radius: q.radius, gsd: q.gsd };
-                            crate::features::build(&self.world, &mut crate::features::CpuPoints(&self.world), &area)
-                        })
-                        .collect::<Vec<crate::features::Features>>()
+                    // (exact point evaluations on the host: the kits' host code takes the same
+                    // decisions from either backend's samples, see `sites_and_routes_match_the_cpu`,
+                    // and GPU evaluations cost a settle round each step of a chain of decisions)
+                    let areas: Vec<crate::features::Area> = tq.iter().map(|q| crate::features::Area { center: q.center, radius: q.radius, gsd: q.gsd }).collect();
+                    crate::features::build_areas(&self.world, &areas)
                 })
             });
             self.run_passes(ids, full, &tq, feats)

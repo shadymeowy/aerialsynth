@@ -123,6 +123,18 @@ pub fn build(w: &World, points: &mut dyn PointSource, area: &Area) -> Features {
     out
 }
 
+/// The features of all kits for a batch of areas, with exact point evaluations
+/// ([`CpuPoints`]): the kits' `prepare` hooks first, then the areas in parallel.
+pub fn build_areas(w: &World, areas: &[Area]) -> Vec<Features> {
+    use rayon::prelude::*;
+    for k in crate::kits::KITS {
+        if let (Some(p), Some(_)) = (k.prepare, k.host) {
+            p(w, areas);
+        }
+    }
+    areas.par_iter().map(|a| build(w, &mut CpuPoints(w), a)).collect()
+}
+
 /// Do any kits build features?
 pub fn any() -> bool {
     crate::kits::KITS.iter().any(|k| k.host.is_some())
