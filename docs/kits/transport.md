@@ -85,7 +85,11 @@ Routes are memoized per edge (the analytic stage and the final route).
 
 **Engineered profiles (host, point samples).** Motorways, trunk roads and railways sample the
 full terrain every 40 m (one GPU round for all samples of an area; memoized per sample) and
-derive deck heights by a local operator: a box mean of the ground (raised over water), then the
+derive deck heights by a local operator; the samples' ground and water levels are quantized to
+1 m, from the exact sample (`World::terrain`, the CPU backend's own) where the backend's is
+within 4 cm of a rounding boundary or near a water decision (`build::deck_sample`: ~8 % of the
+samples), so GPU (f32) and CPU (f64) samples give the same decks, bridges, tunnels and portals
+(they differed by millimetres to centimetres). The operator: a box mean of the ground (raised over water), then the
 mean of its largest grade-limited minorant and smallest majorant within ±1.2 km (railways ±1.8 km; grades 4.5 %,
 6.5 %, 2 %), lifted near water so it clears it. Any stretch of a route gets the same decks, so tiles agree. Where the deck is 6 m
 above the ground (or over water) the stretch is a **bridge** (deck only, parapets, its shadow
@@ -277,8 +281,11 @@ road and a track through forest nearby (−7.619, −16.609) from 500 m.
   reservoirs, 0–2 % elsewhere (`routing_time`, `TR_WHY=1` lists them). Ends in water (a hamlet in a
   reservoir, a track end in a lake) move to the shore, leaving the road short of the place.
 * Sites need point samples, so routes depend on them too; the settlements kit re-takes close
-  site decisions with exact samples, so both backends build the same sites and routes
-  (`sites_and_routes_match_the_cpu`).
+  site decisions with exact samples, and the profiles' samples are quantized (exact near a
+  rounding boundary), so both backends build the same sites, routes and decks
+  (`sites_and_routes_match_the_cpu`, decks and portals included). A sample at a discontinuity of
+  pass A (a lake's shore, a channel's bank) can still differ by more than the 4 cm margin
+  between the backends.
 * River crossings are counted in each drainage level's meander-warped space between the grid
   nodes, an approximation of the drawn channel: crossings are near perpendicular (mean sin 0.87
   at the verification's crossings), but their number is mostly set by the network (a road

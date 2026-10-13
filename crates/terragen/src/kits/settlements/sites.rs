@@ -92,7 +92,7 @@ pub const TIE_H: f64 = 0.5;
 
 /// Can the backend's sample `t` be on the other side of a water decision than the exact one
 /// (ground near sea level or near its lake's level)?
-fn water_fragile(t: &crate::tile::PointTerrain) -> bool {
+pub(crate) fn water_fragile(t: &crate::tile::PointTerrain) -> bool {
     t.ground.abs() < TIE_H || (t.water_kind != crate::world::water::NONE && (t.water - t.ground).abs() < TIE_H)
 }
 

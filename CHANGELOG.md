@@ -11,6 +11,11 @@
   join at different points (by rank). CPU `World::node_pieces` and WGSL `node_pieces` alike
   (`lat_main`, `trib_controls`); the pieces stay zoom-independent. Test
   `tributaries_join_at_an_angle` (no two channels of a level meet at < 12°; 26 of 421 before).
+- **Road decks are backend-independent.** The engineered profiles' point samples (ground and
+  water level) are quantized to 1 m, from the exact sample where the backend's is within 4 cm of
+  a rounding boundary or near a water decision (`transport::build::deck_sample`), so GPU and CPU
+  build the same decks, bridges, tunnels and portals; `sites_and_routes_match_the_cpu` now
+  compares them too.
 
 - **Qanats** (desert kit, design P2): dotted lines of shaft mounds (pale spoil rings around a
   dark shaft every 30–55 m) from the piedmont down to a common outlet, 1–3 lines of 3–8 km per

@@ -358,16 +358,21 @@ fn samples(ctx: &mut HostCtx, key: u64, line: &Line, j0: i64, j1: i64) -> Option
             out.push(g.as_ref().and_then(|m| m.get(&(w.cache_key, key, j))).copied());
         }
     }
-    let mut new = Vec::new();
+    let mut got = Vec::new();
     for (k, j) in (j0..=j1).enumerate() {
         if out[k].is_none() {
             let p = line.at(j as f64 * DS).0;
             let gd = geodesy::ecef2geodetic(p, &w.ell);
             if let Some(t) = ctx.terrain(gd.lat, gd.lon, 20.0) {
-                out[k] = Some(t);
-                new.push((j, t));
+                got.push((k, j, gd.lat, gd.lon, t));
             }
         }
+    }
+    // (some need an exact sample: in parallel)
+    use rayon::prelude::*;
+    let new: Vec<(i64, PointTerrain)> = got.par_iter().map(|&(_, j, lat, lon, t)| (j, deck_sample(w, lat, lon, t))).collect();
+    for (g, &(_, t)) in got.iter().zip(&new) {
+        out[g.0] = Some(t);
     }
     if !new.is_empty() {
         let mut g = SAMPLES.write().unwrap();
@@ -380,6 +385,29 @@ fn samples(ctx: &mut HostCtx, key: u64, line: &Line, j0: i64, j1: i64) -> Option
         }
     }
     out.into_iter().collect()
+}
+
+/// Deck samples are quantized to this (m), so that the profiles (decks, bridges, tunnels,
+/// portals) are the same on both backends: the GPU's samples differ from the CPU's by
+/// millimetres to centimetres, which moved every deck a little.
+const DECK_Q: f64 = 1.0;
+/// A backend sample this close (m) to a rounding boundary of [`DECK_Q`] is re-evaluated exactly.
+const DECK_EPS: f64 = 0.04;
+
+/// The deck sample from the backend's point terrain `t` at (lat, lon): ground and water level
+/// quantized to [`DECK_Q`], from the exact sample (the CPU's `World::terrain`, the CPU backend's
+/// own) where `t` is within [`DECK_EPS`] of a rounding boundary or near a water decision
+/// (`sites::water_fragile`), else from `t`.
+fn deck_sample(w: &World, lat: f64, lon: f64, t: PointTerrain) -> PointTerrain {
+    let near = |h: f64| ((h / DECK_Q).fract().abs() - 0.5).abs() < DECK_EPS / DECK_Q;
+    let t = if sites::water_fragile(&t) || near(t.ground) || (t.water.is_finite() && near(t.water)) {
+        let e = w.terrain(&crate::world::Ctx::new(lat, lon, 20.0, &w.ell));
+        PointTerrain { ground: e.ground, water: e.water, water_kind: e.water_kind }
+    } else {
+        t
+    };
+    let q = |h: f64| (h / DECK_Q).round() * DECK_Q;
+    PointTerrain { ground: q(t.ground), water: if t.water.is_finite() { q(t.water) } else { t.water }, water_kind: t.water_kind }
 }
 
 /// The engineered profile of a stretch: deck heights, ground, bridge and tunnel flags at the
