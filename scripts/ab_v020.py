@@ -5,7 +5,8 @@ The v0.2.0 showcase stills (`showcase/stills.yaml` of v0.2.0, one frame per scen
 are kept as small JPEGs in `docs/ab/v020/<scene>.jpg`; `scripts/ab_v020/<scene>.yaml` are the
 same scenes with today's config keys. A scene `<scene>@<tag>.yaml` is the same camera at another
 place: a place of the same landscape type in today's world (its world differs from v0.2.0's,
-so the identical pose often shows another landscape).
+so the identical pose often shows another landscape). The scenes set `world.generator: next`
+(the modular generator; `classic` is the v0.2.0 one).
 
     # render (needs only the `terrain` binary; GPU: run it on a machine with one)
     scripts/ab_v020.py render --terrain target/release/terrain --out /tmp/ab [SCENE ...]

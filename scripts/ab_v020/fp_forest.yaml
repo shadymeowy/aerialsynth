@@ -1,6 +1,7 @@
 # the camera-footprint example's scene (oblique camera, 1024 x 768 at fx 900 scaled to 640 x 480)
 world:
   seed: 1
+  generator: next
 tiles:
   file: out/world.h5
   max_zoom: 18

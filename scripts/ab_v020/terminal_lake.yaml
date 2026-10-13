@@ -1,5 +1,6 @@
 world:
   seed: 1
+  generator: next
 tiles:
   file: out/world.h5
   max_zoom: 18
