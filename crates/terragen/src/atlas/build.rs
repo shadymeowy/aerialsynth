@@ -220,7 +220,6 @@ struct WindIn {
 
 /// The latitude whose circulation belt (ITCZ, trades, subtropical high, westerlies) lies at
 /// `lat` in a season (`season` +1 July, −1 January): the belts follow the sun, more over land.
-
 fn belt_latitude(ac: &crate::config::AtlasConfig, lat: f64, coast_km: f64, season: f64) -> f64 {
     let landness = smoothstep(-300.0, 1500.0, coast_km);
     // (the heated continents pull the belts far only in the tropics and subtropics: shifted by
