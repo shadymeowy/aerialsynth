@@ -184,6 +184,7 @@ as_close(w);
 | [`docs/stars.md`](docs/stars.md) | stars, planets, Moon: catalogue, astrometry, star ground truth |
 | [`docs/gpu.md`](docs/gpu.md) | the GPU backend: tile generation and rendering |
 | [`bindings/README.md`](bindings/README.md) | the C and Python bindings: tile access, rendering, building, examples |
+| [`examples/camera-footprint`](examples/camera-footprint) | example: camera ↔ geodetic / ECEF / ENU ↔ XYZ tiles, a camera's ground footprint on the stitched map, the map warped into the camera by a homography |
 
 ## Repository layout
 
@@ -197,6 +198,7 @@ crates/viewer     terrain view: map and camera views
 crates/seqview    terrain show / export: the dataset viewer and exporter
 crates/cli        the terrain command
 bindings/         C API (libaerialsynth) and Python package (aerialsynth): tiles, rendering
+examples/         example programs (camera-footprint: camera, geodesy and tile coordinates)
 configs/          example scenarios
 docs/             documentation
 scripts/          builders of the bundled star catalogue and ephemeris
