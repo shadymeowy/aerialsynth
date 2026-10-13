@@ -870,7 +870,7 @@ impl GpuGenerator {
                 );
             }
             let computed: Vec<(u64, Option<crate::eco::EcoParams>)> =
-                missing.par_iter().map(|&id| (id, sites.get(&id).map(|&site| crate::eco::compute(w, reg, id, site)))).collect();
+                host_run(|| missing.par_iter().map(|&id| (id, sites.get(&id).map(|&site| crate::eco::compute(w, reg, id, site)))).collect());
             for (id, e) in computed {
                 match e {
                     Some(e) => {
@@ -994,7 +994,7 @@ impl GpuGenerator {
                     // decisions from either backend's samples, see `sites_and_routes_match_the_cpu`,
                     // and GPU evaluations cost a settle round each step of a chain of decisions)
                     let areas: Vec<crate::features::Area> = tq.iter().map(|q| crate::features::Area { center: q.center, radius: q.radius, gsd: q.gsd }).collect();
-                    crate::features::build_areas(&self.world, &areas)
+                    host_pool().install(|| crate::features::build_areas(&self.world, &areas))
                 })
             });
             self.run_passes(ids, full, &tq, feats)
@@ -1523,6 +1523,30 @@ impl GpuGenerator {
             .collect();
         Ok((vec![], tiles))
     }
+}
+
+/// The generator's thread pool for parallel host work during a batch (the kits' features,
+/// ecoregions), apart from rayon's global pool: a caller may generate tiles from the global
+/// pool's threads (`par_iter` over tiles), which then wait for the batch in progress — host work
+/// queued there could wait for them in turn (a deadlock: the batch holds the generator's cache).
+/// Host code run here never calls the generator. Enter it from a plain thread ([`host_run`]):
+/// a rayon worker waiting for another pool runs its own pool's jobs meanwhile — another tile of
+/// the caller, which would wait for the cache the worker holds.
+fn host_pool() -> &'static rayon::ThreadPool {
+    static POOL: std::sync::OnceLock<rayon::ThreadPool> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(rayon::current_num_threads().max(2))
+            .thread_name(|i| format!("terragen-host-{i}"))
+            .build()
+            .expect("terragen: host thread pool")
+    })
+}
+
+/// Run `f` on the host pool from a plain thread (the calling thread just blocks: it may hold
+/// the generator's cache, see [`host_pool`]).
+fn host_run<T: Send>(f: impl FnOnce() -> T + Send) -> T {
+    std::thread::scope(|s| s.spawn(|| host_pool().install(f)).join()).unwrap_or_else(|e| std::panic::resume_unwind(e))
 }
 
 /// More land-use sites in a batch than the request buffers hold.
