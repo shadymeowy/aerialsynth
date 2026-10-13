@@ -67,10 +67,8 @@ jobs:
         shell: bash
         run: |
           T="cargo test --release -p render --lib gpu::selfcheck::tests::self_check -- --nocapture"
-          run() { echo "=== $*"; env "$@" $T 2>&1 | grep -E "DBG|self-check|warning|error" ; }
-          run DBG_X=1
-          run DBG_GEOM=1
-          run DBG_NO_WALLS=1
+          set +e
+          run() { echo "=== $*"; env "$@" $T 2>&1 | grep -E "DBG gpu|self-check [03]|warning|error|panicked|GPU|left" ; }
           for f in dbg/*.wgsl; do run DBG_SHADE_FILE=$f; done
           D=$(ls -d "/c/Program Files (x86)/Windows Kits/10/bin/"*/x64 | tail -1); ls -la "$D"/dx*.dll || true
           PATH="$D:$PATH" run DBG_X=dxc
@@ -145,10 +143,8 @@ jobs:
         shell: bash
         run: |
           T="cargo test --release -p render --lib gpu::selfcheck::tests::self_check -- --nocapture"
-          run() { echo "=== $*"; env "$@" $T 2>&1 | grep -E "DBG|self-check|warning|error" ; }
-          run DBG_X=1
-          run DBG_GEOM=1
-          run DBG_NO_WALLS=1
+          set +e
+          run() { echo "=== $*"; env "$@" $T 2>&1 | grep -E "DBG gpu|self-check [03]|warning|error|panicked|GPU|left" ; }
           for f in dbg/*.wgsl; do run DBG_SHADE_FILE=$f; done
           D=$(ls -d "/c/Program Files (x86)/Windows Kits/10/bin/"*/x64 | tail -1); ls -la "$D"/dx*.dll || true
           PATH="$D:$PATH" run DBG_X=dxc
