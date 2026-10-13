@@ -2,10 +2,16 @@
 
 ## Unreleased
 
+- **Fixed: the GPU renderer drew no terrain on Windows' WARP** (DX12; the Windows CI's GPU
+  self-check failed since the walls). The walls' geometric normal, gathered from neighbouring
+  G-buffer points inside the shading kernel's sample loop, made the DX12 shader compiler (FXC)
+  / WARP produce a shading kernel that wrote nothing usable, without any error. The normals are
+  now computed by a small compute pass of their own (`normals.wgsl`, only with `render.walls`)
+  into a texture the shading kernel reads once per sample; same normals as before.
 - **GPU renderer on software rasterizers.** The G-buffer pass is now submitted before the
   shading pass instead of in the same submission: lavapipe shaded parts of the frame (whole
-  8 × 8 workgroups) before the mesh was drawn there, i.e. as sky, and WARP (Windows CI) drew no
-  terrain at all; a barrier, or a separate command buffer in the same submission, did not help.
+  8 × 8 workgroups) before the mesh was drawn there, i.e. as sky; a barrier, or a separate
+  command buffer in the same submission, did not help.
   A shader the backend rejects is now an error of the renderer's start-up (not a device failure
   reported a frame later), and a GPU render error fails the self-check (auto renders on the
   CPU). The self-check test runs four frames and wants all of them right; CI runs it on lavapipe

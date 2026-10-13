@@ -138,6 +138,8 @@ struct Targets {
     oh: u32,
     gbuf: wgpu::Texture,
     depth: wgpu::Texture,
+    /// geometric normals of the G-buffer's surface (the normals pass, for the walls)
+    ngeo: wgpu::Texture,
     out: [wgpu::Buffer; 4],
     read: [wgpu::Buffer; 4],
 }
@@ -151,6 +153,7 @@ struct Ctx {
     frame: u64,
     gbuf_pipe: wgpu::RenderPipeline,
     shade_pipe: wgpu::ComputePipeline,
+    norm_pipe: wgpu::ComputePipeline,
     pools: HashMap<Shading, TilePool>,
     targets: Option<Targets>,
     /// unit rays of the renderers' supersampled grids, by renderer id (most recent few)
@@ -192,7 +195,7 @@ impl Ctx {
         let compiling = gpu.compiling();
         // a shader the backend rejects (e.g. its HLSL / MSL compiler) is an error here, not a
         // device failure that only the next frame reports
-        let (gbuf_pipe, shade_pipe) = gpu.scoped(|| Ok(Self::pipelines(d))).context("the renderer's shaders")?;
+        let (gbuf_pipe, shade_pipe, norm_pipe) = gpu.scoped(|| Ok(Self::pipelines(d))).context("the renderer's shaders")?;
         drop(compiling);
         Ok(Ctx {
             gpu,
@@ -202,14 +205,15 @@ impl Ctx {
             frame: 0,
             gbuf_pipe,
             shade_pipe,
+            norm_pipe,
             pools: HashMap::new(),
             targets: None,
             rays: Vec::new(),
         })
     }
 
-    /// The G-buffer (mesh) and shading pipelines.
-    fn pipelines(d: &wgpu::Device) -> (wgpu::RenderPipeline, wgpu::ComputePipeline) {
+    /// The G-buffer (mesh), shading and geometric normals pipelines.
+    fn pipelines(d: &wgpu::Device) -> (wgpu::RenderPipeline, wgpu::ComputePipeline, wgpu::ComputePipeline) {
         let gmod =
             d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("mesh"), source: wgpu::ShaderSource::Wgsl(include_str!("mesh.wgsl").into()) });
         let gbuf_pipe = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -252,7 +256,19 @@ impl Ctx {
             compilation_options: Default::default(),
             cache: None,
         });
-        (gbuf_pipe, shade_pipe)
+        let nmod = d.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("normals"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("normals.wgsl").into()),
+        });
+        let norm_pipe = d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("normals"),
+            layout: None,
+            module: &nmod,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        (gbuf_pipe, shade_pipe, norm_pipe)
     }
 
     fn ensure_targets(&mut self, w: u32, h: u32, ow: u32, oh: u32) {
@@ -274,6 +290,7 @@ impl Ctx {
         };
         let gbuf = tex("gbuf", wgpu::TextureFormat::Rgba32Float, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
         let depth = tex("depth", wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::RENDER_ATTACHMENT);
+        let ngeo = tex("ngeo", wgpu::TextureFormat::Rgba32Float, wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING);
         let size = (ow * oh * 16) as u64;
         let buf = |label, usage| d.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false });
         let su = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC;
@@ -285,6 +302,7 @@ impl Ctx {
             oh,
             gbuf,
             depth,
+            ngeo,
             out: [buf("rad", su), buf("geo", su), buf("fc", su), buf("fs", su)],
             read: [buf("rad r", ru), buf("geo r", ru), buf("fc r", ru), buf("fs r", ru)],
         });
@@ -482,6 +500,8 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
     let relit = shading == Shading::Relit;
     let lights = sun_state.lights > 1e-3;
     let split = r.split_flicker && !r.geometry_only && lights && sun_state.flicker.enabled;
+    // steep walls: the geometric normals pass runs (geometry-only frames need no shading)
+    let walls = r.settings.walls && !r.geometry_only;
     let mut flags = 0;
     for (on, f) in [
         (r.geometry_only, F_GEOM),
@@ -493,7 +513,7 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
         (lights && sun_state.flicker.enabled, F_FLICKER),
         (split, F_SPLIT),
         (atmo.p.enabled, F_ATMO),
-        (r.settings.walls, F_WALLS),
+        (walls, F_WALLS),
     ] {
         if on {
             flags |= f;
@@ -613,16 +633,36 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
     // rasterizers can start a compute pass while the draws before it in the same submission are
     // still being rasterized, despite the barrier wgpu records between them (Mesa's lavapipe
     // does, in the same or another command buffer: the shading then sees parts of the G-buffer
-    // still cleared, i.e. sky; Windows' WARP rendered no terrain at all). A submission boundary
-    // makes them finish; on other GPUs it costs one more submit per frame.
+    // still cleared, i.e. sky). A submission boundary makes them finish; on other GPUs it costs
+    // one more submit per frame.
     queue.submit([enc.finish()]);
     let mut enc = d.create_command_encoder(&Default::default());
+    // ---------------- geometric normals of the G-buffer's surface (walls; normals.wgsl)
+    if walls {
+        let gview = tg.gbuf.create_view(&Default::default());
+        let nview = tg.ngeo.create_view(&Default::default());
+        let bg = d.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &c.norm_pipe.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: ub.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&gview) },
+                wgpu::BindGroupEntry { binding: 2, resource: rays_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&nview) },
+            ],
+        });
+        let mut cp = enc.begin_compute_pass(&Default::default());
+        cp.set_pipeline(&c.norm_pipe);
+        cp.set_bind_group(0, &bg, &[]);
+        cp.dispatch_workgroups(w.div_ceil(8), h.div_ceil(8), 1);
+    }
     // ---------------- shading
     {
         let pool = &c.pools[&shading];
         let tv = |t: &wgpu::Texture| t.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default() });
         let (vc, vn, ve, vz, vl, vb) = (tv(&pool.color), tv(&pool.normal), tv(&pool.emission), tv(&pool.elev), tv(&pool.lc), tv(&pool.blockmax));
         let gview = tg.gbuf.create_view(&Default::default());
+        let nview = tg.ngeo.create_view(&Default::default());
         let tvr = |v| wgpu::BindingResource::TextureView(v);
         let bg = d.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
@@ -643,6 +683,7 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
                 wgpu::BindGroupEntry { binding: 12, resource: tg.out[1].as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 13, resource: tg.out[2].as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 14, resource: tg.out[3].as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 15, resource: tvr(&nview) },
             ],
         });
         let mut cp = enc.begin_compute_pass(&Default::default());
@@ -776,7 +817,9 @@ mod wgsl_tests {
     /// The shaders parse and validate (naga), without a GPU.
     #[test]
     fn shaders_validate() {
-        for (name, src) in [("shade", super::shade_source()), ("mesh", include_str!("mesh.wgsl").to_string())] {
+        for (name, src) in
+            [("shade", super::shade_source()), ("mesh", include_str!("mesh.wgsl").to_string()), ("normals", include_str!("normals.wgsl").to_string())]
+        {
             let m = naga::front::wgsl::parse_str(&src).unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&src)));
             naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
                 .validate(&m)

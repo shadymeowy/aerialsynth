@@ -65,6 +65,9 @@ const PI: f32 = 3.14159265358979;
 @group(0) @binding(12) var<storage, read_write> out_geo: array<vec4<f32>>;
 @group(0) @binding(13) var<storage, read_write> out_fc: array<vec4<f32>>;
 @group(0) @binding(14) var<storage, read_write> out_fs: array<vec4<f32>>;
+// geometric normal of the rendered surface per supersampled pixel (camera frame; zero when
+// unknown), written by the normals pass (normals.wgsl) when F_WALLS is set
+@group(0) @binding(15) var t_ngeo: texture_2d<f32>;
 
 fn has(f: u32) -> bool {
     return (u.cfg.z & f) != 0u;
@@ -637,57 +640,6 @@ fn wall_col(e: u32, q: GP) -> vec4<f32> {
     return vec4<f32>(textureLoad(t_color, vec2<i32>(q.ix & 255, q.iy & 255), i32(e & 0xFFFFu), 0).rgb, 1.0);
 }
 
-// geometric normal (camera frame, facing the camera; zero when unknown) of the rendered surface
-// at supersampled pixel (x, y), from its neighbours' points (Renderer::geo_normal: the next pixel
-// on each axis, the previous one where that is missing or across a silhouette)
-fn ss_point(x: i32, y: i32) -> vec4<f32> {
-    if x < 0 || y < 0 || x >= i32(u.dims.x) || y >= i32(u.dims.y) {
-        return vec4<f32>(0.0);
-    }
-    let g = textureLoad(gbuf, vec2<i32>(x, y), 0);
-    let ray = rays[u32(y) * u.dims.x + u32(x)].xyz;
-    if bitcast<u32>(g.w) == 0u || all(ray == vec3<f32>(0.0)) {
-        return vec4<f32>(0.0);
-    }
-    return vec4<f32>(ray * g.z, 1.0);
-}
-
-// the step from point c to its neighbour at +d (pixels), or from the one at -d where that is
-// missing or across a silhouette (farther than a tenth of the range); w = 0: neither
-fn geo_step(c: vec3<f32>, x: i32, y: i32, d: vec2<i32>) -> vec4<f32> {
-    let lim = 0.01 * dot(c, c);
-    let hi = ss_point(x + d.x, y + d.y);
-    if hi.w > 0.0 {
-        let b = hi.xyz - c;
-        if dot(b, b) < lim {
-            return vec4<f32>(b, 1.0);
-        }
-    }
-    let lo = ss_point(x - d.x, y - d.y);
-    if lo.w > 0.0 {
-        let a = c - lo.xyz;
-        if dot(a, a) < lim {
-            return vec4<f32>(a, 1.0);
-        }
-    }
-    return vec4<f32>(0.0);
-}
-
-// (c: the sample's own point, camera frame)
-fn geo_normal(x: i32, y: i32, c: vec3<f32>) -> vec3<f32> {
-    let dx = geo_step(c, x, y, vec2<i32>(1, 0));
-    let dy = geo_step(c, x, y, vec2<i32>(0, 1));
-    if dx.w == 0.0 || dy.w == 0.0 {
-        return vec3<f32>(0.0);
-    }
-    let n = cross(dx.xyz, dy.xyz);
-    let l = length(n);
-    if l < 1e-12 {
-        return vec3<f32>(0.0);
-    }
-    return select(n / l, -n / l, dot(n, c) > 0.0);
-}
-
 // ---------------------------------------------------------------- glossy surfaces
 
 const GLINT_MAX: f32 = 6.0;
@@ -1076,9 +1028,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if has(F_SHADOWS) {
                 shadow = sun_visibility(p);
             }
+            // the geometric normal: from the normals pass (normals.wgsl)
             var n_geo = vec3<f32>(0.0);
             if has(F_WALLS) {
-                n_geo = r_cam * geo_normal(i32(x), i32(y), ray * range);
+                n_geo = r_cam * textureLoad(t_ngeo, vec2<u32>(x, y), 0).xyz;
             }
             pc = pixel_shade(p, range, dir_w, shadow, n_geo, hs);
             if !have_ctx {
