@@ -903,17 +903,25 @@ fn route_once(w: &World, a: DVec3, b: DVec3, class: usize, sc: &Scene, extra: f6
     // refine the pieces of a coarse grid (lateral resolution: a third of the coarse spacing)
     let step = d / (na - 1) as f64;
     let pts = if step > 260.0 && class != cls::POWER {
+        // (the pieces in parallel)
+        use rayon::prelude::*;
+        let fine: Vec<Option<Vec<DVec3>>> = (0..coarse.len() - 1)
+            .into_par_iter()
+            .map(|k| {
+                let (p, q) = (coarse[k], coarse[k + 1]);
+                let l = (q - p).length();
+                let nf = ((l / 120.0).ceil() as usize).clamp(3, 40) + 1;
+                // (fine lateral steps of 0.45 of the fine step: the local adaptation of the
+                // coarse route)
+                let hf = 3.0 * 0.45 * l / (nf - 1) as f64;
+                corridor(w, p, q, nf, 7, hf, pr, sc).map(|(f, _)| f)
+            })
+            .collect();
         let mut v: Vec<DVec3> = vec![coarse[0]];
-        for k in 0..coarse.len() - 1 {
-            let (p, q) = (coarse[k], coarse[k + 1]);
-            let l = (q - p).length();
-            let nf = ((l / 120.0).ceil() as usize).clamp(3, 40) + 1;
-            // (fine lateral steps of 0.45 of the fine step: the local adaptation of the coarse
-            // route)
-            let hf = 3.0 * 0.45 * l / (nf - 1) as f64;
-            match corridor(w, p, q, nf, 7, hf, pr, sc) {
-                Some((f, _)) => v.extend_from_slice(&f[1..]),
-                None => v.push(q),
+        for (k, f) in fine.into_iter().enumerate() {
+            match f {
+                Some(f) => v.extend_from_slice(&f[1..]),
+                None => v.push(coarse[k + 1]),
             }
         }
         v
