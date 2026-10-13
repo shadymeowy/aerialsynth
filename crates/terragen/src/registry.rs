@@ -1126,7 +1126,9 @@ fn zone(reg: &Registry, b: u16, temp: f64, p: DVec3, gsd: f64) -> (u16, u16, f64
         return (b, b, 0.0);
     }
     // zones sorted warmest first: the sample's zone is the last whose upper limit is above temp
-    let n = perlin3(0x20E5, p / 260.0) * 0.8 + 0.4 * perlin3(0x20E6, p / 90.0);
+    // (the 90 m octave band-limited: aliased at coarse pixels, it flipped zones between a parent
+    // and its children)
+    let n = perlin3(0x20E5, p / 260.0) * 0.8 + 0.4 * perlin3(0x20E6, p / 90.0) * band(90.0, gsd);
     let ex = band(260.0, gsd);
     let tt = temp + 2.0 * n * ex;
     let mut cur = b;
