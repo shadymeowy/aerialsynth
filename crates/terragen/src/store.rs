@@ -230,7 +230,7 @@ mod tests {
             elevation: vec![0.0; n],
             normal: vec![0; 3 * n],
             landcover: vec![1; n],
-            emission: vec![0; n],
+            emission: vec![0; 3 * n],
             elev_min: 0.0,
             elev_max: 0.0,
         }
