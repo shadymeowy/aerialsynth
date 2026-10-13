@@ -357,7 +357,7 @@ fn apply(h: &mut f64, c: &Cone) {
 /// Mean heights of the lattice's cones and maars over cell × amplitude (the profiles' volumes
 /// and the size distributions; a test checks them against explicit averages), and the mean
 /// cover of cinder cones and lava tongues.
-const K_CONE: f64 = 0.004_290_8;
+const K_CONE: f64 = 0.006_007_1;
 const K_MAAR: f64 = -0.001_225_1;
 const MEAN_CINDER: f64 = 0.1790;
 /// mean lava tongue cover × cell (m)
@@ -486,7 +486,7 @@ pub(crate) fn field(it: &Instance, p: DVec3, gsd: f64, fw: f64, look: bool) -> F
                 }
             } else {
                 let rc = cs * (0.16 + 0.2 * u01k(h, 4));
-                let hc = rc * (0.2 + 0.16 * u01k(h, 5)) * amp;
+                let hc = 1.4 * rc * (0.2 + 0.16 * u01k(h, 5)) * amp;
                 let rho = ragged(qx, qy, rc, h);
                 if rho < 1.0 {
                     zs += hc * cone_profile(rho);
@@ -621,13 +621,21 @@ fn ash(s: &mut Stack, v: &Vol, k: &Cone) {
     if m < 0.02 {
         return;
     }
-    let n = 0.6 * nz(SEED_ASH, p, 260.0, gsd) + 0.4 * nz(SEED_ASH + 1, p, 70.0, gsd);
+    // the ash edge follows the cone's radial structure (ash lies in the ravines and streaks down the
+    // flanks): harmonics of the azimuth, each only where its wavelength at this radius is resolved,
+    // and a little raggedness
+    let tau = std::f64::consts::TAU;
+    let wl = |n: f64| band(tau * k.rr / n, gsd);
+    let n = 0.5 * (7.0 * k.th + tau * u01k(v.id, 31)).sin() * wl(7.0)
+        + 0.3 * (17.0 * k.th + tau * u01k(v.id, 32)).sin() * wl(17.0)
+        + 0.2 * (41.0 * k.th + tau * u01k(v.id, 33)).sin() * wl(41.0)
+        + 0.15 * nz(SEED_ASH + 1, p, 90.0, gsd);
     let wd = 0.07 + 0.3 * (1.0 - band(260.0, gsd));
     let cov = smoothstep(-wd, wd, m - 0.35 + 0.5 * n);
     if cov <= 0.0 {
         return;
     }
-    let mut col = ash_col((0.5 + 0.8 * n).clamp(0.0, 1.0));
+    let mut col = ash_col((0.5 + 0.6 * n).clamp(0.0, 1.0));
     // red scoria on the summit cone
     col = mixc(col, srgb(104.0, 58.0, 42.0), 0.35 * smoothstep(0.22, 0.06, k.u) * (0.3 + 0.7 * v.act));
     s.composite(Layer { cov, albedo: col, cls: cls::VOLCANIC_ASH, clear: 0.95, ..Default::default() });
@@ -746,6 +754,8 @@ fn field_look(s: &mut Stack, it: &Instance) {
         // dark crater, pale rim, weathered to the ash at the foot
         col *= mix1(1.0, 0.72, smoothstep(0.22, 0.12, rho)) * (1.0 + 0.15 * smoothstep(0.15, 0.22, rho) * smoothstep(0.4, 0.22, rho));
         col = mixc(col, ash_col(u01k(f.chash, 17)) * 0.9, 0.5 * smoothstep(0.55, 0.95, rho));
+        // a cone is lit towards its top and dark at its foot (the relief alone did not read at a nadir)
+        col *= mix1(0.8, 1.14, smoothstep(0.95, 0.3, rho));
         let col = col * (1.0 + 0.1 * nz(SEED_ASH + 6, p, 9.0, gsd));
         s.composite(Layer { cov: f.cinder, albedo: col, cls: cls::VOLCANIC_ASH, clear: 1.0, ..Default::default() });
         s.m.natural_ok *= 1.0 - f.cinder;

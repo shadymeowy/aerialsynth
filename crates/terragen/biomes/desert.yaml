@@ -19,7 +19,7 @@
     - slot: azonal
       kernel: patches
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.3, 0.45], moist: [null, null, 0.26, 0.36] }
-      params: { scale: 520, fraction: 0.24, octaves: 3, roughness: 0.55, colour: [126, 98, 74], colour2: [112, 88, 68], colour_var: 0.2 }
+      params: { scale: 240, fraction: 0.3, octaves: 3, roughness: 0.65, colour: [140, 112, 86], colour2: [124, 100, 78], colour_var: 0.2 }
       class: gravel
     # pale gravel and silt mottling of the pavement
     - slot: azonal

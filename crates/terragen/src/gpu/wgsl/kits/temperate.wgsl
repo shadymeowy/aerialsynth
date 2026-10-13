@@ -403,7 +403,9 @@ fn temperate_stands(s: ptr<function, Stack>, fe: f32) {
             clear = 0.93;
         } else {
             let g = smoothstep1(3.0, 7.0, age);
-            let c0 = mixc(srgb(138.0, 124.0, 82.0), srgb(110.0, 128.0, 62.0), g) * (1.0 + 0.16 * mot);
+            let gt = mixc(srgb(104.0, 116.0, 68.0), srgb(84.0, 102.0, 64.0), u01k(bid, 6lu));
+            let mot2 = perlin3(T_SEED_STAND ^ 0x14lu, p * (1.0lf / 40.0lf)) * band(40.0, gsd);
+            let c0 = mixc(srgb(138.0, 124.0, 82.0), gt, g) * (1.0 + 0.16 * mot + 0.14 * mot2);
             let fire = smoothstep1(-0.1, 0.3, perlin3(T_SEED_STAND ^ 0x13lu, p * (1.0lf / 14.0lf)) * band(14.0, gsd)) * smoothstep1(2.5, 4.0, age) * (1.0 - smoothstep1(6.0, 9.0, age));
             col = mixc(c0, srgb(166.0, 92.0, 132.0), 0.55 * fire * (0.6 + 0.4 * smoothstep1(0.4, 0.7, (*s).bio.st.land.x)));
             clear = 1.0;

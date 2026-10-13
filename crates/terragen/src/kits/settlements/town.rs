@@ -507,10 +507,17 @@ pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
     let mut w2cell = 0.0;
     if fm == form::CITY as u32 {
         let dcell = [400.0, 400.0, 600.0, 1000.0, 1400.0][pl.level as usize];
-        let dc = worley2(pl.seed ^ 0xD15, q, dcell, 0.85);
+        // (the district borders wander: the cells are looked up at a warped position, so the
+        // districts are not hexagons; and only some of the edges are arterials, the rest are
+        // ordinary streets)
+        let wl = 0.3 * dcell;
+        let qd = q
+            + DVec2::new((q.y / wl + 6.0 * u01k(pl.seed, 51)).sin(), (q.x / (1.17 * wl) + 6.0 * u01k(pl.seed, 52)).sin()) * (0.16 * dcell)
+            + DVec2::new((q.y / (0.4 * wl) + 6.0 * u01k(pl.seed, 54)).sin(), (q.x / (0.43 * wl) + 6.0 * u01k(pl.seed, 55)).sin()) * (0.045 * dcell);
+        let dc = worley2(pl.seed ^ 0xD15, qd, dcell, 0.85);
         did = dc.id;
-        if pl.level >= 2 {
-            art = worley2_edge_dist(&dc, q);
+        if pl.level >= 2 && u01k(dc.id ^ dc.id2, 53) < 0.6 {
+            art = worley2_edge_dist(&dc, qd);
         }
         let rd = rel0(pl, dc.point);
         let zd = zone_of(pl, rd);

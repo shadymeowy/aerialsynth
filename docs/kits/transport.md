@@ -317,3 +317,5 @@ road and a track through forest nearby (−7.619, −16.609) from 500 m.
   dams, solar and wind farms and between developed cities only.
 * Classes vanish above their pixel thresholds (motorways at 600 m): motorway lights are missing
   from night views at zoom ≤ 7.
+
+Leftovers round B: the verge of roads in forest is a darker green (92, 108, 66 at 55 %) instead of a pale yellow-green.

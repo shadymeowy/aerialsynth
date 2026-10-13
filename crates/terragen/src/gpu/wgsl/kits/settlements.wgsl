@@ -491,10 +491,14 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
         } else if (pl.level >= 4u) {
             dcell = 1400.0;
         }
-        let dc = worley2(pl.seed ^ 0xD15lu, q, dcell, 0.85);
+        let wl = 0.3 * dcell;
+        let qd = q
+            + vec2<f32>(sin(q.y / wl + 6.0 * u01k(pl.seed, 51lu)), sin(q.x / (1.17 * wl) + 6.0 * u01k(pl.seed, 52lu))) * (0.16 * dcell)
+            + vec2<f32>(sin(q.y / (0.4 * wl) + 6.0 * u01k(pl.seed, 54lu)), sin(q.x / (0.43 * wl) + 6.0 * u01k(pl.seed, 55lu))) * (0.045 * dcell);
+        let dc = worley2(pl.seed ^ 0xD15lu, qd, dcell, 0.85);
         did = dc.id;
-        if (pl.level >= 2u) {
-            art = worley2_edge_dist(dc, q);
+        if (pl.level >= 2u && u01k(dc.id ^ dc.id2, 53lu) < 0.6) {
+            art = worley2_edge_dist(dc, qd);
         }
         let rd = st_rel0(pl, dc.point);
         let zd = st_zone_of(pl, rd);

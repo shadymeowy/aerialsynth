@@ -193,3 +193,6 @@ burns and swidden plots.
   transport kit's roads, and end at their 22 km block's edges; their feeder roads are 6 m tracks
   (invisible from 12 km, where only the ribs of clearings show); red bare-soil lots read
   saturated; the clearings ignore rivers and slopes below the 0.3 gate.
+
+Leftovers round B: burn scars have a 0.2-scale mottling (±22 %), flowering crowns and the fishbone lots are less saturated
+(laterite lots 40 % towards grey).

@@ -154,3 +154,5 @@ so they cost little outside deserts.
 * No stills yet of inselbergs, yardangs or the gypsum and basalt biomes.
 * Oases, palm groves and qanats are drawn by the agriculture kit (groves) and this kit
   (qanats, below the oasis fields); see their sections.
+
+Leftovers round B: desert varnish patches are 240 m (was 520 m), 3 octaves, lighter (140, 112, 86): less blotchy.

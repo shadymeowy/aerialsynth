@@ -132,3 +132,6 @@ kit's `KITS` entry commented out (mean of two runs, shared machine, so +-3 % noi
 * Heathland burning strips and moorland peat hags are colour only (no relief).
 * Cast shadows of the kit's crowns come from the renderer's DSM only (the core bakes `lit` for
   its own crown layers).
+
+Leftovers round B: the regrowth's grass colour differs by stand (two olive greens) and has a 40 m patchwork; the kettle
+lake place's white rectangles are the boreal clear-cuts under snow (kept).
