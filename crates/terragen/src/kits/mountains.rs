@@ -166,12 +166,12 @@ pub(crate) fn zones(z: &ZIn, lit: u32, n1: f64, n2: f64) -> Zones {
 /// field and of the cockpit ridge field (a test recomputes them).
 const KARST_CELL: f64 = 420.0;
 const TOWER_DENS: f64 = 0.7;
-const TOWER_MEAN: f64 = 16.85;
+const TOWER_MEAN: f64 = 31.51;
 const COCKPIT_MEAN: f64 = 15.24;
 
 /// A cone's height (m) at `p`, `H (1 − F1/R)^e` with R varying with the azimuth (an oval, ragged
 /// outline) and clipped at the bisector (no cut where two cells meet). `kind` 0: towers (70 % of
-/// the cells, H 90–260 m, e 0.6: steep flanks); 1: the cone hills of cockpit karst (every cell,
+/// the cells, H 110–300 m, `√(1 − x^2.5)`: a round top, steep walls); 1: the cone hills of cockpit karst (every cell,
 /// H 60–160 m, e 1.0: the star-shaped depressions lie between them).
 #[inline]
 fn cone_h(c: &Cell3, p: DVec3, east: DVec3, north: DVec3, kind: u32) -> f64 {
@@ -179,7 +179,7 @@ fn cone_h(c: &Cell3, p: DVec3, east: DVec3, north: DVec3, kind: u32) -> f64 {
     if tower && u01k(c.id, 1) >= TOWER_DENS {
         return 0.0;
     }
-    let hh = if tower { 90.0 + 170.0 * u01k(c.id, 2) } else { 60.0 + 100.0 * u01k(c.id, 4) };
+    let hh = if tower { 110.0 + 190.0 * u01k(c.id, 2) } else { 60.0 + 100.0 * u01k(c.id, 4) };
     // (the outline from the azimuth's polynomial harmonics: `atan2` and `sin` are only good to
     // ~1e-4 on the GPU, which shows as centimetres in a tower's height)
     let d = p - c.point;
@@ -196,7 +196,12 @@ fn cone_h(c: &Cell3, p: DVec3, east: DVec3, north: DVec3, kind: u32) -> f64 {
     if x >= 1.0 {
         0.0
     } else {
-        hh * (1.0 - x).powf(if tower { 0.6 } else { 1.0 })
+        // (a tower: a round top and walls that steepen towards the foot, `√(1 − x^2.5)`)
+        if tower {
+            hh * (1.0 - x * x * x.sqrt()).sqrt() * smoothstep(1.0, 0.97, x)
+        } else {
+            hh * (1.0 - x)
+        }
     }
 }
 
@@ -228,7 +233,10 @@ fn ridges(p: DVec3, wf: f64, nw: f64, pl: f64) -> f64 {
                 let e = DVec3::Z.cross(d);
                 let e = if e.length() < 1e-6 { DVec3::X } else { e.normalize() };
                 let n = d.cross(e);
-                let th = TAU * u01k(h, 1);
+                // the strike: a direction shared by blocks of 4 × 4 × 4 corners (560 km) with a little jitter
+                let hb =
+                    hash3(SEED + 11, ((ix + dx) as f64 / 4.0).floor() as i64, ((iy + dy) as f64 / 4.0).floor() as i64, ((iz + dz) as f64 / 4.0).floor() as i64);
+                let th = TAU * (u01k(hb, 1) + 0.18 * (u01k(h, 1) - 0.5));
                 let nn = e * th.cos() + n * th.sin();
                 let lamk = 0.7 + 0.6 * u01k(h, 2);
                 let along = (p - corner).dot(nn);
@@ -238,14 +246,18 @@ fn ridges(p: DVec3, wf: f64, nw: f64, pl: f64) -> f64 {
                 let xf = xf - xf.floor();
                 let xk = xk - xk.floor();
                 let t = 1.0 - (2.0 * xf - 1.0).abs();
-                let pf = 520.0 * (t.powf(1.6) - 1.0 / 2.6);
-                let pk = 900.0
-                    * if xk < 0.8 {
-                        let s = xk / 0.8;
-                        s * s * (3.0 - 2.0 * s) - 0.5
+                let pf = 700.0 * (t.powf(1.6) - 1.0 / 2.6);
+                // (a flat basin floor on the first 30 % of the period, then the tilted block, then the scarp; the
+                // constant 0.15 keeps the mean at zero)
+                let pk = 1150.0
+                    * if xk < 0.3 {
+                        -0.35
+                    } else if xk < 0.8 {
+                        let s = (xk - 0.3) / 0.5;
+                        s * s * (3.0 - 2.0 * s) - 0.35
                     } else {
                         let s = (1.0 - xk) / 0.2;
-                        s * s * (3.0 - 2.0 * s) - 0.5
+                        s * s * (3.0 - 2.0 * s) - 0.35
                     };
                 v += w * (0.7 + 0.6 * u01k(h, 4)) * lerp(pf, pk, wf);
                 sw += w;
@@ -457,8 +469,10 @@ pub fn carve(_w: &World, ci: &CarveIn, cv: &mut Carve) {
         cv.floor = lerp(cv.floor, -dep, fj);
         cv.depth_cap = lerp(cv.depth_cap, 1500.0, fj);
         cv.fp_min = 0.5 - 2000.0 * fj;
-        cv.fp_w *= 1.0 + 1.5 * fj;
-        cv.wall_k *= 1.0 - 0.4 * fj;
+        // a narrow trough: a floor of ~1 km (the river's wide valley no longer sets the extent), steep walls
+        cv.fp_w = lerp(cv.fp_w, (0.5 * cv.fp_w).min(450.0), fj);
+        cv.wall_k *= 1.0 - 0.55 * fj;
+        cv.narrow = fj;
         cv.u = cv.u.max(fj);
     }
     // ---- stepped canyons: arid plateaus (the weights are wide and the depth a constant: the
@@ -473,7 +487,9 @@ pub fn carve(_w: &World, ci: &CarveIn, cv: &mut Carve) {
             * if lvl1 { 0.35 } else { 1.0 };
         if cz > 0.0 {
             let f0 = cv.floor;
-            cv.floor = lerp(f0, (f0 - 450.0).max(f0.min(30.0)), cz);
+            // (the depth by province, from the atlas' uplift and the plateau field: 400-1500 m)
+            let prov = (0.6 * smoothstep(-0.05, 0.4, m.uplift) + 0.4 * smoothstep(0.2, 0.8, m.plateau)).clamp(0.0, 1.0);
+            cv.floor = lerp(f0, (f0 - (400.0 + 1100.0 * prov)).max(f0.min(30.0)), cz);
             cv.depth_cap = lerp(cv.depth_cap, 1500.0, cz);
             cv.wall_k *= lerp(1.0, 0.3, cz);
             cv.fp_w *= lerp(1.0, 0.6, cz);
@@ -532,8 +548,16 @@ pub fn linear(s: &mut Stack) {
         s.m.natural_ok *= 1.0 - cb;
     }
     // ---- karst cliffs: pale grey rock on the steep flanks of towers and cones
-    let kz = (z.tower + z.cockpit).min(1.0);
-    let ck = kz * smoothstep(0.8, 1.4, slope + 0.2 * rn);
+    // ---- forest-clad towers: the core's rock on the walls (it starts at slope 0.55-0.85) is painted over
+    // with a dark canopy colour, except on the steepest walls
+    let cf = z.tower * smoothstep(0.3, 0.7, s.m.rock) * (1.0 - smoothstep(3.5, 6.0, slope + 0.8 * rn));
+    if cf > 0.0 {
+        let col = mixc(srgb(40.0, 60.0, 36.0), srgb(64.0, 86.0, 48.0), 0.5 + 0.5 * rn) * (1.0 + 0.15 * s.pf.detail);
+        s.composite(Layer { cov: cf, albedo: col, cls: crate::landcover::BROADLEAF_FOREST, ..Default::default() });
+    }
+    // (towers are forest-clad: bare rock only on their steepest walls; cockpit cones keep the
+    // lower threshold)
+    let ck = (z.tower * smoothstep(3.5, 6.0, slope + 0.8 * rn) + z.cockpit * smoothstep(0.8, 1.4, slope + 0.2 * rn)).min(1.0);
     if ck > 0.0 {
         let col = mixc(srgb(168.0, 164.0, 150.0), srgb(120.0, 118.0, 108.0), 0.5 + 0.5 * rn) * (1.0 + 0.06 * s.pf.detail);
         s.composite(Layer { cov: ck, albedo: col, cls: cls::CLIFF, clear: 1.0, ..Default::default() });
@@ -617,7 +641,7 @@ mod tests {
             let (mut sum, mut lo, mut hi) = (0.0, f64::MAX, f64::MIN);
             for i in 0..n {
                 let p = plane(i, 900_000.0);
-                let v = ridges(p, kind as f64, 0.0, 1.0) / [520.0, 900.0][kind as usize];
+                let v = ridges(p, kind as f64, 0.0, 1.0) / [700.0, 1150.0][kind as usize];
                 sum += v;
                 lo = lo.min(v);
                 hi = hi.max(v);
@@ -628,7 +652,7 @@ mod tests {
             // a line across several lattice cells: the largest step between points 20 m apart
             let mut worst: f64 = 0.0;
             let a = DVec3::new(6_371_000.0, 0.0, 0.0);
-            let amp = [520.0, 900.0][kind as usize];
+            let amp = [700.0, 1150.0][kind as usize];
             let mut prev = ridges(a, kind as f64, 0.0, 1.0) / amp;
             for j in 1..30_000 {
                 let v = ridges(a + DVec3::new(0.0, 20.0 * j as f64, 0.0), kind as f64, 0.0, 1.0) / amp;
@@ -689,6 +713,7 @@ mod tests {
             top: 600.0,
             lake_r: 0.0,
             lake_level: 0.0,
+            narrow: 0.0,
         };
         fn ci<'a>(ctx: &'a Ctx, m: &'a Macro, level: u8, mountain: f64, moist: f64) -> CarveIn<'a> {
             CarveIn { ctx, m, level, ad: 50.0, u: 0.5, spring: false, hw: 30.0, h0: 600.0, temp: 5.0, moist, mountain, mesa: 0.0, smooth: 500.0 }

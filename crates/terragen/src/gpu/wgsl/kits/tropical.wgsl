@@ -184,6 +184,10 @@ fn tropical_fire(li: u32, i: KIn) -> KOut {
         col *= 1.0 - 0.35 * fresh * (1.0 - smoothstep1(0.0, 0.04, m)) * band(0.04 * k.v[0], i.gsd);
     }
     col *= 1.0 + k.v[4] * (2.0 * u - 1.0);
+    let mw = band(0.2 * k.v[0], i.gsd);
+    if (mw > 0.0) {
+        col *= 1.0 + 0.22 * perlin3(k.seed ^ 0xB07lu, i.p * (1.0lf / (0.2lf * sc))) * mw;
+    }
     var o = kout_none();
     o.cov = cov;
     o.albedo = col;
@@ -618,19 +622,19 @@ fn tropical_slot_canopy(s: ptr<function, Stack>) {
     var cls = LC_TRACK;
     if (cleared) {
         let u = u01k(h, 2lu);
-        var cc2 = srgb(66.0, 92.0, 52.0);
+        var cc2 = srgb(68.0, 88.0, 58.0);
         cls = LC_CLEAR_CUT;
         if (u < 0.55) {
-            cc2 = srgb(118.0, 124.0, 82.0);
+            cc2 = srgb(112.0, 116.0, 88.0);
             cls = LC_PASTURE;
         } else if (u < 0.62) {
             cc2 = srgb(62.0, 58.0, 52.0);
             cls = LC_BURN_SCAR;
         } else if (u < 0.7) {
-            cc2 = laterite * 0.9;
+            cc2 = mixc(laterite * 0.9, srgb(112.0, 100.0, 90.0), 0.4);
             cls = LC_BARE;
         } else if (u < 0.85) {
-            cc2 = srgb(108.0, 118.0, 72.0);
+            cc2 = srgb(104.0, 112.0, 80.0);
             cls = LC_CROP;
         }
         col = cc2 * (0.9 + 0.2 * u01k(h, 3lu)) * (1.0 + 0.08 * perlin3(h, p * (1.0lf / 60.0lf)) * band(60.0, gsd));

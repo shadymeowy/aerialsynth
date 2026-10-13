@@ -799,6 +799,7 @@ struct Carve {
     top: f32,
     lake_r: f32,
     lake_level: f32,
+    narrow: f32,
 }
 
 /// Inputs of the kits' relief operators (`kits::ReliefIn`).
@@ -1104,6 +1105,7 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
             cv.top = h0;
             cv.lake_r = 0.0;
             cv.lake_level = 0.0;
+            cv.narrow = 0.0;
             var ci: CarveIn;
             ci.level = li;
             ci.ad = ad;
@@ -1117,7 +1119,8 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
             ci.mesa = r.mesa;
             ci.smooth_h = r.smooth_h;
             kits_carve(c, m, ci, &cv);
-            let valley = min(max(valley_hit, cv.fp_w + cv.wall_k * (h0 - cv.floor)), reach);
+            let vnat = cv.fp_w + cv.wall_k * (h0 - cv.floor);
+            let valley = min(lerp(max(valley_hit, vnat), vnat, cv.narrow), reach);
             if (h0 > cv.floor && h0 > -4.0 && ad < valley) {
                 var wall = smoothstep1(cv.fp_w, valley, ad);
                 wall = wall * wall * (3.0 - 2.0 * wall);

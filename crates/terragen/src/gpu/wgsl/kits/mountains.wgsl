@@ -62,8 +62,12 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
         composite(s, ly);
         (*s).m.natural_ok *= 1.0 - cb;
     }
-    let kz = min(z.tower + z.cockpit, 1.0);
-    let ck = kz * smoothstep1(0.8, 1.4, slope + 0.2 * rn);
+    let cf = z.tower * smoothstep1(0.3, 0.7, (*s).m.rock) * (1.0 - smoothstep1(3.5, 6.0, slope + 0.8 * rn));
+    if (cf > 0.0) {
+        let col = mixc(srgb(40.0, 60.0, 36.0), srgb(64.0, 86.0, 48.0), 0.5 + 0.5 * rn) * (1.0 + 0.15 * (*s).pf.f[PF_DETAIL]);
+        composite(s, layer_paint(cf, col, LC_BROADLEAF_FOREST));
+    }
+    let ck = min(z.tower * smoothstep1(3.5, 6.0, slope + 0.8 * rn) + z.cockpit * smoothstep1(0.8, 1.4, slope + 0.2 * rn), 1.0);
     if (ck > 0.0) {
         let col = mixc(srgb(168.0, 164.0, 150.0), srgb(120.0, 118.0, 108.0), 0.5 + 0.5 * rn) * (1.0 + 0.06 * (*s).pf.f[PF_DETAIL]);
         var ly = layer_paint(ck, col, LC_CLIFF);

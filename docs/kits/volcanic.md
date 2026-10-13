@@ -100,3 +100,8 @@ oblique 1.5 km); **cinder field** (21.948, 71.408, nadir 1.5 km: cones, ash apro
 Black-sand beaches need a flat coast (steep cones meet the sea in cliffs), so they are rare.
 Islands of oceanic ecoregions have no vegetation. Lava follows radial lines, not the drainage.
 At globe zooms (z < 6) more than 8 instances reach a block and the first 8 by id are kept.
+
+Leftovers round B: the ash edge is azimuth harmonics (7, 17, 41 per turn, band-limited by the radius) plus a 90 m noise, so
+the ash lies in rays down the ravines instead of blobs; the cinder cones are 1.4 x higher (`K_CONE` 0.0060071) and
+shaded light at the top, dark at the foot. Not found: the road up the cone, the river line across a caldera lake (not
+visible in the places re-rendered).

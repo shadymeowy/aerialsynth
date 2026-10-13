@@ -74,13 +74,16 @@ fn vc_ash(s: ptr<function, Stack>, v: VcVol, k: VcCone) {
     if (m < 0.02) {
         return;
     }
-    let n = 0.6 * vc_nz(VC_SEED_ASH, p, 260.0, gsd) + 0.4 * vc_nz(VC_SEED_ASH + 1lu, p, 70.0, gsd);
+    let n = 0.5 * sin(7.0 * k.th + TAU * u01k(v.id, 31lu)) * band(TAU * k.rr / 7.0, gsd)
+        + 0.3 * sin(17.0 * k.th + TAU * u01k(v.id, 32lu)) * band(TAU * k.rr / 17.0, gsd)
+        + 0.2 * sin(41.0 * k.th + TAU * u01k(v.id, 33lu)) * band(TAU * k.rr / 41.0, gsd)
+        + 0.15 * vc_nz(VC_SEED_ASH + 1lu, p, 90.0, gsd);
     let wd = 0.07 + 0.3 * (1.0 - band(260.0, gsd));
     let cov = smoothstep1(-wd, wd, m - 0.35 + 0.5 * n);
     if (cov <= 0.0) {
         return;
     }
-    var col = vc_ash_col(clamp(0.5 + 0.8 * n, 0.0, 1.0));
+    var col = vc_ash_col(clamp(0.5 + 0.6 * n, 0.0, 1.0));
     col = mixc(col, srgb(104.0, 58.0, 42.0), 0.35 * smoothstep1(0.22, 0.06, k.u) * (0.3 + 0.7 * v.act));
     var ly = layer_paint(cov, col, LC_VOLCANIC_ASH);
     ly.clear = 0.95;
@@ -231,6 +234,7 @@ fn vc_field_look(s: ptr<function, Stack>, it: Inst) {
         var col = mixc(srgb(44.0, 38.0, 38.0), srgb(118.0, 62.0, 42.0), 0.65 * t * t);
         col *= mix(1.0, 0.72, smoothstep1(0.22, 0.12, rho)) * (1.0 + 0.15 * smoothstep1(0.15, 0.22, rho) * smoothstep1(0.4, 0.22, rho));
         col = mixc(col, vc_ash_col(u01k(f.chash, 17lu)) * 0.9, 0.5 * smoothstep1(0.55, 0.95, rho));
+        col *= mix(0.8, 1.14, smoothstep1(0.95, 0.3, rho));
         col = col * (1.0 + 0.1 * vc_nz(VC_SEED_ASH + 6lu, p, 9.0, gsd));
         var ly = layer_paint(f.cinder, col, LC_VOLCANIC_ASH);
         ly.clear = 1.0;

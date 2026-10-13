@@ -66,7 +66,7 @@
       slot: canopy
       kernel: tropical_crowns
       mask: { veg: [0.5, 0.8, null, null], natural: [0.5, 0.8, null, null], field: [null, null, 0.05, 0.2], moist: [0.5, 0.65, null, null] }
-      params: { cell: 34, density: 0.4, shape: umbrella, radius: [8, 13], height: [33, 42], colour: [70, 98, 50], colour2: [182, 160, 58], second: 0.1, flowering: 0.08, flower_colour: [172, 92, 100], colour_var: 0.3 }
+      params: { cell: 34, density: 0.4, shape: umbrella, radius: [8, 13], height: [33, 42], colour: [70, 98, 50], colour2: [182, 160, 58], second: 0.1, flowering: 0.08, flower_colour: [158, 108, 106], colour_var: 0.3 }
       class: tropical_rainforest
     # river-edge forest: a lower band of pale pioneer crowns (Cecropia) along the banks
     - slot: canopy
@@ -197,7 +197,7 @@
     - slot: canopy
       kernel: tropical_crowns
       mask: { veg: [0.5, 0.8, null, null], natural: [0.5, 0.8, null, null], field: [null, null, 0.05, 0.2], moist: [0.5, 0.65, null, null] }
-      params: { cell: 36, density: 0.35, shape: umbrella, radius: [7, 12], height: [28, 36], colour: [74, 96, 48], colour2: [138, 120, 92], second: 0.25, flowering: 0.12, flower_colour: [200, 102, 46], colour_var: 0.3 }
+      params: { cell: 36, density: 0.35, shape: umbrella, radius: [7, 12], height: [28, 36], colour: [74, 96, 48], colour2: [138, 120, 92], second: 0.25, flowering: 0.12, flower_colour: [178, 118, 74], colour_var: 0.3 }
       class: tropical_rainforest
     - slot: canopy
       kernel: tropical_crowns
@@ -230,7 +230,7 @@
     - { share: broadleaf, shape: dome, cell: 9, height: [11, 6], colour: [126, 112, 96], density: 0.55 }
     - { share: broadleaf, shape: dome, cell: 10, height: [12, 6], colour: [66, 88, 44], density: 0.6, seed: 0x7E51 }
     # flowering in the dry season (Tabebuia, Cochlospermum)
-    - { share: broadleaf, shape: dome, cell: 34, height: [13, 4], colour: [204, 170, 64], density: 0.07, closure: false, stand: false, seed: 0x7E52 }
+    - { share: broadleaf, shape: dome, cell: 34, height: [13, 4], colour: [184, 162, 96], density: 0.07, closure: false, stand: false, seed: 0x7E52 }
     - { share: savanna, shape: umbrella, cell: 12, height: [7, 3], colour: [86, 92, 54], closure: false, stand: false }
     - { share: shrub, shape: dome, cell: 3.5, height: [1.8, 0], colour: [92, 90, 62], closure: false, stand: false }
   zonation:

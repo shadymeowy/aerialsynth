@@ -6,7 +6,7 @@ const VC_SEED_FLANK: u64 = 0x701CA001lu;
 const VC_SEED_LAVA: u64 = 0x701CA003lu;
 const VC_TWO_OVER_PI: f32 = 0.6366197723675814;
 const VC_GULLY_AMP: f32 = 0.04;
-const VC_K_CONE: f32 = 0.0042908;
+const VC_K_CONE: f32 = 0.0060071;
 const VC_K_MAAR: f32 = -0.0012251;
 const VC_MEAN_CINDER: f32 = 0.1790;
 const VC_MEAN_LAVA: f32 = 135.0;
@@ -480,7 +480,7 @@ fn vc_field(it: Inst, p: vec3<f64>, gsd: f32, fw: f32, look: bool) -> VcField {
                 }
             } else {
                 let rc = cs * (0.16 + 0.2 * u01k(h, 4lu));
-                let hc = rc * (0.2 + 0.16 * u01k(h, 5lu)) * amp;
+                let hc = 1.4 * rc * (0.2 + 0.16 * u01k(h, 5lu)) * amp;
                 let rho = vc_ragged(qx, qy, rc, h);
                 if (rho < 1.0) {
                     zs += hc * vc_cone_profile(rho);

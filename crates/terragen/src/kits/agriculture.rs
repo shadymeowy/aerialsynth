@@ -201,7 +201,7 @@ const CROPS: [([[f64; 3]; 3], [f64; 3]); 12] = [
     ([[100.0, 116.0, 64.0], [214.0, 180.0, 48.0], [84.0, 70.0, 52.0]], [0.7, 0.1, 1.8]),        // sunflower
     ([[126.0, 104.0, 82.0], [60.0, 96.0, 48.0], [128.0, 106.0, 84.0]], [0.75, 0.2, 0.6]),       // potato / vegetables
     ([[86.0, 122.0, 56.0], [112.0, 136.0, 66.0], [98.0, 122.0, 62.0]], [6.5, 0.1, 0.5]),        // alfalfa / hay (windrows)
-    ([[140.0, 112.0, 86.0], [90.0, 116.0, 62.0], [206.0, 202.0, 190.0]], [1.0, 0.12, 1.0]),     // cotton
+    ([[140.0, 112.0, 86.0], [90.0, 116.0, 62.0], [182.0, 170.0, 138.0]], [1.0, 0.12, 1.0]),     // cotton (open bolls: not white)
     ([[98.0, 132.0, 62.0], [86.0, 128.0, 58.0], [124.0, 136.0, 72.0]], [1.5, 0.08, 3.0]),       // sugarcane
     ([[112.0, 108.0, 96.0], [120.0, 104.0, 142.0], [104.0, 104.0, 92.0]], [1.6, 0.3, 0.6]),     // lavender
     ([[104.0, 118.0, 66.0], [156.0, 104.0, 66.0], [176.0, 150.0, 108.0]], [0.75, 0.1, 1.8]),    // sorghum / millet
@@ -688,6 +688,8 @@ fn draw(s: &mut Stack, pl: &Plan) {
     // fields)
     let fsize = d.size[0].min(if d.part == part::VOR { d.size[0] } else { d.size[1] }) * if loc { 1.0 } else { pl.scale };
     let k = fsize / (fsize * fsize + 4.0 * gsd * gsd).sqrt();
+    // (the parcels' colours fade to the mean sooner than their cover and height: small plots read as speckle)
+    let kc = fsize / (fsize * fsize + 10.0 * gsd * gsd).sqrt();
     let mut col = DVec3::ZERO;
     let mut dh = 0.0;
     let mut cov = 0.0;
@@ -716,10 +718,10 @@ fn draw(s: &mut Stack, pl: &Plan) {
     if cov_m <= 0.0 {
         return;
     }
-    let col = if k < 0.999 {
+    let col = if kc < 0.999 {
         let mean = sys_mean(pl, &d, &px);
         if cov > 0.0 {
-            mixc(mean, col, k)
+            mixc(mean, col, kc)
         } else {
             mean
         }

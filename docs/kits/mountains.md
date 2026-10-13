@@ -20,17 +20,17 @@ matters (a tower is there or not); only its extent is smooth.
 
 | landform | where (zone) | pass A (relief) | pass B (slot 6) |
 |---|---|---|---|
-| tower karst | carbonate × humid (moisture 0.42-0.58) × warm (15-21 °C), off high mountains, on the shelf | floors flattened (88 %) towards the atlas' smooth elevation; 3D Worley lattice of 420 m cells, 70 % of the cells carry an oval, ragged tower `H (1 - F1/R)^0.6` (H 90-260 m, R 0.4-0.7 cell), clipped at the bisector; the calibrated mean (16.85 m) where the cells are below the pixel | pale grey cliffs on slopes > 0.8-1.4, forest above (the biome's canopy) |
+| tower karst | carbonate × humid (moisture 0.42-0.58) × warm (15-21 °C), off high mountains, on the shelf | floors flattened (88 %) towards the atlas' smooth elevation; 3D Worley lattice of 420 m cells, 70 % of the cells carry an oval, ragged tower `H (1 - F1/R)^0.6` (H 110-300 m, R 0.4-0.7 cell, profile `H sqrt(1 - x^2.5)`: a round top and steep walls), clipped at the bisector; the calibrated mean (31.5 m) where the cells are below the pixel | dark forest paint over the core's rock on the walls, bare pale cliffs only on slopes > 3.5-6 (cockpit cones: 0.8-1.4) |
 | drowned towers (islands) | the same, near the coast | the plain falls to -11 m within 10 km of the coast (the coast retreats a few km): the towers stand in the sea; no towers beyond 30 km at sea | the core's shallow water and beaches |
 | cockpit karst | carbonate × humid, cooler or drier (moisture 0.28+, 4-12 °C+) | a cone hill in every cell (H 60-160 m, linear flanks), the star-shaped depressions lie between them (mean 15.24 m subtracted: zero-mean) | pale cliffs on the steepest flanks |
-| folded ridges | old orogens (mountain mask with little tectonic uplift) and foreland belts (uplift 0.04-0.5), in the provinces where a 180 km noise is positive (about 45 % of them) | ridges `t^1.6` on an 8-corner lattice of 140 km cells (below), λ 6.3-11.7 km, 520 m; the old relief is 85 % blended into the atlas' smooth elevation first | the core's rock on slopes |
-| fault blocks | extensional provinces (negative uplift, inland) | tilted sawtooth (a scarp on a fifth of the period), λ 11-21 km, 900 m, the same lattice (where fold and fault zones overlap the two profiles blend: no switch); basins between the blocks fill with long lakes where they are below the drainage | |
+| folded ridges | old orogens (mountain mask with little tectonic uplift) and foreland belts (uplift 0.04-0.5), in the provinces where a 180 km noise is positive (about 45 % of them) | ridges `t^1.6` on an 8-corner lattice of 140 km cells (below), λ 6.3-11.7 km, 700 m, striking in a direction shared by 560 km blocks; the old relief is 85 % blended into the atlas' smooth elevation first | the core's rock on slopes |
+| fault blocks | extensional provinces (negative uplift, inland) | tilted sawtooth (flat basin floor on 30 % of the period, the tilted block, a scarp on a fifth), λ 11-21 km, 1150 m, the same lattice (where fold and fault zones overlap the two profiles blend: no switch); basins between the blocks fill with long lakes where they are below the drainage | |
 | badlands | soft sediment (sedimentary, unconsolidated) × arid (moisture < 0.14-0.28) × not in sand seas | three octaves of creased noise (300, 130, 55 m; `|perlin|^0.7`, zero mean; 25-55 m deep) | pale clay floors, strata bands of 9 m (cream, rust, brown) on the gully walls |
 | alluvial fans | family `mountains_fans` (cell 18 km, reach 7.2 km, 40 % of the sites): the atlas' uplift 0.12-0.55 falling by 0.03 over 24 km, dry (moisture index < 0.33), > 5 km from the coast; the fan points down the gradient | a cone `H (1 - r/R)^1.3` (R 2.6-5.6 km, H 1.6-3 % of R) blended 70 % over the smooth elevation in a ±60° sector, a lobed outline | pale gravel with radial streaks, 85 % of the vegetation cleared |
 | glacial troughs, hanging tributaries | glaciation 0.3-0.6 × mountain mask 0.25-0.55 | *carve hook*: U profile (`t^1.5`), walls 25 % steeper than the core's, floors 1.5 × wider and over-deepened by 90 m (rivers) / 40 m (tributaries), the depth cap × 2 (rivers 400 → 800 m) and × 8 (tributaries 35 → 280 m): the side valleys end above the trunk valley | scoured pale rock on slopes > 0.75-1.1 |
 | cirques and tarns | the head (a spring piece) of a glaciated tributary | a round floor of 240 m at the head, 130 m lake (a bowl 4 m deep, level 1.4 m above the floor), fading over the first 6 % of the piece | |
-| fjords | glaciated coastal mountains, the river's floor within 20-70 km of the coast | floor from -70 m at the mouth to -330 … -550 m (the deeper the higher the mountains) 12 km inland and up to 0 at the head 30-70 km from the coast (longer with the glaciation index); the flood plain no longer clamped above the sea (`fp_min`), so the ocean fills the valley; fades with the land mask into the open sea | |
-| stepped canyons | arid (moisture 0.15-0.45 fading) × plateau (100-700 m) × the mesa field (> 0.05) × inland, rivers (tributaries 35 %) | floor lowered by 450 m (not below 30 m), walls 3.3 × steeper, floors 0.6 ×, depth cap 1500 m, benches of 50 m counted from 500 m above the floor (smooth S between them, faded out towards the rim and where the benches are below ~160 m) | strata bands of 14 m on arid sedimentary walls |
+| fjords | glaciated coastal mountains, the river's floor within 20-70 km of the coast | a narrow trough (floor ~1 km wide: floodplain half width capped at 450 m, walls 0.34 x the core's extent, the river's wide valley no longer sets the extent: `Carve::narrow`); floor from -70 m at the mouth to -330 … -550 m (the deeper the higher the mountains) 12 km inland and up to 0 at the head 30-70 km from the coast (longer with the glaciation index); the flood plain no longer clamped above the sea (`fp_min`), so the ocean fills the valley; fades with the land mask into the open sea | |
+| stepped canyons | arid (moisture 0.15-0.45 fading) × plateau (100-700 m) × the mesa field (> 0.05) × inland, rivers (tributaries 35 %) | floor lowered by 400-1500 m by province (the atlas' uplift and the plateau field; not below 30 m), walls 3.3 × steeper, floors 0.6 ×, depth cap 1500 m, benches of 50 m counted from 500 m above the floor (smooth S between them, faded out towards the rim and where the benches are below ~160 m) | strata bands of 14 m on arid sedimentary walls |
 
 **Ridges (`ridges`).** The stripes of folds and fault blocks must keep their phase at any zoom
 (R-wave): the lattice has 8 corners around the point, each with its own strike (a random
@@ -40,8 +40,9 @@ precision), the profile of every corner is blended by its trilinear weight squar
 bends the stripes (up to 1.4 cycles), a 26 km noise makes the amplitude plunge (a fold nose ends
 where it fades). Folds and fault blocks share the lattice: each corner evaluates both profiles
 (λ 9 / 16 km) and the result blends by the fault share of the zones (no switch where the two
-overlap). The strike is random per corner (the macro fields give no belt normal): along a belt
-the ridges turn where two corners meet.
+overlap). The strike is a direction shared by blocks of 4 x 4 x 4 corners (560 km) with a little jitter, so belts are coherent over
+hundreds of km. (A strike from the gradient of the atlas' uplift was tried: the 140 km lever arm of the anchored stripe
+coordinate turns the f32 noise of the atlas sample into metres, and the CPU/GPU tile parity failed.)
 
 **Carve hook (core).** `Kit::carve` (`kits::{CarveIn, Carve}`, WGSL `kits_carve`) is called once
 per channel that reaches a pixel (levels 0 and 1; `ReliefIn`-like inputs plus the position along
@@ -227,3 +228,8 @@ The registration lines in `kits/mod.rs`.
   tight one).
 * The layer paints over the canopy (slot 6): karst cliffs and rock walls cut through forest
   crisply.
+
+Leftovers round B: the tower walls still read pale grey in the still although the kit paints forest over the core's rock
+there and bare rock only above slope 3.5 (the cause of the grey is not found: another layer or the lighting; the tops
+are green). The folds are hazy in the 08:00 still (low sun, 10 km); the fjord at 4 km is still wide (2 km), the 1.5 km one
+is a trough with high walls. A canyon is as deep as the plateau allows (the floor is not lowered below 30 m).

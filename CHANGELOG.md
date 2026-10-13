@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Visual polish, round B** (see the kits' Known limits): tower karst on a rounder, taller profile with forest paint on
+  the walls; fjords as narrow troughs (new `Carve::narrow` in the carve hook: the valley's extent from the walls alone);
+  folds and fault blocks taller, with coherent regional strike, fault basins flat; canyon depth 400-1500 m
+  by province (pass B 31.2 / 31.3 / 20.3 / 26.3 s, pass A1 21.2 s, eval_points 23.1 s); volcanic ash in rays, higher shaded cinder cones; settlement districts with wandering borders and fewer
+  arterials; softer cotton, smallholder, flowering, fishbone, regrowth, varnish, burn-scar and road-verge colours.
+
 - **Host work no longer stalls the GPU** (outputs bit-identical: `tilediff` of the 738 tiles of
   two views and 64 z16 tiles at 39.9N 32.8E against the previous master; parity and
   determinism tests pass). The kits' host features of a GPU batch are built in parallel on the

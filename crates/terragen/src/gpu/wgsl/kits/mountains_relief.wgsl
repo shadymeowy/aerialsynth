@@ -15,7 +15,7 @@ const MT_WARP_A: f32 = 4000.0;
 
 const MT_KARST_CELL: f32 = 420.0;
 const MT_TOWER_DENS: f32 = 0.7;
-const MT_TOWER_MEAN: f32 = 16.85;
+const MT_TOWER_MEAN: f32 = 31.51;
 const MT_COCKPIT_MEAN: f32 = 15.24;
 const MT_RIDGE_CELL: f64 = 140000.0lf;
 const MT_CREASE_MEAN: f32 = 0.4097;
@@ -96,11 +96,9 @@ fn mt_cone_h(c: Cell3, p: vec3<f64>, east: vec3<f32>, north: vec3<f32>, kind: u3
     }
     var hh = 60.0 + 100.0 * u01k(c.id, 4lu);
     var r0 = 1.1 + 0.4 * u01k(c.id, 3lu);
-    var ex = 1.0;
     if (tower) {
-        hh = 90.0 + 170.0 * u01k(c.id, 2lu);
+        hh = 110.0 + 190.0 * u01k(c.id, 2lu);
         r0 = 0.75 + 0.5 * u01k(c.id, 3lu);
-        ex = 0.6;
     }
     let d = vec3<f32>(p - c.point);
     let dx = dot(d, east);
@@ -121,7 +119,10 @@ fn mt_cone_h(c: Cell3, p: vec3<f64>, east: vec3<f32>, north: vec3<f32>, kind: u3
     if (x >= 1.0) {
         return 0.0;
     }
-    return hh * pow(1.0 - x, ex);
+    if (tower) {
+        return hh * sqrt(1.0 - x * x * sqrt(x)) * smoothstep1(1.0, 0.97, x);
+    }
+    return hh * (1.0 - x);
 }
 
 /// `mountains::ridges`.
@@ -164,7 +165,8 @@ fn mt_ridges(p: vec3<f64>, wf: f32, nw: f32, pl: f32) -> f32 {
                     e = normalize(e);
                 }
                 let n = cross(d, e);
-                let th = TAU * u01k(h, 1lu);
+                let hb = hash3(MT_SEED + 11lu, i64(floor(f64(ix + i64(dx)) / 4.0lf)), i64(floor(f64(iy + i64(dy)) / 4.0lf)), i64(floor(f64(iz + i64(dz)) / 4.0lf)));
+                let th = TAU * (u01k(hb, 1lu) + 0.18 * (u01k(h, 1lu) - 0.5));
                 let nn = e * cos(th) + n * sin(th);
                 let lamk = 0.7 + 0.6 * u01k(h, 2lu);
                 let along = dot(vec3<f32>(p - corner), nn);
@@ -174,14 +176,16 @@ fn mt_ridges(p: vec3<f64>, wf: f32, nw: f32, pl: f32) -> f32 {
                 xf = xf - floor(xf);
                 xk = xk - floor(xk);
                 let t = 1.0 - abs(2.0 * xf - 1.0);
-                let pf = 520.0 * (pow(t, 1.6) - 1.0 / 2.6);
+                let pf = 700.0 * (pow(t, 1.6) - 1.0 / 2.6);
                 var pk = 0.0;
-                if (xk < 0.8) {
-                    let s = xk / 0.8;
-                    pk = 900.0 * (s * s * (3.0 - 2.0 * s) - 0.5);
+                if (xk < 0.3) {
+                    pk = 1150.0 * -0.35;
+                } else if (xk < 0.8) {
+                    let s = (xk - 0.3) / 0.5;
+                    pk = 1150.0 * (s * s * (3.0 - 2.0 * s) - 0.35);
                 } else {
                     let s = (1.0 - xk) / 0.2;
-                    pk = 900.0 * (s * s * (3.0 - 2.0 * s) - 0.5);
+                    pk = 1150.0 * (s * s * (3.0 - 2.0 * s) - 0.35);
                 }
                 v += w * (0.7 + 0.6 * u01k(h, 4lu)) * lerp(pf, pk, wf);
                 sw += w;
@@ -408,8 +412,9 @@ fn mountains_carve(c: Ctx, m: Macro, ci: CarveIn, cv: ptr<function, Carve>) {
         (*cv).floor = lerp((*cv).floor, -fjw.y, fj);
         (*cv).depth_cap = lerp((*cv).depth_cap, 1500.0, fj);
         (*cv).fp_min = 0.5 - 2000.0 * fj;
-        (*cv).fp_w *= 1.0 + 1.5 * fj;
-        (*cv).wall_k *= 1.0 - 0.4 * fj;
+        (*cv).fp_w = lerp((*cv).fp_w, min(0.5 * (*cv).fp_w, 450.0), fj);
+        (*cv).wall_k *= 1.0 - 0.55 * fj;
+        (*cv).narrow = fj;
         (*cv).u = max((*cv).u, fj);
     }
     let arid = 1.0 - smoothstep1(0.15, 0.45, ci.moist);
@@ -421,7 +426,8 @@ fn mountains_carve(c: Ctx, m: Macro, ci: CarveIn, cv: ptr<function, Carve>) {
         let cz = arid * smoothstep1(100.0, 700.0, ci.h0) * (1.0 - smoothstep1(0.3, 0.6, ci.mountain)) * smoothstep1(0.05, 0.3, ci.mesa) * smoothstep1(0.0, 0.15, m.cont) * l1;
         if (cz > 0.0) {
             let f0 = (*cv).floor;
-            (*cv).floor = lerp(f0, max(f0 - 450.0, min(f0, 30.0)), cz);
+            let prov = clamp(0.6 * smoothstep1(-0.05, 0.4, m.uplift) + 0.4 * smoothstep1(0.2, 0.8, m.plateau), 0.0, 1.0);
+            (*cv).floor = lerp(f0, max(f0 - (400.0 + 1100.0 * prov), min(f0, 30.0)), cz);
             (*cv).depth_cap = lerp((*cv).depth_cap, 1500.0, cz);
             (*cv).wall_k *= lerp(1.0, 0.3, cz);
             (*cv).fp_w *= lerp(1.0, 0.6, cz);

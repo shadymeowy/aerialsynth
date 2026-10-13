@@ -117,3 +117,7 @@ kit's `KITS` entry commented out (mean of two runs, tiles/s; shared machine, +-3
 * Terraces are contour stripes of pass B (colour and DSM height), not steps of the DTM.
 * Ranches and feedlots are drawn only in the semi-arid grazing systems (see *Ranches and
   feedlots*); there is no aquaculture inland (salt and aquaculture ponds belong to the coast).
+
+Leftovers round B: cotton in autumn is (182, 170, 138) instead of near white; parcel colours fade to the system's mean
+sooner (`k` of the colour uses 10 pixel² instead of 4: small plots no longer read as speckle at 10 km; cover and height
+keep the old `k`, the elevation LOD test of the airport place failed with the new one).

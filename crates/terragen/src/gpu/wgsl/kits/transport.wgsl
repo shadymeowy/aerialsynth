@@ -328,7 +328,7 @@ fn tr_road_px(sg: FSeg, f: TrFrame, e: TrEnv, kc: u32) -> TrPx {
         } else if (kc == TR_TRACK || kc == TR_RAIL) {
             c = mixc(e.below, srgb(150.0, 140.0, 120.0), 0.5);
         } else {
-            c = mixc(mixc(e.below, srgb(118.0, 128.0, 82.0), 0.45), srgb(150.0, 146.0, 136.0), tr_boxcov(ddl - hw, 0.8, fw));
+            c = mixc(mixc(e.below, srgb(92.0, 108.0, 66.0), 0.55), srgb(140.0, 136.0, 126.0), tr_boxcov(ddl - hw, 0.8, fw));
         }
         tr_over(&o, av, c, hs + select(0.0, 1.0, bridge));
         o.z = hs;

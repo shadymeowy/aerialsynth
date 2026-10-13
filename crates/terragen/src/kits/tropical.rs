@@ -122,15 +122,15 @@ pub fn fishbone(s: &mut crate::stack::Stack) {
     if cleared {
         let u = u01k(h, 2);
         let (c, k) = if u < 0.55 {
-            (srgb(118.0, 124.0, 82.0), crate::landcover::PASTURE)
+            (srgb(112.0, 116.0, 88.0), crate::landcover::PASTURE)
         } else if u < 0.62 {
             (srgb(62.0, 58.0, 52.0), crate::landcover::BURN_SCAR)
         } else if u < 0.7 {
-            (laterite * 0.9, crate::landcover::BARE)
+            (crate::surface::mixc(laterite * 0.9, srgb(112.0, 100.0, 90.0), 0.4), crate::landcover::BARE)
         } else if u < 0.85 {
-            (srgb(108.0, 118.0, 72.0), crate::landcover::CROP)
+            (srgb(104.0, 112.0, 80.0), crate::landcover::CROP)
         } else {
-            (srgb(66.0, 92.0, 52.0), crate::landcover::CLEAR_CUT)
+            (srgb(68.0, 88.0, 58.0), crate::landcover::CLEAR_CUT)
         };
         col = c * (0.9 + 0.2 * u01k(h, 3)) * (1.0 + 0.08 * perlin3(h, s.ctx.p / 60.0) * band(60.0, gsd));
         cls = k;
@@ -550,6 +550,11 @@ fn fire(k: &KParams, i: &KIn) -> KOut {
     }
     // (variation from the scar noise itself: no extra octave)
     col *= 1.0 + v[4] * (2.0 * u - 1.0);
+    // patchy char and ash inside a scar (a fire does not burn evenly): mottling of ~0.2 scales
+    let mw = band(0.2 * sc, i.gsd);
+    if mw > 0.0 {
+        col *= 1.0 + 0.22 * perlin3(k.seed ^ 0xB07, i.p / (0.2 * sc)) * mw;
+    }
     KOut { cov, albedo: col, dh: 0.0, emit: 0.0, id: (bin as u64) + 1 }
 }
 

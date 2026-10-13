@@ -150,6 +150,9 @@ pub struct Carve {
     /// a lake in the channel's head: radius (m, 0: none) and absolute water level (m)
     pub lake_r: f64,
     pub lake_level: f64,
+    /// 0..1: the valley's extent from the drainage level's wide valley to what the walls alone need
+    /// (`fp_w + wall_k` per metre of depth): a narrow trough (fjords)
+    pub narrow: f64,
 }
 
 /// A host-built pass-A stamp (`Kit::astamps`): a landform that needs the drainage or exact

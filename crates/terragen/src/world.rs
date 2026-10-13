@@ -1218,6 +1218,7 @@ impl World {
                     top: h0,
                     lake_r: 0.0,
                     lake_level: 0.0,
+                    narrow: 0.0,
                 };
                 if crate::kits::has_carve() {
                     let ci =
@@ -1225,7 +1226,8 @@ impl World {
                     crate::kits::carve(self, &ci, &mut cv);
                 }
                 let (floor, fp_w, wall_k) = (cv.floor, cv.fp_w, cv.wall_k);
-                let valley = rh.valley.max(fp_w + wall_k * (h0 - floor)).min(rh.reach);
+                let vnat = fp_w + wall_k * (h0 - floor);
+                let valley = lerp(rh.valley.max(vnat), vnat, cv.narrow).min(rh.reach);
                 // no carving of the deeper seabed; floodplains stay above the sea (near the coast they were
                 // carved below it and flooded: straight "coastlines" along the valley walls and
                 // channels drawn into the sea) — only the channel itself forms an estuary

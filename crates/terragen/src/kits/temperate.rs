@@ -559,7 +559,10 @@ fn stands(s: &mut Stack, fe: f64) {
         } else {
             // grass and herbs, fireweed in flower, then the young trees close in
             let g = smoothstep(3.0, 7.0, age);
-            let c0 = mixc(rgb(138.0, 124.0, 82.0), rgb(110.0, 128.0, 62.0), g) * (1.0 + 0.16 * mot);
+            // (the regrowth's green differs by stand, and a 40 m patchwork runs through each)
+            let gt = mixc(rgb(104.0, 116.0, 68.0), rgb(84.0, 102.0, 64.0), u01k(bid, 6));
+            let mot2 = perlin3(SEED_STAND ^ 0x14, p / 40.0) * band(40.0, gsd);
+            let c0 = mixc(rgb(138.0, 124.0, 82.0), gt, g) * (1.0 + 0.16 * mot + 0.14 * mot2);
             let fire =
                 smoothstep(-0.1, 0.3, perlin3(SEED_STAND ^ 0x13, p / 14.0) * band(14.0, gsd)) * smoothstep(2.5, 4.0, age) * (1.0 - smoothstep(6.0, 9.0, age));
             let col = mixc(c0, rgb(166.0, 92.0, 132.0), 0.55 * fire * (0.6 + 0.4 * smoothstep(0.4, 0.7, s.bio.style.season)));
