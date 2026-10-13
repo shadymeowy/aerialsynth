@@ -1,4 +1,4 @@
-# desert_coast at a place of the same type in the next generator's world: arid coast (survey) (the same local solar time)
+# desert_coast at a place of the same type in the next generator's world: arid gravel coast (survey) (the same local solar time)
 world:
   seed: 1
   generator: next
@@ -12,8 +12,8 @@ trajectory:
     rate_hz: 400
     speed_mps: 50
     kind: line
-    lat: 17.907
-    lon: 45.4162
+    lat: 33.3035
+    lon: 149.052
     heading_deg: 255
     altitude_m: 900
     duration_s: 8.6
@@ -23,7 +23,7 @@ render:
   lighting:
     mode: clock
     date: '2026-06-21'
-    time_utc: '06:28:17'
+    time_utc: '23:33:44'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
