@@ -30,7 +30,13 @@ fn main() -> anyhow::Result<()> {
     println!("{path}: {tiles} tiles, {:.1} MB of tile layers", sum as f64 / 1e6);
     for (l, b) in Layer::ALL.iter().zip(bytes) {
         if b > 0 {
-            println!("  {:10} {:8.1} MB {:5.1} %  {:6.0} KB / tile", l.name(), b as f64 / 1e6, 100.0 * b as f64 / sum as f64, b as f64 / 1e3 / tiles.max(1) as f64);
+            println!(
+                "  {:10} {:8.1} MB {:5.1} %  {:6.0} KB / tile",
+                l.name(),
+                b as f64 / 1e6,
+                100.0 * b as f64 / sum as f64,
+                b as f64 / 1e3 / tiles.max(1) as f64
+            );
         }
     }
     Ok(())

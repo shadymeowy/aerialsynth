@@ -55,11 +55,7 @@ impl Generator {
         }
         let lacking: Vec<&str> = extra.iter().filter(|l| !st.meta().has(**l)).map(|l| l.name()).collect();
         if !lacking.is_empty() {
-            eprintln!(
-                "note: tile store {} was created without the layer(s) {} (tiles.layers applies to new stores)",
-                path.display(),
-                lacking.join(", ")
-            );
+            eprintln!("note: tile store {} was created without the layer(s) {} (tiles.layers applies to new stores)", path.display(), lacking.join(", "));
         }
         Ok(st)
     }

@@ -487,7 +487,8 @@ impl App {
                 ui.selectable_value(&mut self.s.mode, Mode::Height, "Height above ground").on_hover_text("DSM - DTM (the store's dtm layer)");
             }
             if self.svc.store.meta().has(tilestore::Layer::Instance) {
-                ui.selectable_value(&mut self.s.mode, Mode::Instance, "Instances").on_hover_text("building lots, fields, forest stands (the store's instance layer)");
+                ui.selectable_value(&mut self.s.mode, Mode::Instance, "Instances")
+                    .on_hover_text("building lots, fields, forest stands (the store's instance layer)");
             }
         });
         ui.add(egui::Slider::new(&mut self.s.exaggeration, 1.0..=100.0).logarithmic(true).text("relief ×"));

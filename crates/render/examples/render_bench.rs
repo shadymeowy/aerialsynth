@@ -48,7 +48,8 @@ fn main() -> anyhow::Result<()> {
     r.radiance_only = true;
     let unix = 1_773_964_800.0 + (10.5 - lon_d / 15.0) * 3600.0; // 2026-03-20 10:30 local solar time
     let sun = scn.render.lighting.sun_at_utc(unix, lat, lon);
-    let pose = Pose { t: 0.0, geo: geodesy::Geodetic::new(lat, lon, top + agl), q_ned_body: geodesy::euler_zyx_to_quat(sun.azimuth + 150f64.to_radians(), 0.0, 0.0) };
+    let pose =
+        Pose { t: 0.0, geo: geodesy::Geodetic::new(lat, lon, top + agl), q_ned_body: geodesy::euler_zyx_to_quat(sun.azimuth + 150f64.to_radians(), 0.0, 0.0) };
     let cam = pose.camera(&spec.extrinsics, &ell);
     let mut times = Vec::new();
     let mut frame = None;

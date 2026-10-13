@@ -12,7 +12,7 @@ fn tile(id: TileId, k: u8) -> TileData {
         landcover: (0..n).map(|i| (i % 17) as u8).collect(),
         emission: (0..n * 3).map(|i| (i % 7) as u8).collect(),
         dtm: (0..n).map(|i| i as f32 * 0.25 - 103.0 + k as f32).collect(),
-        instance: (0..n).map(|i| (i as u32 / 300) * 0x9E37_79B1 ^ k as u32).collect(),
+        instance: (0..n).map(|i| ((i as u32 / 300) * 0x9E37_79B1) ^ k as u32).collect(),
         elev_min: -100.0,
         elev_max: 1000.0 + k as f32,
     }

@@ -1086,10 +1086,8 @@ impl Renderer {
             }
             lo.and_then(point).map(|p| c - p).filter(|a| a.length_squared() < lim)
         };
-        let (Some(dx), Some(dy)) = (
-            step((x > 0).then(|| k - 1), (x + 1 < w).then_some(k + 1)),
-            step((y > 0).then(|| k - w), (y + 1 < h).then_some(k + w)),
-        ) else {
+        let (Some(dx), Some(dy)) = (step((x > 0).then(|| k - 1), (x + 1 < w).then_some(k + 1)), step((y > 0).then(|| k - w), (y + 1 < h).then_some(k + w)))
+        else {
             return DVec3::ZERO;
         };
         let n = dx.cross(dy);
