@@ -1375,31 +1375,21 @@ impl GpuGenerator {
         let b_ek = storage(d, "ecoregion keys", &ek);
         let b_ev = storage(d, "ecoregions", &ev);
         stamp(&format!("{} ecoregions", ecos.len()));
-        // the kits' host-built features per tile (shared Rust with the CPU; point evaluations
-        // through the settle rounds), binned like the pass-A pixels
+        // the kits' host-built features per tile (shared Rust with the CPU), binned like the
+        // pass-A pixels
         let (fs, fst, fb, fi) = if crate::features::any() {
-            // (the tiles' host functions in parallel: they only read the evaluations done so
-            // far; the missing ones are requested afterwards, tile by tile)
-            let feats: Vec<crate::features::Features> = self.settle(&mut cache, |prep| {
-                use rayon::prelude::*;
-                let points = &prep.c.points;
-                let built: Vec<(crate::features::Features, Vec<Ctx>)> = tq
-                    .par_iter()
-                    .map(|q| {
-                        let area = crate::features::Area { center: q.center, radius: q.radius, gsd: q.gsd };
-                        let mut src = host::ReadPoints { points, missing: Vec::new() };
-                        let f = crate::features::build(&self.world, &mut src, &area);
-                        (f, src.missing)
-                    })
-                    .collect();
-                built
-                    .into_iter()
-                    .map(|(f, missing)| {
-                        host::ReadPoints::request(prep, &missing);
-                        f
-                    })
-                    .collect()
-            })?;
+            // (the tiles' host functions in parallel, with exact point evaluations on the host:
+            // the kits' host code takes the same decisions from either backend's samples, see
+            // `sites_and_routes_match_the_cpu`, and GPU evaluations cost a settle round each
+            // step of a chain of decisions, tens of rounds)
+            use rayon::prelude::*;
+            let feats: Vec<crate::features::Features> = tq
+                .par_iter()
+                .map(|q| {
+                    let area = crate::features::Area { center: q.center, radius: q.radius, gsd: q.gsd };
+                    crate::features::build(&self.world, &mut crate::features::CpuPoints(&self.world), &area)
+                })
+                .collect();
             feature_tables(&self.world, ids, feats)
         } else {
             (vec![], vec![], vec![[0u32; 4]], vec![0u32])
