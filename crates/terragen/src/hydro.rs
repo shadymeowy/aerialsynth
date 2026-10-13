@@ -85,6 +85,10 @@ static QUERIES: Memo<QueryKey, Arc<Vec<Seg>>> = Memo::new(1 << 13);
 const POINT_R: f64 = 100.0;
 /// Side of a query cell (lattice cells of the level).
 const QUERY_CELL: f64 = 0.25;
+/// Side of a node block (lattice cells; `node_block`).
+const NODE_BLOCK: i64 = 4;
+/// The active lattice points per node block.
+static NODES_SHARED: Memo<LatticeKey, Arc<[(Cell, DVec3)]>> = Memo::new(1 << 16);
 
 /// A drainage piece near a query cell, with the lattice cell and surface point of the node that
 /// owns it (the selection of `river_segments_of`).
@@ -723,6 +727,31 @@ impl World {
         }
     }
 
+    /// The active lattice points of level `lvl` in the block `b` of [`NODE_BLOCK`]³ lattice cells:
+    /// cell and surface point (shared memo).
+    fn node_block(&self, lvl: usize, b: Cell) -> Arc<[(Cell, DVec3)]> {
+        let key = (self.level_key(lvl) ^ self.cache_key ^ 0xB10C, b.0, b.1, b.2);
+        NODES_SHARED.get_or(key, || {
+            let cell = self.cfg.hydro.levels[lvl].cell_km * KM;
+            let mut v = Vec::new();
+            for z in b.2 * NODE_BLOCK..(b.2 + 1) * NODE_BLOCK {
+                for y in b.1 * NODE_BLOCK..(b.1 + 1) * NODE_BLOCK {
+                    for x in b.0 * NODE_BLOCK..(b.0 + 1) * NODE_BLOCK {
+                        let c = (x, y, z);
+                        if !self.maybe_active(lvl, c, cell) {
+                            continue;
+                        }
+                        let fp = self.flow_point(lvl, c);
+                        if fp.active {
+                            v.push((c, fp.s));
+                        }
+                    }
+                }
+            }
+            v.into()
+        })
+    }
+
     /// The pieces of level `lvl` that a query within [`POINT_R`] of a point of the query cell
     /// `qc` (side [`QUERY_CELL`] lattice cells) can select, with their nodes, in the order of
     /// [`World::area_segments`] (nodes in z, y, x order; shared memo).
@@ -738,28 +767,31 @@ impl World {
             let hd = 0.5 * 3f64.sqrt() * q + 1.0;
             let reach = POINT_R + 4.6 * cell + lc.valley_m;
             let keep = POINT_R + 0.4 * cell + 1.4 * lc.valley_m + 0.35 * lc.meander * cell;
-            // (every query box lies in this one)
+            // (every query box lies in this one; its active nodes from the node blocks, in the
+            // z, y, x order of the scan)
             let lo = ((q0 - DVec3::splat(reach)) / cell).floor();
             let hi = ((q0 + DVec3::splat(q + reach)) / cell).floor();
-            let mut v = Vec::new();
-            for z in lo.z as i64..=hi.z as i64 {
-                for y in lo.y as i64..=hi.y as i64 {
-                    for x in lo.x as i64..=hi.x as i64 {
-                        let c = (x, y, z);
-                        if !self.maybe_active(lvl, c, cell) {
-                            continue;
-                        }
-                        let fp = self.flow_point(lvl, c);
-                        if !fp.active || (fp.s - qm).length() > reach + hd {
-                            continue;
-                        }
-                        for &seg in self.node_pieces_arc(lvl, c).iter() {
-                            let ab = seg.b - seg.a;
-                            let u = ((qm - seg.a).dot(ab) / ab.length_squared().max(1e-9)).clamp(0.0, 1.0);
-                            if (qm - (seg.a + ab * u)).length() <= keep + hd {
-                                v.push(NearPiece { seg, node: c, s: fp.s });
+            let (lo, hi) = ((lo.x as i64, lo.y as i64, lo.z as i64), (hi.x as i64, hi.y as i64, hi.z as i64));
+            let mut nodes: Vec<(Cell, DVec3)> = Vec::new();
+            for bz in lo.2.div_euclid(NODE_BLOCK)..=hi.2.div_euclid(NODE_BLOCK) {
+                for by in lo.1.div_euclid(NODE_BLOCK)..=hi.1.div_euclid(NODE_BLOCK) {
+                    for bx in lo.0.div_euclid(NODE_BLOCK)..=hi.0.div_euclid(NODE_BLOCK) {
+                        for &(c, sp) in self.node_block(lvl, (bx, by, bz)).iter() {
+                            if c.0 >= lo.0 && c.0 <= hi.0 && c.1 >= lo.1 && c.1 <= hi.1 && c.2 >= lo.2 && c.2 <= hi.2 && (sp - qm).length() <= reach + hd {
+                                nodes.push((c, sp));
                             }
                         }
+                    }
+                }
+            }
+            nodes.sort_unstable_by_key(|&((x, y, z), _)| (z, y, x));
+            let mut v = Vec::new();
+            for (c, sp) in nodes {
+                for &seg in self.node_pieces_arc(lvl, c).iter() {
+                    let ab = seg.b - seg.a;
+                    let u = ((qm - seg.a).dot(ab) / ab.length_squared().max(1e-9)).clamp(0.0, 1.0);
+                    if (qm - (seg.a + ab * u)).length() <= keep + hd {
+                        v.push(NearPiece { seg, node: c, s: sp });
                     }
                 }
             }

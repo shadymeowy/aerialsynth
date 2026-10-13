@@ -845,74 +845,52 @@ impl World {
     }
 
     /// Lake surface level: the spill height of the basin (lowest rim sample), or None when the
-    /// site is on a slope / in the sea. Cached per thread (pure function of the lake).
+    /// site is on a slope / in the sea. Memoized (pure function of the lake).
     /// Level of a lake that must exist (a river's closed basin): the spill height when the
     /// basin holds water, else just above the basin floor (a low levee holds it).
     fn lake_level_forced(&self, id: u64, center: DVec3, rad: f64) -> Option<f64> {
-        thread_local! {
-            static CACHE: std::cell::RefCell<FxHashMap<u64, Option<f64>>> = Default::default();
-        }
+        // (shared by the threads)
+        static CACHE: crate::memo::Memo<(u64, u64, u64), Option<f64>> = crate::memo::Memo::new(1 << 17);
         // the level also depends on `rad` (inflow widths): part of the key, so a cached value
         // never stands in for a different basin size (thread-order dependence)
-        let key = id ^ self.cache_key.rotate_left(29) ^ rad.to_bits().wrapping_mul(0x9E37_79B9_7F4A_7C15);
-        if let Some(v) = CACHE.with(|c| c.borrow().get(&key).copied()) {
-            return v;
-        }
-        let v = self.lake_level(id, center, rad).or_else(|| {
-            let g = geodesy::ecef2geodetic(center, &self.ell);
-            let cctx = Ctx::new(g.lat, g.lon, 20.0, &self.ell);
-            let tc = self.terrain_impl(&cctx, &self.macro_at(cctx.p, cctx.gsd), Mode::NoLakes, None, None);
-            (tc.water_kind == water::NONE && tc.ground > 1.0).then_some(tc.ground + 1.0)
-        });
-        CACHE.with(|c| {
-            let mut c = c.borrow_mut();
-            if c.len() > 100_000 {
-                c.clear();
-            }
-            c.insert(key, v);
-        });
-        v
+        CACHE.get_or((id, self.cache_key, rad.to_bits()), || {
+            self.lake_level(id, center, rad).or_else(|| {
+                let g = geodesy::ecef2geodetic(center, &self.ell);
+                let cctx = Ctx::new(g.lat, g.lon, 20.0, &self.ell);
+                let tc = self.terrain_impl(&cctx, &self.macro_at(cctx.p, cctx.gsd), Mode::NoLakes, None, None);
+                (tc.water_kind == water::NONE && tc.ground > 1.0).then_some(tc.ground + 1.0)
+            })
+        })
     }
 
     fn lake_level(&self, id: u64, center: DVec3, rad: f64) -> Option<f64> {
-        thread_local! {
-            static CACHE: std::cell::RefCell<FxHashMap<u64, Option<f64>>> = Default::default();
-        }
+        // (shared by the threads)
+        static CACHE: crate::memo::Memo<(u64, u64, u64), Option<f64>> = crate::memo::Memo::new(1 << 17);
         // the level also depends on `rad` (inflow widths): part of the key, so a cached value
         // never stands in for a different basin size (thread-order dependence)
-        let key = id ^ self.cache_key.rotate_left(17) ^ rad.to_bits().wrapping_mul(0x9E37_79B9_7F4A_7C15);
-        if let Some(v) = CACHE.with(|c| c.borrow().get(&key).copied()) {
-            return v;
-        }
-        let g = geodesy::ecef2geodetic(center, &self.ell);
-        let cctx = Ctx::new(g.lat, g.lon, 20.0, &self.ell);
-        let tc = self.terrain_impl(&cctx, &self.macro_at(cctx.p, cctx.gsd), Mode::NoLakes, None, None);
-        let v = if tc.water_kind != water::NONE || tc.ground < 1.0 {
-            None
-        } else {
-            let mut rim = f64::MAX;
-            for k in 0..10 {
-                let a = k as f64 * std::f64::consts::TAU / 10.0;
-                let q = cctx.offset(rad * a.cos(), rad * a.sin());
-                let gq = geodesy::ecef2geodetic(q, &self.ell);
-                let qctx = Ctx::new(gq.lat, gq.lon, 20.0, &self.ell);
-                let tq = self.terrain_impl(&qctx, &self.macro_at(qctx.p, qctx.gsd), Mode::NoLakes, None, None);
-                rim = rim.min(tq.ground);
-            }
-            if rim < tc.ground - 4.0 {
+        CACHE.get_or((id, self.cache_key, rad.to_bits()), || {
+            let g = geodesy::ecef2geodetic(center, &self.ell);
+            let cctx = Ctx::new(g.lat, g.lon, 20.0, &self.ell);
+            let tc = self.terrain_impl(&cctx, &self.macro_at(cctx.p, cctx.gsd), Mode::NoLakes, None, None);
+            if tc.water_kind != water::NONE || tc.ground < 1.0 {
                 None
             } else {
-                Some((rim - 0.7).max(tc.ground + 1.0))
+                let mut rim = f64::MAX;
+                for k in 0..10 {
+                    let a = k as f64 * std::f64::consts::TAU / 10.0;
+                    let q = cctx.offset(rad * a.cos(), rad * a.sin());
+                    let gq = geodesy::ecef2geodetic(q, &self.ell);
+                    let qctx = Ctx::new(gq.lat, gq.lon, 20.0, &self.ell);
+                    let tq = self.terrain_impl(&qctx, &self.macro_at(qctx.p, qctx.gsd), Mode::NoLakes, None, None);
+                    rim = rim.min(tq.ground);
+                }
+                if rim < tc.ground - 4.0 {
+                    None
+                } else {
+                    Some((rim - 0.7).max(tc.ground + 1.0))
+                }
             }
-        };
-        CACHE.with(|c| {
-            let mut c = c.borrow_mut();
-            if c.len() > 100_000 {
-                c.clear();
-            }
-            c.insert(key, v);
-        });
-        v
+        })
     }
 
     /// Pass A at one point (macro fields and drainage evaluated exactly).
