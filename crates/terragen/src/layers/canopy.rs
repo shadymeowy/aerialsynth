@@ -145,7 +145,10 @@ pub fn layer(s: &mut crate::stack::Stack) {
     let st = &t.style;
     let style = s.bio.style;
     let trees_mult = s.veg(|v| v.trees) * style.trees;
-    let base_cover = smoothstep(0.3, 0.68, wet) * smoothstep(-6.0, 2.0, temp) * veg.tree_density * trees_mult;
+    // (cold climates need less rain for a closed forest: the boreal forest of dry continental
+    // interiors, not the mountains; the moisture window shifts down below 8 C)
+    let cold = (1.0 - smoothstep(0.0, 8.0, temp)) * (1.0 - smoothstep(0.15, 0.4, t.mountain));
+    let base_cover = smoothstep(0.3 - 0.14 * cold, 0.68 - 0.24 * cold, wet) * smoothstep(-6.0, 2.0, temp) * veg.tree_density * trees_mult;
     let fpu = 0.5 + 0.5 * pf.forest; // ~[0, 1]
                                      // forests where the patch field is below the cover fraction (crisp but noisy edges)
     let forest = smoothstep(-0.03, 0.03, base_cover - fpu);

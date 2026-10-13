@@ -121,12 +121,12 @@ kit's `KITS` entry commented out (mean of two runs, shared machine, so +-3 % noi
 
 ## Known limits
 
-* Regrowth on clear-cuts is a uniform lime green (grass and fireweed, then young rows): from
-  1.5 km up a cut of a few years reads as a flat bright rectangle; there is no gradient of ages
+* Up to 18 % of the managed stands are cut within 16 years (42 % before: the taiga was a
+  patchwork of bright rectangles); regrowth is a muted green and the young rows close within 7
+  years, but a cut still reads as a flat rectangle from 1.5 km up; there is no gradient of ages
   within a stand.
 * Managed stands are a brick pattern of rectangles in the land-use region's frame: their edges
-  are straight and axis-aligned within a region, regardless of slope, streams and roads; under
-  seasonal snow the cuts read as white rectangles in the forest (the cold kit's kettle still).
+  are straight and axis-aligned within a region, regardless of slope, streams and roads.
 * Bogs, string bogs and fens are drawn by masks on the drainage and the relief (no peat
   hydrology): a raised bog can sit on a gentle slope, and string-bog strings follow a slow flow
   field rather than the real slope.

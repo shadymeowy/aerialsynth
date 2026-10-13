@@ -776,7 +776,8 @@ fn layer_canopy(s: ptr<function, Stack>) {
     let style = (*s).bio.st;
     let td = cfg.tree_density;
     let trees_mult = sveg(s, VEG_TREES) * style.veg.x;
-    let base_cover = smoothstep1(0.3, 0.68, wet) * smoothstep1(-6.0, 2.0, temp) * td * trees_mult;
+    let cold = (1.0 - smoothstep1(0.0, 8.0, temp)) * (1.0 - smoothstep1(0.15, 0.4, t.mountain));
+    let base_cover = smoothstep1(0.3 - 0.14 * cold, 0.68 - 0.24 * cold, wet) * smoothstep1(-6.0, 2.0, temp) * td * trees_mult;
     let fpu = 0.5 + 0.5 * (*s).pf.f[PF_FOREST];
     let forest = smoothstep1(-0.03, 0.03, base_cover - fpu);
     let savanna = smoothstep1(0.18, 0.35, wet) * (1.0 - smoothstep1(0.55, 0.7, wet)) * smoothstep1(12.0, 20.0, temp) * 0.12 * sveg(s, VEG_SAVANNA);

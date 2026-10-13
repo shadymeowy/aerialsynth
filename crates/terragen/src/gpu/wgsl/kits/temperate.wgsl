@@ -90,7 +90,8 @@ fn temperate_forest_est(s: ptr<function, Stack>) -> f32 {
     let t = (*s).t;
     let td = cfg.tree_density;
     let trees_mult = sveg(s, VEG_TREES) * (*s).bio.st.veg.x;
-    let base_cover = smoothstep1(0.3, 0.68, t.moist) * smoothstep1(-6.0, 2.0, t.temp) * td * trees_mult;
+    let cold = (1.0 - smoothstep1(0.0, 8.0, t.temp)) * (1.0 - smoothstep1(0.15, 0.4, t.mountain));
+    let base_cover = smoothstep1(0.3 - 0.14 * cold, 0.68 - 0.24 * cold, t.moist) * smoothstep1(-6.0, 2.0, t.temp) * td * trees_mult;
     let fpu = 0.5 + 0.5 * (*s).pf.f[PF_FOREST];
     let forest = smoothstep1(-0.03, 0.03, base_cover - fpu);
     let clear = 1.0 - 0.85 * smoothstep1(0.05, 0.4, s_agri(s)) * (1.0 - smoothstep1(0.45, 0.7, (*s).l.slope));
@@ -383,7 +384,7 @@ fn temperate_stands(s: ptr<function, Stack>, fe: f32) {
     let fy = yr - cy;
     let bid = hash2(seed, i64(cx), i64(cy));
     let inside = smoothstep1(0.35, 0.65, fe);
-    let pc = min(0.32 * fi, 0.42);
+    let pc = min(0.14 * fi, 0.18);
     let uc = u01k(bid, 3lu);
     if (uc < pc && inside > 0.0) {
         let age = 16.0 * uc / pc;
@@ -403,7 +404,7 @@ fn temperate_stands(s: ptr<function, Stack>, fe: f32) {
             clear = 0.93;
         } else {
             let g = smoothstep1(3.0, 7.0, age);
-            let gt = mixc(srgb(104.0, 116.0, 68.0), srgb(84.0, 102.0, 64.0), u01k(bid, 6lu));
+            let gt = mixc(srgb(92.0, 102.0, 64.0), srgb(78.0, 92.0, 60.0), u01k(bid, 6lu));
             let mot2 = perlin3(T_SEED_STAND ^ 0x14lu, p * (1.0lf / 40.0lf)) * band(40.0, gsd);
             let c0 = mixc(srgb(138.0, 124.0, 82.0), gt, g) * (1.0 + 0.16 * mot + 0.14 * mot2);
             let fire = smoothstep1(-0.1, 0.3, perlin3(T_SEED_STAND ^ 0x13lu, p * (1.0lf / 14.0lf)) * band(14.0, gsd)) * smoothstep1(2.5, 4.0, age) * (1.0 - smoothstep1(6.0, 9.0, age));
@@ -412,7 +413,7 @@ fn temperate_stands(s: ptr<function, Stack>, fe: f32) {
         }
         composite(s, temperate_layer(inside, col, LC_CLEAR_CUT, clear));
         if (age > 3.0) {
-            let grow = clamp((age - 3.0) / 10.0, 0.0, 1.0);
+            let grow = clamp((age - 3.0) / 7.0, 0.0, 1.0);
             let kp = temperate_parts(s, temperate_kp_young(), TEMPERATE_YOUNG_SIZE, TEMPERATE_YOUNG_MEAN.x, inside * (0.25 + 0.75 * grow), q, 0.0);
             var tc = srgb(84.0, 112.0, 50.0);
             if (u01k(bid, 5lu) < 0.65) {

@@ -221,7 +221,8 @@ fn forest_est(s: &Stack) -> f64 {
     let t = s.t;
     let td = s.world.cfg.vegetation.tree_density;
     let trees_mult = s.veg(|v| v.trees) * s.bio.style.trees;
-    let base_cover = smoothstep(0.3, 0.68, t.moist) * smoothstep(-6.0, 2.0, t.temp) * td * trees_mult;
+    let cold = (1.0 - smoothstep(0.0, 8.0, t.temp)) * (1.0 - smoothstep(0.15, 0.4, t.mountain));
+    let base_cover = smoothstep(0.3 - 0.14 * cold, 0.68 - 0.24 * cold, t.moist) * smoothstep(-6.0, 2.0, t.temp) * td * trees_mult;
     let fpu = 0.5 + 0.5 * s.pf.forest;
     let forest = smoothstep(-0.03, 0.03, base_cover - fpu);
     let clear = 1.0 - 0.85 * smoothstep(0.05, 0.4, s.agri()) * (1.0 - smoothstep(0.45, 0.7, s.l.slope));
@@ -538,7 +539,9 @@ fn stands(s: &mut Stack, fe: f64) {
     let bid = hash2(seed, cx as i64, cy as i64);
     let inside = smoothstep(0.35, 0.65, fe);
     // the stand's state: cut `age` years ago (0..16) with a probability by the forestry
-    let pc = (0.32 * fi).min(0.42);
+    // (~1 % of the stands a year: 42 % cut within 16 years made the taiga a patchwork of
+    // bright rectangles)
+    let pc = (0.14 * fi).min(0.18);
     let uc = u01k(bid, 3);
     if uc < pc && inside > 0.0 {
         let age = 16.0 * uc / pc;
@@ -560,7 +563,7 @@ fn stands(s: &mut Stack, fe: f64) {
             // grass and herbs, fireweed in flower, then the young trees close in
             let g = smoothstep(3.0, 7.0, age);
             // (the regrowth's green differs by stand, and a 40 m patchwork runs through each)
-            let gt = mixc(rgb(104.0, 116.0, 68.0), rgb(84.0, 102.0, 64.0), u01k(bid, 6));
+            let gt = mixc(rgb(92.0, 102.0, 64.0), rgb(78.0, 92.0, 60.0), u01k(bid, 6));
             let mot2 = perlin3(SEED_STAND ^ 0x14, p / 40.0) * band(40.0, gsd);
             let c0 = mixc(rgb(138.0, 124.0, 82.0), gt, g) * (1.0 + 0.16 * mot + 0.14 * mot2);
             let fire =
@@ -571,7 +574,7 @@ fn stands(s: &mut Stack, fe: f64) {
         s.composite(Layer { cov: inside, albedo: col, cls: lc::CLEAR_CUT, clear, ..Default::default() });
         if age > 3.0 {
             // the young trees: planted in rows (the stand's frame), growing with the age
-            let grow = ((age - 3.0) / 10.0).clamp(0.0, 1.0);
+            let grow = ((age - 3.0) / 7.0).clamp(0.0, 1.0);
             let kp = kernel_parts(s, K_YOUNG, inside * (0.25 + 0.75 * grow), q, 0.0);
             let tc = if u01k(bid, 5) < 0.65 { rgb(44.0, 70.0, 42.0) } else { rgb(84.0, 112.0, 50.0) };
             let ly = kernel_layer(s, K_YOUNG, &kp, tc, tc, 0.6 * (age - 2.0));
