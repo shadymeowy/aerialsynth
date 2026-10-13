@@ -1399,7 +1399,7 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
         }
     }
     let bsel = u01k(pc.id, 0xB0lu);
-    let hedge_m = 0.5 + pl.e.hedges;
+    let hedge_m = 0.3 + 0.7 * pl.e.hedges;
     var p0 = d.bp.x;
     if (d.borders.x == AB_HEDGE || d.borders.x == AB_BELT) {
         p0 *= hedge_m;
@@ -1453,8 +1453,8 @@ fn agri_pasture(pl: Plan, pc: Parcel, px: AgPx, id: u64, q: vec2<f32>) -> Shade 
         let trail = band_cov(dmin, 0.45, fw) * vis * smoothstep1(8.0, 20.0, r);
         let bare = px.soil * 0.95;
         col = mixc(col, bare, trail * 0.8);
-        let tramp = 1.0 - smoothstep1(10.0, 24.0 + 6.0 * perlin3(id ^ 0x7A12lu, p * (1.0lf / 9.0lf)), r);
-        col = mixc(col, bare * 0.9, 0.75 * tramp);
+        let tramp = (1.0 - smoothstep1(5.0, 13.0 + 5.0 * perlin3(id ^ 0x7A12lu, p * (1.0lf / 9.0lf)), r)) * select(0.0, 1.0, u01k(id, 65lu) < 0.35);
+        col = mixc(col, bare * 0.9, 0.5 * tramp);
         let trough = band_cov(r, 1.4, fw);
         col = mixc(col, srgb(112.0, 118.0, 122.0), trough);
         dh += 0.8 * trough;
@@ -1532,7 +1532,7 @@ fn agri_border(b: u32, edge: f32, i: Shade, pc: Parcel, px: AgPx) -> Shade {
     switch b {
         case 0u: {
             let c = band_cov(edge, 0.9, fwb);
-            o.col = mixc(i.col, mixc(px.grass_dry, px.grass, px.moist), 0.7 * c);
+            o.col = mixc(i.col, mixc(px.grass_dry, px.grass, px.moist), 0.45 * c);
         }
         case 1u, 2u: {
             let belt = b == AB_BELT;
@@ -1546,23 +1546,30 @@ fn agri_border(b: u32, edge: f32, i: Shade, pc: Parcel, px: AgPx) -> Shade {
                 dark = 0.82;
                 h = 9.0 + 6.0 * u01k(hb, 2lu);
             }
-            if (abs(edge) > 1.5 * hw0 + fwb) {
+            if (abs(edge) > 4.5 * hw0 + fwb) {
                 return o;
             }
             let clump = perlin3(hb, p * (1.0lf / f64(lam)));
+            let b11 = band(11.0, gsd);
+            var tb = 0.0;
+            if (!belt) {
+                tb = smoothstep1(0.3, 0.6, perlin3(hb ^ 3lu, p * (1.0lf / 11.0lf))) * b11 + (1.0 - b11) * 0.08;
+            }
             // crowns of different size along the hedge: its width varies (the mean below the pixel)
-            let hw = hw0 * (0.875 + 0.4 * clump * band(lam, gsd));
-            let c = max(min(edge + 0.5 * fwb, hw) - max(edge - 0.5 * fwb, -hw), 0.0) / fwb;
+            let hw = hw0 * (0.875 + 0.4 * clump * band(lam, gsd)) * (1.0 + 2.0 * tb);
+            let b18 = band(18.0, gsd);
+            let gap = smoothstep1(-0.5, -0.2, perlin3(hb ^ 5lu, p * (1.0lf / 18.0lf))) * b18 + (1.0 - b18) * 0.85;
+            let c = gap * max(min(edge + 0.5 * fwb, hw) - max(edge - 0.5 * fwb, -hw), 0.0) / fwb;
             if (c <= 0.0) {
                 return o;
             }
             let tex = 1.0 + 0.18 * perlin3(hb ^ 1lu, p * (1.0lf / 2.2lf)) * band(2.2, gsd);
             let ea = abs(edge) / hw;
             let across = sqrt(max(1.0 - ea * ea, 0.0));
-            let hc = px.crown * dark * (0.85 + 0.3 * clump) * tex * (0.82 + 0.3 * across);
+            let hc = px.crown * dark * (0.85 + 0.3 * clump) * tex * (0.82 + 0.3 * across) * (1.0 - 0.1 * tb);
             let along = 0.55 + 0.45 * (0.5 + 0.5 * clump);
             o.col = mixc(i.col, hc, c);
-            o.dh = lerp(i.dh, h * across * along, c);
+            o.dh = lerp(i.dh, (h + 7.0 * tb) * across * along, c);
             if (c > 0.5) {
                 o.cls = LC_HEDGEROW;
             }

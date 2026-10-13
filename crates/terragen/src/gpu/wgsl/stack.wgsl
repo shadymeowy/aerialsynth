@@ -585,8 +585,8 @@ fn finish_ground(s: ptr<function, Stack>) {
     let t = (*s).t;
     if (l.river_hw > 0.0 && t.river_wet > 0.3) {
         let ad = abs(l.river_d);
-        let belt = 4.0 + 0.6 * min(l.river_hw, 60.0);
-        (*s).m.riparian = (1.0 - smoothstep1(l.river_hw + 0.3 * belt, l.river_hw + belt, ad)) * smoothstep1(0.35, 0.6, t.moist)
+        let belt = 7.0 + 0.6 * min(l.river_hw, 60.0);
+        (*s).m.riparian = (1.0 - smoothstep1(l.river_hw + 0.3 * belt, l.river_hw + belt, ad)) * smoothstep1(0.18, 0.42, t.moist)
             * smoothstep1(0.3, 0.7, t.river_wet) * (*s).m.natural_ok * (0.55 + 0.45 * smoothstep1(-0.3, 0.3, (*s).pf.f[PF_PATCH]));
     }
 }
@@ -797,7 +797,7 @@ fn layer_canopy(s: ptr<function, Stack>) {
     let cold = (1.0 - smoothstep1(0.0, 8.0, temp)) * (1.0 - smoothstep1(0.15, 0.4, t.mountain));
     let base_cover = smoothstep1(0.3 - 0.14 * cold, 0.68 - 0.24 * cold, wet) * smoothstep1(-6.0, 2.0, temp) * td * trees_mult;
     let fpu = 0.5 + 0.5 * (*s).pf.f[PF_FOREST];
-    let forest = smoothstep1(-0.03, 0.03, base_cover - fpu);
+    let forest = max(smoothstep1(-0.03, 0.03, base_cover - fpu), m.woodlot * smoothstep1(0.05, 0.4, s_agri(s)));
     let savanna = smoothstep1(0.18, 0.35, wet) * (1.0 - smoothstep1(0.55, 0.7, wet)) * smoothstep1(12.0, 20.0, temp) * 0.12 * sveg(s, VEG_SAVANNA);
     let groves = 0.04 * smoothstep1(0.15, 0.3, wet) * sveg(s, VEG_GROVES);
     let clear = 1.0 - 0.85 * smoothstep1(0.05, 0.4, s_agri(s)) * (1.0 - smoothstep1(0.45, 0.7, slope)) * (1.0 - m.woodlot);

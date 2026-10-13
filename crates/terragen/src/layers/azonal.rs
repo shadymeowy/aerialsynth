@@ -86,9 +86,10 @@ pub fn finish_ground(s: &mut Stack) {
     let l = s.l;
     if l.river_hw > 0.0 && t.river_wet > 0.3 {
         let ad = l.river_d.abs();
-        let belt = 4.0 + 0.6 * l.river_hw.min(60.0);
+        // (gallery trees along the streams of dry farmland too: v0.2.0's tree lines)
+        let belt = 7.0 + 0.6 * l.river_hw.min(60.0);
         s.m.riparian = (1.0 - smoothstep(l.river_hw + 0.3 * belt, l.river_hw + belt, ad))
-            * smoothstep(0.35, 0.6, t.moist)
+            * smoothstep(0.18, 0.42, t.moist)
             * smoothstep(0.3, 0.7, t.river_wet)
             * s.m.natural_ok
             * (0.55 + 0.45 * smoothstep(-0.3, 0.3, s.pf.patch));

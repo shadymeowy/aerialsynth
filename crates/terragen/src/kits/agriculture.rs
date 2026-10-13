@@ -1414,7 +1414,7 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
     }
     // the border
     let bsel = u01k(pc.id, 0xB0);
-    let hedge_m = 0.5 + pl.e.hedges;
+    let hedge_m = 0.3 + 0.7 * pl.e.hedges;
     let p0 = d.bp[0] * if d.borders[0] == border::HEDGE || d.borders[0] == border::BELT { hedge_m } else { 1.0 };
     let b = if bsel < p0 {
         d.borders[0]
@@ -1493,8 +1493,9 @@ fn pasture(pl: &Plan, pc: &Parcel, px: &Px, id: u64, q: DVec2) -> (DVec3, f64, u
         let bare = px.soil * 0.95;
         col = mixc(col, bare, trail * 0.8);
         // trampled ground and the trough
-        let tramp = 1.0 - smoothstep(10.0, 24.0 + 6.0 * perlin3(id ^ 0x7A12, p / 9.0), r);
-        col = mixc(col, bare * 0.9, 0.75 * tramp);
+        // (a third of the paddocks: bare discs in every one dotted the land like a pattern)
+        let tramp = (1.0 - smoothstep(5.0, 13.0 + 5.0 * perlin3(id ^ 0x7A12, p / 9.0), r)) * if u01k(id, 65) < 0.35 { 1.0 } else { 0.0 };
+        col = mixc(col, bare * 0.9, 0.5 * tramp);
         let trough = band_cov(r, 1.4, fw);
         col = mixc(col, srgb(112.0, 118.0, 122.0), trough);
         dh += 0.8 * trough;
@@ -1562,29 +1563,36 @@ fn draw_border(b: u32, edge: f64, col: DVec3, dh: f64, cls: u8, pc: &Parcel, px:
     match b {
         border::MARGIN => {
             let c = band_cov(edge, 0.9, fwb);
-            (mixc(col, mixc(px.grass_dry, px.grass, px.moist), 0.7 * c), dh, cls)
+            (mixc(col, mixc(px.grass_dry, px.grass, px.moist), 0.45 * c), dh, cls)
         }
         border::HEDGE | border::BELT => {
             let belt = b == border::BELT;
             let hw0 = if belt { 4.0 + 3.0 * u01k(hb, 4) } else { 1.0 + 1.0 * u01k(hb, 4) };
-            if edge.abs() > 1.5 * hw0 + fwb {
+            if edge.abs() > 4.5 * hw0 + fwb {
                 return (col, dh, cls);
             }
             let lam = if belt { 7.0 } else { 5.0 };
             let clump = perlin3(hb, p / lam);
+            // hedgerow trees: crowns bulging out of the hedge every few tens of metres (a hedge of
+            // constant width outlined every field like a drawing)
+            let b11 = band(11.0, gsd);
+            let tb = if belt { 0.0 } else { smoothstep(0.3, 0.6, perlin3(hb ^ 3, p / 11.0)) * b11 + (1.0 - b11) * 0.08 };
             // crowns of different size along the hedge: its width varies (the mean below the pixel)
-            let hw = hw0 * (0.875 + 0.4 * clump * band(lam, gsd));
+            let hw = hw0 * (0.875 + 0.4 * clump * band(lam, gsd)) * (1.0 + 2.0 * tb);
             // (the band box-filtered exactly: a band narrower than the filter keeps its area
             // instead of widening to the filter)
-            let c = ((edge + 0.5 * fwb).min(hw) - (edge - 0.5 * fwb).max(-hw)).max(0.0) / fwb;
+            // gaps: gateways and missing stretches
+            let b18 = band(18.0, gsd);
+            let gap = smoothstep(-0.5, -0.2, perlin3(hb ^ 5, p / 18.0)) * b18 + (1.0 - b18) * 0.85;
+            let c = gap * ((edge + 0.5 * fwb).min(hw) - (edge - 0.5 * fwb).max(-hw)).max(0.0) / fwb;
             if c <= 0.0 {
                 return (col, dh, cls);
             }
             let tex = 1.0 + 0.18 * perlin3(hb ^ 1, p / 2.2) * band(2.2, gsd);
             let across = (1.0 - (edge.abs() / hw).powi(2)).max(0.0).sqrt();
-            let hc = px.crown * (if belt { 0.82 } else { 0.95 }) * (0.85 + 0.3 * clump) * tex * (0.82 + 0.3 * across);
+            let hc = px.crown * (if belt { 0.82 } else { 0.95 }) * (0.85 + 0.3 * clump) * tex * (0.82 + 0.3 * across) * (1.0 - 0.1 * tb);
             let along = 0.55 + 0.45 * (0.5 + 0.5 * clump);
-            let h = if belt { 9.0 + 6.0 * u01k(hb, 2) } else { 3.0 + 4.0 * u01k(hb, 2) };
+            let h = if belt { 9.0 + 6.0 * u01k(hb, 2) } else { 3.0 + 4.0 * u01k(hb, 2) + 7.0 * tb };
             (mixc(col, hc, c), lerp(dh, h * across * along, c), if c > 0.5 { CLS_HEDGEROW } else { cls })
         }
         border::WALL => {
