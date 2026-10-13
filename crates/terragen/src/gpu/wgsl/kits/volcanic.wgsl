@@ -234,8 +234,8 @@ fn vc_field_look(s: ptr<function, Stack>, it: Inst) {
         var col = mixc(srgb(44.0, 38.0, 38.0), srgb(118.0, 62.0, 42.0), 0.65 * t * t);
         col *= mix(1.0, 0.72, smoothstep1(0.22, 0.12, rho)) * (1.0 + 0.15 * smoothstep1(0.15, 0.22, rho) * smoothstep1(0.4, 0.22, rho));
         col = mixc(col, vc_ash_col(u01k(f.chash, 17lu)) * 0.9, 0.5 * smoothstep1(0.55, 0.95, rho));
-        col *= mix(0.8, 1.14, smoothstep1(0.95, 0.3, rho));
-        col = col * (1.0 + 0.1 * vc_nz(VC_SEED_ASH + 6lu, p, 9.0, gsd));
+        col = mixc(col, (*s).col, 0.5 * smoothstep1(0.55, 1.0, rho));
+        col = col * (1.0 + 0.18 * vc_nz(VC_SEED_ASH + 6lu, p, 9.0, gsd));
         var ly = layer_paint(f.cinder, col, LC_VOLCANIC_ASH);
         ly.clear = 1.0;
         composite(s, ly);
