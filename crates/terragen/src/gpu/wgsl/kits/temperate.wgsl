@@ -371,7 +371,7 @@ fn temperate_stands(s: ptr<function, Stack>, fe: f32) {
     let p = (*s).c.p;
     let gsd = (*s).c.gsd;
     let fw = (*s).l.fw;
-    let q = (*s).q_rot;
+    let q = (*s).q_rot + vec2<f32>(perlin3(T_SEED_STAND ^ 0x21lu, p * (1.0lf / 110.0lf)), perlin3(T_SEED_STAND ^ 0x22lu, p * (1.0lf / 110.0lf))) * 24.0;
     let seed = mix64((*s).t.region_id ^ T_SEED_STAND);
     let wc = 150.0 + 150.0 * u01k(seed, 1lu);
     let xc = q.x / wc;
@@ -384,29 +384,31 @@ fn temperate_stands(s: ptr<function, Stack>, fe: f32) {
     let fy = yr - cy;
     let bid = hash2(seed, i64(cx), i64(cy));
     let inside = smoothstep1(0.35, 0.65, fe);
-    let pc = min(0.14 * fi, 0.18);
+    let pc = min(0.07 * fi, 0.09);
     let uc = u01k(bid, 3lu);
     if (uc < pc && inside > 0.0) {
-        let age = 16.0 * uc / pc;
+        let age = 16.0 * pow(uc / pc, 0.6);
         let ex = min(fx, 1.0 - fx) * wc;
         let ey = min(fy, 1.0 - fy) * hr;
+        let en = 14.0 * perlin3(T_SEED_STAND ^ 0x23lu, p * (1.0lf / 45.0lf)) * band(45.0, gsd) + 6.0 * perlin3(T_SEED_STAND ^ 0x24lu, p * (1.0lf / 13.0lf)) * band(13.0, gsd);
+        let inside = inside * clamp((min(ex, ey) - 8.0 + en) / fw + 0.5, 0.0, 1.0);
         let mot = perlin3(T_SEED_STAND ^ 0x11lu, p * (1.0lf / 6.0lf)) * band(6.0, gsd) + 0.5 * perlin3(T_SEED_STAND ^ 0x12lu, p * (1.0lf / 2.0lf)) * band(2.0, gsd);
         var col: vec3<f32>;
         var clear: f32;
         if (age < 3.0) {
-            let c0 = mixc(srgb(116.0, 104.0, 88.0), srgb(134.0, 110.0, 86.0), smoothstep1(-0.3, 0.4, mot));
+            let c0 = mixc(srgb(92.0, 84.0, 70.0), srgb(106.0, 90.0, 72.0), smoothstep1(-0.3, 0.4, mot));
             let c1 = mixc(c0, spal(s, BP_SOIL), 0.15) * (1.0 + 0.22 * mot);
             let tr = q.x / 19.0 + u01k(bid, 4lu);
             let trail = band_cov((tr - floor(tr) - 0.5) * 19.0, 1.6, fw) * band(19.0, gsd) * smoothstep1(4.0, 14.0, ey);
-            let c2 = mixc(c1, srgb(162.0, 144.0, 114.0), 0.7 * trail);
+            let c2 = mixc(c1, srgb(128.0, 116.0, 94.0), 0.7 * trail);
             let landing = band_cov(ey, 12.0, fw) * band_cov(ex - 0.5 * wc, 22.0, fw);
-            col = mixc(c2, srgb(170.0, 156.0, 128.0), landing);
+            col = mixc(c2, srgb(138.0, 126.0, 104.0), landing);
             clear = 0.93;
         } else {
             let g = smoothstep1(3.0, 7.0, age);
             let gt = mixc(srgb(92.0, 102.0, 64.0), srgb(78.0, 92.0, 60.0), u01k(bid, 6lu));
             let mot2 = perlin3(T_SEED_STAND ^ 0x14lu, p * (1.0lf / 40.0lf)) * band(40.0, gsd);
-            let c0 = mixc(srgb(138.0, 124.0, 82.0), gt, g) * (1.0 + 0.16 * mot + 0.14 * mot2);
+            let c0 = mixc(srgb(110.0, 104.0, 70.0), gt, g) * (1.0 + 0.16 * mot + 0.14 * mot2);
             let fire = smoothstep1(-0.1, 0.3, perlin3(T_SEED_STAND ^ 0x13lu, p * (1.0lf / 14.0lf)) * band(14.0, gsd)) * smoothstep1(2.5, 4.0, age) * (1.0 - smoothstep1(6.0, 9.0, age));
             col = mixc(c0, srgb(166.0, 92.0, 132.0), 0.55 * fire * (0.6 + 0.4 * smoothstep1(0.4, 0.7, (*s).bio.st.land.x)));
             clear = 1.0;

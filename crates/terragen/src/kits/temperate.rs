@@ -525,7 +525,8 @@ fn stands(s: &mut Stack, fe: f64) {
         return;
     }
     let (p, gsd, fw) = (s.ctx.p, s.ctx.gsd, s.l.fw);
-    let q = s.q_rot;
+    // (the stands' frame warped by ~25 m: straight-edged rectangles read as a plan, not a forest)
+    let q = s.q_rot + DVec2::new(perlin3(SEED_STAND ^ 0x21, p / 110.0), perlin3(SEED_STAND ^ 0x22, p / 110.0)) * 24.0;
     let seed = mix64(s.t.region.id ^ SEED_STAND);
     let wc = 150.0 + 150.0 * u01k(seed, 1);
     let xc = q.x / wc;
@@ -539,25 +540,28 @@ fn stands(s: &mut Stack, fe: f64) {
     let bid = hash2(seed, cx as i64, cy as i64);
     let inside = smoothstep(0.35, 0.65, fe);
     // the stand's state: cut `age` years ago (0..16) with a probability by the forestry
-    // (~1 % of the stands a year: 42 % cut within 16 years made the taiga a patchwork of
-    // bright rectangles)
-    let pc = (0.14 * fi).min(0.18);
+    // (~0.5 % of the stands a year, most of the cuts years old and greening: 42 % cut within
+    // 16 years, a fifth of them fresh, made the taiga a patchwork of bright rectangles)
+    let pc = (0.07 * fi).min(0.09);
     let uc = u01k(bid, 3);
     if uc < pc && inside > 0.0 {
-        let age = 16.0 * uc / pc;
+        let age = 16.0 * (uc / pc).powf(0.6);
         let ex = fx.min(1.0 - fx) * wc;
         let ey = fy.min(1.0 - fy) * hr;
+        // ragged edges: seed trees and uncut corners left along the border
+        let en = 14.0 * perlin3(SEED_STAND ^ 0x23, p / 45.0) * band(45.0, gsd) + 6.0 * perlin3(SEED_STAND ^ 0x24, p / 13.0) * band(13.0, gsd);
+        let inside = inside * ((ex.min(ey) - 8.0 + en) / fw + 0.5).clamp(0.0, 1.0);
         let mot = perlin3(SEED_STAND ^ 0x11, p / 6.0) * band(6.0, gsd) + 0.5 * perlin3(SEED_STAND ^ 0x12, p / 2.0) * band(2.0, gsd);
         let (col, clear) = if age < 3.0 {
             // fresh: slash (brown, reddish dead needles), skid trails along the stand, a landing
             // at its edge, a few trees left standing
-            let c0 = mixc(rgb(116.0, 104.0, 88.0), rgb(134.0, 110.0, 86.0), smoothstep(-0.3, 0.4, mot));
+            let c0 = mixc(rgb(92.0, 84.0, 70.0), rgb(106.0, 90.0, 72.0), smoothstep(-0.3, 0.4, mot));
             let c1 = mixc(c0, s.pal(pal::SOIL), 0.15) * (1.0 + 0.22 * mot);
             let tr = q.x / 19.0 + u01k(bid, 4);
             let trail = kernels::band_cov((tr - tr.floor() - 0.5) * 19.0, 1.6, fw) * band(19.0, gsd) * smoothstep(4.0, 14.0, ey);
-            let c2 = mixc(c1, rgb(162.0, 144.0, 114.0), 0.7 * trail);
+            let c2 = mixc(c1, rgb(128.0, 116.0, 94.0), 0.7 * trail);
             let landing = kernels::band_cov(ey, 12.0, fw) * kernels::band_cov(ex - 0.5 * wc, 22.0, fw);
-            let col = mixc(c2, rgb(170.0, 156.0, 128.0), landing);
+            let col = mixc(c2, rgb(138.0, 126.0, 104.0), landing);
             (col, 0.93)
         } else {
             // grass and herbs, fireweed in flower, then the young trees close in
@@ -565,7 +569,7 @@ fn stands(s: &mut Stack, fe: f64) {
             // (the regrowth's green differs by stand, and a 40 m patchwork runs through each)
             let gt = mixc(rgb(92.0, 102.0, 64.0), rgb(78.0, 92.0, 60.0), u01k(bid, 6));
             let mot2 = perlin3(SEED_STAND ^ 0x14, p / 40.0) * band(40.0, gsd);
-            let c0 = mixc(rgb(138.0, 124.0, 82.0), gt, g) * (1.0 + 0.16 * mot + 0.14 * mot2);
+            let c0 = mixc(rgb(110.0, 104.0, 70.0), gt, g) * (1.0 + 0.16 * mot + 0.14 * mot2);
             let fire =
                 smoothstep(-0.1, 0.3, perlin3(SEED_STAND ^ 0x13, p / 14.0) * band(14.0, gsd)) * smoothstep(2.5, 4.0, age) * (1.0 - smoothstep(6.0, 9.0, age));
             let col = mixc(c0, rgb(166.0, 92.0, 132.0), 0.55 * fire * (0.6 + 0.4 * smoothstep(0.4, 0.7, s.bio.style.season)));
