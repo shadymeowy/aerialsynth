@@ -10,6 +10,10 @@
   reported a frame later), and a GPU render error fails the self-check (auto renders on the
   CPU). The self-check test runs four frames and wants all of them right; CI runs it on lavapipe
   too.
+- **Fixed** a flaky GPU read-back panic (`TargetAlignmentGreaterAndInputNotAligned`): mapped
+  buffer ranges are not guaranteed to be aligned for the element type, so read-backs now copy
+  through `bytemuck::pod_collect_to_vec` (hit `classic::gpu::tests::tiles_match_the_cpu` under
+  contention).
 - **Rendering side** (design §8). *Walls:* steep faces (the geometric normal of the rendered
   mesh from the G-buffer, slope > ~52–66°) get a wall material instead of the top-down texture
   stretched down them: building facades from the roof's colour with floors, window bays and

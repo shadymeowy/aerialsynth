@@ -669,7 +669,7 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
     // ---------------- read back into a FrameOut
     let n = (ow * oh) as usize;
     let get = |k: usize| -> anyhow::Result<Vec<[f32; 4]>> {
-        let v = bytemuck::cast_slice::<u8, [f32; 4]>(&tg.read[k].slice(..).get_mapped_range()?).to_vec();
+        let v = bytemuck::pod_collect_to_vec::<u8, [f32; 4]>(&tg.read[k].slice(..).get_mapped_range()?);
         tg.read[k].unmap();
         Ok(v)
     };
