@@ -881,6 +881,23 @@ struct Sink {
     level: f32,
 }
 
+/// What a kit's pass-A stamp sees at a pixel (`kits::AStampIn`): the nearest channel (NONE_F /
+/// 0: none). The stamp itself is a `Sink` with a negative radius (`kits::AStamp`).
+struct AStampIn {
+    river_d: f32,
+    river_hw: f32,
+}
+
+/// The geocentric frame at a stamp's centre and its direction (`kits::astamp_frame`): east,
+/// north, up, direction.
+fn astamp_frame(c: vec3<f64>, bearing: f64) -> array<vec3<f32>, 4> {
+    let up = normalize(vec3<f32>(c));
+    let east = normalize(cross(vec3<f32>(0.0, 0.0, 1.0), up));
+    let north = cross(up, east);
+    let b = f32(bearing);
+    return array<vec3<f32>, 4>(east, north, up, east * cos(b) + north * sin(b));
+}
+
 @group(1) @binding(0) var<storage, read> segs: array<Seg>;
 @group(1) @binding(1) var<storage, read> seg_list: array<u32>;
 @group(1) @binding(2) var<storage, read> sinks: array<Sink>;
@@ -1163,6 +1180,20 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
             }
             let wm = cfg.lvl_b[best_lvl].x;
             t.river_wet = smoothstep1(wm, wm + 0.12, moist);
+        }
+    }
+
+    // ---- the kits' pass-A stamps (deltas at river mouths), after the drainage carve (in the
+    // sink list with a negative radius)
+    if (with_lakes) {
+        var ai: AStampIn;
+        ai.river_d = t.river_d;
+        ai.river_hw = t.river_hw;
+        for (var k = 0u; k < dr.nsink; k++) {
+            let sk = sinks[dr.sink0 + k];
+            if (sk.rad < 0.0 && dist64(p, sk.c.xyz) < -sk.rad) {
+                kits_astamp(c, sk, ai, &h);
+            }
         }
     }
 

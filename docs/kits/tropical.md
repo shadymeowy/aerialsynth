@@ -128,7 +128,14 @@ floodplain (in the core alone this place was mostly fields).
 ![oxbow lake 300 m](images/tropical_oxbow_300m.jpg)
 
 **River water**: a white-water river (21.212, −20.262), nadir 800 m; a muddy and a black-water
-river side by side (4.628, 5.338), nadir 800 m.
+river side by side (4.628, 5.338), nadir 800 m (rendered before tributaries joined at an angle:
+the black-water river now joins the muddy one south of this frame).
+
+**Confluences** (4.628, 5.338; nadir 4.5 km), before and after: tributaries joined the main
+stem tangentially and ran beside it; now they meet it at 35–80°.
+
+![confluence before](images/rivers_confluence_before.jpg)
+![confluence after](images/rivers_confluence_after.jpg)
 
 ![white-water river 800 m](images/tropical_whitewater_800m.jpg)
 ![black-water river 800 m](images/tropical_blackwater_800m.jpg)
@@ -175,18 +182,14 @@ burns and swidden plots.
 * Meander scars, oxbows and scroll bars are drawn beside the rivers (a mask on `river_dist` and
   `floodplain`), not as the river's own bends: the live channel keeps the core's smooth
   meander, so oxbows lie next to a river that does not meander at their scale.
-* Mangroves are rare in the default world: they need low tropical coasts below ~3–5 m inside
+* Mangroves are rare in the default world (most of them grow on the coast kit's deltas of
+  tropical rivers): they need low tropical coasts below ~3–5 m inside
   tropical ecoregions, and near-shore water whose ecoregion site lies at sea takes that site's
-  biome (see *What needs the core*). No still shows them yet.
+  biome (see *What needs the core*). Still: the tropical delta in the coast kit's doc.
 * River water by type (white-water, black-water) is a per-pixel choice by the river's width,
   the moisture and a regional style channel: a tributary can change colour where the style
   channel crosses its threshold, not only at its confluence.
-* No deltas: river mouths end at the coast without distributaries or sediment lobes (the design's
-  pass-A delta stamps at level-0 mouths are not built: the mouth must be found on the drawn coast,
-  not at the coarse drainage lattice's sea points, and the lobes must be relief).
 * Fishbone projects follow their own spines (a grid in the plane of a 200 km anchor), not the
   transport kit's roads, and end at their 22 km block's edges; their feeder roads are 6 m tracks
   (invisible from 12 km, where only the ribs of clearings show); red bare-soil lots read
   saturated; the clearings ignore rivers and slopes below the 0.3 gate.
-* Rivers that join run side by side for a while before their confluence (the core's drainage
-  curves meet tangentially), as in the black-water still.

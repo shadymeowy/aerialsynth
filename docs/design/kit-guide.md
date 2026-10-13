@@ -455,6 +455,18 @@ signed distance, along-distance and fraction — the `aux` of the `linear` and `
 
 ---
 
+**Pass-A stamps** (`Kit::astamps`, `Kit::astamp`): a landform whose placement needs the drainage
+or exact samples (a delta at the point where a river meets the drawn coast) cannot be a relief
+operator (analytic only) nor a pass-B stamp (no height in pass A). The kit's host function
+`astamps(world, center, radius, gsd) -> Vec<AStamp>` lists the stamps reaching a disc (a pure
+function of the world: cache it); the core applies `astamp(world, stamp, AStampIn, &mut h)` after
+the drainage carve, before the lakes and the sea, in full pass-A evaluations (tiles, points of
+both backends; not the drainage lattice heights). On the GPU a stamp travels in the sink-lake
+list (`Sink` with a negative radius: centre and bearing in `c`, `id` with the kit's kind in its
+low byte, reach `-rad`, one parameter in `level`); the kit's WGSL `<kit>_astamp(c: Ctx, st: Sink,
+ai: AStampIn, h: ptr<function, f32>)` tells its own stamps by the kind. Example: the coast kit's
+deltas.
+
 > **Height in the azonal slot:** the core's `azonal::finish_ground` sets the ground height
 > after the azonal slot (`height = ground + micro`), so a height (`dh`) a kit adds there is
 > overwritten. Add relief that must survive (e.g. barchans) in the disturbance slot, or as a

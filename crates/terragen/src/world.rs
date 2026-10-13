@@ -23,6 +23,8 @@ pub struct NearSegs<'a> {
     pub sinks: &'a [(u64, DVec3, f64)],
     /// the instances of the relief families that can reach the area
     pub inst: &'a [Vec<crate::instances::Instance>],
+    /// the kits' pass-A stamps that can reach the area (`kits::astamps`)
+    pub astamps: &'a [crate::kits::AStamp],
 }
 
 /// What `terrain_impl` evaluates.
@@ -965,6 +967,28 @@ impl World {
         self.lake_level_forced(id, c, rad)
     }
 
+    /// The kits' pass-A stamps that can reach the point `p` at pixel size `gsd` (point
+    /// evaluations of both backends: the stamps of a 20 km cell around it, cached).
+    pub(crate) fn astamps_at(&self, p: DVec3, gsd: f64) -> std::sync::Arc<Vec<crate::kits::AStamp>> {
+        type Key = (u64, u64, i64, i64, i64);
+        static CACHE: std::sync::RwLock<Option<FxHashMap<Key, std::sync::Arc<Vec<crate::kits::AStamp>>>>> = std::sync::RwLock::new(None);
+        const CELL: f64 = 20_000.0;
+        let c = (p / CELL).floor();
+        let key = (self.cache_key, gsd.to_bits(), c.x as i64, c.y as i64, c.z as i64);
+        if let Some(v) = CACHE.read().unwrap().as_ref().and_then(|m| m.get(&key)) {
+            return v.clone();
+        }
+        let center = (c + 0.5) * CELL;
+        let v = std::sync::Arc::new(crate::kits::astamps(self, center, 0.5 * 3f64.sqrt() * CELL + 1.0, gsd));
+        let mut g = CACHE.write().unwrap();
+        let m = g.get_or_insert_with(FxHashMap::default);
+        if m.len() > 100_000 {
+            m.clear();
+        }
+        m.insert(key, v.clone());
+        v
+    }
+
     /// Can a lattice lake reach `p`? (cheap and conservative: the two lake sites that pass A
     /// visits at `p`, by their radius and their existence at `p`'s climate; no levels)
     pub(crate) fn lattice_lake_near(&self, p: DVec3) -> bool {
@@ -1284,6 +1308,24 @@ impl World {
                 // rivers. Outside the channel the level is the ground.
                 t.river_level = if ad < rh.hw { floor.min(h + 1.0 + 0.06 * rh.hw).max(h + 0.6) } else { h };
                 t.river_wet = smoothstep(lc.wet_moisture, lc.wet_moisture + 0.12, moist);
+            }
+        }
+
+        // ---- the kits' pass-A stamps (deltas at river mouths), after the drainage carve
+        if with_lakes && crate::kits::has_astamps() {
+            let local;
+            let sts = match near_segs {
+                Some(n) => n.astamps,
+                None => {
+                    local = self.astamps_at(p, gsd);
+                    &local[..]
+                }
+            };
+            let ai = crate::kits::AStampIn { ctx, river_d: t.river_d, river_hw: t.river_hw };
+            for st in sts {
+                if (p - st.c).length() < st.r {
+                    crate::kits::astamp(self, st, &ai, &mut h);
+                }
             }
         }
 

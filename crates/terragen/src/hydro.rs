@@ -65,6 +65,7 @@ thread_local! {
     static TGT: RefCell<FxHashMap<LatticeKey, Option<Cell>>> = RefCell::new(FxHashMap::default());
     static SRC: RefCell<FxHashMap<LatticeKey, bool>> = RefCell::new(FxHashMap::default());
     static MAIN: RefCell<FxHashMap<LatticeKey, Option<Cell>>> = RefCell::new(FxHashMap::default());
+    static PIECES: RefCell<FxHashMap<LatticeKey, std::rc::Rc<[Seg]>>> = RefCell::new(FxHashMap::default());
 }
 
 /// The junction angle of a tributary with the main stem: its inflow direction's angle to the
@@ -282,7 +283,8 @@ impl World {
     pub(crate) fn lattice_point(&self, lvl: usize, c: Cell) -> DVec3 {
         let cell = self.cfg.hydro.levels[lvl].cell_km * KM;
         let hh = hash3(self.level_key(lvl), c.0, c.1, c.2);
-        DVec3::new(c.0 as f64 + 0.5 + 0.8 * (u01k(hh, 1) - 0.5), c.1 as f64 + 0.5 + 0.8 * (u01k(hh, 2) - 0.5), c.2 as f64 + 0.5 + 0.8 * (u01k(hh, 3) - 0.5)) * cell
+        DVec3::new(c.0 as f64 + 0.5 + 0.8 * (u01k(hh, 1) - 0.5), c.1 as f64 + 0.5 + 0.8 * (u01k(hh, 2) - 0.5), c.2 as f64 + 0.5 + 0.8 * (u01k(hh, 3) - 0.5))
+            * cell
     }
 
     /// Cheap test without the cache: false only for lattice points certainly not active (far
@@ -387,6 +389,193 @@ impl World {
             }
         }
         r
+    }
+
+    /// Can a closed-basin lake ([`World::sink_lakes`]) of drainage level `only` reach `p`? Cheap
+    /// and conservative: true where an active lattice point above sea level without a lower
+    /// neighbour (a possible sink) lies within the reach (1.6 radii) of the largest lake it can
+    /// hold: its radius as `sink_lakes` sizes it, from the widths of all the neighbours that
+    /// could drain into it. Visits only the few lattice points near `p` and stops at the first
+    /// lower neighbour of each (no drainage pieces).
+    pub(crate) fn sink_near_level(&self, p: DVec3, only: usize) -> bool {
+        if !self.cfg.hydro.rivers {
+            return false;
+        }
+        for (lvl, lc) in self.cfg.hydro.levels.iter().enumerate().filter(|x| x.0 == only) {
+            let cell = lc.cell_km * KM;
+            // the widest possible lake: 26 inflows of the widest channel (`sink_lakes`)
+            let reach = 1.6 * (6.0 * 26.0 * 0.5 * lc.width_m[1]).clamp(200.0, 2500.0) * 1.2 + 50.0;
+            let lo = ((p - DVec3::splat(reach + 0.5 * cell)) / cell).floor();
+            let hi = ((p + DVec3::splat(reach + 0.5 * cell)) / cell).floor();
+            for z in lo.z as i64..=hi.z as i64 {
+                for y in lo.y as i64..=hi.y as i64 {
+                    for x in lo.x as i64..=hi.x as i64 {
+                        let c = (x, y, z);
+                        if !self.maybe_active(lvl, c, cell) {
+                            continue;
+                        }
+                        let hh = hash3(self.level_key(lvl), c.0, c.1, c.2);
+                        let q = DVec3::new(
+                            c.0 as f64 + 0.5 + 0.8 * (u01k(hh, 1) - 0.5),
+                            c.1 as f64 + 0.5 + 0.8 * (u01k(hh, 2) - 0.5),
+                            c.2 as f64 + 0.5 + 0.8 * (u01k(hh, 3) - 0.5),
+                        ) * cell;
+                        // (the surface point below it: within ~0.2 % of the cell of the
+                        // geocentric projection)
+                        if (q.normalize() * p.length() - p).length() > reach + 0.01 * cell {
+                            continue;
+                        }
+                        let me = self.flow_point(lvl, c);
+                        if !me.active || me.h <= 0.0 {
+                            continue;
+                        }
+                        // no lower neighbour (else not a sink); the widths of the higher ones
+                        let mut inflow = 0.0;
+                        let mut lower = false;
+                        'n: for dz in -1..=1i64 {
+                            for dy in -1..=1i64 {
+                                for dx in -1..=1i64 {
+                                    let n = (c.0 + dx, c.1 + dy, c.2 + dz);
+                                    if n == c || !self.maybe_active(lvl, n, cell) {
+                                        continue;
+                                    }
+                                    let o = self.flow_point(lvl, n);
+                                    let d = (o.s - me.s).length();
+                                    if !o.active || d < 0.2 * cell || d > 1.8 * cell {
+                                        continue;
+                                    }
+                                    if o.h < me.h {
+                                        lower = true;
+                                        break 'n;
+                                    }
+                                    let hw = hash3(self.level_key(lvl) ^ 0x51DE, n.0, n.1, n.2);
+                                    inflow += 0.5 * (lc.width_m[0] + (lc.width_m[1] - lc.width_m[0]) * u01k(hw, 1));
+                                }
+                            }
+                        }
+                        if lower || inflow == 0.0 {
+                            continue;
+                        }
+                        let lh = hash3(0x51A7, (me.s.x / 10.0) as i64, (me.s.y / 10.0) as i64, (me.s.z / 10.0) as i64);
+                        let rad = (6.0 * inflow).clamp(200.0, 2500.0) * (0.8 + 0.4 * u01k(lh, 1));
+                        if (me.s - p).length() <= 1.6 * rad + 1.0 {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// The channel pieces node `c` of level `lvl` owns, in order (`river_segments`): a source's
+    /// straight start, then the bend at its downstream node (a tributary's last reach to the
+    /// main stem), or the last piece into the sea or a closed basin.
+    pub(crate) fn node_pieces(&self, lvl: usize, c: Cell, out: &mut Vec<Seg>) {
+        // (memoized per thread: queries of neighbouring areas share most nodes)
+        let key = (self.level_key(lvl) ^ self.cache_key ^ 0x91EC, c.0, c.1, c.2);
+        if let Some(v) = PIECES.with(|m| m.borrow().get(&key).cloned()) {
+            out.extend_from_slice(&v);
+            return;
+        }
+        let first = out.len();
+        self.node_pieces_uncached(lvl, c, out);
+        let v: std::rc::Rc<[Seg]> = out[first..].into();
+        PIECES.with(|m| {
+            let mut m = m.borrow_mut();
+            if m.len() > 60_000 {
+                m.clear();
+            }
+            m.insert(key, v);
+        });
+    }
+
+    fn node_pieces_uncached(&self, lvl: usize, c: Cell, out: &mut Vec<Seg>) {
+        let lc = &self.cfg.hydro.levels[lvl];
+        let width = |c: (i64, i64, i64)| {
+            let hh = hash3(self.level_key(lvl) ^ 0x51DE, c.0, c.1, c.2);
+            (0.5 * (lc.width_m[0] + (lc.width_m[1] - lc.width_m[0]) * u01k(hh, 1)), lc.valley_m * (0.6 + 0.8 * u01k(hh, 2)))
+        };
+        let fp = self.flow_point(lvl, c);
+        let Some(tc) = self.flow_target(lvl, c) else { return };
+        let tp = self.flow_point(lvl, tc);
+        let (hw, valley) = width(c);
+        let seg = |a: DVec3, b: DVec3, ha: f64, hb: f64, hw: f64, hw_b: f64| Seg { a, b, ha, hb, level: lvl as u8, hw, valley, hw_b, sink: false };
+        let mid = 0.5 * (fp.s + tp.s);
+        let hmid = 0.5 * (fp.h + tp.h);
+        // a source (nothing drains into it): straight from the source point to the
+        // middle of its edge, where the bends start
+        if self.is_source(lvl, c) {
+            out.push(seg(fp.s, mid, fp.h, hmid, 0.08 * hw, hw));
+            // widening from a spring
+        }
+        match self.flow_target(lvl, tc) {
+            // the bend at the downstream node: a quadratic curve from the middle
+            // of this edge to the middle of the next (straight edges met in sharp
+            // corners: bulging wedges where a wide river turned)
+            Some(ttc) => {
+                let tq = self.flow_point(lvl, ttc);
+                let (hw2, _) = width(tc);
+                let mid2 = 0.5 * (tp.s + tq.s);
+                let hmid2 = 0.5 * (tp.h + tq.h);
+                // the main stem into `tc` (of its 1-ring: a sea outlet farther
+                // away keeps the plain bend)
+                let ring1 = (tc.0 - c.0).abs().max((tc.1 - c.1).abs()).max((tc.2 - c.2).abs()) <= 1;
+                let main = if ring1 { self.main_upstream(lvl, tc, ttc) } else { None };
+                // a fixed number of pieces: the curve must not depend on the zoom
+                // (pieces adapted to the pixel size moved the centreline between
+                // zoom levels: elevation steps at LOD seams, walls along rivers)
+                let n = 6usize;
+                match main {
+                    // a tributary: it joins the main stem's bend at an angle
+                    // (all channels into a node bent into its outflow met
+                    // tangentially and ran side by side for kilometres)
+                    Some(mc) if mc != c => {
+                        let mp = self.flow_point(lvl, mc);
+                        let (hwm, _) = width(mc);
+                        let midm = 0.5 * (mp.s + tp.s);
+                        let hmidm = 0.5 * (mp.h + tp.h);
+                        let at_main = |t: f64| {
+                            let (u, v) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t));
+                            (midm * u + tp.s * v + mid2 * (t * t), hmidm * u + tp.h * v + hmid2 * (t * t), hwm + (hw2 - hwm) * t)
+                        };
+                        // the junction on the main stem's bend: from its
+                        // middle on, a different one for each tributary of
+                        // the node (two at one point met each other
+                        // tangentially)
+                        let tj = junction(self.tributary_rank(lvl, tc, c, mc)) as f64;
+                        let (j, hj, wj) = at_main(tj);
+                        let tan = ((tp.s - midm) * (2.0 * (1.0 - tj)) + (mid2 - tp.s) * (2.0 * tj)).as_vec3();
+                        let u_in = (tp.s - fp.s).as_vec3().normalize();
+                        let (p1, p2) = tributary_controls(mid, u_in, j, tan);
+                        // (its floor at the junction: the main stem's, but never
+                        // rising)
+                        let (hb, wb) = (hj.min(hmid), hw.min(wj));
+                        for k in 0..n {
+                            let (k0, k1) = (k as f64 / n as f64, (k + 1) as f64 / n as f64);
+                            let (a, b) = (cubic([mid, p1, p2, j], k0), cubic([mid, p1, p2, j], k1));
+                            out.push(seg(a, b, hmid + (hb - hmid) * k0, hmid + (hb - hmid) * k1, hw + (wb - hw) * k0, hw + (wb - hw) * k1));
+                        }
+                    }
+                    _ => {
+                        let at = |t: f64| {
+                            let (u, v) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t));
+                            (mid * u + tp.s * v + mid2 * (t * t), hmid * u + tp.h * v + hmid2 * (t * t), hw + (hw2 - hw) * t)
+                        };
+                        for k in 0..n {
+                            let (a, ha, wa) = at(k as f64 / n as f64);
+                            let (b, hb, wb) = at((k + 1) as f64 / n as f64);
+                            out.push(seg(a, b, ha, hb, wa, wb));
+                        }
+                    }
+                }
+            }
+            // into deep sea, or into a closed basin, where the river feeds a lake
+            // (it ended there in a blunt cap on land)
+            None => {
+                out.push(Seg { sink: tp.h > 0.0, ..seg(mid, tp.s, hmid, tp.h, hw, hw) });
+            }
+        }
     }
 
     /// All drainage edges whose valley could reach within `radius` of `center`.

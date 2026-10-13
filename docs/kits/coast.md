@@ -1,4 +1,4 @@
-# Coast and ocean kit: cliffs, skerries, tidal flats, barrier islands, reefs, atolls, ponds
+# Coast and ocean kit: cliffs, skerries, tidal flats, barrier islands, reefs, atolls, ponds, deltas
 
 `crates/terragen/src/kits/coast.rs` (types, creeks, relief, atoll family, layers, tests), its WGSL
 twins `src/gpu/wgsl/kits/coast_relief.wgsl` (types, creeks, relief, atoll family) and
@@ -26,6 +26,30 @@ the atlas coast distance (−100..30 km) and on a window of `h0` before any nois
 | salt / aquaculture ponds | | on the high flats and marsh, in the land-use region's field frame: 150 × 85 m ponds with dykes; salt (pink, white, turquoise, green) where moist < 0.45, aquaculture (blue-greens) elsewhere; patches by a 2.4 km noise |
 | atolls | family `coast_atolls` (cell 80 km, reach 24 km): ring of reef R 2-14 km, rim 180-400 m wide at -0.3 m, motus (+1.9 m, noise > threshold), lagoon 12-30 m, outer slope 0.5 to the sea floor; ocean floor 1.5-5.5 km deep, > 150 km from any coast, SST > 25 °C, mostly hotspot tracks | turquoise lagoon with coral, scrub on the motus (the core's beach is the sand) |
 
+**Deltas** (`kits/coast/delta.rs`, WGSL `coast_delta_shape`, `coast_astamp`): fan (arcuate,
+65 %) and bird's-foot deltas (35 %) at the mouths of the major rivers (drainage level 0), radius
+2–12 km by the river's width.
+
+* *Mouths (host, exact).* Along a drainage node's channel pieces, samples every 250 m are moved
+  onto the drawn centre line (the inverse of the meander warp, a fixed-point iteration) and the
+  relief before the drainage is evaluated there (f64, `World::relief_height`); the mouth is the
+  last land-to-sea crossing after which the channel stays at sea (bisection to ~1 m), owned by
+  the node whose channel starts on land, with the drawn channel's direction. 85 % of the mouths
+  get a delta where the shelf 0.4 radii ahead is shallower than 60 m. A pure function of the
+  world, cached per node, the same for both backends; listed for areas with pixels ≤ 3 km.
+* *Pass A, after the drainage carve* (a new core hook: `Kit::astamps` / `Kit::astamp`, pass-A
+  stamps that reach the GPU in the sink-lake list as entries with a negative radius): in a frame
+  at the mouth with the apex a quarter radius inland, the margin is a ±72° fan with lobes (three
+  angular harmonics) or four fingers (the longest ahead along the river); inside, low ground is
+  raised and slightly higher ground flattened to 2 m at the apex falling to 0.5 m at the radius;
+  a shallow front (−2 m) around the lobes; distributaries radiate from the apex (fan: five,
+  forking halfway; bird's-foot: along the fingers), carved to −1.5 m (sea water), box-filtered
+  by the pixel; the river's own channel upstream of the mouth stays. Lobes fade out over a shelf
+  deeper than 35–60 m.
+* *Pass B (slot 5)* from a stamp (`delta::TEMPLATE` 128): reed marsh on the plain, mud where it
+  is lowest or arid, over the core's beach; fields stay where the land use draws them; tropical
+  deltas get the tropical biomes' mangroves (their land layer: below 1.5–3.5 m, flat).
+
 Creek, ring and rim widths below a pixel are widened or show their mean (creeks fade to a mean
 cover of 5.5 % by pixel size, no step between zooms).
 
@@ -37,9 +61,10 @@ across zooms and backends. Atolls are an instance family (existence at the site 
 Places (default world, `PLACES` in the tests): cliff coast (-21.804, -43.364), Adriatic tidal flats
 (44.107, 11.756), arid tidal flats and creeks (26.538, -5.414), barrier / lagoon coast
 (19.379, -14.658), fringing reef (11.859, 81.198), glaciated skerry coast (61.882, 19.636), atoll
-(7.131, 87.717), plain coast (-41.129, -152.831). Find more with the ignored tests
+(7.131, 87.717), plain coast (-41.129, -152.831), fan delta (44.2101, 176.6552), bird's-foot delta
+(35.1942, 73.4256), tropical delta with mangroves (-1.4670, 173.6521). Find more with the ignored tests
 `find_coast_places` (atlas), `find_coast_crossings` (pass-A coast crossings by type) and
-`find_atolls`.
+`find_atolls`; the deltas of 24 coastal regions with `deltas_sit_at_river_mouths -- --nocapture`.
 
 ## Tests
 
@@ -97,6 +122,13 @@ shallows over the platform.
 ![skerry](images/coast_skerry_1500m.jpg)
 ![atoll](images/coast_atoll_10km.jpg)
 
+**Deltas** (nadir 5 km): a bird's-foot delta (35.194, 73.426) with fields on its plain; a fan
+delta (44.210, 176.655) with reed marsh and forest; a tropical fan delta (−1.467, 173.652) under
+mangroves with their creeks. Distributaries hold sea water.
+![bird's-foot delta](images/coast_delta_birdsfoot_5km.jpg)
+![fan delta](images/coast_delta_fan_5km.jpg)
+![tropical delta](images/coast_delta_tropical_5km.jpg)
+
 ## Known limits
 
 * Weights come from atlas fields (uplift, mountains, glaciation, temperature) and noise, not from
@@ -112,5 +144,10 @@ shallows over the platform.
   fixed). Skerry coasts show kelp and rock but few islets where the shelf is steep.
 * Ponds cover large patchworks on wide marsh (patch noise 2.4 km); the town / field layers do not
   avoid them beyond `natural_ok`.
-* Deltas, mangroves and ports belong to other kits and are not drawn here.
+* Mangroves and ports belong to other kits and are not drawn here.
+* Deltas: only at the major rivers' mouths (drainage level 0), 2–12 km, not drawn in tiles with
+  pixels above 3 km (they appear at ~z6); a lobe over a shelf deeper than 35 m is only partly
+  raised (a shallow mound under water); the plain is flat (no levees or abandoned lobes); the
+  distributaries are near-straight rays (a gentle wiggle, no meanders) and read geometric from
+  a few kilometres; two mouths close together overlap.
 * A straight scarp inside a tidal-flat view is the core's arid mesa terrace, not a seam.

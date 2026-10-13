@@ -224,3 +224,138 @@ fn co_atoll_at(it: Inst, p: vec3<f64>, gsd: f32) -> CoAt {
     o.wre = wre;
     return o;
 }
+
+// ---------------------------------------------------------------- deltas (`coast::delta`)
+
+/// `delta::Shape`.
+struct CoDelta {
+    plain: f32,
+    hd: f32,
+    front: f32,
+    chan: f32,
+    u: f32,
+    r0: f32,
+}
+
+/// `delta::finger`: angle, length (radii), angular half width.
+fn co_finger(id: u64, k: u32) -> vec3<f32> {
+    var side = 0.98;
+    if (u01k(id, 19lu) < 0.5) {
+        side = -0.98;
+    }
+    var base = array<f32, 4>(0.0, -0.52, 0.5, side);
+    let a = base[k] + 0.16 * (u01k(id, 20lu + u64(k)) - 0.5);
+    var l = 0.5 + 0.4 * u01k(id, 10lu + u64(k));
+    if (k == 0u) {
+        l = 0.8 + 0.2 * u01k(id, 10lu);
+    }
+    return vec3<f32>(a, l, 0.09 + 0.05 * u01k(id, 14lu + u64(k)));
+}
+
+/// `delta::shape`: the delta (centre `c`, `bearing`, `reach`, `id`, river half width `hw`) at
+/// `p` for pixels of `gsd` m.
+fn coast_delta_shape(c: vec3<f64>, bearing: f64, reach: f32, id: u64, hw: f32, p: vec3<f64>, gsd: f32) -> CoDelta {
+    let f = astamp_frame(c, bearing);
+    let up = f[2];
+    let d = f[3];
+    let left = cross(up, d);
+    let dp = vec3<f32>(p - c);
+    let u = dot(dp, d);
+    let v = dot(dp, left);
+    let r0 = reach / 1.4;
+    let bird = u01k(id, 4lu) < 0.35;
+    let x = u + 0.25 * r0;
+    let r = sqrt(x * x + v * v);
+    let phi = atan2(v, x);
+    let g = max(1.0 - (phi / 1.25) * (phi / 1.25), 0.0);
+    var rm = 0.0;
+    if (bird) {
+        rm = 0.4 * r0 * sqrt(g);
+        for (var k = 0u; k < 4u; k++) {
+            let fk = co_finger(id, k);
+            let e = (phi - fk.x) / fk.z;
+            rm = max(rm, fk.y * r0 * exp(-e * e));
+        }
+    } else {
+        let lob = 0.5 * cos(5.0 * phi + TAU * u01k(id, 5lu)) + 0.3 * cos(9.0 * phi + TAU * u01k(id, 6lu)) + 0.2 * cos(14.0 * phi + TAU * u01k(id, 7lu));
+        rm = r0 * sqrt(g) * (1.0 + 0.14 * lob);
+    }
+    let edge = max(0.05 * r0, gsd);
+    var o: CoDelta;
+    o.plain = 0.0;
+    o.front = 0.0;
+    if (rm > 0.0) {
+        o.plain = smoothstep1(rm, rm - edge, r);
+        o.front = smoothstep1(1.3 * rm + edge, rm, r) * (1.0 - o.plain);
+    }
+    o.hd = 0.5 + 1.5 * clamp(1.0 - r / r0, 0.0, 1.0);
+    // distributaries from the apex: along the fingers (bird's-foot) or five forking ones (fan)
+    let cw0 = max(0.5 * hw, 10.0);
+    var chan = 0.0;
+    var nk = 5u;
+    if (bird) {
+        nk = 4u;
+    }
+    for (var k = 0u; k < nk; k++) {
+        var a = 0.0;
+        if (bird) {
+            a = co_finger(id, k).x;
+        } else {
+            a = (f32(k) - 2.0) * 0.42 + 0.14 * (u01k(id, 24lu + u64(k)) - 0.5);
+        }
+        a += 0.05 * sin(r / (0.21 * r0) + TAU * u01k(id, 30lu + u64(k)));
+        var fork = 0.0;
+        if (!bird) {
+            fork = 0.11 * smoothstep1(0.5 * r0, 0.75 * r0, r);
+        }
+        for (var si = 0; si < 2; si++) {
+            let s = f32(2 * si - 1);
+            let dphi = abs(phi - a - s * fork);
+            if (dphi <= 1.2) {
+                let dist = r * sin(dphi);
+                let cw = (1.0 - 0.45 * min(r / r0, 1.0)) * cw0;
+                let cov = (min(dist + 0.5 * gsd, cw) - max(dist - 0.5 * gsd, -cw)) / gsd;
+                let ext = smoothstep1(rm + 2.0 * cw + edge, rm, r);
+                chan = max(chan, clamp(cov, 0.0, 1.0) * ext);
+            }
+            if (fork == 0.0) {
+                break;
+            }
+        }
+    }
+    o.chan = chan;
+    o.u = u;
+    o.r0 = r0;
+    return o;
+}
+
+/// `delta::relief` (`Kit::astamp`): the plain, the front and the distributaries.
+fn coast_astamp(c: Ctx, st: Sink, ai: AStampIn, h: ptr<function, f32>) {
+    if ((st.id & 0xFFlu) != 1lu) {
+        return;
+    }
+    let sh = coast_delta_shape(st.c.xyz, st.c.w, -st.rad, st.id, st.level, c.p, c.gsd);
+    if (sh.plain <= 0.0 && sh.front <= 0.0 && sh.chan <= 0.0) {
+        return;
+    }
+    let h0 = *h;
+    // the river's own channel upstream of the mouth stays
+    var keep = 0.0;
+    if (ai.river_hw > 0.0 && abs(ai.river_d) < 1.2 * ai.river_hw) {
+        keep = 1.0 - smoothstep1(-0.05 * sh.r0, 0.1 * sh.r0, sh.u);
+    }
+    // lobes grow on the shelf only
+    let shelf = smoothstep1(-60.0, -35.0, h0);
+    var ht = h0;
+    if (h0 < sh.hd) {
+        ht = sh.hd;
+    } else if (h0 < sh.hd + 4.0) {
+        ht = sh.hd + (h0 - sh.hd) * (h0 - sh.hd) / 4.0;
+    }
+    var hn = h0 + (ht - h0) * sh.plain * shelf * (1.0 - keep);
+    if (hn < -2.0) {
+        hn += (-2.0 - hn) * sh.front * shelf;
+    }
+    hn += (min(hn, -1.5) - hn) * sh.chan * (1.0 - keep);
+    *h = hn;
+}

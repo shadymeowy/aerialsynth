@@ -36,12 +36,17 @@ pub static KIT: Kit = Kit {
     name: "coast",
     biomes_yaml: "",
     wgsl: include_str!("../gpu/wgsl/kits/coast.wgsl"),
-    layers: &[(slot::AZONAL, azonal), (slot::WATER, water)],
+    layers: &[(slot::AZONAL, azonal), (slot::AGRICULTURE, agriculture), (slot::WATER, water)],
     relief: Some(relief),
     relief_wgsl: include_str!("../gpu/wgsl/kits/coast_relief.wgsl"),
     families: &[Family { name: "coast_atolls", cell: 80_000.0, jitter: 0.7, reach: 24_000.0, relief: true, exists: atoll_exists }],
+    astamps: Some(delta::astamps),
+    astamp: Some(delta::relief),
+    host: Some(delta::host),
     ..Kit::EMPTY
 };
+
+pub(crate) mod delta;
 
 /// Land-cover v2 class ids (`registry::classes`; checked by a test).
 mod cls {
@@ -422,6 +427,41 @@ fn flats(s: &mut Stack, ty: &Types) {
     ponds(s, zone);
 }
 
+/// Slot 5: the cover of the deltas' plains (`delta`): reed marsh, mud where it is arid or
+/// lowest; fields stay where the land use draws them (before this layer), towns too, and the
+/// tropical biomes' mangroves cover theirs (canopy slot).
+pub fn agriculture(s: &mut Stack) {
+    let ground = s.l.ground;
+    if !(0.0..3.0).contains(&ground) || s.l.water > ground {
+        return;
+    }
+    let t = s.t;
+    if t.temp >= 20.0 && t.moist >= 0.4 {
+        return;
+    }
+    let (p, gsd) = (s.ctx.p, s.ctx.gsd);
+    let mut plain = 0.0f32;
+    for st in s.stamps() {
+        if st.template == delta::TEMPLATE {
+            let id = st.v[2] as u64 | (st.v[3] as u64) << 24 | (st.v[4] as u64) << 48;
+            plain = plain.max(delta::shape(st.center, st.v[0] as f64, st.v[1], id, st.h, p, gsd as f32).plain);
+        }
+    }
+    // (over the core's beach, which the low land near the sea gets; not over fields)
+    let zone = plain as f64 * (1.0 - smoothstep(2.4, 3.0, ground)) * (1.0 - s.m.field_cov);
+    if zone <= 0.0 {
+        return;
+    }
+    let arid = 1.0 - smoothstep(0.2, 0.34, t.moist);
+    let low = 1.0 - smoothstep(0.6, 1.1, ground + 0.3 * nz(SEED + 60, p, 90.0, gsd));
+    let mud = mixc(mixc(srgb(118.0, 106.0, 88.0), srgb(84.0, 76.0, 66.0), low), srgb(176.0, 160.0, 134.0), arid);
+    let reed = mixc(srgb(96.0, 106.0, 62.0), srgb(134.0, 112.0, 70.0), smoothstep(0.0, 0.7, nz(SEED + 61, p, 260.0, gsd)));
+    let m = (1.0 - arid) * (1.0 - low);
+    let col = mixc(mud, reed, m) * (1.0 + 0.08 * nz(SEED + 62, p, 9.0, gsd));
+    s.composite(Layer { cov: zone, albedo: col, cls: if m > 0.5 { cls::MARSH } else { cls::TIDAL_FLAT }, clear: 1.0, ..Default::default() });
+    s.m.natural_ok *= 1.0 - zone;
+}
+
 /// Salt (arid) and aquaculture (humid) ponds in the field frame of the land-use region.
 fn ponds(s: &mut Stack, zone: f64) {
     let t = s.t;
@@ -708,6 +748,10 @@ mod tests {
         ("skerry", 61.882, 19.636),
         ("atoll", 7.131, 87.717),
         ("plain", -41.129, -152.831),
+        // deltas (`delta`): their mouths
+        ("delta_fan", 44.2101, 176.6552),
+        ("delta_birdsfoot", 35.1942, 73.4256),
+        ("delta_tropical", -1.4670, 173.6521),
     ];
 
     fn tile_at(name: &str, z: u8) -> geodesy::tiles::TileId {
@@ -752,6 +796,10 @@ mod tests {
             ("skerry", 14),
             ("atoll", 12),
             ("atoll", 14),
+            ("delta_fan", 12),
+            ("delta_fan", 14),
+            ("delta_birdsfoot", 13),
+            ("delta_tropical", 13),
         ] {
             let id = tile_at(name, z);
             let g = gen.tiles(&[id]).unwrap().remove(0);
@@ -795,7 +843,18 @@ mod tests {
     fn lod_consistent_at_coast_places() {
         let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let n = crate::TILE_SIZE;
-        for (name, z) in [("cliff", 12u8), ("flat", 13), ("flat_arid", 12), ("flat_arid", 13), ("reef", 12), ("barrier", 12), ("atoll", 11)] {
+        for (name, z) in [
+            ("cliff", 12u8),
+            ("flat", 13),
+            ("flat_arid", 12),
+            ("flat_arid", 13),
+            ("reef", 12),
+            ("barrier", 12),
+            ("atoll", 11),
+            ("delta_fan", 11),
+            ("delta_fan", 13),
+            ("delta_tropical", 12),
+        ] {
             let parent = tile_at(name, z);
             let p = g.tile(parent);
             let kids = parent.children().map(|c| g.tile(c));
@@ -828,7 +887,7 @@ mod tests {
     fn seamless_at_coast_places() {
         let g = crate::Generator::new(crate::Config { tile_supersample: 1, ..crate::Config::default() });
         let n = crate::TILE_SIZE;
-        for (name, z) in [("cliff", 14u8), ("flat", 15), ("flat_arid", 14), ("reef", 14), ("skerry", 13), ("atoll", 12)] {
+        for (name, z) in [("cliff", 14u8), ("flat", 15), ("flat_arid", 14), ("reef", 14), ("skerry", 13), ("atoll", 12), ("delta_birdsfoot", 13)] {
             let id = tile_at(name, z);
             let a = g.tile(id);
             let (mut ea, mut ei, mut na, mut ni) = (0.0, 0.0, 0.0, 0.0);
