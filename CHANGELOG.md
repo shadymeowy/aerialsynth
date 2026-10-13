@@ -16,6 +16,11 @@
   a rounding boundary or near a water decision (`transport::build::deck_sample`), so GPU and CPU
   build the same decks, bridges, tunnels and portals; `sites_and_routes_match_the_cpu` now
   compares them too.
+- **Towns and cities stay out of lakes.** The best candidate of a town, city or metropolis gives
+  way to the next where a lattice lake or a closed-basin lake of the major rivers can reach its
+  centre (cheap conservative screens over a few drainage lattice points, no drainage pieces,
+  ~0.05 ms per town: `World::lattice_lake_near`, `World::sink_near_level`). Test
+  `towns_avoid_lakes` (3 of 3000 centres in pass A's water, in streams' ponds; 7 before).
 
 - **Qanats** (desert kit, design P2): dotted lines of shaft mounds (pale spoil rings around a
   dark shaft every 30–55 m) from the piedmont down to a common outlet, 1–3 lines of 3–8 km per

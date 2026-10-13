@@ -100,12 +100,21 @@ results are memoized per lattice cell or place (pure functions of the world).
   (pass A at the point, `World::terrain`: the sea, lattice and closed-basin lakes, the kits'
   lakes, a level 0–1 river channel) is dropped; water on a ring of 4 points at 0.8 × the level's
   smallest radius lowers its score (× 0.3–1), a level 0–1 river within 2.5 km raises it (up to
-  × 1.3: crossings, mills, river ports). Host Rust, analytic, the same for both backends. Towns
-  and larger keep the smooth-relief test only: the transport kit's trunk networks visit their
-  candidates over thousands of kilometres (370 000 town candidates for one 2.5 km view), where
-  pass A at points (~2 ms) costs minutes; at villages and hamlets the test costs ~7 % of a
-  survey view's generation. (The transport routing's `Scene` was tried first: a scene per
-  block costs ~70 ms.) Reservoirs come after
+  × 1.3: crossings, mills, river ports). Host Rust, analytic, the same for both backends. At
+  villages and hamlets the test costs ~7 % of a survey view's generation. (The transport
+  routing's `Scene` was tried first: a scene per block costs ~70 ms.)
+* **Lakes** (towns, cities, metropolises): the transport kit's networks visit every town of a
+  continent at low zooms (some 6 700 per 1500 km view), where pass A at a point costs 1–10 ms
+  (tens of milliseconds where a lake's level must be found first). So the best candidate gives
+  way to the next one only where a lake *can* reach its centre (`places::lake_free`): within
+  1.5 radii of a lattice lake that can exist at the centre's climate
+  (`World::lattice_lake_near`), or within 1.6 radii of the largest lake a possible closed basin
+  of the major rivers (drainage level 0) can hold (`World::sink_near_level`: an active lattice
+  point above the sea without a lower neighbour, sized by the widths of all the neighbours that
+  could drain into it). The screens visit a few lattice points (~0.05 ms per town), no
+  drainage pieces; the tributaries' and streams' closed basins (ponds of a few hundred metres)
+  would cost 0.4 ms per town and are not screened. Test `towns_avoid_lakes`: 3 of 3000 town
+  and city centres in pass A's water, all in streams' ponds (7 before). Reservoirs come after
   the places (dams are placed near towns): hamlets and villages whose centre a reservoir floods
   (> 1 m) are drowned (not drawn; `sites::drowned`), and a dam whose reservoir would flood a town
   or a city is not built.
@@ -195,9 +204,12 @@ villages and farmsteads as points.
 ## Known limits
 
 * Only hamlets and villages test their centres against pass A's water and score rivers; towns,
-  cities and metropolises keep the smooth-relief sea test (their candidates are too many for
-  point evaluations), so a town's centre can still lie in a lake or a river. A town's lots do not follow the terrain beyond the slope gate and
-  the river banks; its footprint may still reach into a lake or river.
+  cities and metropolises avoid the reach of possible lattice lakes and major rivers' closed
+  basins (conservative screens: they also give way where the lake turns out not to exist) and
+  keep the smooth-relief sea test, so a town's centre can lie in a wide river or a stream's
+  pond (0.1 % of them). A town's
+  lots do not follow the terrain beyond the slope gate and the river banks; its footprint may
+  still reach into a lake or river.
 * Confluences and river mouths get no extra bonus beyond the river's proximity (the coast bonus
   is the atlas coast distance).
 * Streets are not connected between districts (district edges are arterials) nor to the core's

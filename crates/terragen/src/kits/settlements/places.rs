@@ -7,7 +7,8 @@
 //! highland villages prefer hilltops instead) × water for the best three (villages, hamlets): a
 //! candidate whose centre lies in open water (pass A at the point: the sea, a lake, a level 0–1
 //! river channel) is dropped, water on a ring around it lowers its score, a river within 2.5 km
-//! raises it. Scores are quantized to 1/64 with the candidate hash as the
+//! raises it; the best town or larger gives way to the next where a lake can reach its centre
+//! (`lake_free`). Scores are quantized to 1/64 with the candidate hash as the
 //! tie-breaker. The best candidate exists with a probability by
 //! level, population potential, culture (archetype) and `landuse.towns`.
 //!
@@ -365,7 +366,7 @@ fn base_place(w: &World, level: usize, c: (i64, i64, i64)) -> Option<Place> {
     // stage 2: flatness (hilltops for perched villages), elevation for the best three
     let lapse = w.cfg.climate.lapse_rate_c_per_km;
     let perch = matches!(arch0, 5 | 11) && level as u8 <= VILLAGE;
-    let mut best: Option<(u32, u64, DVec3, crate::atlas::AtlasSample, f64, f64, f64)> = None;
+    let mut ranked: Vec<(u32, u64, DVec3, crate::atlas::AtlasSample, f64, f64, f64)> = Vec::with_capacity(3);
     for (s1q, h, p, a) in cands {
         let (h0, amp) = w.smooth_relief(p, 0.5 * spec.ring);
         if h0 < 1.0 {
@@ -413,11 +414,12 @@ fn base_place(w: &World, level: usize, c: (i64, i64, i64)) -> Option<Place> {
         }
         // the downhill direction (valley axis) for street villages
         let axis = (-gn).atan2(-ge);
-        if best.as_ref().is_none_or(|b| (q, std::cmp::Reverse(h)) > (b.0, std::cmp::Reverse(b.1))) {
-            best = Some((q, h, p, a, h0, slope, axis));
-        }
+        ranked.push((q, h, p, a, h0, slope, axis));
     }
-    let (score, id, p, a, h0, slope, axis) = best?;
+    // the best (then the first by hash); towns and larger: the best whose centre no lake can
+    // reach (`lake_free`; hamlets and villages tested theirs above)
+    ranked.sort_unstable_by(|x, y| y.0.cmp(&x.0).then(x.1.cmp(&y.1)));
+    let (score, id, p, a, h0, slope, axis) = ranked.into_iter().find(|c| level as u8 <= VILLAGE || lake_free(w, c.2))?;
     let arch = (a.archetype as usize).min(11);
     // population (Zipf-like within the level: few large ones), by potential and development
     let t = (0.55 * u01k(id, 11).powf(2.2) + 0.45 * smoothstep(spec.pop_window[0], 1.0, a.population) * (0.6 + 0.4 * u01k(id, 12))).clamp(0.0, 1.0);
@@ -472,6 +474,18 @@ fn base_place(w: &World, level: usize, c: (i64, i64, i64)) -> Option<Place> {
         elev: h0,
         litho: a.litho as u8,
     })
+}
+
+/// Is the centre `p` of a town or larger clear of lakes? Not where a lattice lake or a
+/// closed-basin lake of the major rivers can reach it (cheap conservative screens without
+/// drainage pieces, see `World::lattice_lake_near`, `World::sink_near_level`): such a candidate
+/// gives way to the next one. (Pass A at a point costs milliseconds, tens where a lake's level
+/// must be found, and the transport kit's networks visit every town of a continent at low
+/// zooms: the screens cost ~0.05 ms per town. The tributaries' and streams' closed basins,
+/// ponds of a few hundred metres, would cost 0.4 ms: not screened.) The smooth-relief test of
+/// the ring keeps towns off the sea; the built-up area may still reach a lake's shore.
+fn lake_free(w: &World, p: DVec3) -> bool {
+    !w.lattice_lake_near(p) && !w.sink_near_level(p, 0)
 }
 
 /// Score bonus of a site at a river's bank (level 0–1; fading out by 2.5 km).
@@ -821,6 +835,31 @@ mod tests {
         }
         eprintln!("{wet} of {n} place centres in water");
         assert!(n > 50 && wet * 100 <= n, "{wet} of {n}");
+    }
+
+    /// Towns and cities keep their centres out of lakes and the sea (pass A at the centre; their
+    /// candidates avoid the reach of possible lattice and closed-basin lakes).
+    #[test]
+    fn towns_avoid_lakes() {
+        let w = world();
+        let t0 = std::time::Instant::now();
+        let mut towns = Vec::new();
+        for p in land_points(&w, 4, 0.1) {
+            towns.extend(settlements_near_min_level(&w, p, 1_500_000.0, TOWN));
+        }
+        eprintln!("{} towns and cities in {:.2} s", towns.len(), t0.elapsed().as_secs_f64());
+        let n = towns.len().min(3000);
+        let mut wet = 0;
+        for s in &towns[..n] {
+            let t = w.terrain(&crate::world::Ctx::new(s.lat_deg.to_radians(), s.lon_deg.to_radians(), 20.0, &w.ell));
+            if t.water_kind != crate::world::water::NONE && t.water > t.ground {
+                wet += 1;
+                eprintln!("in water: level {} at ({:.4}, {:.4}) kind {}", s.level, s.lat_deg, s.lon_deg, t.water_kind);
+            }
+        }
+        // (7 of these 3000 were in lakes before the screens: 5 in lattice and major rivers'
+        // closed-basin lakes, 2 in streams' ponds of ~200 m, which are not screened)
+        assert!(n >= 2000 && wet * 1000 <= n, "{wet} of {n} town centres in water");
     }
 
     /// Debug: places of each level and form in the default world:

@@ -278,6 +278,13 @@ impl World {
         out
     }
 
+    /// The jittered lattice point of cell `c` of drainage level `lvl` (m, ECEF; not projected).
+    pub(crate) fn lattice_point(&self, lvl: usize, c: Cell) -> DVec3 {
+        let cell = self.cfg.hydro.levels[lvl].cell_km * KM;
+        let hh = hash3(self.level_key(lvl), c.0, c.1, c.2);
+        DVec3::new(c.0 as f64 + 0.5 + 0.8 * (u01k(hh, 1) - 0.5), c.1 as f64 + 0.5 + 0.8 * (u01k(hh, 2) - 0.5), c.2 as f64 + 0.5 + 0.8 * (u01k(hh, 3) - 0.5)) * cell
+    }
+
     /// Cheap test without the cache: false only for lattice points certainly not active (far
     /// from the surface by a geocentric height estimate; `flow_point` decides with the geodetic
     /// height |h| < cell / 2, which differs from the estimate by far less than the margin).

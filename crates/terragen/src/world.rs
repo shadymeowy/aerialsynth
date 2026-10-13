@@ -965,6 +965,34 @@ impl World {
         self.lake_level_forced(id, c, rad)
     }
 
+    /// Can a lattice lake reach `p`? (cheap and conservative: the two lake sites that pass A
+    /// visits at `p`, by their radius and their existence at `p`'s climate; no levels)
+    pub(crate) fn lattice_lake_near(&self, p: DVec3) -> bool {
+        let lake_cell = self.cfg.hydro.lake_cell_km * KM;
+        let dens = self.cfg.hydro.lake_density;
+        if dens <= 0.0 {
+            return false;
+        }
+        let near: Vec<u64> = worley3_sites(self.seed ^ 0x1A4E, p, lake_cell, 0.85)
+            .iter()
+            .filter(|&&(id, pt)| {
+                let rad = (300.0 * (u01k(id, 2) * 2.7).exp()).min(lake_cell * 0.3);
+                u01k(id, 1) <= dens * 1.2 && (pt.normalize() * p.length() - p).length() <= 1.5 * rad + 1.0
+            })
+            .map(|s| s.0)
+            .collect();
+        if near.is_empty() {
+            return false;
+        }
+        // (the existence test of pass A, with its fields at `p`)
+        let g = geodesy::ecef2geodetic(p, &self.ell);
+        let ctx = Ctx::new(g.lat, g.lon, 20.0, &self.ell);
+        let m = self.macro_at(ctx.p, 20.0);
+        let t = self.terrain_impl(&ctx, &m, Mode::Relief, None, None);
+        let prob = dens * (0.3 + 0.9 * t.moist) * (1.0 - 0.8 * t.mountain);
+        smoothstep(-0.06, 0.05, m.cont) > 0.3 && near.iter().any(|&id| u01k(id, 1) <= prob + 1e-9)
+    }
+
     /// Ground height before rivers, lakes and the sea (cheap; for bounds).
     pub fn relief_height(&self, ctx: &Ctx, m: &Macro) -> f64 {
         self.terrain_impl(ctx, m, Mode::Relief, None, None).ground
