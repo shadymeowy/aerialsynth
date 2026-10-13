@@ -276,6 +276,7 @@ struct StEnv {
     n: f32,
     moist: f32,
     detail: f32,
+    ground: vec3<f32>,
 }
 
 fn st_asphalt() -> vec3<f32> {
@@ -469,6 +470,37 @@ struct StDist {
 }
 
 /// `town::district`.
+/// `district_pattern`: (pattern, zone at the site, industrial).
+fn st_district_pattern(pl: StPl, point: vec2<f32>, id: u64) -> vec3<u32> {
+    let rd = st_rel0(pl, point);
+    let zd = st_zone_of(pl, rd);
+    let ang = atan2(point.y, point.x);
+    var ind = false;
+    var nw = 0u;
+    if (pl.level >= 3u) {
+        nw = 2u;
+    } else if (pl.level == 2u) {
+        nw = 1u;
+    }
+    for (var k = 0u; k < 2u; k++) {
+        if (k < nw) {
+            var a0 = pl.wind;
+            if (k > 0u) {
+                a0 = pl.wind + ST_PI * 1.4 * (u01k(pl.seed, 41lu) - 0.5);
+            }
+            let hw = 0.22 + 0.2 * u01k(pl.seed, 42lu + u64(k));
+            if (abs(st_wrap_pi(ang - a0)) < hw && rd > 0.25 && rd < 0.95 && u01k(id, 3lu) < 0.8) {
+                ind = true;
+            }
+        }
+    }
+    var pattern = st_pick_pattern(pl, zd, mix64(pl.seed ^ 0x2A7Elu ^ u64(zd)), ind);
+    if (pl.level < 2u) {
+        pattern = SP_GRID;
+    }
+    return vec3<u32>(pattern, zd, select(0u, 1u, ind));
+}
+
 fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
     let fm = pl.form;
     var pattern = SP_GRID;
@@ -497,46 +529,29 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
             + vec2<f32>(sin(q.y / (0.4 * wl) + 6.0 * u01k(pl.seed, 54lu)), sin(q.x / (0.43 * wl) + 6.0 * u01k(pl.seed, 55lu))) * (0.045 * dcell);
         let dc = worley2(pl.seed ^ 0xD15lu, qd, dcell, 0.85);
         did = dc.id;
-        if (pl.level >= 2u && u01k(dc.id ^ dc.id2, 53lu) < 0.6) {
-            art = worley2_edge_dist(dc, qd);
-        }
-        let rd = st_rel0(pl, dc.point);
-        let zd = st_zone_of(pl, rd);
-        let ang = atan2(dc.point.y, dc.point.x);
-        var ind = false;
-        var nw = 0u;
-        if (pl.level >= 3u) {
-            nw = 2u;
-        } else if (pl.level == 2u) {
-            nw = 1u;
-        }
-        for (var k = 0u; k < 2u; k++) {
-            if (k < nw) {
-                var a0 = pl.wind;
-                if (k > 0u) {
-                    a0 = pl.wind + ST_PI * 1.4 * (u01k(pl.seed, 41lu) - 0.5);
-                }
-                let hw = 0.22 + 0.2 * u01k(pl.seed, 42lu + u64(k));
-                if (abs(st_wrap_pi(ang - a0)) < hw && rd > 0.25 && rd < 0.95 && u01k(did, 3lu) < 0.8) {
-                    ind = true;
-                }
+        let dp = st_district_pattern(pl, dc.point, dc.id);
+        pattern = dp.x;
+        let zd = dp.y;
+        if (pl.level >= 2u) {
+            let pt2 = st_district_pattern(pl, dc.point2, dc.id2).x;
+            if (pt2 != pattern || pattern == SP_INDUSTRIAL || pattern == SP_SUPER) {
+                art = worley2_edge_dist(dc, qd);
             }
         }
-        pattern = st_pick_pattern(pl, zd, did, ind);
-        if (pl.level < 2u) {
-            pattern = SP_GRID;
-        }
-        if (ind) {
+        if (dp.z != 0u) {
             z = SZ_OUTER;
         } else {
             z = min(max(zd, min(z, SZ_INNER)), SZ_PERI);
         }
+        if (pattern != SP_INDUSTRIAL && pattern != SP_SUPER) {
+            did = mix64(pl.seed ^ 0x1A70lu ^ u64(pattern));
+        }
         let survey = pl.arch == 7u;
         let ud = u01k(did, 5lu);
-        if (survey || zd <= SZ_INNER) {
+        if (survey) {
             theta = 0.0;
         } else {
-            theta = (ud - 0.5) * 0.6;
+            theta = (ud - 0.5) * 0.3;
         }
         var bf = 1.0;
         let ar = pl.arch % 12u;
@@ -610,7 +625,7 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
     }
     var dmul = 1.0;
     if (fm == SF_CITY && pl.level >= 2u) {
-        dmul = min(0.55 + 0.9 * u01k(did, 13lu), 1.0);
+        dmul = min(0.8 + 0.4 * u01k(did, 13lu), 1.0);
     }
     var o: StDist;
     o.did = did;
@@ -861,7 +876,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     var tree = 0.0;
     var tree_h = 0.0;
     var em = vec3<f32>(0.0);
-    let yard = st_yard(e.moist, u01k(blk.id, 19lu));
+    let yard = mixc(e.ground * (0.92 + 0.16 * u01k(blk.id, 19lu)), st_yard(e.moist, u01k(blk.id, 19lu)), 0.35);
     var rf_arch = pl.arch;
     var rf_u = 0.5;
     var rf_flat = false;
@@ -2516,6 +2531,7 @@ fn st_place(s: ptr<function, Stack>, pl: StPl, rel: f32, n: f32, q: vec2<f32>, s
     env.n = n;
     env.moist = t.moist;
     env.detail = (*s).pf.f[PF_DETAIL];
+    env.ground = (*s).col;
     let city = pl.form == SF_CITY;
     let block = select(40.0, 90.0, city);
     let e_blk = band(block, gsd);
