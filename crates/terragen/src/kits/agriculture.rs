@@ -1584,7 +1584,7 @@ fn draw_border(b: u32, edge: f64, col: DVec3, dh: f64, cls: u8, pc: &Parcel, px:
             // instead of widening to the filter)
             // gaps: gateways and missing stretches
             let b18 = band(18.0, gsd);
-            let gap = smoothstep(-0.5, -0.2, perlin3(hb ^ 5, p / 18.0)) * b18 + (1.0 - b18) * 0.85;
+            let gap = if belt { 1.0 } else { smoothstep(-0.5, -0.2, perlin3(hb ^ 5, p / 18.0)) * b18 + (1.0 - b18) * 0.85 };
             let c = gap * ((edge + 0.5 * fwb).min(hw) - (edge - 0.5 * fwb).max(-hw)).max(0.0) / fwb;
             if c <= 0.0 {
                 return (col, dh, cls);

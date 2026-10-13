@@ -21,8 +21,8 @@ pub fn standing(s: &mut Stack) {
         // and patchy (a turquoise ring of shallow water 5 m wide read as a plastic rim, and a
         // channel carved through it as a dark band across the lake)
         _ => {
-            let sh = 1.0 - smoothstep(0.0, 2.2, depth * (1.0 + 0.6 * wn).max(0.2));
-            mixc(mixc(pal.lake_deep, srgb(26.0, 32.0, 26.0), 0.35), mixc(pal.river, srgb(78.0, 76.0, 56.0), 0.6), 0.75 * sh * sh)
+            let sh = 1.0 - smoothstep(0.0, 3.5, depth * (1.0 + 0.5 * wn).max(0.2));
+            mixc(mixc(pal.lake_deep, srgb(26.0, 32.0, 26.0), 0.35), mixc(pal.river, srgb(78.0, 76.0, 56.0), 0.6), 0.7 * sh)
         }
     };
     // sediment / plankton variation

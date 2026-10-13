@@ -1558,7 +1558,10 @@ fn agri_border(b: u32, edge: f32, i: Shade, pc: Parcel, px: AgPx) -> Shade {
             // crowns of different size along the hedge: its width varies (the mean below the pixel)
             let hw = hw0 * (0.875 + 0.4 * clump * band(lam, gsd)) * (1.0 + 2.0 * tb);
             let b18 = band(18.0, gsd);
-            let gap = smoothstep1(-0.5, -0.2, perlin3(hb ^ 5lu, p * (1.0lf / 18.0lf))) * b18 + (1.0 - b18) * 0.85;
+            var gap = 1.0;
+            if (!belt) {
+                gap = smoothstep1(-0.5, -0.2, perlin3(hb ^ 5lu, p * (1.0lf / 18.0lf))) * b18 + (1.0 - b18) * 0.85;
+            }
             let c = gap * max(min(edge + 0.5 * fwb, hw) - max(edge - 0.5 * fwb, -hw), 0.0) / fwb;
             if (c <= 0.0) {
                 return o;

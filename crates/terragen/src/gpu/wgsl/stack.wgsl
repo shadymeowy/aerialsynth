@@ -452,7 +452,7 @@ fn layer_zonal(s: ptr<function, Stack>) {
     var soil = mixc(spal(s, BP_SOIL + i0), spal(s, BP_SOIL + i0 + 1u), soil_i - f32(i0));
     let lat_w = min(0.75 * sveg(s, VEG_LATERITE), 1.0);
     soil = mixc(soil, spal(s, BP_LATERITE), lat_w * smoothstep1(19.0, 25.0, temp) * smoothstep1(0.45, 0.7, wet));
-    let grass_green = mixc(spal(s, BP_GRASS_DRY), spal(s, BP_GRASS_WET), smoothstep1(0.25, 0.75, wet + 0.15 * patchv + 0.18 * (1.0 - smoothstep1(6.0, 14.0, temp))));
+    let grass_green = mixc(spal(s, BP_GRASS_DRY), spal(s, BP_GRASS_WET), smoothstep1(0.25, 0.75, wet + 0.15 * patchv + 0.18 * (1.0 - smoothstep1(6.0, 14.0, (*s).bio.site.x)) * (1.0 - smoothstep1(0.55, 0.8, t.mountain))));
     var grass = mixc(spal(s, BP_GRASS_COLD), grass_green, smoothstep1(-2.0, 8.0, temp));
     grass = grass * vec3<f32>(1.0 + 0.10 * (st.y - 0.5), 1.0 + 0.06 * (st.w - 0.5), 1.0 - 0.08 * (st.y - 0.5));
     let land_n = (*s).pf.f[PF_LAND];
@@ -586,7 +586,9 @@ fn finish_ground(s: ptr<function, Stack>) {
     if (l.river_hw > 0.0 && t.river_wet > 0.3) {
         let ad = abs(l.river_d);
         let belt = 7.0 + 0.6 * min(l.river_hw, 60.0);
-        (*s).m.riparian = (1.0 - smoothstep1(l.river_hw + 0.3 * belt, l.river_hw + belt, ad)) * smoothstep1(0.18, 0.42, t.moist)
+        let fwr = max(l.fw, 0.35 * (*s).c.gsd);
+        let area = max(min(ad + 0.5 * fwr, l.river_hw + belt) - max(ad - 0.5 * fwr, 0.0), 0.0) / fwr;
+        (*s).m.riparian = min(area, 1.0) * smoothstep1(0.18, 0.42, t.moist)
             * smoothstep1(0.3, 0.7, t.river_wet) * (*s).m.natural_ok * (0.55 + 0.45 * smoothstep1(-0.3, 0.3, (*s).pf.f[PF_PATCH]));
     }
 }
@@ -797,12 +799,12 @@ fn layer_canopy(s: ptr<function, Stack>) {
     let cold = (1.0 - smoothstep1(0.0, 8.0, temp)) * (1.0 - smoothstep1(0.15, 0.4, t.mountain));
     let base_cover = smoothstep1(0.3 - 0.14 * cold, 0.68 - 0.24 * cold, wet) * smoothstep1(-6.0, 2.0, temp) * td * trees_mult;
     let fpu = 0.5 + 0.5 * (*s).pf.f[PF_FOREST];
-    let forest = max(smoothstep1(-0.03, 0.03, base_cover - fpu), m.woodlot * smoothstep1(0.05, 0.4, s_agri(s)));
+    let clear = 1.0 - 0.85 * smoothstep1(0.05, 0.4, s_agri(s)) * (1.0 - smoothstep1(0.45, 0.7, slope));
+    let forest = max(smoothstep1(-0.03, 0.03, base_cover * clear - fpu), m.woodlot * smoothstep1(0.05, 0.4, s_agri(s)));
     let savanna = smoothstep1(0.18, 0.35, wet) * (1.0 - smoothstep1(0.55, 0.7, wet)) * smoothstep1(12.0, 20.0, temp) * 0.12 * sveg(s, VEG_SAVANNA);
     let groves = 0.04 * smoothstep1(0.15, 0.3, wet) * sveg(s, VEG_GROVES);
-    let clear = 1.0 - 0.85 * smoothstep1(0.05, 0.4, s_agri(s)) * (1.0 - smoothstep1(0.45, 0.7, slope)) * (1.0 - m.woodlot);
     let base = m.natural_ok * (1.0 - m.field_cov) * td;
-    var dens = (forest * 0.9 * clear + savanna + groves) * base;
+    var dens = (forest * 0.9 + savanna + groves) * base;
     var dens_sav = savanna * base;
     dens = max(dens, 0.8 * m.riparian * td);
     let gully_scrub = 0.55 * smoothstep1(0.2, 0.9, -t.gully) * smoothstep1(0.2, 0.5, wet) * m.natural_ok * (1.0 - m.field_cov);
@@ -923,8 +925,8 @@ fn layer_standing(s: ptr<function, Stack>) {
     if (l.water_kind == W_OCEAN) {
         col = mixc(pal3(PAL_OCEAN_SHALLOW), pal3(PAL_OCEAN_DEEP), smoothstep1(0.0, 28.0, depth));
     } else {
-        let sh = 1.0 - smoothstep1(0.0, 2.2, depth * max(1.0 + 0.6 * wn, 0.2));
-        col = mixc(mixc(pal3(PAL_LAKE_DEEP), srgb(26.0, 32.0, 26.0), 0.35), mixc(pal3(PAL_RIVER), srgb(78.0, 76.0, 56.0), 0.6), 0.75 * sh * sh);
+        let sh = 1.0 - smoothstep1(0.0, 3.5, depth * max(1.0 + 0.5 * wn, 0.2));
+        col = mixc(mixc(pal3(PAL_LAKE_DEEP), srgb(26.0, 32.0, 26.0), 0.35), mixc(pal3(PAL_RIVER), srgb(78.0, 76.0, 56.0), 0.6), 0.7 * sh);
     }
     col *= 1.0 + 0.06 * wn;
     if (l.water_kind == W_OCEAN && depth < 3.0) {
