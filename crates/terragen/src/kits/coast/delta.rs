@@ -37,6 +37,8 @@ pub const TEMPLATE: u32 = 128;
 /// draw them (a 2–12 km delta covers a few pixels there; the drainage of level 0 itself is
 /// listed up to 12.5 km).
 pub const GSD_MAX: f64 = 3_000.0;
+/// Areas farther than this (km, beyond their radius) from the atlas' coast have no deltas.
+const COAST_KM: f64 = 100.0;
 /// The drainage level whose rivers build deltas.
 const LEVEL: usize = 0;
 /// Sample spacing along a channel (m) and the pixel size of the samples (m).
@@ -64,9 +66,14 @@ type Key = (u64, i64, i64, i64);
 static CACHE: RwLock<Option<FxHashMap<Key, Option<AStamp>>>> = RwLock::new(None);
 
 /// The deltas that can reach the disc (`center`, `radius`) at pixel size `gsd`
-/// (`Kit::astamps`), by node in lattice order.
+/// (`Kit::astamps`), by id.
 pub fn astamps(w: &World, center: DVec3, radius: f64, gsd: f64) -> Vec<AStamp> {
     if gsd > GSD_MAX || !w.cfg.hydro.rivers || w.cfg.hydro.levels.is_empty() {
+        return Vec::new();
+    }
+    // (far from any coast: none; the atlas' coast distance, cheap — the mouths are on the drawn
+    // coast, which keeps within some tens of kilometres of the atlas' 20 km one)
+    if w.atlas().sample(center.normalize()).coast_km.abs() > radius / 1000.0 + COAST_KM {
         return Vec::new();
     }
     let cell = w.cfg.hydro.levels[LEVEL].cell_km * 1000.0;
@@ -75,13 +82,15 @@ pub fn astamps(w: &World, center: DVec3, radius: f64, gsd: f64) -> Vec<AStamp> {
     let lo = ((center - DVec3::splat(reach)) / cell).floor();
     let hi = ((center + DVec3::splat(reach)) / cell).floor();
     let cells: Vec<_> = w
-        .shell_cells(center, lo, hi, cell)
+        .shell_cells_in(center, lo, hi, cell, false)
         .into_iter()
         .filter(|&c| w.maybe_active(LEVEL, c, cell) && (w.lattice_point(LEVEL, c).normalize() * center.length() - center).length() <= reach + cell)
         .collect();
     use rayon::prelude::*;
     let found: Vec<Option<AStamp>> = cells.par_iter().map(|&c| node_delta(w, c)).collect();
-    found.into_iter().flatten().filter(|st| (st.c - center).length() <= radius + st.r).collect()
+    let mut out: Vec<AStamp> = found.into_iter().flatten().filter(|st| (st.c - center).length() <= radius + st.r).collect();
+    out.sort_unstable_by_key(|st| st.id);
+    out
 }
 
 /// The pass-B stamps of the deltas reaching an area (the coast kit's host function).

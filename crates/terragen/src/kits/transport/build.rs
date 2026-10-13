@@ -370,7 +370,8 @@ fn samples(ctx: &mut HostCtx, key: u64, line: &Line, j0: i64, j1: i64) -> Option
     }
     // (some need an exact sample: in parallel)
     use rayon::prelude::*;
-    let new: Vec<(i64, PointTerrain)> = got.par_iter().map(|&(_, j, lat, lon, t)| (j, deck_sample(w, lat, lon, t))).collect();
+    let exact = ctx.points.exact();
+    let new: Vec<(i64, PointTerrain)> = got.par_iter().map(|&(_, j, lat, lon, t)| (j, deck_sample(w, lat, lon, t, exact))).collect();
     for (g, &(_, t)) in got.iter().zip(&new) {
         out[g.0] = Some(t);
     }
@@ -398,9 +399,10 @@ const DECK_EPS: f64 = 0.04;
 /// quantized to [`DECK_Q`], from the exact sample (the CPU's `World::terrain`, the CPU backend's
 /// own) where `t` is within [`DECK_EPS`] of a rounding boundary or near a water decision
 /// (`sites::water_fragile`), else from `t`.
-fn deck_sample(w: &World, lat: f64, lon: f64, t: PointTerrain) -> PointTerrain {
+fn deck_sample(w: &World, lat: f64, lon: f64, t: PointTerrain, exact: bool) -> PointTerrain {
     let near = |h: f64| ((h / DECK_Q).fract().abs() - 0.5).abs() < DECK_EPS / DECK_Q;
-    let t = if sites::water_fragile(&t) || near(t.ground) || (t.water.is_finite() && near(t.water)) {
+    // (`exact`: `t` is the exact sample already, the CPU backend's)
+    let t = if !exact && (sites::water_fragile(&t) || near(t.ground) || (t.water.is_finite() && near(t.water))) {
         let e = w.terrain(&crate::world::Ctx::new(lat, lon, 20.0, &w.ell));
         PointTerrain { ground: e.ground, water: e.water, water_kind: e.water_kind }
     } else {
