@@ -261,7 +261,7 @@ impl GpuEventSensor {
             enc.copy_buffer_to_buffer(&self.ev, 0, &self.count_read, 0, 4);
             q.submit([enc.finish()]);
             self.gpu.map_read(&[self.count_read.slice(..)])?;
-            let count = bytemuck::cast_slice::<u8, u32>(&self.count_read.slice(..).get_mapped_range()?)[0] as u64;
+            let count = bytemuck::pod_collect_to_vec::<u8, u32>(&self.count_read.slice(..).get_mapped_range()?)[0] as u64;
             self.count_read.unmap();
             first = false;
             if count <= self.cap {
@@ -282,7 +282,7 @@ impl GpuEventSensor {
             self.gpu.map_read(&[self.ev_read.slice(..bytes)])?;
             {
                 let map = self.ev_read.slice(..bytes).get_mapped_range()?;
-                let rec: &[u32] = bytemuck::cast_slice(&map[4..]);
+                let rec: Vec<u32> = bytemuck::pod_collect_to_vec(&map[4..]);
                 let w = self.cpu.w as u32;
                 for r in rec.as_chunks::<3>().0 {
                     let s = r[2] as usize;
