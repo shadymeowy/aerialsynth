@@ -918,13 +918,15 @@ fn layer_standing(s: ptr<function, Stack>) {
     let p = (*s).c.p;
     let gsd = (*s).c.gsd;
     let depth = l.water - l.ground;
+    let wn = s_pf_lazy(s, PF_WATER);
     var col = vec3<f32>(0.0);
     if (l.water_kind == W_OCEAN) {
         col = mixc(pal3(PAL_OCEAN_SHALLOW), pal3(PAL_OCEAN_DEEP), smoothstep1(0.0, 28.0, depth));
     } else {
-        col = mixc(mixc(pal3(PAL_RIVER), pal3(PAL_OCEAN_SHALLOW), 0.25), pal3(PAL_LAKE_DEEP), smoothstep1(0.0, 5.0, depth));
+        let sh = 1.0 - smoothstep1(0.0, 2.2, depth * max(1.0 + 0.6 * wn, 0.2));
+        col = mixc(mixc(pal3(PAL_LAKE_DEEP), srgb(26.0, 32.0, 26.0), 0.35), mixc(pal3(PAL_RIVER), srgb(78.0, 76.0, 56.0), 0.6), 0.75 * sh * sh);
     }
-    col *= 1.0 + 0.06 * s_pf_lazy(s, PF_WATER);
+    col *= 1.0 + 0.06 * wn;
     if (l.water_kind == W_OCEAN && depth < 3.0) {
         let sh = 1.0 - smoothstep1(0.0, 3.0, depth);
         col = mixc(col, mixc(pal3(PAL_OCEAN_SHALLOW), pal3(PAL_BEACH), 0.55) * 1.05, 0.75 * sh * sh);
