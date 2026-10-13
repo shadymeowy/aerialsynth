@@ -678,7 +678,8 @@ fn draw(s: &mut Stack, pl: &Plan) {
         slope,
         ground: s.l.ground,
         // (a brown of the biome's soils: its second one alone, a red, drew maroon ploughland)
-        soil: mixc(mixc(s.pal(pal::SOIL), s.pal(pal::SOIL + 2), 0.5), s.pal(pal::SOIL + 1), 0.3),
+        // (and 30 % towards its grey: tilled soil is a dull brown)
+        soil: field_soil(mixc(mixc(s.pal(pal::SOIL), s.pal(pal::SOIL + 2), 0.5), s.pal(pal::SOIL + 1), 0.3)),
         grass: s.pal(pal::GRASS_WET),
         grass_dry: s.pal(pal::GRASS_DRY),
         crown: s.pal(pal::CROWN_DECID),
@@ -749,6 +750,11 @@ fn draw(s: &mut Stack, pl: &Plan) {
     // the parcel is the instance (its crops, not its borders, yards and ponds)
     let inst = if cov > 0.0 && crate::landcover::group(cls) == crate::landcover::Group::Agriculture { crate::stack::instance_id(pc.id) } else { 0 };
     s.composite(Layer { cov: a, albedo: col, dh: dh * k - 0.6 * m.micro, hmode: hmode::ADD, cls, inst, emit: GH_GLOW * glow, ..Default::default() });
+}
+
+/// Tilled soil: 30 % towards its luminance.
+fn field_soil(c: DVec3) -> DVec3 {
+    mixc(c, DVec3::splat(c.dot(DVec3::new(0.2126, 0.7152, 0.0722))), 0.3)
 }
 
 /// A field colour, muted: 25 % towards its luminance.

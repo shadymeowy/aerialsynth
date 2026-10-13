@@ -335,7 +335,7 @@ fn mires(s: &mut Stack) {
     let (col, pool, clear) = if fen > 0.5 {
         // fen: sedge and moss, tussocks, willow and birch scrub, a few pools
         let g = smoothstep(-0.3, 0.4, perlin3(SEED_MIRE ^ 0x31, p / 30.0) * band(30.0, gsd));
-        let col = mixc(rgb(126.0, 134.0, 68.0), rgb(152.0, 150.0, 86.0), g) * (1.0 + 0.16 * mot);
+        let col = mixc(rgb(110.0, 114.0, 72.0), rgb(134.0, 128.0, 90.0), g) * (1.0 + 0.16 * mot);
         let e = band(40.0, gsd);
         let pu = perlin3(SEED_MIRE ^ 0x32, p / 22.0) + 0.5 * perlin3(SEED_MIRE ^ 0x33, p / 9.0) * band(9.0, gsd);
         let pool = e * smoothstep(0.5, 0.56, pu) * smoothstep(0.3, 0.5, dpt) + (1.0 - e) * 0.02 * smoothstep(0.3, 0.5, dpt);
@@ -477,7 +477,7 @@ fn beaver_ponds(s: &mut Stack) {
         return;
     }
     s.m.natural_ok *= 1.0 - meadow;
-    let grass = rgb(130.0, 140.0, 72.0) * (1.0 + 0.12 * s.pf.detail);
+    let grass = rgb(114.0, 120.0, 76.0) * (1.0 + 0.12 * s.pf.detail);
     s.composite(Layer { cov: meadow, albedo: grass, cls: lc::GRASS, clear: 1.0, ..Default::default() });
     // the flooded ring: dead trees standing in shallow water and sedge
     let ring = ((1.5 * wp + 8.0 - rd) / fw + 0.5).clamp(0.0, 1.0);

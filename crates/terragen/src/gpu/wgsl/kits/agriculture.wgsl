@@ -571,7 +571,8 @@ fn agri_draw(s: ptr<function, Stack>, pl: Plan) {
     px.moist = (*s).t.moist;
     px.slope = slope;
     px.ground = (*s).l.ground;
-    px.soil = mixc(mixc(spal(s, BP_SOIL), spal(s, BP_SOIL + 2u), 0.5), spal(s, BP_SOIL + 1u), 0.3);
+    let soil0 = mixc(mixc(spal(s, BP_SOIL), spal(s, BP_SOIL + 2u), 0.5), spal(s, BP_SOIL + 1u), 0.3);
+    px.soil = mixc(soil0, vec3<f32>(dot(soil0, vec3<f32>(0.2126, 0.7152, 0.0722))), 0.3);
     px.grass = spal(s, BP_GRASS_WET);
     px.grass_dry = spal(s, BP_GRASS_DRY);
     px.crown = spal(s, BP_CROWN_DECID);

@@ -200,7 +200,7 @@ fn temperate_mires(s: ptr<function, Stack>) {
     var clear: f32;
     if (fen > 0.5) {
         let g = smoothstep1(-0.3, 0.4, perlin3(T_SEED_MIRE ^ 0x31lu, p * (1.0lf / 30.0lf)) * band(30.0, gsd));
-        col = mixc(srgb(126.0, 134.0, 68.0), srgb(152.0, 150.0, 86.0), g) * (1.0 + 0.16 * mot);
+        col = mixc(srgb(110.0, 114.0, 72.0), srgb(134.0, 128.0, 90.0), g) * (1.0 + 0.16 * mot);
         let e = band(40.0, gsd);
         let pu = perlin3(T_SEED_MIRE ^ 0x32lu, p * (1.0lf / 22.0lf)) + 0.5 * perlin3(T_SEED_MIRE ^ 0x33lu, p * (1.0lf / 9.0lf)) * band(9.0, gsd);
         pool = e * smoothstep1(0.5, 0.56, pu) * smoothstep1(0.3, 0.5, dpt) + (1.0 - e) * 0.02 * smoothstep1(0.3, 0.5, dpt);
@@ -326,7 +326,7 @@ fn temperate_beaver_ponds(s: ptr<function, Stack>) {
         return;
     }
     (*s).m.natural_ok *= 1.0 - meadow;
-    let grass = srgb(130.0, 140.0, 72.0) * (1.0 + 0.12 * (*s).pf.f[PF_DETAIL]);
+    let grass = srgb(114.0, 120.0, 76.0) * (1.0 + 0.12 * (*s).pf.f[PF_DETAIL]);
     composite(s, temperate_layer(meadow, grass, LC_GRASS, 1.0));
     let ring = clamp((1.5 * wp + 8.0 - rd) / fw + 0.5, 0.0, 1.0);
     if (ring > 0.0) {
