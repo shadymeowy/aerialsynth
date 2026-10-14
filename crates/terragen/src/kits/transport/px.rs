@@ -291,11 +291,14 @@ fn road_px(sg: &FSeg, f: &Frame, e: &Env, class: usize) -> Px {
         let sl = (ddl - edge).max(0.0) * 0.5;
         if raised > 0.0 {
             let toe = edge + 2.0 * raised.min(15.0);
-            over(&mut o, aa(toe - ddl, fw), mixc(e.below, srgb(112.0, 124.0, 74.0), 0.35), hs - sl);
+            over(&mut o, aa(toe - ddl, fw), mixc(e.below, srgb(112.0, 124.0, 74.0), 0.2), hs - sl);
         } else {
-            let toe = edge + 2.0 * (-raised).min(15.0);
-            let strata = 0.9 + 0.1 * ((hs + sl) / 3.0).sin();
-            over(&mut o, aa(toe - ddl, fw), mixc(e.below, srgb(140.0, 128.0, 100.0) * strata, 0.4), hs + sl);
+            // (cuttings are steep rock faces (2:1), in the colour of the ground: 1:2 slopes in a
+            // pale tint drew 30 m wide ribbons where roads climb canyon walls)
+            let slc = (ddl - edge).max(0.0) * 2.0;
+            let toe = edge + 0.5 * (-raised).min(15.0);
+            let strata = 0.9 + 0.1 * ((hs + slc) / 3.0).sin();
+            over(&mut o, aa(toe - ddl, fw), mixc(e.below, srgb(140.0, 128.0, 100.0) * strata, 0.2), hs + slc);
         }
         o.z = hs - sl;
         o.clear = o.cov;
