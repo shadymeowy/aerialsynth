@@ -220,7 +220,7 @@ fn continent(p: vec3<f64>, gsd: f32) -> f32 {
 
 /// Octaves of the ridged mountains of wavelength >= `cut` (`low`) or < `cut` (not `low`,
 /// continuing from `st`): sum, low-passed sum, weight (`World::ridged_part`).
-fn ridged_part(p: vec3<f64>, gsd: f32, sharp: f32, cut: f32, low: bool, st: vec3<f32>) -> vec3<f32> {
+fn ridged_part(p: vec3<f64>, gsd: f32, sharp: f32, cut: f32, low: bool, st: vec3<f32>, fine: f32) -> vec3<f32> {
     var sum = st.x;
     var low_sum = st.y;
     var weight = st.z;
@@ -247,7 +247,7 @@ fn ridged_part(p: vec3<f64>, gsd: f32, sharp: f32, cut: f32, low: bool, st: vec3
             r = pow(r, sharp);
             r *= weight;
             weight = clamp(r * 1.8, 0.0, 1.0);
-            sum += r * amp * wb;
+            sum += r * amp * wb * select(1.0, fine, lamf < 1800.0);
             if (lamf > 6.0 * KM) {
                 low_sum += r * amp * wb;
             }
@@ -259,9 +259,14 @@ fn ridged_part(p: vec3<f64>, gsd: f32, sharp: f32, cut: f32, low: bool, st: vec3
     return vec3<f32>(sum, low_sum, weight);
 }
 
-fn ridged(p: vec3<f64>, gsd: f32, sharp: f32) -> vec2<f32> {
-    let st = ridged_part(p, gsd, sharp, 0.0, true, vec3<f32>(0.0, 0.0, 1.0));
+fn ridged(p: vec3<f64>, gsd: f32, sharp: f32, fine: f32) -> vec2<f32> {
+    let st = ridged_part(p, gsd, sharp, 0.0, true, vec3<f32>(0.0, 0.0, 1.0), fine);
     return st.xy * 0.5;
+}
+
+/// `world::ridged_fine`: the share of the ridged mountains' fine octaves at amplitude `amp_m`.
+fn ridged_fine(amp_m: f32) -> f32 {
+    return clamp(3000.0 / max(amp_m, 1.0), 0.55, 1.0);
 }
 
 /// Octaves of the hill fBm of wavelength >= `cut` (`low`) or < `cut`: sum, low-passed sum.
@@ -509,7 +514,7 @@ fn low_relief(c: Ctx, m: Macro, q: vec3<f64>, mountain: f32, amp_m: f32, hill_am
     var v = hill_amp * hills(q, gl, gain).x;
     if (amp_m > 0.0) {
         let wp = m.mtn_warp * 9.0 * KM;
-        v += amp_m * ridged(q + vec3<f64>(c.east * wp.x + c.north * wp.y), gl, 1.6 + 0.8 * m.style.z).x;
+        v += amp_m * ridged(q + vec3<f64>(c.east * wp.x + c.north * wp.y), gl, 1.6 + 0.8 * m.style.z, ridged_fine(amp_m)).x;
     }
     return v;
 }
@@ -561,7 +566,7 @@ fn pre_at(c: Ctx, m: Macro, gully: bool, roads: bool, has_cut: bool, cut: vec2<f
     if (has_cut) {
         let wp = m.mtn_warp * 9.0 * KM;
         let pw = c.p + vec3<f64>(c.east * wp.x + c.north * wp.y);
-        let r = ridged_part(pw, c.gsd, 1.6 + 0.8 * m.style.z, cut.x, true, vec3<f32>(0.0, 0.0, 1.0));
+        let r = ridged_part(pw, c.gsd, 1.6 + 0.8 * m.style.z, cut.x, true, vec3<f32>(0.0, 0.0, 1.0), ridged_fine(mountain_mask(m).y));
         let hl = hills_part(c.p, c.gsd, 0.47 + 0.08 * m.rough, cut.y, true);
         pre.relief = vec4<f32>(r, hl.x);
         pre.relief4 = hl.y;
@@ -666,10 +671,10 @@ fn relief_core(c: Ctx, m: Macro, pre: Pre) -> Relief {
         let sharp = 1.6 + 0.8 * m.style.z;
         if ((pre.flags & P_RELIEF) != 0u) {
             // the long octaves from the tile's coarse grid
-            let st = ridged_part(pw, gsd, sharp, pre.relief_cut.x, false, vec3<f32>(pre.relief.x, pre.relief.y, clamp(pre.relief.z, 0.0, 1.0)));
+            let st = ridged_part(pw, gsd, sharp, pre.relief_cut.x, false, vec3<f32>(pre.relief.x, pre.relief.y, clamp(pre.relief.z, 0.0, 1.0)), ridged_fine(amp_m));
             rg = st.xy * 0.5;
         } else {
-            rg = ridged(pw, gsd, sharp);
+            rg = ridged(pw, gsd, sharp, ridged_fine(amp_m));
         }
     }
     let uplift = 0.22 * amp_m;
@@ -711,7 +716,7 @@ fn relief_core(c: Ctx, m: Macro, pre: Pre) -> Relief {
                 g = gullies(p, c.up, grad, gsd);
             }
             gully_n = g * mask;
-            gully = gully_n * cfg.erosion * (0.05 * amp_m + 0.12 * hill_amp);
+            gully = gully_n * cfg.erosion * (0.05 * amp_m * ridged_fine(amp_m) + 0.12 * hill_amp);
         }
     }
 
