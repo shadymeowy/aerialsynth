@@ -165,9 +165,9 @@ pub(crate) fn ice(s: &Stack, c: &ColdClimate) -> Ice {
     let g = pi - 2.6 * valley;
     let steep = 1.0 - smoothstep(0.45, 0.75, l.slope + 0.1 * n + 0.15 * spur);
     let ice = smoothstep(0.15, -0.15, g + 0.4) * steep;
-    // (snow holds on slopes to ~45°: the cut from 35° left half of the high ranges grey rock
-    // where v0.2.0's alpine scenes are white)
-    let snow = smoothstep(0.15, -0.15, pi) * (1.0 - 0.85 * smoothstep(1.0, 1.7, l.slope));
+    // (snow holds on slopes to ~45° and dusts the walls above: the cut from 35° left half of
+    // the high ranges grey rock where v0.2.0's alpine scenes are white)
+    let snow = smoothstep(0.15, -0.15, pi) * (1.0 - 0.6 * smoothstep(1.0, 1.8, l.slope));
     Ice { p: pi, g, ice, snow: snow.max(ice), n }
 }
 
