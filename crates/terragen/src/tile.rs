@@ -1025,7 +1025,7 @@ mod setup_failure_tests {
             g
         };
         let id = TileId { z: 8, x: 100, y: 100 };
-        let e = mk(Backend::Gpu).tiles(&[id]).err().expect("Backend::Gpu must fail");
+        let e = mk(Backend::Gpu).tiles(&[id]).expect_err("Backend::Gpu must fail");
         assert!(format!("{e:#}").contains("injected setup failure"), "{e:#}");
         let auto = mk(Backend::Auto);
         if crate::gpu::strict() {
