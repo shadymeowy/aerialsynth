@@ -293,16 +293,23 @@ pub fn shape(c: DVec3, bearing: f64, reach: f32, id: u64, hw: f32, p: DVec3, gsd
     // polar coordinates from the apex, a quarter radius inland
     let x = u + 0.25 * r0;
     let r = (x * x + v * v).sqrt();
-    let phi = v.atan2(x);
     let tau = std::f32::consts::TAU;
+    // (the angle bends with the distance from the apex: the fan's sides and its channels were
+    // straight rays, a chevron)
+    let bend = 0.22 * (r / (0.45 * r0) + tau * u24(id, 8)).sin() + 0.08 * (r / (0.13 * r0) + tau * u24(id, 9)).sin();
+    let phi = v.atan2(x) + bend * sm(0.0, 0.25 * r0, r);
+    // (the fan opens downstream of the apex and the distributaries leave the river's line one by
+    // one: a V of straight rays from one point read as a stamp)
+    let spread = sm(0.0, 0.5 * r0, r);
     // the margin: a fan of ±72° with lobes, or fingers along the distributaries
-    let g = (1.0 - (phi / 1.25) * (phi / 1.25)).max(0.0);
+    let wmax = 1.25 * (0.3 + 0.7 * spread);
+    let g = (1.0 - (phi / wmax) * (phi / wmax)).max(0.0);
     let mut rm;
     if bird {
         rm = 0.4 * r0 * g.sqrt();
         for k in 0..4u32 {
             let (a, l, wk) = finger(id, k);
-            let e = (phi - a) / wk;
+            let e = (phi - a * spread) / wk;
             rm = rm.max(l * r0 * (-e * e).exp());
         }
     } else {
@@ -319,7 +326,7 @@ pub fn shape(c: DVec3, bearing: f64, reach: f32, id: u64, hw: f32, p: DVec3, gsd
     let mut chan = 0.0f32;
     let nk = if bird { 4u32 } else { 5 };
     for k in 0..nk {
-        let mut a = if bird { finger(id, k).0 } else { (k as f32 - 2.0) * 0.42 + 0.14 * (u24(id, 24 + k as u64) - 0.5) };
+        let mut a = spread * if bird { finger(id, k).0 } else { (k as f32 - 2.0) * 0.42 + 0.14 * (u24(id, 24 + k as u64) - 0.5) };
         a += 0.05 * (r / (0.21 * r0) + tau * u24(id, 30 + k as u64)).sin();
         // (a fan's channels fork halfway)
         let fork = if bird { 0.0 } else { 0.11 * sm(0.5 * r0, 0.75 * r0, r) };
