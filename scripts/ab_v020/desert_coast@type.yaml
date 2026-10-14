@@ -14,8 +14,8 @@ trajectory:
     rate_hz: 400
     speed_mps: 50
     kind: line
-    lat: 14.955
-    lon: 71.775
+    lat: 14.985
+    lon: 71.755
     heading_deg: 320
     altitude_m: 900
     duration_s: 8.6
