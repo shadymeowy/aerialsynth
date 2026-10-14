@@ -1,6 +1,6 @@
 //! The settlements kit: hamlets to megacities, airports, ports, dams and reservoirs, quarries
 //! and mines, solar and wind farms, gas flares (`docs/design/terrain-next.md` §5.9, §6.1, §6.2,
-//! §6.4; `docs/kits/settlements.md`).
+//! §6.4; `docs/next/kits/settlements.md`).
 //!
 //! * [`places`]: the central-place hierarchy (host-side, analytic): where settlements are, their
 //!   level, population, radius, culture, form; the API other kits use

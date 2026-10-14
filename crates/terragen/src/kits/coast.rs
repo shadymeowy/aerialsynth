@@ -1,4 +1,4 @@
-//! The coast and ocean kit (`docs/design/terrain-next.md` §5.5, `docs/kits/coast.md`): cliffs with
+//! The coast and ocean kit (`docs/design/terrain-next.md` §5.5, `docs/next/kits/coast.md`): cliffs with
 //! wave-cut platforms, rocky shores and skerries, tidal flats with salt marsh and dendritic
 //! creeks, barrier islands and lagoons, fringing and barrier reefs, salt and aquaculture ponds,
 //! archipelagos. The WGSL twins are `gpu/wgsl/kits/coast_relief.wgsl` (types, creeks, relief) and

@@ -1,14 +1,12 @@
 # Coast and ocean kit: cliffs, skerries, tidal flats, barrier islands, reefs, atolls, ponds, deltas
 
-> [!NOTE]
-> This kit belongs to the **next** generator (`world.generator: next`, a preview; see
-> [`docs/simulation.md`](../simulation.md)). The default generator, `classic` (v0.2.0's), has no
-> kits: worlds made with it do not show what this page describes.
+A kit of the experimental [next generator](../README.md) (`world.generator: next`). *The default
+world* on this page is seed 1 of the next generator.
 
 `crates/terragen/src/kits/coast.rs` (types, creeks, relief, atoll family, layers, tests), its WGSL
 twins `src/gpu/wgsl/kits/coast_relief.wgsl` (types, creeks, relief, atoll family) and
-`coast.wgsl` (the layers). No biomes (design: [terrain-next.md §5.5](../design/terrain-next.md),
-contract: [kit-guide.md](../design/kit-guide.md)).
+`coast.wgsl` (the layers). No biomes (design: [terrain-next.md §5.5](https://github.com/shadymeowy/aerialsynth/blob/terrain-design/docs/design/terrain-next.md),
+contract: [kit-guide.md](../kit-guide.md)).
 
 ## What it draws
 

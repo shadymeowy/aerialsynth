@@ -1,5 +1,5 @@
-# terrain survey --seed 1 --seed-places 1 --count 24 (default world, generator version 3; master 7e3911f): the redesign's "before" places
-# re-render: terrain survey --seed 1 --places docs/design/survey_places.csv -o out/survey1
+# terrain survey --seed 1 --seed-places 1 --count 24 (default world, the classic generator, version 3; master 7e3911f): the redesign's "before" places
+# re-render: terrain survey --seed 1 --places docs/next/ab/survey_places.csv -o out/survey1
 index,lat,lon,theme,elevation_m,relief_m,slope,water,coast,river,town,temp_c,moist,biome,dominant
 0,24.960804,22.464715,coast,0.0,8.2,0.0024,0.480,1,0,0,22.0,0.177,,ocean 48% beach 28% grass 16%
 1,-16.362560,68.938938,mountains,3820.1,1328.8,0.3900,0.000,0,0,0,3.0,0.151,,rock 56% bare 44%

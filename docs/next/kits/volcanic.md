@@ -1,14 +1,12 @@
 # Volcanic kit: volcanoes, calderas, shields, cinder fields, lava and ash
 
-> [!NOTE]
-> This kit belongs to the **next** generator (`world.generator: next`, a preview; see
-> [`docs/simulation.md`](../simulation.md)). The default generator, `classic` (v0.2.0's), has no
-> kits: worlds made with it do not show what this page describes.
+A kit of the experimental [next generator](../README.md) (`world.generator: next`). *The default
+world* on this page is seed 1 of the next generator.
 
 `crates/terragen/src/kits/volcanic.rs` (families, relief, layer, tests), its WGSL twins
 `src/gpu/wgsl/kits/volcanic_relief.wgsl` (families, shared geometry, pass-A relief) and
 `volcanic.wgsl` (the layer), and its biomes `crates/terragen/biomes/volcanic.yaml` (design:
-[terrain-next.md §5.2](../design/terrain-next.md), contract: [kit-guide.md](../design/kit-guide.md)).
+[terrain-next.md §5.2](https://github.com/shadymeowy/aerialsynth/blob/terrain-design/docs/design/terrain-next.md), contract: [kit-guide.md](../kit-guide.md)).
 
 ## What it draws
 

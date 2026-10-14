@@ -1,4 +1,4 @@
-//! The cold kit (`docs/design/terrain-next.md` §5.4, `docs/kits/cold.md`): glaciers and ice
+//! The cold kit (`docs/design/terrain-next.md` §5.4, `docs/next/kits/cold.md`): glaciers and ice
 //! caps, periglacial ground, the lakes of the permafrost and of glaciated lowlands, sea ice and
 //! frozen lakes, seasonal snow. The WGSL twin is `gpu/wgsl/kits/cold.wgsl` (same names, same
 //! order of operations).

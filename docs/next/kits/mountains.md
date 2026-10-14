@@ -1,15 +1,13 @@
 # Mountains kit: karst, folded ridges, fault blocks, canyons, badlands, glacial troughs, fjords, fans
 
-> [!NOTE]
-> This kit belongs to the **next** generator (`world.generator: next`, a preview; see
-> [`docs/simulation.md`](../simulation.md)). The default generator, `classic` (v0.2.0's), has no
-> kits: worlds made with it do not show what this page describes.
+A kit of the experimental [next generator](../README.md) (`world.generator: next`). *The default
+world* on this page is seed 1 of the next generator.
 
 `crates/terragen/src/kits/mountains.rs` (zones, relief, carve hook, fan family, layer, tests), its
 WGSL twins `src/gpu/wgsl/kits/mountains_relief.wgsl` (fields, zones, relief, carve hook, fan family;
 in every module with pass A) and `mountains.wgsl` (the layer). No biomes and no kernels (design:
-[terrain-next.md §5.3, §5.4](../design/terrain-next.md), contract:
-[kit-guide.md](../design/kit-guide.md)). The kit is also the first to use a **core hook**, the
+[terrain-next.md §5.3, §5.4](https://github.com/shadymeowy/aerialsynth/blob/terrain-design/docs/design/terrain-next.md), contract:
+[kit-guide.md](../kit-guide.md)). The kit is also the first to use a **core hook**, the
 *carve hook* (below), because glacial troughs, fjords and canyons change how the drainage carves
 its valleys, and that happens after the relief operators have run.
 
@@ -58,7 +56,7 @@ benches (bench height and share) and a small lake at the channel's head. The cor
 by the piece's reach (`RiverHit::reach`; a no-op in the core). The hook costs nothing where no
 kit sets it.
 
-**Places** (default world; `PLACES` in the tests, `docs/kits/mountains_places.csv`): tower karst
+**Places** (default world; `PLACES` in the tests, `docs/next/kits/mountains_places.csv`): tower karst
 (-0.714, -96.231), karst islands (4.857, -93.234), cockpit karst (41.958, -21.188), folded ridges
 (27.899, 42.870), fault blocks (31.739, 137.721), badlands (-21.410, 36.504), canyon (21.245,
 -121.297), glacial troughs (49.423, -162.365), cirque and tarn (40.874, 174.741), fjords (63.382,
@@ -106,7 +104,7 @@ octaves); the tests run at the same speed as before. No with / without-kit bench
 
 ## Stills
 
-GPU-generated (`terrain survey --places docs/kits/mountains_places.csv`, default world, 10:30
+GPU-generated (`terrain survey --generator next --places docs/next/kits/mountains_places.csv`, default world, 10:30
 local on the equinox except the folds and the fault blocks, which need a low sun (08:00 / 16:30);
 oblique views 1.5 km above the ground, 25° down; `cruise` 4 km, 30° down; `high` 10 km, 30° down;
 the stills come from the build before the last relief edit (the plains' flattening target moved

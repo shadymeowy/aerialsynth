@@ -1,4 +1,4 @@
-//! The volcanic kit (`docs/design/terrain-next.md` §5.2, `docs/kits/volcanic.md`): stratovolcanoes
+//! The volcanic kit (`docs/design/terrain-next.md` §5.2, `docs/next/kits/volcanic.md`): stratovolcanoes
 //! with craters, radial gullies, lava flows and ash; calderas with lakes; shield volcanoes;
 //! cinder-cone fields with maars; black-sand beaches. The WGSL twins are
 //! `gpu/wgsl/kits/volcanic_relief.wgsl` (families, relief, shared geometry) and

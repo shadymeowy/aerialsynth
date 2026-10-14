@@ -1,5 +1,5 @@
 # terrain survey --seed 2 --seed-places 1 --count 24 (world seed 2, generator version 3; master 7e3911f): the redesign's "before" places
-# re-render: terrain survey --seed 2 --places docs/design/survey_places_seed2.csv -o out/survey2
+# re-render: terrain survey --seed 2 --places docs/next/ab/survey_places_seed2.csv -o out/survey2
 index,lat,lon,theme,elevation_m,relief_m,slope,water,coast,river,town,temp_c,moist,biome,dominant
 0,65.694327,-166.673242,coast,0.1,23.3,0.0084,0.440,1,0,0,0.8,0.603,,forest 52% ocean 44% beach 4%
 1,23.719119,-119.460571,mountains,3788.6,1141.1,0.3173,0.000,0,0,0,-1.5,0.083,,bare 44% rock 40% snow 16%

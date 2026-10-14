@@ -1,16 +1,14 @@
 # Tropical and savanna kit
 
-> [!NOTE]
-> This kit belongs to the **next** generator (`world.generator: next`, a preview; see
-> [`docs/simulation.md`](../simulation.md)). The default generator, `classic` (v0.2.0's), has no
-> kits: worlds made with it do not show what this page describes.
+A kit of the experimental [next generator](../README.md) (`world.generator: next`). *The default
+world* on this page is seed 1 of the next generator.
 
 The wet and dry tropics from 100 m to 10 km above the ground: rainforest canopies with emergent
 and flowering crowns, floodplains with meander scars, cloud forest and páramo on the mountains,
 mangroves on low coasts; savannas in dry-season colours with umbrella acacias, baobabs, palm
 groves, termite mounds, burn scars, waterholes and gallery forests; monsoon, dry deciduous and
-miombo woodland; slash-and-burn frontiers. Design: [terrain-next.md §5.6](../design/terrain-next.md);
-contract: [kit-guide.md](../design/kit-guide.md).
+miombo woodland; slash-and-burn frontiers. Design: [terrain-next.md §5.6](https://github.com/shadymeowy/aerialsynth/blob/terrain-design/docs/design/terrain-next.md);
+contract: [kit-guide.md](../kit-guide.md).
 
 | file | content |
 |---|---|

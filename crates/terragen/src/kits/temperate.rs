@@ -1,5 +1,5 @@
 //! The temperate, boreal and wetland kit (`docs/design/terrain-next.md` §5.7,
-//! `docs/kits/temperate.md`).
+//! `docs/next/kits/temperate.md`).
 //!
 //! * **Biomes** (`biomes/temperate.yaml`): broadleaf deciduous, mixed forest, taiga, lichen
 //!   woodland, maquis, garrigue, chaparral, feather-grass steppe, heathland, moorland, and the
