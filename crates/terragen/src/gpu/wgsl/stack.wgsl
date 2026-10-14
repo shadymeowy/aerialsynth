@@ -598,7 +598,7 @@ fn layer_agriculture(s: ptr<function, Stack>) {
     let t = (*s).t;
     let fpu = 0.5 + 0.5 * (*s).pf.f[PF_FOREST];
     let cover = smoothstep1(0.12, 0.45, max(t.moist, 0.0)) * smoothstep1(-6.0, 2.0, t.temp) * cfg.tree_density;
-    let share = min(0.5 * sveg(s, VEG_WOODLOTS) * (*s).bio.st.veg.w, 0.95);
+    let share = min(0.42 * sveg(s, VEG_WOODLOTS) * (*s).bio.st.veg.w, 0.95);
     (*s).m.woodlot = smoothstep1(-0.02, 0.02, share * cover - fpu) * (*s).m.natural_ok;
     let agri = s_agri(s);
     let m = (*s).m;
