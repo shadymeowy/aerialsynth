@@ -167,7 +167,7 @@ const SYS: [SysDef; sys::N] = {
         SysDef { part: VOR, size: [240.0, 1.4], kinds: [OLIVE, ORCHARD, CROP, FALLOW], kw: [0.55, 0.2, 0.15, 0.1], borders: [WALL, MARGIN], bp: [0.5, 0.5], slope: [0.6, 0.8], ..D },
         SysDef { part: GRID, size: [360.0, 270.0], kinds: [PALM, RUBBER, TEA, CROP], kw: [0.4, 0.2, 0.12, 0.28], borders: [TRACK, MARGIN], bp: [0.9, 0.1], slope: [0.6, 0.8], ..D },
         SysDef { part: GRID, size: [95.0, 60.0], kinds: [GREENH, CROP, FALLOW, POND], kw: [0.58, 0.24, 0.16, 0.02], borders: [TRACK, MARGIN], bp: [0.25, 0.75], ..D },
-        SysDef { part: GRID, size: [320.0, 230.0], kinds: [PASTURE, HAY, CROP, POND], kw: [0.34, 0.16, 0.48, 0.02], borders: [MARGIN, HEDGE], bp: [0.55, 0.45], slope: [0.38, 0.5], trees: 0.03, ..D },
+        SysDef { part: GRID, size: [320.0, 230.0], kinds: [PASTURE, HAY, CROP, POND], kw: [0.34, 0.16, 0.48, 0.02], borders: [MARGIN, HEDGE], bp: [0.35, 0.65], slope: [0.38, 0.5], trees: 0.07, ..D },
         SysDef { part: PIVOT, size: [805.0, 805.0], kinds: [CROP, FALLOW, CROP, CROP], kw: [0.75, 0.25, 0.0, 0.0], borders: [NONE, NONE], bp: [1.0, 0.0], ..D },
         SysDef { part: GRID, size: [2200.0, 1500.0], kinds: [PASTURE, HAY, FALLOW, POND], kw: [0.86, 0.04, 0.08, 0.02], borders: [TRACK, MARGIN], bp: [0.4, 0.6], slope: [0.38, 0.5], ..D },
     ]
