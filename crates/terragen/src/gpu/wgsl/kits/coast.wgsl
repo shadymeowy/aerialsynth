@@ -141,7 +141,7 @@ fn co_ponds(s: ptr<function, Stack>, zone: f32) {
     let p = (*s).c.p;
     let gsd = (*s).c.gsd;
     let fw = (*s).l.fw;
-    let area = smoothstep1(-0.2, 0.1, perlin3(CO_SEED + 60lu, p * (1.0lf / 2400.0lf)));
+    let area = smoothstep1(0.05, 0.3, perlin3(CO_SEED + 60lu, p * (1.0lf / 2400.0lf)));
     if (area <= 0.0) {
         return;
     }
@@ -190,7 +190,7 @@ fn co_ponds(s: ptr<function, Stack>, zone: f32) {
     }
     let c = area * zone * (e * exact + (1.0 - e) * 0.7 * 0.62);
     if (c > 0.0) {
-        var ly = layer_paint(c, mixc(mean_col, col, e), LC_AQUACULTURE);
+        var ly = layer_paint(c, mixc(mean_col, col, 0.7 * e), LC_AQUACULTURE);
         ly.clear = 1.0;
         ly.relit = 0.6;
         composite(s, ly);

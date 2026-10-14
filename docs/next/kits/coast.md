@@ -26,7 +26,7 @@ the atlas coast distance (−100..30 km) and on a window of `h0` before any nois
 | tidal flats, salt marsh | the intertidal band compressed to a fifth of its slope; dendritic creeks (3 levels of ridged noise, 14 / 6 / 2.4 m wide) cut 1.9 m | grey-brown mud (wet darker), marsh above 1 m (green with rust patches), creeks as dark channels, no towns |
 | barrier islands, lagoons | bump at -6 m (8.7 m, width 2.8 m), inlets where a 3.2 km noise closes it | the core's beach on the island, green-sand lagoon water |
 | reefs | bump at -7 m (fringing) or -28 m (barrier reef) up to -0.9 m, passes where a noise closes it | turquoise sand by depth, coral heads, the core's surf on the crest |
-| salt / aquaculture ponds | | on the high flats and marsh, in the land-use region's field frame: 150 × 85 m ponds with dykes; salt (pink, white, turquoise, green) where moist < 0.45, aquaculture (blue-greens) elsewhere; patches by a 2.4 km noise |
+| salt / aquaculture ponds | | on the high flats and marsh, in the land-use region's field frame: 150 × 85 m ponds with dykes; salt (pink, white, turquoise, green) where moist < 0.45, aquaculture (blue-greens) elsewhere, muted 30 % towards their mean; patches on about a quarter of the flats by a 2.4 km noise |
 | atolls | family `coast_atolls` (cell 80 km, reach 24 km): ring of reef R 2-14 km, rim 180-400 m wide at -0.3 m, motus (+1.9 m, noise > threshold), lagoon 12-30 m, outer slope 0.5 to the sea floor; ocean floor 1.5-5.5 km deep, > 150 km from any coast, SST > 25 °C, mostly hotspot tracks | turquoise lagoon with coral, scrub on the motus (the core's beach is the sand) |
 
 **Deltas** (`kits/coast/delta.rs`, WGSL `coast_delta_shape`, `coast_astamp`): fan (arcuate,
@@ -54,7 +54,7 @@ the atlas coast distance (−100..30 km) and on a window of `h0` before any nois
   by the pixel; the river's own channel stays as the main pass to the sea (deeper sea floor in it
   filled to −2.5 m). Lobes fade out over a shelf deeper than 35–60 m.
 * *Pass B (slot 5)* from a stamp (`delta::TEMPLATE` 128): reed marsh on the plain, mud where it
-  is lowest or arid (grey silt with salt crusts on the higher flats, darker where wet), tidal
+  is lowest or arid (silt in the hue of the land's soil with salt crusts on the higher flats, darker where wet), tidal
   creeks in the low mud, scrub on the distributaries' levees (four channel widths), mottled and
   pulled towards the land's own colour (30 %, more where the plain thins out; its margin breaks
   into patches), over the core's beach; fields stay where the land use draws them; tropical

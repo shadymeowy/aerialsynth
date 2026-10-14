@@ -494,7 +494,9 @@ fn ponds(s: &mut Stack, zone: f64) {
         return;
     }
     let (p, gsd, fw) = (s.ctx.p, s.ctx.gsd, s.l.fw);
-    let area = smoothstep(-0.2, 0.1, perlin3(SEED + 60, p / 2400.0));
+    // (pond fields on part of the flats, their colours muted: a quilt of pink, white and teal
+    // ponds covered half of every arid delta)
+    let area = smoothstep(0.05, 0.3, perlin3(SEED + 60, p / 2400.0));
     if area <= 0.0 {
         return;
     }
@@ -533,7 +535,7 @@ fn ponds(s: &mut Stack, zone: f64) {
     }
     let c = area * zone * (e * exact + (1.0 - e) * 0.7 * 0.62);
     if c > 0.0 {
-        s.composite(Layer { cov: c, albedo: mixc(mean_col, col, e), cls: cls::AQUACULTURE, clear: 1.0, relit: 0.6, ..Default::default() });
+        s.composite(Layer { cov: c, albedo: mixc(mean_col, col, 0.7 * e), cls: cls::AQUACULTURE, clear: 1.0, relit: 0.6, ..Default::default() });
         s.m.natural_ok *= 1.0 - c;
     }
 }
