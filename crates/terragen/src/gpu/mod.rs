@@ -12,7 +12,7 @@ pub(crate) mod host;
 pub(crate) mod tables;
 pub mod types;
 
-pub use device::{shared, Gpu};
+pub use device::{shared, strict, Gpu};
 
 use crate::surface::SurfaceModel;
 use crate::world::{Ctx, World};
@@ -1681,6 +1681,9 @@ pub(crate) struct Compile<'g> {
 impl<'g> Compile<'g> {
     /// Start compiling the pipelines of `srcs` (the WGSL modules) on `gpu`.
     pub(crate) fn start(gpu: &'g Gpu, flavor: &str, srcs: &[&str]) -> Compile<'g> {
+        // the lock first: a world set up at the same time (another thread) then finds the cache
+        // file the first one saved, instead of both compiling cold
+        let lock = gpu.compiling();
         let hash = sources_hash(srcs);
         let cache = PipelineCache::open(gpu, flavor, hash);
         let marker = if cache.is_none() { CompileMarker::open(gpu, flavor, hash) } else { None };
@@ -1689,7 +1692,6 @@ impl<'g> Compile<'g> {
         let cold = !(cache.as_ref().is_some_and(|c| c.warm) || marker.as_ref().is_some_and(|m| m.path.exists()));
         notice::emit(CompileEvent::Started { gpu_name: gpu.info.name.clone(), cold });
         let t = std::time::Instant::now();
-        let lock = gpu.compiling();
         Compile { cache, marker, cold, t, _lock: lock }
     }
 
@@ -1762,23 +1764,7 @@ fn prune_files(dir: &std::path::Path, prefix: &str, suffix: &str, legacy: Option
     }
 }
 
-/// The generator's cache directory: `$XDG_CACHE_HOME/terrain` (`~/.cache/terrain`).
-fn cache_dir() -> Option<std::path::PathBuf> {
-    cache_dir_in(|k| std::env::var_os(k))
-}
-
-/// [`cache_dir`] with the environment `var`: `$XDG_CACHE_HOME/terrain`, else
-/// `$HOME/.cache/terrain`, else `%LOCALAPPDATA%\terrain` (Windows, where `HOME` is usually
-/// unset: without it every run compiled the shaders cold). Empty variables are unset (an empty
-/// `XDG_CACHE_HOME` put the cache in the working directory).
-fn cache_dir_in(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<std::path::PathBuf> {
-    let set = |k: &str| var(k).filter(|v| !v.is_empty());
-    set("XDG_CACHE_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| set("HOME").map(|h| std::path::Path::new(&h).join(".cache")))
-        .or_else(|| set("LOCALAPPDATA").map(std::path::PathBuf::from))
-        .map(|d| d.join("terrain"))
-}
+use crate::cachedir::cache_dir;
 
 /// Devices without a pipeline cache (Metal, DX12: their drivers cache compiled shaders
 /// themselves): an empty marker file per adapter and shader version, written after the
@@ -1848,18 +1834,6 @@ impl PipelineCache {
 #[cfg(test)]
 mod cache_tests {
     use super::*;
-
-    #[test]
-    fn cache_directory() {
-        use std::path::PathBuf;
-        let env = |vars: &'static [(&'static str, &'static str)]| move |k: &str| vars.iter().find(|v| v.0 == k).map(|v| std::ffi::OsString::from(v.1));
-        assert_eq!(cache_dir_in(env(&[("XDG_CACHE_HOME", "/x"), ("HOME", "/h")])), Some(PathBuf::from("/x/terrain")));
-        assert_eq!(cache_dir_in(env(&[("XDG_CACHE_HOME", ""), ("HOME", "/h")])), Some(PathBuf::from("/h/.cache/terrain")));
-        // Windows: no HOME
-        assert_eq!(cache_dir_in(env(&[("LOCALAPPDATA", "C:/Users/u/AppData/Local")])), Some(PathBuf::from("C:/Users/u/AppData/Local/terrain")));
-        assert_eq!(cache_dir_in(env(&[("HOME", "/h"), ("LOCALAPPDATA", "C:/l")])), Some(PathBuf::from("/h/.cache/terrain")));
-        assert_eq!(cache_dir_in(env(&[])), None);
-    }
 
     #[test]
     fn cache_names_and_pruning() {
