@@ -266,10 +266,9 @@ fn coast_delta_shape(c: vec3<f64>, bearing: f64, reach: f32, id: u64, hw: f32, p
     let bird = u01k(id, 4lu) < 0.35;
     let x = u + 0.25 * r0;
     let r = sqrt(x * x + v * v);
-    let bend = 0.22 * sin(r / (0.45 * r0) + TAU * u01k(id, 8lu)) + 0.08 * sin(r / (0.13 * r0) + TAU * u01k(id, 9lu));
-    let phi = atan2(v, x) + bend * smoothstep1(0.0, 0.25 * r0, r);
+    let phi = atan2(v, x);
     let spread = smoothstep1(0.0, 0.5 * r0, r);
-    let wmax = 1.25 * (0.3 + 0.7 * spread);
+    let wmax = 1.25 * (0.3 + 0.7 * spread) * (1.0 + 0.12 * sin(r / (0.07 * r0) + TAU * u01k(id, 8lu)));
     let g = max(1.0 - (phi / wmax) * (phi / wmax), 0.0);
     var rm = 0.0;
     if (bird) {
@@ -307,7 +306,7 @@ fn coast_delta_shape(c: vec3<f64>, bearing: f64, reach: f32, id: u64, hw: f32, p
             a = (f32(k) - 2.0) * 0.42 + 0.14 * (u01k(id, 24lu + u64(k)) - 0.5);
         }
         a *= spread;
-        a += 0.05 * sin(r / (0.21 * r0) + TAU * u01k(id, 30lu + u64(k)));
+        a += 0.11 * spread * sin(r / (0.21 * r0) + TAU * u01k(id, 30lu + u64(k)));
         var fork = 0.0;
         if (!bird) {
             fork = 0.11 * smoothstep1(0.5 * r0, 0.75 * r0, r);
