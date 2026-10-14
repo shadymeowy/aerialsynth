@@ -29,8 +29,8 @@ volume kept. Radial gullies: three tiers of 14, 30 and 62 ravines, random depth 
 zero mean, band-limited; flank noise.
 
 **Pass B (slot 3).** Black-sand beaches (the core's beach, recoloured on volcanic coasts and
-by the biome palette); ash and scoria on the upper cone and an ash-fall apron around active
-volcanoes (noise threshold); lava tongues down the flanks (fresh black, weathered brown,
+by the biome palette); ash and scoria on the upper cone (dark, streaked down the summit cone)
+and an ash-fall apron around active volcanoes (paler weathered ash in soft blotches); lava tongues down the flanks (fresh black, weathered brown,
 old moss-green by age; no trees, no fields on them); hydrothermal sulphur, rust and clay patches
 at the crater; crater and caldera lakes at one flat water level of the instance; in fields the
 cinder cones (dark crater, pale rim), tephra rings and lakes of maars, an ash apron, short lava
@@ -108,3 +108,8 @@ Leftovers round B: the ash edge is azimuth harmonics (7, 17, 41 per turn, band-l
 the ash lies in rays down the ravines instead of blobs; the cinder cones are 2.0 x higher than at first (`K_CONE` 0.0085816; no light baked into their
 albedo: the renderer shades them), their lower flanks blend into the ground around them. Not found: the road up the cone, the river line across a caldera lake (not
 visible in the places re-rendered).
+
+Round 4 (polish): the azimuth harmonics only on the summit cone (u < 0.06-0.22), their azimuth
+shifted sideways by up to ~100 m; lower down three octaves of noise (90, 320, 900 m) and a soft
+edge, paler ash (112, 104, 94) from u 0.08-0.35: the rays across the whole apron drew a dark star
+from above and dark spikes in oblique views (volcano@type).

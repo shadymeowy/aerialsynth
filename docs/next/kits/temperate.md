@@ -44,7 +44,8 @@ gets the steppe class.
   swales parallel to the channel. Pools and ponds are class *lake*; mires *bog*, reed *marsh*.
 * **Managed forest** (disturbance slot): stands (a brick pattern of columns 150–300 m wide in
   the land-use region's frame, warped by ~25 m) where the culture manages its forests (boreal,
-  survey-grid and temperate archetypes, by development and a per-ecoregion draw), about 0.5 %
+  survey-grid and temperate archetypes, by development and a per-ecoregion draw; only within reach
+  of people: habitation 0.02-0.25), about 0.5 %
   of them cut a year (at most 9 % within 16 years; most cuts years old) with ragged edges (seed
   trees and uncut corners along the border) — fresh dark slash with skid trails, a landing and a
   few seed trees, then grass and fireweed, then dense young plantations in rows — with logging

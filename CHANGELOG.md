@@ -30,6 +30,10 @@
   `world.biomes`, `world.relief.tectonic_mountains` / `belt_mountains`.
 - `next` closer to v0.2.0's look: larger, softer fields with more woodlots; one street pattern
   per town; irregular dune fields; deltas that open from the river; mixed paddies; denser taiga.
+- `next` polish round 4: organic deltas (lobate, wandering distributaries, silt blended into the
+  land; no pale wedge); tree lines along the streams of dry farmland; closed lowland taiga, no
+  clear-cuts in empty land; volcano ash without the dark star of rays; darker, smaller cloud-forest
+  crowns; fewer big survey sections in wet climates; denser suburbs; red canyon walls.
 - **Optional tile layers** (tile store format 2; `next` only): `tiles.layers: [dtm, instance]`
   adds the bare ground and instance ids (building lots, fields, forest stands) to a new store;
   the viewer's map shadings *Height above ground* and *Instances* show them. Format-1 stores
