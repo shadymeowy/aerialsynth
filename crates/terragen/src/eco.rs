@@ -228,17 +228,25 @@ pub fn warp_min_wavelength(w: &World) -> f64 {
     0.17 * w.cfg.ecoregions.cell_km * KM
 }
 
-/// Weight (0..1) of the ecoregion across the border at `edge` m from it: within the ecotone a
-/// crisp mosaic of ragged ~220 m patches (0 or 1), blended to the probability where the patches are
-/// below the pixel.
-pub fn ecotone_pick(w: &World, p: DVec3, gsd: f64, edge: f64) -> f64 {
+/// Probability (0..½) of the ecoregion across the border at `edge` m from it: ½ at the border,
+/// 0 at the ecotone's edge (the mean of [`ecotone_pick`]; the ecoregions' styles blend by it).
+pub fn ecotone_prob(w: &World, gsd: f64, edge: f64) -> f64 {
     let wd = w.cfg.ecoregions.ecotone_km * KM;
     let wd_eff = wd.max(1.5 * gsd);
     if edge >= wd_eff || wd_eff <= 0.0 {
         return 0.0;
     }
-    // probability of the other side: ½ at the border, 0 at the ecotone's edge
-    let pb = 0.5 * (1.0 - smoothstep(0.0, wd_eff, edge));
+    0.5 * (1.0 - smoothstep(0.0, wd_eff, edge))
+}
+
+/// Weight (0..1) of the ecoregion across the border at `edge` m from it: within the ecotone a
+/// crisp mosaic of ragged ~220 m patches (0 or 1), blended to the probability where the patches are
+/// below the pixel.
+pub fn ecotone_pick(w: &World, p: DVec3, gsd: f64, edge: f64) -> f64 {
+    let pb = ecotone_prob(w, gsd, edge);
+    if pb <= 0.0 {
+        return 0.0;
+    }
     let ex = band(220.0, gsd);
     if ex <= 0.0 {
         return pb;

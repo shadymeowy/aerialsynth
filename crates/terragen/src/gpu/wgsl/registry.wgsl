@@ -172,14 +172,22 @@ struct Bio {
     wst: f32,
 }
 
-/// `eco::ecotone_pick`: weight of the ecoregion across the border at `edge` m.
-fn ecotone_pick(p: vec3<f64>, gsd: f32, edge: f32) -> f32 {
+/// `eco::ecotone_prob`: probability (0..½) of the ecoregion across the border at `edge` m.
+fn ecotone_prob(gsd: f32, edge: f32) -> f32 {
     let wd = cfg.ecotone;
     let wd_eff = max(wd, 1.5 * gsd);
     if (edge >= wd_eff || wd_eff <= 0.0) {
         return 0.0;
     }
-    let pb = 0.5 * (1.0 - smoothstep1(0.0, wd_eff, edge));
+    return 0.5 * (1.0 - smoothstep1(0.0, wd_eff, edge));
+}
+
+/// `eco::ecotone_pick`: weight of the ecoregion across the border at `edge` m.
+fn ecotone_pick(p: vec3<f64>, gsd: f32, edge: f32) -> f32 {
+    let pb = ecotone_prob(gsd, edge);
+    if (pb <= 0.0) {
+        return 0.0;
+    }
     let ex = band(220.0, gsd);
     if (ex <= 0.0) {
         return pb;
@@ -258,11 +266,13 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
     let ea = eco_vals[ka];
     var kb2 = ka;
     var wb = 0.0;
+    var pb = 0.0;
     if (ib != 0lu && ib != ia) {
+        pb = ecotone_prob(c.gsd, edge);
         wb = ecotone_pick(c.p, c.gsd, edge);
     }
     var eb = ea;
-    if (wb > 0.0) {
+    if (pb > 0.0) {
         let kb = eco_find(ib);
         if (kb >= 0) {
             eb = eco_vals[kb];
@@ -274,12 +284,14 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
     var e1 = ea;
     var e2 = eb;
     var w = wb;
+    var ws = pb;
     o.k1 = ka;
     o.k2 = kb2;
     if (wb > 0.5) {
         e1 = eb;
         e2 = ea;
         w = 1.0 - wb;
+        ws = 1.0 - pb;
         o.k1 = kb2;
         o.k2 = ka;
     }
@@ -290,12 +302,15 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
         o.a = z1.z;
         o.b = z2.z;
         o.w = w;
-        o.st = style_mix(eco_style(e1), eco_style(e2), w);
-        o.wst = w;
     } else {
         o.a = z1.z;
         o.b = z1.partner;
         o.w = z1.w;
+    }
+    if (ws > 0.0) {
+        o.st = style_mix(eco_style(e1), eco_style(e2), ws);
+        o.wst = ws;
+    } else {
         o.st = eco_style(e1);
         o.wst = 0.0;
     }

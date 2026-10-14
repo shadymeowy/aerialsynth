@@ -1070,10 +1070,15 @@ impl BioSample {
             edge = -edge;
         }
         let ea = sm.eco.params(world, reg, cache, ia, ca);
-        let wb = if ib != 0 && ib != ia { crate::eco::ecotone_pick(world, ctx.p, ctx.gsd, edge) } else { 0.0 };
-        let eb = if wb > 0.0 { sm.eco.params(world, reg, cache, ib, cb) } else { ea };
-        // the sample's ecoregion and the one blended in (where the mosaic is below the pixel)
-        let (e1, e2, w) = if wb > 0.5 { (eb, ea, 1.0 - wb) } else { (ea, eb, wb) };
+        let two = ib != 0 && ib != ia;
+        let pb = if two { crate::eco::ecotone_prob(world, ctx.gsd, edge) } else { 0.0 };
+        let wb = if two { crate::eco::ecotone_pick(world, ctx.p, ctx.gsd, edge) } else { 0.0 };
+        let eb = if pb > 0.0 { sm.eco.params(world, reg, cache, ib, cb) } else { ea };
+        // the sample's ecoregion and the one blended in (where the mosaic is below the pixel);
+        // the styles (soil, rock, grass and crown tints …) blend by the ecotone's probability at
+        // any pixel size: picked by the mosaic, two ecoregions' soils drew a camouflage of crisp
+        // ~220 m patches over the ecotones (a third of the land)
+        let (e1, e2, w, ws) = if wb > 0.5 { (eb, ea, 1.0 - wb, 1.0 - pb) } else { (ea, eb, wb, pb) };
         let tz = zone_temp(t.temp, t.temp_range);
         let z1 = zone(reg, e1.biome, tz, ctx.p, ctx.gsd);
         let (a, b, wz) = if w > 0.0 {
@@ -1082,7 +1087,7 @@ impl BioSample {
         } else {
             z1
         };
-        let style = if w > 0.0 { e1.style.mix(&e2.style, w) } else { e1.style };
+        let style = if ws > 0.0 { e1.style.mix(&e2.style, ws) } else { e1.style };
         BioSample { a, b, w: if a == b { 0.0 } else { wz }, style, site: e1.climate, edge_km: edge / 1000.0 }
     }
 
