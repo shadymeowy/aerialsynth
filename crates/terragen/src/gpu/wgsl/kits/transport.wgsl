@@ -309,11 +309,12 @@ fn tr_road_px(sg: FSeg, f: TrFrame, e: TrEnv, kc: u32) -> TrPx {
         let sl = max(ddl - edge, 0.0) * 0.5;
         if (raised > 0.0) {
             let toe = edge + 2.0 * min(raised, 15.0);
-            tr_over(&o, tr_aa(toe - ddl, fw), mixc(e.below, srgb(112.0, 124.0, 74.0), 0.35), hs - sl);
+            tr_over(&o, tr_aa(toe - ddl, fw), mixc(e.below, srgb(112.0, 124.0, 74.0), 0.2), hs - sl);
         } else {
-            let toe = edge + 2.0 * min(-raised, 15.0);
-            let strata = 0.9 + 0.1 * sin((hs + sl) / 3.0);
-            tr_over(&o, tr_aa(toe - ddl, fw), mixc(e.below, srgb(140.0, 128.0, 100.0) * strata, 0.4), hs + sl);
+            let slc = max(ddl - edge, 0.0) * 2.0;
+            let toe = edge + 0.5 * min(-raised, 15.0);
+            let strata = 0.9 + 0.1 * sin((hs + slc) / 3.0);
+            tr_over(&o, tr_aa(toe - ddl, fw), mixc(e.below, srgb(140.0, 128.0, 100.0) * strata, 0.2), hs + slc);
         }
         o.z = hs - sl;
         o.clear = o.cov;

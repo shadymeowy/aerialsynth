@@ -220,7 +220,7 @@
   layers:
     - slot: zonal
       kernel: patches
-      params: { scale: 32, fraction: 0.82, octaves: 3, roughness: 0.55, colour: [198, 192, 158], colour2: [170, 160, 116], colour_var: 0.14 }
+      params: { scale: 32, fraction: 0.82, octaves: 3, roughness: 0.55, colour: [198, 192, 158], colour2: [170, 160, 116], colour_var: 0.14, soft: 0.3 }
       class: steppe
     - slot: zonal
       kernel: patches
@@ -277,7 +277,7 @@
       class: shrub
     - slot: zonal
       kernel: patches
-      params: { scale: 260, fraction: 0.22, octaves: 3, colour: [142, 126, 82], colour2: [124, 112, 72], colour_var: 0.1 }
+      params: { scale: 260, fraction: 0.22, octaves: 3, colour: [142, 126, 82], colour2: [124, 112, 72], colour_var: 0.1, soft: 0.3 }
       class: grass
     - slot: azonal
       kernel: patches
@@ -327,7 +327,7 @@
   layers:
     - slot: altitudinal
       kernel: patches
-      params: { scale: 26, fraction: 0.72, octaves: 3, roughness: 0.5, colour: [118, 142, 70], colour2: [150, 152, 92], colour_var: 0.15 }
+      params: { scale: 26, fraction: 0.72, octaves: 3, roughness: 0.5, colour: [118, 142, 70], colour2: [150, 152, 92], colour_var: 0.15, soft: 0.3 }
       class: alpine_meadow
     - slot: altitudinal
       kernel: patches
@@ -349,7 +349,7 @@
   layers:
     - slot: zonal
       kernel: patches
-      params: { scale: 40, fraction: 0.62, octaves: 3, roughness: 0.5, colour: grass_dry, colour2: [150, 146, 100], colour_var: 0.12 }
+      params: { scale: 40, fraction: 0.62, octaves: 3, roughness: 0.5, colour: grass_dry, colour2: [150, 146, 100], colour_var: 0.12, soft: 0.3 }
       class: steppe
 
 # altitudinal zones of the core temperate and Mediterranean biomes

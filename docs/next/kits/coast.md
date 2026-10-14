@@ -163,3 +163,5 @@ mangroves with their creeks. Distributaries hold sea water.
 
 Polish round 6: arid deltas and tidal flats are calmer: salt crusts soft and faint, dry creeks only a little darker
 than the mud, salt pans on fewer flats (perlin 0.3–0.55) and muted towards their mean.
+Polish round 7: salt pans on fewer arid flats (perlin 0.4–0.62) in salt colours (grey-pink, white, grey-teal, khaki;
+desert_coast@type had a quilt of pink, white and teal ponds).

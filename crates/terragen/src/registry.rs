@@ -1040,7 +1040,11 @@ pub struct BioSample {
     /// the biome blended in (coarse pixels at ecotones / zone borders) and its weight 0..1
     pub b: u16,
     pub w: f64,
-    /// style of the ecoregion (blended as the biomes are)
+    /// the other ecoregion's biome where the mosaic picked one of two (within the ecotone) and
+    /// the weight its palette blends in by (the ecotone's probability; `a` and 0 elsewhere)
+    pub c: u16,
+    pub wc: f64,
+    /// style of the ecoregion (blended by the ecotone's probability)
     pub style: crate::eco::EcoStyle,
     pub site: SiteClimate,
     /// distance to the ecoregion border (km)
@@ -1070,31 +1074,46 @@ impl BioSample {
             edge = -edge;
         }
         let ea = sm.eco.params(world, reg, cache, ia, ca);
-        let wb = if ib != 0 && ib != ia { crate::eco::ecotone_pick(world, ctx.p, ctx.gsd, edge) } else { 0.0 };
-        let eb = if wb > 0.0 { sm.eco.params(world, reg, cache, ib, cb) } else { ea };
-        // the sample's ecoregion and the one blended in (where the mosaic is below the pixel)
-        let (e1, e2, w) = if wb > 0.5 { (eb, ea, 1.0 - wb) } else { (ea, eb, wb) };
+        let two = ib != 0 && ib != ia;
+        let pb = if two { crate::eco::ecotone_prob(world, ctx.gsd, edge) } else { 0.0 };
+        let wb = if two { crate::eco::ecotone_pick(world, ctx.p, ctx.gsd, edge) } else { 0.0 };
+        let eb = if pb > 0.0 { sm.eco.params(world, reg, cache, ib, cb) } else { ea };
+        // the sample's ecoregion and the one blended in (where the mosaic is below the pixel);
+        // the styles (soil, rock, grass and crown tints …) blend by the ecotone's probability at
+        // any pixel size: picked by the mosaic, two ecoregions' soils drew a camouflage of crisp
+        // ~220 m patches over the ecotones (a third of the land)
+        let (e1, e2, w, ws) = if wb > 0.5 { (eb, ea, 1.0 - wb, 1.0 - pb) } else { (ea, eb, wb, pb) };
         let tz = zone_temp(t.temp, t.temp_range);
         let z1 = zone(reg, e1.biome, tz, ctx.p, ctx.gsd);
-        let (a, b, wz) = if w > 0.0 {
+        // (the palettes, too, blend by the probability where the mosaic picked one biome: two
+        // biomes' soils and grasses drew a camouflage of crisp patches over the ecotones)
+        let (a, b, wz, c, wc) = if w > 0.0 {
             let z2 = zone(reg, e2.biome, tz, ctx.p, ctx.gsd);
-            (z1.0, z2.0, w)
+            (z1.0, z2.0, w, z1.0, 0.0)
+        } else if ws > 0.0 {
+            let z2 = zone(reg, e2.biome, tz, ctx.p, ctx.gsd);
+            (z1.0, z1.1, z1.2, z2.0, ws)
         } else {
-            z1
+            (z1.0, z1.1, z1.2, z1.0, 0.0)
         };
-        let style = if w > 0.0 { e1.style.mix(&e2.style, w) } else { e1.style };
-        BioSample { a, b, w: if a == b { 0.0 } else { wz }, style, site: e1.climate, edge_km: edge / 1000.0 }
+        let style = if ws > 0.0 { e1.style.mix(&e2.style, ws) } else { e1.style };
+        let wc = if c == a { 0.0 } else { wc };
+        BioSample { a, b, w: if a == b { 0.0 } else { wz }, c, wc, style, site: e1.climate, edge_km: edge / 1000.0 }
     }
 
     /// A palette colour of the sample's biome(s).
     #[inline]
     pub fn pal(&self, reg: &Registry, i: usize) -> DVec3 {
-        let a = reg.biomes[self.a as usize].pal.c[i];
-        if self.w <= 0.0 {
-            return a;
+        let mut a = reg.biomes[self.a as usize].pal.c[i];
+        if self.w > 0.0 {
+            let b = reg.biomes[self.b as usize].pal.c[i];
+            a += (b - a) * self.w;
         }
-        let b = reg.biomes[self.b as usize].pal.c[i];
-        a + (b - a) * self.w
+        if self.wc > 0.0 {
+            let c = reg.biomes[self.c as usize].pal.c[i];
+            a += (c - a) * self.wc;
+        }
+        a
     }
 
     /// A vegetation parameter of the sample's biome(s).

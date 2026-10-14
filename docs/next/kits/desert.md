@@ -165,3 +165,7 @@ Leftovers round B: desert varnish patches are 240 m (was 520 m), 3 octaves, ligh
 Polish round 5: varnish on a fifth of the pavement (was 0.3; red deserts 0.18), lighter (164, 136, 104).
 Polish round 6: varnish and gravel mottling fade in and out (`soft: 0.3` / `0.35`), the core desert's pale mottling
 (184, 160, 126) is closer to the ground: v0.2.0's even desert floor instead of crisp blots.
+Polish round 7 (random-place audit): barchans only near the ergs of hyper-arid deserts (sand 0.08–0.2 up, moisture
+below 0.1–0.2: crescents were strewn over semi-arid scrub, steppe and even paddy land), the stony pavement of the erg
+fringe only in arid land (`aridity`), its varnish a gradual mottling (smoothstep −0.15–0.45 of the noise, 50 %: a crisp
+threshold drew a camouflage of dark and pale patches).

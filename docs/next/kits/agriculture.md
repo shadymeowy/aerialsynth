@@ -147,3 +147,4 @@ keep the old `k`, the elevation LOD test of the airport place failed with the ne
 Polish round 6: parcels up to 35 % smaller where it is wet (1000–1600 mm a year); pasture parcels 320 × 230 m
 (were 420 × 300), plantations 360 × 270 m with more crops (were 480 × 360); greenhouse seas only in warm climates
 (13–18 °C and up) and with more open fields; the survey culture grows the temperate crop mix in oceanic climates.
+Polish round 7: pastures hedged on two thirds of their parcels (were 45 %), field trees 0.07 (were 0.03).

@@ -6,6 +6,8 @@
 //!     cargo run --release -p terragen --example probe_px -- info LAT LON [LAT LON ...]
 //!     cargo run --release -p terragen --example probe_px -- bands
 //!     cargo run --release -p terragen --example probe_px -- towns LAT LON R_KM [MIN_LEVEL]
+//!     cargo run --release -p terragen --example probe_px -- audit N SEED
+//!     cargo run --release -p terragen --example probe_px -- slopes LAT LON KM STEP_M [classic]
 //!
 //! The first prints the world fields at one point (default 5 m pixels); `scan` prints one line of
 //! features per grid point (200 m pixels) to look for places; `sinks` lists the rivers ending in
@@ -96,10 +98,130 @@ fn main() {
         }
         return;
     }
+    if args[0] == "slopes" {
+        // slopes LAT LON KM STEP_M [classic]: the slope distribution of the bare ground over a
+        // KM x KM box (central differences of pass A's ground STEP_M apart)
+        let a: Vec<f64> = args[1..5].iter().map(|s| s.parse().unwrap()).collect();
+        let classic = args.get(5).is_some_and(|s| s == "classic");
+        let cg = classic.then(|| {
+            let cfg = terragen::Config { generator: terragen::GeneratorKind::Classic, ..Default::default() };
+            terragen::classic::Generator::with_backend(cfg, terragen::Backend::Cpu)
+        });
+        let n = (a[2] * 1000.0 / a[3]) as i64;
+        let (dlat, dlon) = (a[3] / 111_200.0, a[3] / (111_200.0 * a[0].to_radians().cos()));
+        let h = |i: i64, j: i64| {
+            let (la, lo) = ((a[0] + (i - n / 2) as f64 * dlat).to_radians(), (a[1] + (j - n / 2) as f64 * dlon).to_radians());
+            match &cg {
+                Some(c) => c.probe(la, lo, a[3]).0.ground,
+                None => g.probe(la, lo, a[3]).0.ground,
+            }
+        };
+        let grid: Vec<Vec<f64>> = (0..n).map(|i| (0..n).map(|j| h(i, j)).collect()).collect();
+        let mut sl = vec![];
+        for i in 1..n as usize - 1 {
+            for j in 1..n as usize - 1 {
+                let gx = (grid[i][j + 1] - grid[i][j - 1]) / (2.0 * a[3]);
+                let gy = (grid[i + 1][j] - grid[i - 1][j]) / (2.0 * a[3]);
+                sl.push(gx.hypot(gy).atan().to_degrees());
+            }
+        }
+        sl.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        let q = |f: f64| sl[((sl.len() - 1) as f64 * f) as usize];
+        let mean = sl.iter().sum::<f64>() / sl.len() as f64;
+        let share = |d: f64| sl.iter().filter(|&&x| x > d).count() as f64 / sl.len() as f64;
+        let (mn, mx) = grid.iter().flatten().fold((f64::MAX, f64::MIN), |(a, b), &x| (a.min(x), b.max(x)));
+        println!(
+            "slope mean {mean:.1} p50 {:.1} p90 {:.1} p99 {:.1}; >30 {:.2} >40 {:.2} >50 {:.2}; ground {mn:.0}..{mx:.0} m",
+            q(0.5),
+            q(0.9),
+            q(0.99),
+            share(30.0),
+            share(40.0),
+            share(50.0)
+        );
+        return;
+    }
+    if args[0] == "audit" {
+        // audit N SEED: the A/B audit's random land places (CSV)
+        audit(&g, args[1].parse().unwrap(), args[2].parse().unwrap());
+        return;
+    }
     let a: Vec<f64> = args.iter().map(|s| s.parse().unwrap()).collect();
     let (t, h, c) = g.probe(a[0].to_radians(), a[1].to_radians(), a.get(2).copied().unwrap_or(5.0));
     println!(
         "temp {:.1} moist {:.2} agri {:.2} ground {:8.2} water {:8.2} kind {} cont {:.4} mountain {:.2} mesa {:.2} river_hw {:.1} river_d {:.0} dsm {h:.2} class {c}",
         t.temp, t.moist, t.agri, t.ground, t.water, t.water_kind, t.cont, t.mountain, t.mesa, t.river_hw, t.river_d
     );
+}
+
+/// `audit N SEED`: `N` deterministic pseudo-random land places of the next world (the A/B
+/// audit, `scripts/ab_v020/audit_places.csv`) as CSV. Candidates are area-uniform within
+/// |lat| <= 70°; a candidate is kept when the next world has land there at least 2 km from the
+/// sea (no ocean, lake or river at the point), its Köppen group still has room (quotas A 6, B 8,
+/// C 7, D 6, E 3: every climate, roughly in proportion to the land), and it is at least 400 km
+/// from the places kept before it. The classic (v0.2.0) world has other continents: its place
+/// is the same point when that is land there, else the nearest classic land point (rings of
+/// 16 directions, 10 km apart).
+fn audit(g: &terragen::NextGenerator, n: usize, seed: u64) {
+    use terragen::noise::mix64;
+    let cfg = terragen::Config { generator: terragen::GeneratorKind::Classic, ..Default::default() };
+    let cg = terragen::classic::Generator::with_backend(cfg, terragen::Backend::Cpu);
+    let classic_land = |lat: f64, lon: f64| {
+        let (t, _, _) = cg.probe(lat.to_radians(), lon.to_radians(), 30.0);
+        t.water_kind == terragen::classic::world::water::NONE && t.cont > 0.0
+    };
+    let quota = |grp: char| match grp {
+        'A' => 6,
+        'B' => 8,
+        'C' => 7,
+        'D' => 6,
+        _ => 3,
+    };
+    let unit = |k: u64| (mix64(seed ^ mix64(k)) >> 11) as f64 / (1u64 << 53) as f64;
+    let dist_km = |a: (f64, f64), b: (f64, f64)| {
+        let (p1, p2) = (a.0.to_radians(), b.0.to_radians());
+        let c = p1.sin() * p2.sin() + p1.cos() * p2.cos() * (a.1 - b.1).to_radians().cos();
+        6371.0 * c.clamp(-1.0, 1.0).acos()
+    };
+    let mut kept: Vec<(f64, f64)> = vec![];
+    let mut count = std::collections::HashMap::<char, usize>::new();
+    println!("id,lat,lon,koppen,biome,ground_m,classic_lat,classic_lon,classic_shift_km");
+    let mut k = 0u64;
+    while kept.len() < n && k < 200_000 {
+        let (u, v) = (unit(2 * k), unit(2 * k + 1));
+        k += 1;
+        let lat = (2.0 * u - 1.0).asin().to_degrees();
+        let lon = 360.0 * v - 180.0;
+        if lat.abs() > 70.0 || kept.iter().any(|&p| dist_km(p, (lat, lon)) < 400.0) {
+            continue;
+        }
+        let (t, _, _) = g.probe(lat.to_radians(), lon.to_radians(), 30.0);
+        if t.coast_km < 2.0 || t.water_kind != terragen::world::water::NONE {
+            continue;
+        }
+        let e = terragen::eco::compute(&g.world, &g.surface.registry, t.eco.id, t.eco.center);
+        let kop = terragen::atlas::Koppen::ALL[e.climate.koppen as usize].code();
+        let grp = kop.chars().next().unwrap();
+        if count.get(&grp).copied().unwrap_or(0) >= quota(grp) {
+            continue;
+        }
+        // the classic world's place: the same point or the nearest land point
+        let mut cp = None;
+        'rings: for ring in 0..80 {
+            let r = 10.0 * ring as f64;
+            for d in 0..if ring == 0 { 1 } else { 16 } {
+                let az = (d as f64 * 22.5).to_radians();
+                let clat = lat + r / 111.2 * az.cos();
+                let clon = lon + r / (111.2 * lat.to_radians().cos().max(0.2)) * az.sin();
+                if classic_land(clat, clon) {
+                    cp = Some((clat, clon, r));
+                    break 'rings;
+                }
+            }
+        }
+        let Some((clat, clon, r)) = cp else { continue };
+        *count.entry(grp).or_default() += 1;
+        kept.push((lat, lon));
+        println!("a{:02},{lat:.4},{lon:.4},{kop},{},{:.0},{clat:.4},{clon:.4},{r:.0}", kept.len(), g.surface.registry.biomes[e.biome as usize].name, t.ground);
+    }
 }

@@ -677,8 +677,10 @@ fn autumn_weights(red: f64) -> [f64; 5] {
     [0.3, 0.28, 0.2 - 0.5 * red, red, 0.22 - 0.5 * red]
 }
 
+/// (muted: seen from the air, autumn forests are olive, ochre and rust; saturated yellow, orange
+/// and red crowns drew a speckle of toy colours)
 fn autumn_colours() -> [DVec3; 5] {
-    [rgb(176.0, 150.0, 62.0), rgb(184.0, 124.0, 48.0), rgb(172.0, 92.0, 40.0), rgb(138.0, 52.0, 40.0), rgb(112.0, 84.0, 54.0)]
+    [rgb(160.0, 144.0, 76.0), rgb(164.0, 124.0, 66.0), rgb(152.0, 98.0, 60.0), rgb(124.0, 68.0, 54.0), rgb(110.0, 88.0, 60.0)]
 }
 
 /// Autumn colours: deciduous crowns in yellow, gold, orange, red and brown over the canopy, by
@@ -698,7 +700,7 @@ fn canopy(s: &mut Stack) {
         return;
     }
     let conifer = ((1.0 - smoothstep(4.0, 13.0, t.temp)) + s.veg(|v| v.conifer) + s.bio.style.conifer).clamp(0.0, 1.0);
-    let leaf = aut * fe * (1.0 - conifer) * 0.85;
+    let leaf = aut * fe * (1.0 - conifer) * 0.65;
     if leaf > 0.01 {
         let kp = kernel_parts(s, K_AUTUMN, leaf, s.q_loc, 0.0);
         let w = autumn_weights(0.06 + 0.3 * eco_u2(s));

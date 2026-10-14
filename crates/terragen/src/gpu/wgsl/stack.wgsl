@@ -841,7 +841,7 @@ fn layer_canopy(s: ptr<function, Stack>) {
     let cold = (1.0 - smoothstep1(0.0, 8.0, temp)) * (1.0 - smoothstep1(0.35, 0.7, t.mountain));
     let base_cover = smoothstep1(0.3 - 0.2 * cold, 0.68 - 0.36 * cold, wet) * smoothstep1(-6.0 - 3.0 * cold, 2.0 - 2.0 * cold, temp) * td * trees_mult;
     let fpu = 0.5 + 0.5 * (*s).pf.f[PF_FOREST];
-    let forest = max(smoothstep1(-0.03, 0.03, base_cover - fpu), m.woodlot * smoothstep1(0.05, 0.4, s_agri(s)));
+    let forest = max(smoothstep1(-0.09, 0.09, base_cover - fpu), m.woodlot * smoothstep1(0.05, 0.4, s_agri(s)));
     let savanna = smoothstep1(0.18, 0.35, wet) * (1.0 - smoothstep1(0.55, 0.7, wet)) * smoothstep1(12.0, 20.0, temp) * 0.12 * sveg(s, VEG_SAVANNA);
     let groves = 0.04 * smoothstep1(0.15, 0.3, wet) * sveg(s, VEG_GROVES);
     let base = m.natural_ok * (1.0 - m.field_cov) * td;

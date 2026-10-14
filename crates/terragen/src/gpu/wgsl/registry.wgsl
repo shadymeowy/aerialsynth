@@ -161,6 +161,9 @@ struct Bio {
     a: u32,
     b: u32,
     w: f32,
+    /// the other ecoregion's biome where the mosaic picked one (its palette blends in by `wst`;
+    /// `a` elsewhere)
+    c: u32,
     edge_km: f32,
     st: EcoStyle,
     /// site temperature, precipitation, temperature range, dry months
@@ -172,14 +175,22 @@ struct Bio {
     wst: f32,
 }
 
-/// `eco::ecotone_pick`: weight of the ecoregion across the border at `edge` m.
-fn ecotone_pick(p: vec3<f64>, gsd: f32, edge: f32) -> f32 {
+/// `eco::ecotone_prob`: probability (0..½) of the ecoregion across the border at `edge` m.
+fn ecotone_prob(gsd: f32, edge: f32) -> f32 {
     let wd = cfg.ecotone;
     let wd_eff = max(wd, 1.5 * gsd);
     if (edge >= wd_eff || wd_eff <= 0.0) {
         return 0.0;
     }
-    let pb = 0.5 * (1.0 - smoothstep1(0.0, wd_eff, edge));
+    return 0.5 * (1.0 - smoothstep1(0.0, wd_eff, edge));
+}
+
+/// `eco::ecotone_pick`: weight of the ecoregion across the border at `edge` m.
+fn ecotone_pick(p: vec3<f64>, gsd: f32, edge: f32) -> f32 {
+    let pb = ecotone_prob(gsd, edge);
+    if (pb <= 0.0) {
+        return 0.0;
+    }
     let ex = band(220.0, gsd);
     if (ex <= 0.0) {
         return pb;
@@ -245,6 +256,7 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
         o.a = 0u;
         o.b = 0u;
         o.w = 0.0;
+        o.c = 0u;
         o.edge_km = edge / 1000.0;
         o.st.grass = vec4<f32>(1.0);
         o.st.crown = vec4<f32>(1.0);
@@ -258,11 +270,13 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
     let ea = eco_vals[ka];
     var kb2 = ka;
     var wb = 0.0;
+    var pb = 0.0;
     if (ib != 0lu && ib != ia) {
+        pb = ecotone_prob(c.gsd, edge);
         wb = ecotone_pick(c.p, c.gsd, edge);
     }
     var eb = ea;
-    if (wb > 0.0) {
+    if (pb > 0.0) {
         let kb = eco_find(ib);
         if (kb >= 0) {
             eb = eco_vals[kb];
@@ -274,12 +288,14 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
     var e1 = ea;
     var e2 = eb;
     var w = wb;
+    var ws = pb;
     o.k1 = ka;
     o.k2 = kb2;
     if (wb > 0.5) {
         e1 = eb;
         e2 = ea;
         w = 1.0 - wb;
+        ws = 1.0 - pb;
         o.k1 = kb2;
         o.k2 = ka;
     }
@@ -290,12 +306,20 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
         o.a = z1.z;
         o.b = z2.z;
         o.w = w;
-        o.st = style_mix(eco_style(e1), eco_style(e2), w);
-        o.wst = w;
+        o.c = z1.z;
     } else {
         o.a = z1.z;
         o.b = z1.partner;
         o.w = z1.w;
+        o.c = z1.z;
+        if (ws > 0.0) {
+            o.c = zone_of(e2.biome, tz, c.p, c.gsd).z;
+        }
+    }
+    if (ws > 0.0) {
+        o.st = style_mix(eco_style(e1), eco_style(e2), ws);
+        o.wst = ws;
+    } else {
         o.st = eco_style(e1);
         o.wst = 0.0;
     }
@@ -309,10 +333,11 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
 
 /// The `Bio` that `bio_at` made, from its zones (`a`, `b`, `w`), its style's ecoregions and blend
 /// (`k1`, `k2`, `wst`) and the border distance `edge` (m).
-fn bio_from(a: u32, b: u32, w: f32, k1: i32, k2: i32, wst: f32, edge: f32) -> Bio {
+fn bio_from(a: u32, bc: u32, w: f32, k1: i32, k2: i32, wst: f32, edge: f32) -> Bio {
     var o: Bio;
     o.a = a;
-    o.b = b;
+    o.b = bc & 0xffffu;
+    o.c = bc >> 16u;
     o.w = w;
     o.k1 = k1;
     o.k2 = k2;
@@ -337,11 +362,14 @@ fn bio_from(a: u32, b: u32, w: f32, k1: i32, k2: i32, wst: f32, edge: f32) -> Bi
 
 /// A palette colour of the sample's biome(s).
 fn bio_pal(b: Bio, i: u32) -> vec3<f32> {
-    let a = biomes[b.a].pal[i].xyz;
-    if (b.w <= 0.0) {
-        return a;
+    var a = biomes[b.a].pal[i].xyz;
+    if (b.w > 0.0) {
+        a += (biomes[b.b].pal[i].xyz - a) * b.w;
     }
-    return a + (biomes[b.b].pal[i].xyz - a) * b.w;
+    if (b.c != b.a && b.wst > 0.0) {
+        a += (biomes[b.c].pal[i].xyz - a) * b.wst;
+    }
+    return a;
 }
 
 /// Vegetation parameter `k` (0..11: trees, conifer, shrubs, savanna, groves, woodlots, tall,

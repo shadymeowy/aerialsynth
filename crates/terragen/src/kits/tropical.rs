@@ -840,7 +840,8 @@ fn mangrove(k: &KParams, i: &KIn) -> KOut {
 
 /// `tropical_grass`: savanna grass in dry-season colours: golden and grey-straw tones at
 /// `scale`, bare (laterite) patches, tussock mottling at metres (band-limited). Its extent is
-/// a crisp threshold of the tone noise by the amount. v: scale, bare, tussock, colour_var.
+/// a soft threshold of the tone noise by the amount (a crisp one drew golden patches cut out
+/// of the green). v: scale, bare, tussock, colour_var.
 fn grass(k: &KParams, i: &KIn) -> KOut {
     let v = &k.v;
     let sc = v[0];
@@ -848,7 +849,7 @@ fn grass(k: &KParams, i: &KIn) -> KOut {
         return KOut::default();
     }
     let t = 0.5 + 0.5 * perlin3(k.seed ^ 0x6A1, i.p / sc);
-    let w = (2.0 * i.fw / sc).clamp(1e-3, 0.5);
+    let w = (2.0 * i.fw / sc).clamp(0.15, 0.5);
     let cov = smoothstep(-w, w, i.amount - 0.05 - 0.9 * (1.0 - t));
     if cov <= 0.0 {
         return KOut::default();

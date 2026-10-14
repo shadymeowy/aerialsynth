@@ -752,7 +752,8 @@ pub fn azonal(s: &mut Stack) {
     let black = s.bio.style.litho == 3;
     let patch = s.pf.patch;
     let erg = smoothstep(0.47, 0.53, t.sand + 0.1 * patch);
-    let fringe = (1.0 - erg) * smoothstep(0.0, 0.08, t.sand);
+    // (the stony desert pavement is the arid lands': semi-arid scrub keeps its biome's ground)
+    let fringe = (1.0 - erg) * smoothstep(0.0, 0.08, t.sand) * aridity(t.moist);
     if fringe > 0.0 {
         // the stony pavement between the barchans: varnished gravel, sand sheets streaked
         // along the wind
@@ -760,8 +761,9 @@ pub fn azonal(s: &mut Stack) {
         let mut pav = mixc(soil, s.pal(pal::ROCK), 0.3) * 0.9;
         let vn = perlin3(seed ^ S_VARN, p / 420.0) + 0.5 * perlin3(seed ^ S_VARN ^ 1, p / 130.0) * band(130.0, gsd);
         let ve = smoothstep(1.2 * gsd, 3.0 * gsd, 130.0);
-        let varn = ve * smoothstep(0.2, 0.3, vn) + (1.0 - ve) * 0.3;
-        pav = mixc(pav, pav * DVec3::new(0.72, 0.68, 0.66), 0.7 * varn);
+        // (a gradual mottling: a crisp threshold drew a camouflage of dark and pale patches)
+        let varn = ve * smoothstep(-0.15, 0.45, vn) + (1.0 - ve) * 0.3;
+        pav = mixc(pav, pav * DVec3::new(0.72, 0.68, 0.66), 0.5 * varn);
         let sb = band(45.0, gsd);
         let mut streak = 0.2;
         if sb > 0.0 {
@@ -796,10 +798,12 @@ pub fn azonal(s: &mut Stack) {
 }
 
 /// Slot 4 (after the core's micro-relief resets the height): barchans on the sand-poor fringe
-/// of the sand seas, most where the wind is steady.
+/// of the sand seas of hyper-arid deserts, most where the wind is steady.
 pub fn barchan_field(s: &mut Stack) {
     let t = *s.t;
-    let z0 = smoothstep(0.02, 0.1, t.sand) * (1.0 - smoothstep(0.42, 0.58, t.sand));
+    // (only near the ergs of hyper-arid deserts: crescents strewn over semi-arid scrub, steppe
+    // and even paddy land read as toys)
+    let z0 = smoothstep(0.08, 0.2, t.sand) * (1.0 - smoothstep(0.42, 0.58, t.sand)) * (1.0 - smoothstep(0.1, 0.2, t.moist));
     if z0 <= 0.0 {
         return;
     }

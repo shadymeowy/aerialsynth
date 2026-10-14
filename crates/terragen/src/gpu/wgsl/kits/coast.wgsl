@@ -144,7 +144,7 @@ fn co_ponds(s: ptr<function, Stack>, zone: f32) {
     let fw = (*s).l.fw;
     let salt = t.moist < 0.45;
     let pn = perlin3(CO_SEED + 60lu, p * (1.0lf / 2400.0lf));
-    let area = select(smoothstep1(0.05, 0.3, pn), smoothstep1(0.3, 0.55, pn), salt);
+    let area = select(smoothstep1(0.05, 0.3, pn), smoothstep1(0.4, 0.62, pn), salt);
     if (area <= 0.0) {
         return;
     }
@@ -161,7 +161,7 @@ fn co_ponds(s: ptr<function, Stack>, zone: f32) {
     let h = hash2(CO_SEED + 61lu, i64(ix), i64(iy));
     var mean_col = srgb(88.0, 130.0, 116.0);
     if (salt) {
-        mean_col = srgb(184.0, 150.0, 140.0);
+        mean_col = srgb(176.0, 160.0, 148.0);
     }
     let e = smoothstep1(1.2 * gsd, 3.0 * gsd, cb);
     var exact = 0.0;
@@ -174,13 +174,13 @@ fn co_ponds(s: ptr<function, Stack>, zone: f32) {
         let pick = u01k(h, 2lu);
         if (salt) {
             if (pick < 0.3) {
-                col = srgb(206.0, 120.0, 132.0);
+                col = srgb(184.0, 148.0, 144.0);
             } else if (pick < 0.5) {
-                col = srgb(232.0, 214.0, 208.0);
+                col = srgb(214.0, 206.0, 196.0);
             } else if (pick < 0.75) {
-                col = srgb(78.0, 166.0, 168.0);
+                col = srgb(128.0, 150.0, 146.0);
             } else {
-                col = srgb(96.0, 150.0, 98.0);
+                col = srgb(150.0, 146.0, 122.0);
             }
         } else if (pick < 0.4) {
             col = srgb(70.0, 140.0, 130.0);

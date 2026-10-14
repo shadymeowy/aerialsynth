@@ -141,3 +141,7 @@ kit's `KITS` entry commented out (mean of two runs, shared machine, so +-3 % noi
 
 Leftovers round B: the regrowth's grass colour differs by stand (two olive greens) and has a 40 m patchwork; the kettle
 lake place's white rectangles are the boreal clear-cuts under snow (kept).
+
+Polish round 7: autumn colours muted (olive, ochre, rust instead of saturated yellow, orange and red) on two thirds of
+the deciduous crowns (were 85 %); steppe, feather-grass steppe, moor grass and alpine meadow patches soft (`soft: 0.3`:
+crisp dry patches over green read as camouflage); the core `boreal` biome's open ground grey-brown (lichen, heath).

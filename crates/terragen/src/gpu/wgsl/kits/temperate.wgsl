@@ -511,11 +511,11 @@ fn temperate_firebreaks(s: ptr<function, Stack>, fe: f32, dry: f32) {
 
 fn temperate_autumn_colour(i: u32) -> vec3<f32> {
     switch i {
-        case 0u: { return srgb(176.0, 150.0, 62.0); }
-        case 1u: { return srgb(184.0, 124.0, 48.0); }
-        case 2u: { return srgb(172.0, 92.0, 40.0); }
-        case 3u: { return srgb(138.0, 52.0, 40.0); }
-        default: { return srgb(112.0, 84.0, 54.0); }
+        case 0u: { return srgb(160.0, 144.0, 76.0); }
+        case 1u: { return srgb(164.0, 124.0, 66.0); }
+        case 2u: { return srgb(152.0, 98.0, 60.0); }
+        case 3u: { return srgb(124.0, 68.0, 54.0); }
+        default: { return srgb(110.0, 88.0, 60.0); }
     }
 }
 
@@ -544,7 +544,7 @@ fn temperate_slot_canopy(s: ptr<function, Stack>) {
         return;
     }
     let conifer = clamp((1.0 - smoothstep1(4.0, 13.0, t.temp)) + sveg(s, VEG_CONIFER) + (*s).bio.st.veg.y, 0.0, 1.0);
-    let leaf = aut * fe * (1.0 - conifer) * 0.85;
+    let leaf = aut * fe * (1.0 - conifer) * 0.65;
     if (leaf > 0.01) {
         let kp = temperate_parts(s, temperate_kp_autumn(), TEMPERATE_AUTUMN_SIZE, TEMPERATE_AUTUMN_MEAN.x, leaf, (*s).q_loc, 0.0);
         let red = 0.06 + 0.3 * temperate_eco_u2(s);

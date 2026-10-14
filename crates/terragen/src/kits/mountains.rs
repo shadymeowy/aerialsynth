@@ -499,7 +499,9 @@ pub fn carve(_w: &World, ci: &CarveIn, cv: &mut Carve) {
             cv.wall_k *= lerp(1.0, 0.3 * (1.0 + 1.1 * re + 0.3 * sp), cz);
             cv.fp_w *= lerp(1.0, 0.6, cz);
             cv.steps = 50.0;
-            cv.step_mix = cv.step_mix.max(cz * band(160.0, gsd));
+            // (the benches strong along some stretches of the canyon, faint along others)
+            let bs = 0.45 + 0.55 * smoothstep(-0.35, 0.35, perlin3(SEED + 72, ci.ctx.p / 1400.0));
+            cv.step_mix = cv.step_mix.max(cz * band(160.0, gsd) * bs);
             // (the benches are counted from a fixed height above the floor, not from the ground)
             cv.top = cv.floor + 500.0;
         }

@@ -128,6 +128,15 @@ pub struct Terrain {
     pub regime: f64,
 }
 
+/// The share of the ridged mountains' fine octaves (wavelengths below 1.8 km) at mountain
+/// amplitude `amp_m` (m): the walls' relief saturates at ~3 km of amplitude, so the highest
+/// ranges are higher, not steeper (at full amplitude the 6-7 km ranges had a mean slope of
+/// 37° at 30 m, a fifth of the ground steeper than 50°: steeper than the Himalaya).
+#[inline]
+pub(crate) fn ridged_fine(amp_m: f64) -> f64 {
+    (3000.0 / amp_m.max(1.0)).clamp(0.55, 1.0)
+}
+
 /// A Worley site: id hash, centre (ECEF, on the surface), distance to its Voronoi border (m).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Site {
@@ -372,9 +381,9 @@ impl World {
         c
     }
 
-    /// Ridged multifractal mountains, 0..~1.
-    fn ridged(&self, p: DVec3, gsd: f64, sharp: f64) -> (f64, f64) {
-        let st = self.ridged_part(p, gsd, sharp, 0.0, true, [0.0, 0.0, 1.0]);
+    /// Ridged multifractal mountains, 0..~1 (`fine`: [`ridged_fine`] of the amplitude).
+    fn ridged(&self, p: DVec3, gsd: f64, sharp: f64, fine: f64) -> (f64, f64) {
+        let st = self.ridged_part(p, gsd, sharp, 0.0, true, [0.0, 0.0, 1.0], fine);
         (st[0] * 0.5, st[1] * 0.5)
     }
 
@@ -382,7 +391,7 @@ impl World {
     /// (not `low`, continuing from the state `st` of the long ones). State: sum, low-passed sum,
     /// weight of the next octave (before the final scaling).
     #[allow(clippy::too_many_arguments)]
-    fn ridged_part(&self, p: DVec3, gsd: f64, sharp: f64, cut: f64, low: bool, st: [f64; 3]) -> [f64; 3] {
+    fn ridged_part(&self, p: DVec3, gsd: f64, sharp: f64, cut: f64, low: bool, st: [f64; 3], fine: f64) -> [f64; 3] {
         let [mut sum, mut low_sum, mut weight] = st;
         let mut lam = 14.0 * KM;
         let mut amp = 1.0;
@@ -402,7 +411,7 @@ impl World {
                 r = r.powf(sharp);
                 r *= weight;
                 weight = (r * 1.8).clamp(0.0, 1.0);
-                sum += r * amp * wb;
+                sum += r * amp * wb * if lam < 1.8 * KM { fine } else { 1.0 };
                 if lam > 6.0 * KM {
                     low_sum += r * amp * wb;
                 }
@@ -668,7 +677,8 @@ impl World {
         if let Some(cut) = relief_cut {
             let wp = DVec2::new(m.mtn_warp[0], m.mtn_warp[1]) * 9.0 * KM;
             let pw = ctx.p + ctx.east * wp.x + ctx.north * wp.y;
-            let [rs, rl, rw] = self.ridged_part(pw, ctx.gsd, 1.6 + 0.8 * m.style[2], cut[0], true, [0.0, 0.0, 1.0]);
+            let fine = ridged_fine(self.mountain_mask(m).1);
+            let [rs, rl, rw] = self.ridged_part(pw, ctx.gsd, 1.6 + 0.8 * m.style[2], cut[0], true, [0.0, 0.0, 1.0], fine);
             let [hs, hl] = self.hills_part(ctx.p, ctx.gsd, 0.47 + 0.08 * m.rough, cut[1], true);
             pre.relief = Some([rs, rl, rw, hs, hl]);
             pre.relief_cut = cut;
@@ -736,7 +746,7 @@ impl World {
             let mut v = hill_amp * self.hills(q, gl, gain).0;
             if amp_m > 0.0 {
                 let wp = DVec2::new(m.mtn_warp[0], m.mtn_warp[1]) * 9.0 * KM;
-                v += amp_m * self.ridged(q + ctx.east * wp.x + ctx.north * wp.y, gl, 1.6 + 0.8 * m.style[2]).0;
+                v += amp_m * self.ridged(q + ctx.east * wp.x + ctx.north * wp.y, gl, 1.6 + 0.8 * m.style[2], ridged_fine(amp_m)).0;
             }
             v
         };
@@ -1042,13 +1052,14 @@ impl World {
             let wp = DVec2::new(m.mtn_warp[0], m.mtn_warp[1]) * 9.0 * KM;
             let pw = p + ctx.east * wp.x + ctx.north * wp.y;
             let sharp = 1.6 + 0.8 * m.style[2];
+            let fine = ridged_fine(amp_m);
             match m.pre.and_then(|p| p.relief.map(|r| (r, p.relief_cut[0]))) {
                 // the long octaves from the tile's coarse grid
                 Some((r, cut)) => {
-                    let st = self.ridged_part(pw, gsd, sharp, cut, false, [r[0], r[1], r[2].clamp(0.0, 1.0)]);
+                    let st = self.ridged_part(pw, gsd, sharp, cut, false, [r[0], r[1], r[2].clamp(0.0, 1.0)], fine);
                     (st[0] * 0.5, st[1] * 0.5)
                 }
-                None => self.ridged(pw, gsd, sharp),
+                None => self.ridged(pw, gsd, sharp, fine),
             }
         } else {
             (0.0, 0.0)
@@ -1091,7 +1102,8 @@ impl World {
                     None => self.gullies(p, ctx.up, grad, gsd, lam_e),
                 };
                 gully_n = g * mask;
-                gully = gully_n * self.cfg.relief.erosion * (0.05 * amp_m + 0.12 * hill_amp);
+                // (the gullies of the highest ranges as deep as those of ~3 km ranges)
+                gully = gully_n * self.cfg.relief.erosion * (0.05 * amp_m * ridged_fine(amp_m) + 0.12 * hill_amp);
             }
         }
 
@@ -1248,7 +1260,9 @@ impl World {
                             let k = ((cv.top - fp) / cv.steps.max(1.0)).max(1.0);
                             let x = w * k;
                             let i = x.floor();
-                            w = lerp(w, (i + smoothstep(0.4, 0.97, x - i)) / k, cv.step_mix * (1.0 - smoothstep(0.8, 1.0, w)));
+                            // (each bench its own ledge width: equal ledges drew a staircase)
+                            let a = 0.15 + 0.5 * u01k(hash1(0xBE4C, i as i64), 1);
+                            w = lerp(w, (i + smoothstep(a, 0.97, x - i)) / k, cv.step_mix * (1.0 - smoothstep(0.8, 1.0, w)));
                         }
                         w
                     } else {

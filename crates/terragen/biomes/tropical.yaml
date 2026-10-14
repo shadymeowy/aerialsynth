@@ -251,7 +251,7 @@
       clear: 1.0
     - slot: canopy
       kernel: tropical_crowns
-      mask: { gully: [null, null, -0.5, -0.2], natural: [0.4, 0.7, null, null], veg: [0.3, 0.6, null, null] }
+      mask: { gully: [null, null, -0.75, 0.05], natural: [0.4, 0.7, null, null], veg: [0.3, 0.6, null, null] }
       params: { cell: 7, density: 0.9, radius: [3, 5], height: [12, 18], colour: [48, 80, 38], colour2: [70, 98, 46], second: 0.35, colour_var: 0.25 }
       class: broadleaf_forest
     - *mangrove
@@ -263,7 +263,7 @@
   patch: true
   landuse: { agriculture: 0.45 }
   palette:
-    grass_dry: [190, 160, 98]
+    grass_dry: [178, 156, 104]
     grass_wet: [128, 128, 64]
     crown_decid: [70, 86, 44]
     crown_dry: [116, 106, 80]
@@ -278,8 +278,8 @@
     - &savanna_grass
       slot: zonal
       kernel: tropical_grass
-      mask: { moist: [null, null, 0.5, 0.68], temp: [16, 20, null, null] }
-      params: { scale: 70, bare: 0.08, tussock: 0.6, colour: [214, 186, 116], colour2: [190, 174, 122], bare_colour: [176, 126, 88] }
+      mask: { moist: [null, null, 0.45, 0.62], temp: [16, 20, null, null] }
+      params: { scale: 70, bare: 0.08, tussock: 0.6, colour: [196, 176, 120], colour2: [176, 166, 122], bare_colour: [168, 124, 90] }
       class: savanna
     - &savanna_fire
       slot: disturbance
@@ -296,7 +296,9 @@
     - &gallery_gully
       slot: canopy
       kernel: tropical_crowns
-      mask: { gully: [null, null, -0.5, -0.2], natural: [0.4, 0.7, null, null], veg: [0.3, 0.6, null, null], field: [null, null, 0.05, 0.2] }
+      # (the gallery forest thins out up the valley sides: a crisp edge at the valley's rim cut
+      # pale savanna blotches out of the dark forest)
+      mask: { gully: [null, null, -0.75, 0.05], natural: [0.4, 0.7, null, null], veg: [0.3, 0.6, null, null], field: [null, null, 0.05, 0.2] }
       params: { cell: 7, density: 0.9, radius: [3, 5], height: [10, 16], colour: [44, 74, 36], colour2: [62, 90, 42], second: 0.35, colour_var: 0.25 }
       class: broadleaf_forest
     - &gallery_river
@@ -447,7 +449,7 @@
   canopy:
     # Brachystegia: new leaves red-bronze, mature olive, some leafless
     - { share: broadleaf, shape: dome, cell: 10, height: [10, 6], open_height: 0.7, colour: [82, 96, 50], colour_dry: [136, 112, 80] }
-    - { share: broadleaf, shape: dome, cell: 13, height: [11, 5], colour: [150, 96, 66], density: 0.18, closure: false, seed: 0x7E71 }
+    - { share: broadleaf, shape: dome, cell: 13, height: [11, 5], colour: [128, 98, 70], density: 0.18, closure: false, seed: 0x7E71 }
     - { share: savanna, shape: umbrella, cell: 12, height: [7, 3], colour: [82, 92, 50], closure: false, stand: false }
     - { share: shrub, shape: dome, cell: 4, height: [1.5, 0], colour: [98, 96, 62], closure: false, stand: false }
   layers:

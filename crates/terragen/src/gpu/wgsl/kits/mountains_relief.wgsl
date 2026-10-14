@@ -435,7 +435,8 @@ fn mountains_carve(c: Ctx, m: Macro, ci: CarveIn, cv: ptr<function, Carve>) {
             (*cv).wall_k *= lerp(1.0, 0.3 * (1.0 + 1.1 * re + 0.3 * sp), cz);
             (*cv).fp_w *= lerp(1.0, 0.6, cz);
             (*cv).steps = 50.0;
-            (*cv).step_mix = max((*cv).step_mix, cz * band(160.0, gsd));
+            let bs = 0.45 + 0.55 * smoothstep1(-0.35, 0.35, perlin3(MT_SEED + 72lu, c.p / 1400.0lf));
+            (*cv).step_mix = max((*cv).step_mix, cz * band(160.0, gsd) * bs);
             (*cv).top = (*cv).floor + 500.0;
         }
     }

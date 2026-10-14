@@ -42,6 +42,12 @@
   town centres of detached boxes on lawns, fewer street trees; smaller, more varied parcels
   in wet climates, hedged mixed farms; no fishbone clearings over farmland; greenhouse seas
   only in warm climates; snow on steep high-mountain slopes.
+- `next` polish round 7, from an audit at 30 random land places (`scripts/ab_v020.py audit`):
+  ecotones blend their palettes and styles (no camouflage of two biomes' soils), barchans only
+  near hyper-arid ergs, soft steppe and savanna mosaics, feathered forest edges, muted cold
+  colours (glacier ice, crevasses, polar soils, snow nets) and autumn crowns; dense town centres
+  of small lots with varied roofs; less steep 5–7 km ranges; irregular canyon benches, narrow
+  road cuttings, muted salt pans, hedged pastures, grey-brown boreal heath.
 - **Optional tile layers** (tile store format 2; `next` only): `tiles.layers: [dtm, instance]`
   adds the bare ground and instance ids (building lots, fields, forest stands) to a new store;
   the viewer's map shadings *Height above ground* and *Instances* show them. Format-1 stores

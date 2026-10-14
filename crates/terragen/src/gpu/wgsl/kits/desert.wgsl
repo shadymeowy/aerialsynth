@@ -207,14 +207,14 @@ fn desert_slot_azonal(s: ptr<function, Stack>) {
     let black = (*s).bio.st.litho == 3u;
     let pnoise = (*s).pf.f[PF_PATCH];
     let erg = smoothstep1(0.47, 0.53, t.sand + 0.1 * pnoise);
-    let fringe = (1.0 - erg) * smoothstep1(0.0, 0.08, t.sand);
+    let fringe = (1.0 - erg) * smoothstep1(0.0, 0.08, t.sand) * desert_aridity(t.moist);
     if (fringe > 0.0) {
         let soil = spal(s, BP_SOIL + 1u);
         var pav = mixc(soil, spal(s, BP_ROCK), 0.3) * 0.9;
         let vn = perlin3(cfg.seed ^ DS_VARN, p / 420.0lf) + 0.5 * perlin3(cfg.seed ^ DS_VARN ^ 1lu, p / 130.0lf) * band(130.0, gsd);
         let ve = smoothstep1(1.2 * gsd, 3.0 * gsd, 130.0);
-        let varn = ve * smoothstep1(0.2, 0.3, vn) + (1.0 - ve) * 0.3;
-        pav = mixc(pav, pav * vec3<f32>(0.72, 0.68, 0.66), 0.7 * varn);
+        let varn = ve * smoothstep1(-0.15, 0.45, vn) + (1.0 - ve) * 0.3;
+        pav = mixc(pav, pav * vec3<f32>(0.72, 0.68, 0.66), 0.5 * varn);
         let sb = band(45.0, gsd);
         var streak = 0.2;
         if (sb > 0.0) {
@@ -254,7 +254,7 @@ fn desert_slot_azonal(s: ptr<function, Stack>) {
 /// `desert::barchan_field` (slot 4).
 fn desert_slot_disturbance(s: ptr<function, Stack>) {
     let t = (*s).t;
-    let z0 = smoothstep1(0.02, 0.1, t.sand) * (1.0 - smoothstep1(0.42, 0.58, t.sand));
+    let z0 = smoothstep1(0.08, 0.2, t.sand) * (1.0 - smoothstep1(0.42, 0.58, t.sand)) * (1.0 - smoothstep1(0.1, 0.2, t.moist));
     if (z0 <= 0.0) {
         return;
     }

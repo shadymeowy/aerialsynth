@@ -321,7 +321,7 @@ pub fn roof_col(arch: u32, u: f64, flat: bool) -> DVec3 {
         // slate, red tile, brown
         6 | 4 => match k {
             0 => srgb(88.0, 88.0, 94.0),
-            1 => srgb(152.0, 74.0, 58.0),
+            1 => srgb(146.0, 84.0, 66.0),
             2 => srgb(118.0, 86.0, 72.0),
             _ => srgb(70.0, 72.0, 80.0),
         },
@@ -1068,7 +1068,10 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     // handled below (W2 units)
                 } else {
                     // lots by BSP and buildings by typology
+                    // (a town's centre: v0.2.0's dense small lots, 13-25 m wide)
+                    let core = town_core(pl, z, pattern);
                     let depth = match z {
+                        _ if core => 4,
                         zone::CBD => 1,
                         zone::INNER => 2,
                         _ => 3,
@@ -1147,7 +1150,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                             }
                         }
                     };
-                    let town_box = t == typ::MIDRISE && pl.level <= 2 && z == zone::INNER;
+                    let town_box = t == typ::MIDRISE && core;
                     if built || dl > 0.65 {
                         cov_lot = 1.0;
                         col = match t {
@@ -1178,20 +1181,25 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                                 (DVec2::splat(s), 40.0 + 360.0 * ps * u01k(lh, 4).powi(3) + 40.0 * u01k(lh, 5), true)
                             }
                             typ::MIDRISE => {
-                                // (a town's: a box of 3-7 floors in its lot, lawn around)
-                                let fill = if town_box {
-                                    DVec2::new(9.0 + 7.0 * u01k(lh, 6), 7.0 + 6.0 * u01k(lh, 7))
-                                } else if z <= zone::INNER {
-                                    DVec2::new(60.0, 60.0)
+                                if town_box {
+                                    // (a town's: v0.2.0's houses and blocks, the lot minus
+                                    // 1.5-4 m setbacks, 3.5-8 m high and a few taller ones,
+                                    // mostly pitched roofs)
+                                    let sb = 1.5 + 2.5 * u01k(lh, 1);
+                                    let u5 = u01k(lh, 5);
+                                    (
+                                        DVec2::new((0.5 * lw - sb).min(13.0), (0.5 * ld - sb).min(11.0)),
+                                        3.5 + 4.5 * u01k(lh, 4) + 16.0 * u5 * u5 * u5 * u5,
+                                        u01k(lh, 6) < 0.35,
+                                    )
                                 } else {
-                                    DVec2::new(40.0, 14.0 + 10.0 * u01k(lh, 6))
-                                };
-                                let fl = if town_box { 3.0 } else { 4.0 };
-                                (
-                                    DVec2::new(0.5 * lw - 2.5, 0.5 * ld - 2.5).min(fill),
-                                    3.0 * (fl + 4.0 * u01k(lh, 4)) + if z == zone::CBD { 12.0 } else { 0.0 },
-                                    true,
-                                )
+                                    let fill = if z <= zone::INNER { DVec2::new(60.0, 60.0) } else { DVec2::new(40.0, 14.0 + 10.0 * u01k(lh, 6)) };
+                                    (
+                                        DVec2::new(0.5 * lw - 2.5, 0.5 * ld - 2.5).min(fill),
+                                        3.0 * (4.0 + 4.0 * u01k(lh, 4)) + if z == zone::CBD { 12.0 } else { 0.0 },
+                                        true,
+                                    )
+                                }
                             }
                             typ::WAREHOUSE => (DVec2::new(0.5 * lw - 9.0, 0.5 * ld - 9.0), 8.0 + 6.0 * u01k(lh, 4), true),
                             typ::ROW => {
@@ -1241,7 +1249,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         );
                         let frac = match t {
                             typ::HOUSE => 0.3,
-                            _ if town_box => 0.3,
+                            _ if town_box => 0.45,
                             typ::TOWER => 0.75,
                             typ::WAREHOUSE => 0.6,
                             _ => 0.55,
@@ -1535,16 +1543,22 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
 /// Shares of green and paved ground of a zone (the rest is roofs).
 pub fn zone_fracs(pl: &Pl, d: &Dist) -> (f64, f64) {
     if town_centre(pl, d) {
-        // (a town's centre: boxes on lawns)
-        return (0.38, 0.32);
+        // (a town's centre: v0.2.0's dense houses on small lots)
+        return (0.3, 0.3);
     }
     let zi = d.zone as usize;
     ([0.05, 0.12, 0.25, 0.42, 0.5][zi], [0.5, 0.4, 0.32, 0.25, 0.18][zi])
 }
 
-/// Is the district a town's centre (detached boxes on lawns, not perimeter blocks)?
+/// Is the district a town's centre (v0.2.0's dense houses on small lots, not perimeter blocks)?
 fn town_centre(pl: &Pl, d: &Dist) -> bool {
-    d.zone == zone::INNER && pl.level <= 2 && pl.form == form::CITY as u32 && d.pattern != pat::INDUSTRIAL
+    town_core(pl, d.zone, d.pattern)
+}
+
+/// A town's inner and outer zones (towns, levels <= 2; not industrial estates): small lots
+/// (BSP depth 4) of houses and blocks of 1-3 floors, v0.2.0's town centres.
+fn town_core(pl: &Pl, z: u32, pattern: u32) -> bool {
+    (z == zone::INNER || z == zone::OUTER) && pl.level <= 2 && pl.form == form::CITY as u32 && pattern != pat::INDUSTRIAL
 }
 
 /// The land-cover class of a sample where the district's lots are below the pixel: drawn from
@@ -1578,7 +1592,8 @@ pub fn zone_mean(pl: &Pl, d: &Dist, moist: f64) -> (DVec3, f64) {
     let (green, paved) = zone_fracs(pl, d);
     let roofs = 1.0 - green - paved;
     let flat = z <= zone::OUTER && pl.form == form::CITY as u32;
-    let rc = roof_col(pl.arch, 0.35, flat);
+    // (a town centre's roofs: a third flat)
+    let rc = if town_centre(pl, d) { mixc(roof_col(pl.arch, 0.35, false), roof_col(pl.arch, 0.35, true), 0.35) } else { roof_col(pl.arch, 0.35, flat) };
     let rc = match d.pattern {
         pat::INDUSTRIAL => srgb(140.0, 140.0, 138.0),
         pat::INFORMAL => srgb(124.0, 104.0, 86.0),

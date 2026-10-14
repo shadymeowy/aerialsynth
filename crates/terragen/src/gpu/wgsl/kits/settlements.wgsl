@@ -306,7 +306,7 @@ fn st_roof_col(arch: u32, u: f32, flat: bool) -> vec3<f32> {
         c3 = srgb(226.0, 220.0, 208.0);
     } else if (arch == 6u || arch == 4u) {
         c0 = srgb(88.0, 88.0, 94.0);
-        c1 = srgb(152.0, 74.0, 58.0);
+        c1 = srgb(146.0, 84.0, 66.0);
         c2 = srgb(118.0, 86.0, 72.0);
         c3 = srgb(70.0, 72.0, 80.0);
     } else if (arch == 9u || arch == 10u) {
@@ -1163,8 +1163,11 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             }
         } else if (pattern != SP_DISPERSED && pattern != SP_KRAAL) {
             // lots by BSP and buildings by typology
+            let core = st_town_core(pl, z, pattern);
             var depth = 3u;
-            if (z == SZ_CBD) {
+            if (core) {
+                depth = 4u;
+            } else if (z == SZ_CBD) {
                 depth = 1u;
             } else if (z == SZ_INNER) {
                 depth = 2u;
@@ -1223,7 +1226,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             } else if ((a == 0u || a == 1u || a == 8u || a == 3u) && ut < 0.6) {
                 t = STY_ROW;
             }
-            let town_box = t == STY_MIDRISE && pl.level <= 2u && z == SZ_INNER;
+            let town_box = t == STY_MIDRISE && core;
             if (built || dl > 0.65) {
                 cov_lot = 1.0;
                 if (t == STY_WAREHOUSE) {
@@ -1256,15 +1259,19 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     let u4 = u01k(lh, 4lu);
                     half = vec2<f32>(s2);
                     hb = 40.0 + 360.0 * ps * (u4 * u4 * u4) + 40.0 * u01k(lh, 5lu);
+                } else if (t == STY_MIDRISE && town_box) {
+                    let sb = 1.5 + 2.5 * u01k(lh, 1lu);
+                    let u5 = u01k(lh, 5lu);
+                    half = vec2<f32>(min(0.5 * lw - sb, 13.0), min(0.5 * ld - sb, 11.0));
+                    hb = 3.5 + 4.5 * u01k(lh, 4lu) + 16.0 * u5 * u5 * u5 * u5;
+                    flat = u01k(lh, 6lu) < 0.35;
                 } else if (t == STY_MIDRISE) {
                     var fill = vec2<f32>(40.0, 14.0 + 10.0 * u01k(lh, 6lu));
-                    if (town_box) {
-                        fill = vec2<f32>(9.0 + 7.0 * u01k(lh, 6lu), 7.0 + 6.0 * u01k(lh, 7lu));
-                    } else if (z <= SZ_INNER) {
+                    if (z <= SZ_INNER) {
                         fill = vec2<f32>(60.0, 60.0);
                     }
                     half = min(vec2<f32>(0.5 * lw - 2.5, 0.5 * ld - 2.5), fill);
-                    hb = 3.0 * (select(4.0, 3.0, town_box) + 4.0 * u01k(lh, 4lu)) + select(0.0, 12.0, z == SZ_CBD);
+                    hb = 3.0 * (4.0 + 4.0 * u01k(lh, 4lu)) + select(0.0, 12.0, z == SZ_CBD);
                 } else if (t == STY_WAREHOUSE) {
                     half = vec2<f32>(0.5 * lw - 9.0, 0.5 * ld - 9.0);
                     hb = 8.0 + 6.0 * u01k(lh, 4lu);
@@ -1310,8 +1317,10 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                 rf_flat = flat;
                 rf_mul = 0.84 + 0.32 * u01k(lh, 11lu);
                 var frac = 0.55;
-                if (t == STY_HOUSE || town_box) {
+                if (t == STY_HOUSE) {
                     frac = 0.3;
+                } else if (town_box) {
+                    frac = 0.45;
                 } else if (t == STY_TOWER) {
                     frac = 0.75;
                 } else if (t == STY_WAREHOUSE) {
@@ -1623,15 +1632,22 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     return o;
 }
 
-/// `town::zone_fracs`: (green, paved).
-fn st_town_centre(pl: StPl, d: StDist) -> bool {
-    return d.zone == SZ_INNER && pl.level <= 2u && pl.form == SF_CITY && d.pattern != SP_INDUSTRIAL;
+/// `town::town_core`.
+fn st_town_core(pl: StPl, z: u32, pattern: u32) -> bool {
+    return (z == SZ_INNER || z == SZ_OUTER) && pl.level <= 2u && pl.form == SF_CITY && pattern != SP_INDUSTRIAL;
 }
+
+/// `town::town_centre`.
+fn st_town_centre(pl: StPl, d: StDist) -> bool {
+    return st_town_core(pl, d.zone, d.pattern);
+}
+
+/// `town::zone_fracs`: (green, paved).
 
 fn st_zone_fracs(pl: StPl, d: StDist) -> vec2<f32> {
     let z = d.zone;
     if (st_town_centre(pl, d)) {
-        return vec2<f32>(0.38, 0.32);
+        return vec2<f32>(0.3, 0.3);
     }
     if (z == SZ_INNER) {
         return vec2<f32>(0.12, 0.4);
@@ -1681,6 +1697,9 @@ fn st_zone_mean(pl: StPl, d: StDist, moist: f32) -> vec4<f32> {
     let roofs = 1.0 - green - paved;
     let flat = z <= SZ_OUTER && pl.form == SF_CITY;
     var rc = st_roof_col(pl.arch, 0.35, flat);
+    if (st_town_centre(pl, d)) {
+        rc = mixc(st_roof_col(pl.arch, 0.35, false), st_roof_col(pl.arch, 0.35, true), 0.35);
+    }
     if (d.pattern == SP_INDUSTRIAL) {
         rc = srgb(140.0, 140.0, 138.0);
     } else if (d.pattern == SP_INFORMAL) {
