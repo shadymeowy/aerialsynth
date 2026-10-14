@@ -1,5 +1,6 @@
 # alpine_south at a place of the same type in the next generator's world: snow-covered high mountains (48.5 N, ridges
-# 4-6 km; round 5 used an equatorial range with glaciers only on the peaks) (the same local solar time and date)
+# 4-6 km; round 5 used an equatorial range with glaciers only on the peaks) (the same local solar time; 18 February:
+# the sun as low as at v0.2.0's place in the southern winter, 14 deg; on 21 June it stood 40 deg high and lit the range flat)
 world:
   seed: 1
   generator: next
@@ -23,7 +24,7 @@ render:
   shading: relit
   lighting:
     mode: clock
-    date: '2026-06-21'
+    date: '2026-02-18'
     time_utc: '02:54:00'
     time_scale: 1.0
     sky_intensity: 0.55
