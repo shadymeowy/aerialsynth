@@ -144,66 +144,20 @@ fn st_rot2(v: vec2<f32>, a: f32) -> vec2<f32> {
     return vec2<f32>(c * v.x + s * v.y, -s * v.x + c * v.y);
 }
 
-fn st_pick_pattern(pl: StPl, z: u32, did: u64, industrial: bool) -> u32 {
+fn st_pick_pattern(pl: StPl, did: u64, industrial: bool) -> u32 {
     if (industrial) {
         return SP_INDUSTRIAL;
     }
     let u = u01k(did, 4lu);
     let a = pl.arch;
-    let poor = pl.dev < 0.45 && (a == 0u || a == 1u || a == 2u || a == 3u || a == 8u);
-    if (z == SZ_CBD) {
-        if ((a == 6u || a == 9u || a == 4u) && u < 0.3) {
-            return SP_RADIAL;
-        }
-        return SP_GRID;
+    if (a == 3u) {
+        return SP_ORGANIC;
     }
-    if (z == SZ_INNER) {
-        if (a == 3u) {
-            return SP_ORGANIC;
-        }
-        if (a == 5u || a == 6u || a == 11u) {
-            if (u < 0.5) {
-                return SP_ORGANIC;
-            } else if (u < 0.75) {
-                return SP_RADIAL;
-            }
-            return SP_GRID;
-        }
-        if (a == 7u || a == 10u) {
-            return SP_GRID;
-        }
-        if (a == 4u || a == 9u) {
-            return select(SP_GRID, SP_SUPER, u < 0.5);
-        }
-        return select(SP_ORGANIC, SP_GRID, u < 0.5);
+    if ((a == 5u || a == 6u || a == 11u) && u < 0.3) {
+        return SP_RADIAL;
     }
-    if (z == SZ_OUTER) {
-        if (a == 7u) {
-            return SP_GRID;
-        }
-        if (a == 4u || a == 9u) {
-            return select(SP_GRID, SP_SUPER, u < 0.7);
-        }
-        if (a == 8u) {
-            return select(SP_GRID, SP_SUPER, pl.dev > 0.5 && u < 0.5);
-        }
-        return select(SP_CURVI, SP_GRID, u < 0.7);
-    }
-    if (z == SZ_SUBURB) {
-        if (poor && u < 0.5) {
-            return SP_INFORMAL;
-        } else if (a == 7u || ((a == 5u || a == 6u || a == 11u) && u < 0.5)) {
-            if (a == 7u && u > 0.7) {
-                return SP_GRID;
-            }
-            return SP_CURVI;
-        }
-        return SP_GRID;
-    }
-    if ((poor || (a == 4u && pl.dev < 0.5)) && u < 0.65) {
-        return SP_INFORMAL;
-    } else if ((a == 7u || a == 6u) && u < 0.5) {
-        return SP_CURVI;
+    if ((a == 4u || a == 9u) && u < 0.5) {
+        return SP_SUPER;
     }
     return SP_GRID;
 }
@@ -496,7 +450,7 @@ fn st_district_pattern(pl: StPl, point: vec2<f32>, id: u64) -> vec3<u32> {
             }
         }
     }
-    var pattern = st_pick_pattern(pl, zd, mix64(pl.seed ^ 0x2A7Elu ^ u64(zd)), ind);
+    var pattern = st_pick_pattern(pl, mix64(pl.seed ^ 0x2A7Elu), ind);
     if (pl.level < 2u) {
         pattern = SP_GRID;
     }
@@ -536,7 +490,7 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
         let zd = dp.y;
         if (pl.level >= 2u) {
             let pt2 = st_district_pattern(pl, dc.point2, dc.id2).x;
-            if (pt2 != pattern || pattern == SP_INDUSTRIAL || pattern == SP_SUPER) {
+            if (pt2 != pattern || pattern == SP_INDUSTRIAL) {
                 art = worley2_edge_dist(dc, qd);
             }
         }
@@ -545,11 +499,10 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
         } else {
             z = min(max(zd, min(z, SZ_INNER)), SZ_PERI);
         }
-        if (pattern != SP_INDUSTRIAL && pattern != SP_SUPER) {
+        if (pattern != SP_INDUSTRIAL) {
             did = mix64(pl.seed ^ 0x1A70lu ^ u64(pattern));
         }
         let survey = pl.arch == 7u;
-        let ud = u01k(did, 5lu);
         if (survey) {
             theta = 0.0;
         } else {
@@ -589,7 +542,6 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
             b = 280.0 + 110.0 * u2;
             sw = 9.0;
             jit = 0.1;
-            theta = (ud - 0.5) * 0.8;
         } else if (pattern == SP_INFORMAL) {
             b = 60.0 + 20.0 * u2;
             sw = 2.3;
@@ -1243,7 +1195,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             let dl = st_dens_at(pl, q, lot_dq, e.n, dmul);
             var edge = 1.0;
             if (fm == SF_CITY) {
-                edge = smoothstep1(0.3, 0.42, dl);
+                edge = smoothstep1(0.42, 0.47, dl);
             }
             let built = u01k(lh, 3lu) < pow(dl, 0.7) * 1.05 * edge;
             let a = pl.arch;
