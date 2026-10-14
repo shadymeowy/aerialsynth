@@ -15,13 +15,15 @@
 //! ([`TEMPLATE`]).
 //!
 //! **Relief (pass A, after the drainage carve).** In a frame at the mouth (apex a quarter radius
-//! inland): a fan of ±72° with lobate margins (three angular harmonics) or four fingers along
-//! the distributaries, the longest ahead (bird's-foot); inside, low ground is raised (and a little higher ground
-//! flattened) to 2 m at the apex falling to 0.5 m at the radius; a shallow front (−2 m) around
-//! the lobes; distributaries radiate from the apex with a gentle wiggle (fan: forking halfway),
-//! carved to 1.5 m below the sea, so they hold sea water; the river's own channel upstream of
-//! the mouth is kept. Lobes only grow over the shelf (fading out from −35 to −60 m). Channels are
-//! box-filtered by the pixel (the mean below it), the margin's edge is at least a pixel wide.
+//! inland), warped by three octaves of noise so that no margin or channel is straight: a fan of
+//! ±75° with lobate margins (three angular harmonics) or four fingers along the distributaries,
+//! the longest ahead (bird's-foot), ending inland in a rounded margin behind the mouth; inside,
+//! low ground is raised (and a little higher ground flattened) to 2 m at the apex falling to
+//! 0.5 m at the radius; a shallow front (−2 m) around the lobes; distributaries radiate from
+//! the apex with a gentle wiggle (fan: forking halfway), carved to 1.5 m below the sea, so they
+//! hold sea water; the river's own channel is kept (its main pass). Lobes only grow over
+//! the shelf (fading out from −35 to −60 m). Channels are box-filtered by the pixel (the mean
+//! below it), the margin's edge is at least a pixel wide.
 
 use crate::kits::{astamp_frame, AStamp, AStampIn};
 use crate::noise::*;
@@ -256,7 +258,8 @@ fn find(w: &World, c: (i64, i64, i64)) -> Option<AStamp> {
 /// A delta's geometry at a point (f32, as WGSL `coast_delta_shape`).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Shape {
-    /// the delta plain: 1 inside the lobes (a soft edge of 5 % of the radius, at least a pixel)
+    /// the delta plain: 1 inside the lobes (a soft edge of 5 % of the radius, at least a pixel),
+    /// fading out inland behind the mouth
     pub plain: f32,
     /// its height (m): 2 at the apex, 0.5 at the radius
     pub hd: f32,
@@ -264,9 +267,8 @@ pub struct Shape {
     pub front: f32,
     /// the distributaries' share of the pixel (box-filtered)
     pub chan: f32,
-    /// the along-coordinate from the mouth (m, + seaward) and the radius
-    pub u: f32,
-    pub r0: f32,
+    /// their levees: a band of three channel widths on either side (0..1, box-filtered)
+    pub lev: f32,
 }
 
 /// The fingers of a bird's-foot delta: angle (rad from the river's direction), length (radii),
@@ -280,6 +282,17 @@ fn finger(id: u64, k: u32) -> (f32, f32, f32) {
     (a, l, 0.09 + 0.05 * u24(id, 14 + k as u64))
 }
 
+/// A band-limited noise of wavelength `lam` (m) for the shape (as WGSL `co_nz`, f32).
+#[inline]
+fn wnz(seed: u64, p: DVec3, lam: f32, gsd: f32) -> f32 {
+    let b = sm(2.0 * gsd, 4.0 * gsd, lam);
+    if b > 0.0 {
+        perlin3(seed, p * (1.0 / lam as f64)) as f32 * b
+    } else {
+        0.0
+    }
+}
+
 /// The shape of the delta (centre `c`, `bearing`, `reach`, `id`, the river's half width `hw`
 /// at the mouth) at `p` for pixels of `gsd` m.
 pub fn shape(c: DVec3, bearing: f64, reach: f32, id: u64, hw: f32, p: DVec3, gsd: f32) -> Shape {
@@ -287,26 +300,36 @@ pub fn shape(c: DVec3, bearing: f64, reach: f32, id: u64, hw: f32, p: DVec3, gsd
     let (up, d) = (f[2], f[3]);
     let left = up.cross(d);
     let dp: Vec3 = (p - c).as_vec3();
-    let (u, v) = (dp.dot(d), dp.dot(left));
     let r0 = reach / REACH;
+    // the frame is warped by three octaves of noise (each moving points by about a third of its
+    // wavelength at most, band-limited): margins, lobes and channels wander, no straight edge or
+    // ray at any zoom; none at the mouth, where the distributaries leave the river
+    let ws = id ^ 0x0DE1_7A0A;
+    let (l1, l2, l3) = (0.32 * r0, 0.11 * r0, 0.035 * r0);
+    let wk = r0 * sm(0.0, 0.35 * r0, dp.length());
+    let wu = wk * (0.11 * wnz(ws, p, l1, gsd) + 0.035 * wnz(ws + 2, p, l2, gsd) + 0.011 * wnz(ws + 4, p, l3, gsd));
+    let wv = wk * (0.11 * wnz(ws + 1, p, l1, gsd) + 0.035 * wnz(ws + 3, p, l2, gsd) + 0.011 * wnz(ws + 5, p, l3, gsd));
+    let (u, v) = (dp.dot(d) + wu, dp.dot(left) + wv);
     let bird = u24(id, 4) < 0.35;
     // polar coordinates from the apex, a quarter radius inland
     let x = u + 0.25 * r0;
     let r = (x * x + v * v).sqrt();
     let tau = std::f32::consts::TAU;
     let phi = v.atan2(x);
-    // (the fan opens downstream of the apex and the distributaries leave the river's line one by
-    // one: a V of straight rays from one point read as a stamp)
-    let spread = sm(0.0, 0.5 * r0, r);
-    // the margin: a fan of ±72° with lobes, or fingers along the distributaries
-    let wmax = 1.25 * (0.3 + 0.7 * spread) * (1.0 + 0.12 * (r / (0.07 * r0) + tau * u24(id, 8)).sin());
+    // the distributaries leave the river at the mouth (polar coordinates from there) one by
+    // one: a V of straight rays from one point read as a stamp
+    let rc = (u * u + v * v).sqrt();
+    let phic = v.atan2(u);
+    let spread = sm(0.0, 0.45 * r0, rc);
+    // the margin: a fan of ±75° with lobes, or fingers along the distributaries
+    let wmax = 1.3 * (1.0 + 0.12 * (r / (0.07 * r0) + tau * u24(id, 8)).sin());
     let g = (1.0 - (phi / wmax) * (phi / wmax)).max(0.0);
     let mut rm;
     if bird {
         rm = 0.4 * r0 * g.sqrt();
         for k in 0..4u32 {
             let (a, l, wk) = finger(id, k);
-            let e = (phi - a * spread) / wk;
+            let e = (phic - a * spread) / wk;
             rm = rm.max(l * r0 * (-e * e).exp());
         }
     } else {
@@ -314,35 +337,42 @@ pub fn shape(c: DVec3, bearing: f64, reach: f32, id: u64, hw: f32, p: DVec3, gsd
         rm = r0 * g.sqrt() * (1.0 + 0.14 * lob);
     }
     let edge = (0.05 * r0).max(gsd);
-    let plain = if rm > 0.0 { sm(rm, rm - edge, r) } else { 0.0 };
+    let lobes = if rm > 0.0 { sm(rm, rm - edge, r) } else { 0.0 };
+    // inland the plain ends behind the mouth in a rounded margin (the fan's V towards the apex
+    // was a pale geometric wedge over the land)
+    let back = sm(-0.3 * r0, -0.04 * r0, u - 0.6 * v * v / r0);
+    let plain = lobes * back;
     let hd = 0.5 + 1.5 * (1.0 - r / r0).clamp(0.0, 1.0);
-    let front = if rm > 0.0 { sm(1.3 * rm + edge, rm, r) * (1.0 - plain) } else { 0.0 };
+    let front = if rm > 0.0 { sm(1.3 * rm + edge, rm, r) * (1.0 - lobes) } else { 0.0 };
     // distributaries from the apex: along the fingers (bird's-foot) or five forking ones (fan)
     // (half width at the apex: half the river's, at least 10 m; narrowing seaward)
     let cw0 = (0.5 * hw).max(10.0);
-    let mut chan = 0.0f32;
+    let (mut chan, mut lev) = (0.0f32, 0.0f32);
     let nk = if bird { 4u32 } else { 5 };
     for k in 0..nk {
         let mut a = spread * if bird { finger(id, k).0 } else { (k as f32 - 2.0) * 0.42 + 0.14 * (u24(id, 24 + k as u64) - 0.5) };
-        a += 0.11 * spread * (r / (0.21 * r0) + tau * u24(id, 30 + k as u64)).sin();
+        a += 0.11 * spread * (rc / (0.21 * r0) + tau * u24(id, 30 + k as u64)).sin();
         // (a fan's channels fork halfway)
-        let fork = if bird { 0.0 } else { 0.11 * sm(0.5 * r0, 0.75 * r0, r) };
+        let fork = if bird { 0.0 } else { 0.11 * sm(0.4 * r0, 0.65 * r0, rc) };
         for s in [-1.0f32, 1.0] {
-            let dphi = (phi - a - s * fork).abs();
+            let dphi = (phic - a - s * fork).abs();
             if dphi > 1.2 {
                 continue;
             }
-            let dist = r * dphi.sin();
+            let dist = rc * dphi.sin();
             let cw = (1.0 - 0.45 * (r / r0).min(1.0)) * cw0;
             let cov = ((dist + 0.5 * gsd).min(cw) - (dist - 0.5 * gsd).max(-cw)) / gsd;
-            let ext = sm(rm + 2.0 * cw + edge, rm, r);
+            let lw = 4.0 * cw;
+            let lcov = ((dist + 0.5 * gsd).min(lw) - (dist - 0.5 * gsd).max(-lw)) / gsd;
+            let ext = sm(rm + 2.0 * cw + edge, rm, r) * sm(-0.5 * cw0, 0.5 * cw0, u);
             chan = chan.max(cov.clamp(0.0, 1.0) * ext);
+            lev = lev.max(lcov.clamp(0.0, 1.0) * ext);
             if fork == 0.0 {
                 break;
             }
         }
     }
-    Shape { plain, hd, front, chan, u, r0 }
+    Shape { plain, hd, front, chan, lev: (lev - chan).max(0.0) }
 }
 
 /// A delta's relief (`Kit::astamp`): the plain, the front and the distributaries.
@@ -355,8 +385,8 @@ pub fn relief(_w: &World, st: &AStamp, ai: &AStampIn, h: &mut f64) {
         return;
     }
     let h0 = *h as f32;
-    // the river's own channel upstream of the mouth stays
-    let keep = if ai.river_hw > 0.0 && (ai.river_d.abs() as f32) < 1.2 * ai.river_hw as f32 { 1.0 - sm(-0.05 * sh.r0, 0.1 * sh.r0, sh.u) } else { 0.0 };
+    // the river's own channel stays, through the plain too (its main pass to the sea)
+    let keep = if ai.river_hw > 0.0 && (ai.river_d.abs() as f32) < 1.2 * ai.river_hw as f32 { 1.0 } else { 0.0 };
     // lobes grow on the shelf only
     let shelf = sm(-60.0, -35.0, h0);
     let ht = if h0 < sh.hd {
@@ -367,6 +397,8 @@ pub fn relief(_w: &World, st: &AStamp, ai: &AStampIn, h: &mut f64) {
         h0
     };
     let mut hn = h0 + (ht - h0) * sh.plain * shelf * (1.0 - keep);
+    // (a pass, not a trench: the sea floor in it is filled to 2.5 m below the sea)
+    hn += ((-2.5f32).max(hn) - hn) * sh.plain * shelf * keep;
     if hn < -2.0 {
         hn += (-2.0 - hn) * sh.front * shelf;
     }
@@ -433,8 +465,9 @@ mod tests {
             let r0 = st.r / REACH as f64;
             let q = surface(&w, st.c + d.as_dvec3() * 0.35 * r0);
             let tq = w.terrain(&ctx(&w, q, 20.0));
-            // (the plain, or a distributary cut into it ahead of the mouth)
-            if tq.ground > -1.6 && tq.ground < 2.5 {
+            // (the plain, or a distributary or the river's own pass cut into it ahead of the
+            // mouth)
+            if tq.ground > -2.6 && tq.ground < 2.5 {
                 grown += 1;
             }
             let g = geodesy::ecef2geodetic(st.c, &w.ell);

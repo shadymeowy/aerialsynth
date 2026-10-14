@@ -233,8 +233,7 @@ struct CoDelta {
     hd: f32,
     front: f32,
     chan: f32,
-    u: f32,
-    r0: f32,
+    lev: f32,
 }
 
 /// `delta::finger`: angle, length (radii), angular half width.
@@ -260,22 +259,32 @@ fn coast_delta_shape(c: vec3<f64>, bearing: f64, reach: f32, id: u64, hw: f32, p
     let d = f[3];
     let left = cross(up, d);
     let dp = vec3<f32>(p - c);
-    let u = dot(dp, d);
-    let v = dot(dp, left);
     let r0 = reach / 1.4;
+    // the frame warped by three octaves of noise
+    let ws = id ^ 0x0DE17A0Alu;
+    let l1 = 0.32 * r0;
+    let l2 = 0.11 * r0;
+    let l3 = 0.035 * r0;
+    let wk = r0 * smoothstep1(0.0, 0.35 * r0, length(dp));
+    let wu = wk * (0.11 * co_nz(ws, p, l1, gsd) + 0.035 * co_nz(ws + 2lu, p, l2, gsd) + 0.011 * co_nz(ws + 4lu, p, l3, gsd));
+    let wv = wk * (0.11 * co_nz(ws + 1lu, p, l1, gsd) + 0.035 * co_nz(ws + 3lu, p, l2, gsd) + 0.011 * co_nz(ws + 5lu, p, l3, gsd));
+    let u = dot(dp, d) + wu;
+    let v = dot(dp, left) + wv;
     let bird = u01k(id, 4lu) < 0.35;
     let x = u + 0.25 * r0;
     let r = sqrt(x * x + v * v);
     let phi = atan2(v, x);
-    let spread = smoothstep1(0.0, 0.5 * r0, r);
-    let wmax = 1.25 * (0.3 + 0.7 * spread) * (1.0 + 0.12 * sin(r / (0.07 * r0) + TAU * u01k(id, 8lu)));
+    let rc = sqrt(u * u + v * v);
+    let phic = atan2(v, u);
+    let spread = smoothstep1(0.0, 0.45 * r0, rc);
+    let wmax = 1.3 * (1.0 + 0.12 * sin(r / (0.07 * r0) + TAU * u01k(id, 8lu)));
     let g = max(1.0 - (phi / wmax) * (phi / wmax), 0.0);
     var rm = 0.0;
     if (bird) {
         rm = 0.4 * r0 * sqrt(g);
         for (var k = 0u; k < 4u; k++) {
             let fk = co_finger(id, k);
-            let e = (phi - fk.x * spread) / fk.z;
+            let e = (phic - fk.x * spread) / fk.z;
             rm = max(rm, fk.y * r0 * exp(-e * e));
         }
     } else {
@@ -283,17 +292,21 @@ fn coast_delta_shape(c: vec3<f64>, bearing: f64, reach: f32, id: u64, hw: f32, p
         rm = r0 * sqrt(g) * (1.0 + 0.14 * lob);
     }
     let edge = max(0.05 * r0, gsd);
+    var lobes = 0.0;
     var o: CoDelta;
-    o.plain = 0.0;
     o.front = 0.0;
     if (rm > 0.0) {
-        o.plain = smoothstep1(rm, rm - edge, r);
-        o.front = smoothstep1(1.3 * rm + edge, rm, r) * (1.0 - o.plain);
+        lobes = smoothstep1(rm, rm - edge, r);
+        o.front = smoothstep1(1.3 * rm + edge, rm, r) * (1.0 - lobes);
     }
+    // inland: a rounded margin behind the mouth
+    let back = smoothstep1(-0.3 * r0, -0.04 * r0, u - 0.6 * v * v / r0);
+    o.plain = lobes * back;
     o.hd = 0.5 + 1.5 * clamp(1.0 - r / r0, 0.0, 1.0);
     // distributaries from the apex: along the fingers (bird's-foot) or five forking ones (fan)
     let cw0 = max(0.5 * hw, 10.0);
     var chan = 0.0;
+    var lev = 0.0;
     var nk = 5u;
     if (bird) {
         nk = 4u;
@@ -306,20 +319,23 @@ fn coast_delta_shape(c: vec3<f64>, bearing: f64, reach: f32, id: u64, hw: f32, p
             a = (f32(k) - 2.0) * 0.42 + 0.14 * (u01k(id, 24lu + u64(k)) - 0.5);
         }
         a *= spread;
-        a += 0.11 * spread * sin(r / (0.21 * r0) + TAU * u01k(id, 30lu + u64(k)));
+        a += 0.11 * spread * sin(rc / (0.21 * r0) + TAU * u01k(id, 30lu + u64(k)));
         var fork = 0.0;
         if (!bird) {
-            fork = 0.11 * smoothstep1(0.5 * r0, 0.75 * r0, r);
+            fork = 0.11 * smoothstep1(0.4 * r0, 0.65 * r0, rc);
         }
         for (var si = 0; si < 2; si++) {
             let s = f32(2 * si - 1);
-            let dphi = abs(phi - a - s * fork);
+            let dphi = abs(phic - a - s * fork);
             if (dphi <= 1.2) {
-                let dist = r * sin(dphi);
+                let dist = rc * sin(dphi);
                 let cw = (1.0 - 0.45 * min(r / r0, 1.0)) * cw0;
                 let cov = (min(dist + 0.5 * gsd, cw) - max(dist - 0.5 * gsd, -cw)) / gsd;
-                let ext = smoothstep1(rm + 2.0 * cw + edge, rm, r);
+                let lw = 4.0 * cw;
+                let lcov = (min(dist + 0.5 * gsd, lw) - max(dist - 0.5 * gsd, -lw)) / gsd;
+                let ext = smoothstep1(rm + 2.0 * cw + edge, rm, r) * smoothstep1(-0.5 * cw0, 0.5 * cw0, u);
                 chan = max(chan, clamp(cov, 0.0, 1.0) * ext);
+                lev = max(lev, clamp(lcov, 0.0, 1.0) * ext);
             }
             if (fork == 0.0) {
                 break;
@@ -327,8 +343,7 @@ fn coast_delta_shape(c: vec3<f64>, bearing: f64, reach: f32, id: u64, hw: f32, p
         }
     }
     o.chan = chan;
-    o.u = u;
-    o.r0 = r0;
+    o.lev = max(lev - chan, 0.0);
     return o;
 }
 
@@ -342,10 +357,10 @@ fn coast_astamp(c: Ctx, st: Sink, ai: AStampIn, h: ptr<function, f32>) {
         return;
     }
     let h0 = *h;
-    // the river's own channel upstream of the mouth stays
+    // the river's own channel stays, through the plain too
     var keep = 0.0;
     if (ai.river_hw > 0.0 && abs(ai.river_d) < 1.2 * ai.river_hw) {
-        keep = 1.0 - smoothstep1(-0.05 * sh.r0, 0.1 * sh.r0, sh.u);
+        keep = 1.0;
     }
     // lobes grow on the shelf only
     let shelf = smoothstep1(-60.0, -35.0, h0);
@@ -356,6 +371,7 @@ fn coast_astamp(c: Ctx, st: Sink, ai: AStampIn, h: ptr<function, f32>) {
         ht = sh.hd + (h0 - sh.hd) * (h0 - sh.hd) / 4.0;
     }
     var hn = h0 + (ht - h0) * sh.plain * shelf * (1.0 - keep);
+    hn += (max(hn, -2.5) - hn) * sh.plain * shelf * keep;
     if (hn < -2.0) {
         hn += (-2.0 - hn) * sh.front * shelf;
     }
