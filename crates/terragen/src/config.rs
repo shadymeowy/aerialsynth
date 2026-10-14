@@ -425,6 +425,23 @@ impl Config {
     }
 }
 
+/// Settings only `generator: next` reads (classic ignores them).
+const NEXT_ONLY_KEYS: [&str; 5] = ["atlas", "ecoregions", "biomes", "relief.tectonic_mountains", "relief.belt_mountains"];
+
+/// The notes for next-only settings that a config file sets explicitly while its generator is
+/// classic (which ignores them): from the raw `world:` mapping of the file, so that defaults
+/// and the full configs stored with tiles say nothing. Empty for `generator: next`.
+pub fn next_only_notes(world: &serde_yaml::Value) -> Vec<String> {
+    if world.get("generator").and_then(|g| g.as_str()).is_some_and(|g| g != "classic") {
+        return vec![];
+    }
+    NEXT_ONLY_KEYS
+        .iter()
+        .filter(|k| k.split('.').try_fold(world, |v, part| v.get(part)).is_some())
+        .map(|k| format!("note: world.{k} is set, but it applies to `generator: next` only (this world uses classic)"))
+        .collect()
+}
+
 /// Largest `tile_supersample`: the cost grows with its square (4: 16 samples per pixel).
 pub const MAX_TILE_SUPERSAMPLE: u32 = 4;
 
@@ -608,5 +625,24 @@ mod tests {
             c.landuse.region_km = -1.0;
         });
         assert!(two.contains("and 1 more") && two.contains("world.landuse.region_km"), "{two}");
+    }
+}
+
+#[cfg(test)]
+mod next_only_tests {
+    use super::next_only_notes;
+
+    fn notes(y: &str) -> Vec<String> {
+        next_only_notes(&serde_yaml::from_str(y).unwrap())
+    }
+
+    #[test]
+    fn classic_notes_only_the_keys_that_are_set() {
+        assert!(notes("seed: 3").is_empty());
+        assert!(notes("generator: next\natlas: {}").is_empty());
+        let n = notes("atlas: {resolution: 64}\nrelief: {belt_mountains: 0.2, mesas: 0.1}\necoregions: {}");
+        assert_eq!(n.len(), 3, "{n:?}");
+        assert!(n.iter().any(|m| m.contains("world.relief.belt_mountains")));
+        assert!(n.iter().all(|m| m.contains("`generator: next` only")));
     }
 }
