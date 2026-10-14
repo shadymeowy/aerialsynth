@@ -224,11 +224,6 @@ fn audit(g: &terragen::NextGenerator, n: usize, seed: u64) {
         let Some((clat, clon, r)) = cp else { continue };
         *count.entry(grp).or_default() += 1;
         kept.push((lat, lon));
-        println!(
-            "a{:02},{lat:.4},{lon:.4},{kop},{},{:.0},{clat:.4},{clon:.4},{r:.0}",
-            kept.len(),
-            g.surface.registry.biomes[e.biome as usize].name,
-            t.ground
-        );
+        println!("a{:02},{lat:.4},{lon:.4},{kop},{},{:.0},{clat:.4},{clon:.4},{r:.0}", kept.len(), g.surface.registry.biomes[e.biome as usize].name, t.ground);
     }
 }

@@ -1194,7 +1194,11 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                                     )
                                 } else {
                                     let fill = if z <= zone::INNER { DVec2::new(60.0, 60.0) } else { DVec2::new(40.0, 14.0 + 10.0 * u01k(lh, 6)) };
-                                    (DVec2::new(0.5 * lw - 2.5, 0.5 * ld - 2.5).min(fill), 3.0 * (4.0 + 4.0 * u01k(lh, 4)) + if z == zone::CBD { 12.0 } else { 0.0 }, true)
+                                    (
+                                        DVec2::new(0.5 * lw - 2.5, 0.5 * ld - 2.5).min(fill),
+                                        3.0 * (4.0 + 4.0 * u01k(lh, 4)) + if z == zone::CBD { 12.0 } else { 0.0 },
+                                        true,
+                                    )
                                 }
                             }
                             typ::WAREHOUSE => (DVec2::new(0.5 * lw - 9.0, 0.5 * ld - 9.0), 8.0 + 6.0 * u01k(lh, 4), true),
