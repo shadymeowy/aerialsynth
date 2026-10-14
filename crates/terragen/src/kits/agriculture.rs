@@ -161,7 +161,7 @@ const SYS: [SysDef; sys::N] = {
         SysDef { part: STRIP, size: [600.0, 34.0], kinds: [CROP, FALLOW, HAY, PASTURE], kw: [0.72, 0.12, 0.12, 0.04], borders: [MARGIN, MARGIN], bp: [1.0, 0.0], ..D },
         SysDef { part: VOR, size: [260.0, 1.5], kinds: [PASTURE, CROP, HAY, FALLOW], kw: [0.5, 0.3, 0.14, 0.06], borders: [HEDGE, WALL], bp: [0.55, 0.06], slope: [0.3, 0.42], ..D },
         SysDef { part: VOR, size: [64.0, 1.8], kinds: [CROP, FALLOW, PASTURE, YARD], kw: [0.6, 0.24, 0.1, 0.06], borders: [MARGIN, HEDGE], bp: [0.6, 0.08], slope: [0.3, 0.42], trees: 0.3, ..D },
-        SysDef { part: GRID, size: [130.0, 90.0], kinds: [PADDY, POND, CROP, YARD], kw: [0.9, 0.025, 0.065, 0.01], borders: [NONE, CANAL], bp: [0.75, 0.25], slope: [0.7, 0.9], terraces: 1.0, ..D },
+        SysDef { part: GRID, size: [130.0, 90.0], kinds: [PADDY, POND, CROP, YARD], kw: [0.92, 0.01, 0.06, 0.01], borders: [NONE, CANAL], bp: [0.75, 0.25], slope: [0.7, 0.9], terraces: 1.0, ..D },
         SysDef { part: VOR, size: [130.0, 1.3], kinds: [CROP, OLIVE, FALLOW, ORCHARD], kw: [0.42, 0.28, 0.2, 0.1], borders: [WALL, MARGIN], bp: [0.75, 0.25], slope: [0.7, 0.9], terraces: 1.0, ..D },
         SysDef { part: GRID, size: [140.0, 70.0], kinds: [VINE, OLIVE, ORCHARD, FALLOW], kw: [0.7, 0.1, 0.1, 0.1], borders: [TRACK, MARGIN], bp: [0.15, 0.85], slope: [0.6, 0.8], ..D },
         SysDef { part: VOR, size: [240.0, 1.4], kinds: [OLIVE, ORCHARD, CROP, FALLOW], kw: [0.55, 0.2, 0.15, 0.1], borders: [WALL, MARGIN], bp: [0.5, 0.5], slope: [0.6, 0.8], ..D },
@@ -702,8 +702,10 @@ fn draw(s: &mut Stack, pl: &Plan) {
         let key = [c3.x.to_bits(), c3.y.to_bits(), c3.z.to_bits(), pl.seed ^ 0xA9];
         let sm = s.sm;
         let (mask, cluster) = *s.cache.fields.entry(key).or_insert_with(|| (sm.cultivated_mask(c3, gsd), worley2(pl.seed ^ 0xC1C, pc.fc, 700.0, 1.0).id));
-        if mask < cult && u01k(pc.id, 5) >= 0.04 {
-            let sh = explicit(pl, &d, &pc, &px, q, cluster);
+        if mask < cult {
+            // (a few parcels lie idle: rough grass; left to the canopy they became dark squares
+            // of forest in the paddies)
+            let sh = if u01k(pc.id, 5) >= 0.04 { explicit(pl, &d, &pc, &px, q, cluster) } else { (pasture_col(&px) * 0.92, 0.2, CLS_PASTURE) };
             col = sh.0;
             dh = sh.1;
             cls = sh.2;
@@ -1118,7 +1120,7 @@ fn paddy_col(st: u32) -> DVec3 {
     match st {
         0 => srgb(64.0, 84.0, 94.0),
         1 => srgb(76.0, 100.0, 86.0),
-        2 => srgb(80.0, 116.0, 50.0),
+        2 => srgb(88.0, 114.0, 62.0),
         3 => srgb(188.0, 172.0, 92.0),
         _ => srgb(150.0, 128.0, 88.0),
     }
@@ -1140,10 +1142,10 @@ fn paddy_state(ph: f64) -> u32 {
 }
 
 fn paddy_mean(season: f64) -> DVec3 {
-    // phases spread ±0.15 around the season: the mean of five draws
+    // phases spread ±0.225 around the season: the mean of five draws
     let mut acc = DVec3::ZERO;
     for i in 0..5 {
-        acc += paddy_col(paddy_state((season + 0.075 * (i as f64 - 2.0)).clamp(0.0, 1.0)));
+        acc += paddy_col(paddy_state((season + 0.1125 * (i as f64 - 2.0)).clamp(0.0, 1.0)));
     }
     acc / 5.0
 }
@@ -1333,7 +1335,8 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
             dh = 1.0 * cv;
         }
         kind::PADDY => {
-            let ph = (px.season + 0.3 * (u01k(id, 31) - 0.5)).clamp(0.0, 1.0);
+            // (paddies of different stages side by side: one vivid green over whole valleys read as paint)
+            let ph = (px.season + 0.45 * (u01k(id, 31) - 0.5)).clamp(0.0, 1.0);
             let st = paddy_state(ph);
             col = paddy_col(st) * (0.94 + 0.12 * u01k(id, 32));
             let fine = perlin3(id ^ 0x9AD, p / 7.0) * band(7.0, gsd);
@@ -1385,7 +1388,7 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
             let rp = 18.0 + 30.0 * u01k(id, 12);
             let dc = (q - pc.fc).abs() - DVec2::splat(rp);
             let w = ((pc.edge - m_in) / fw + 0.5).clamp(0.0, 1.0) * ((-dc.x.max(dc.y)) / fw + 0.5).clamp(0.0, 1.0);
-            let water = if pl.sys == sys::PADDY || pl.sys == sys::GREENH { srgb(62.0, 90.0, 72.0) } else { srgb(48.0, 70.0, 74.0) };
+            let water = if pl.sys == sys::PADDY || pl.sys == sys::GREENH { srgb(76.0, 100.0, 84.0) } else { srgb(48.0, 70.0, 74.0) };
             col = mixc(srgb(140.0, 128.0, 100.0), water * (0.9 + 0.2 * u01k(id, 11)), w);
             dh = -0.6 * w;
             cls = if w > 0.5 {

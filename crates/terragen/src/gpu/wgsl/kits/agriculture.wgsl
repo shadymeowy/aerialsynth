@@ -595,12 +595,18 @@ fn agri_draw(s: ptr<function, Stack>, pl: Plan) {
     if (pc.inside > 0.0) {
         let c3 = r.center.xyz + vec3<f64>(ax * pc.fc.x + ay * pc.fc.y);
         let mask = cultivated_mask(c3, gsd);
-        if (mask < cult && u01k(pc.id, 5lu) >= 0.04) {
-            let cluster = worley2(pl.seed ^ 0xC1Clu, pc.fc, 700.0, 1.0).id;
-            let sh = agri_explicit(pl, d, pc, px, q, cluster);
-            col = sh.col;
-            dh = sh.dh;
-            cls = sh.cls;
+        if (mask < cult) {
+            if (u01k(pc.id, 5lu) >= 0.04) {
+                let cluster = worley2(pl.seed ^ 0xC1Clu, pc.fc, 700.0, 1.0).id;
+                let sh = agri_explicit(pl, d, pc, px, q, cluster);
+                col = sh.col;
+                dh = sh.dh;
+                cls = sh.cls;
+            } else {
+                col = agri_pasture_col(px) * 0.92;
+                dh = 0.2;
+                cls = LC_PASTURE;
+            }
             cov = pc.inside;
         }
     }
@@ -1024,7 +1030,7 @@ fn agri_paddy_col(st: u32) -> vec3<f32> {
     switch st {
         case 0u: { return srgb(64.0, 84.0, 94.0); }
         case 1u: { return srgb(76.0, 100.0, 86.0); }
-        case 2u: { return srgb(80.0, 116.0, 50.0); }
+        case 2u: { return srgb(88.0, 114.0, 62.0); }
         case 3u: { return srgb(188.0, 172.0, 92.0); }
         default: { return srgb(150.0, 128.0, 88.0); }
     }
@@ -1046,7 +1052,7 @@ fn agri_paddy_state(ph: f32) -> u32 {
 fn agri_paddy_mean(season: f32) -> vec3<f32> {
     var acc = vec3<f32>(0.0);
     for (var i = 0; i < 5; i++) {
-        acc += agri_paddy_col(agri_paddy_state(clamp(season + 0.075 * (f32(i) - 2.0), 0.0, 1.0)));
+        acc += agri_paddy_col(agri_paddy_state(clamp(season + 0.1125 * (f32(i) - 2.0), 0.0, 1.0)));
     }
     return acc / 5.0;
 }
@@ -1306,7 +1312,7 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
             dh = 1.0 * cv;
         }
         case 9u: {
-            let ph = clamp(px.season + 0.3 * (u01k(id, 31lu) - 0.5), 0.0, 1.0);
+            let ph = clamp(px.season + 0.45 * (u01k(id, 31lu) - 0.5), 0.0, 1.0);
             let st = agri_paddy_state(ph);
             col = agri_paddy_col(st) * (0.94 + 0.12 * u01k(id, 32lu));
             let fine = perlin3(id ^ 0x9ADlu, p * (1.0lf / 7.0lf)) * band(7.0, gsd);
@@ -1359,7 +1365,7 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
             let aq = pl.sys == AG_PADDY || pl.sys == AG_GREENH;
             var water = srgb(48.0, 70.0, 74.0);
             if (aq) {
-                water = srgb(62.0, 90.0, 72.0);
+                water = srgb(76.0, 100.0, 84.0);
             }
             col = mixc(srgb(140.0, 128.0, 100.0), water * (0.9 + 0.2 * u01k(id, 11lu)), w);
             dh = -0.6 * w;
