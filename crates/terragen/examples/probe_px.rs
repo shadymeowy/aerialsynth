@@ -104,8 +104,7 @@ fn main() {
         let a: Vec<f64> = args[1..5].iter().map(|s| s.parse().unwrap()).collect();
         let classic = args.get(5).is_some_and(|s| s == "classic");
         let cg = classic.then(|| {
-            let mut cfg = terragen::Config::default();
-            cfg.generator = terragen::GeneratorKind::Classic;
+            let cfg = terragen::Config { generator: terragen::GeneratorKind::Classic, ..Default::default() };
             terragen::classic::Generator::with_backend(cfg, terragen::Backend::Cpu)
         });
         let n = (a[2] * 1000.0 / a[3]) as i64;
@@ -165,8 +164,7 @@ fn main() {
 /// 16 directions, 10 km apart).
 fn audit(g: &terragen::NextGenerator, n: usize, seed: u64) {
     use terragen::noise::mix64;
-    let mut cfg = terragen::Config::default();
-    cfg.generator = terragen::GeneratorKind::Classic;
+    let cfg = terragen::Config { generator: terragen::GeneratorKind::Classic, ..Default::default() };
     let cg = terragen::classic::Generator::with_backend(cfg, terragen::Backend::Cpu);
     let classic_land = |lat: f64, lon: f64| {
         let (t, _, _) = cg.probe(lat.to_radians(), lon.to_radians(), 30.0);
