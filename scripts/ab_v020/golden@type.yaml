@@ -1,4 +1,6 @@
-# golden at a place of the same type in the next generator's world: forested highland (survey) (the same local solar time)  (southern summer: December)
+# golden at a place of the same type in the next generator's world: the foothills of mountains@type's range (the same
+# offset as v0.2.0's golden from its mountains; round 4 used a forested highland) (the same local solar time: 18:24 on
+# 21 June, 05:47 UTC on the 22nd)
 world:
   seed: 1
   generator: next
@@ -14,16 +16,16 @@ trajectory:
     altitude_m: 700
     heading_deg: 20
     kind: line
-    lat: -17.2037
-    lon: -6.0487
+    lat: 49.6397
+    lon: -170.8194
     duration_s: 8.6
 render:
   supersample: 2
   shading: relit
   lighting:
     mode: clock
-    date: '2026-12-21'
-    time_utc: '18:48:00'
+    date: '2026-06-22'
+    time_utc: '05:47:05'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
