@@ -100,8 +100,9 @@ impl Generator {
         self.open_store_rw_with(path, &[])
     }
 
-    /// [`Generator::open_store_rw`]; a new (or empty) store also gets the optional layers
-    /// `extra`. A store with tiles keeps its layers (a note names those it lacks).
+    /// [`Generator::open_store_rw`]; a new store also gets the optional layers `extra`. An
+    /// existing store keeps its layers (a note names those it lacks), but for an empty one with
+    /// layers this world does not make: it is made again.
     pub fn open_store_rw_with(&self, path: &std::path::Path, extra: &[Layer]) -> Result<TileStore> {
         let classic = self.config().generator == GeneratorKind::Classic;
         if classic && !extra.is_empty() {
@@ -124,12 +125,19 @@ impl Generator {
                 }
                 return Ok(st);
             }
-            // an empty store is this world's now: re-stamped, or made again when it has other
-            // layers (the optional layers of a store the next generator created would refuse
-            // the classic generator's tiles, which have none)
-            let same_layers = st.meta().layers.len() == meta.layers.len() && meta.layers.iter().all(|l| st.meta().has(*l));
-            if same_layers {
+            // an empty store is this world's now: re-stamped, or made again when it has layers
+            // this world does not make (the optional layers of a store the next generator
+            // created would refuse the classic generator's tiles, which have none)
+            if st.meta().layers.iter().all(|l| meta.layers.contains(l)) {
                 st.set_generator(&meta)?;
+                let lacking: Vec<&str> = extra.iter().filter(|l| !classic && !st.meta().has(**l)).map(|l| l.name()).collect();
+                if !lacking.is_empty() {
+                    eprintln!(
+                        "note: tile store {} was created without the layer(s) {} (tiles.layers applies to new stores)",
+                        path.display(),
+                        lacking.join(", ")
+                    );
+                }
                 return Ok(st);
             }
             drop(st);
@@ -383,11 +391,12 @@ mod tests {
         st.write_tiles(&[dummy_tile(id)]).unwrap();
         drop(st);
         assert!(classic.open_store_rw(&path).unwrap().contains(id));
-        // and the other way: an empty classic store takes the next generator's optional layers
+        // the other way the store keeps its layers (the next generator's tiles fill the base
+        // ones), re-stamped for next
         let path2 = dir.join("w2.h5");
         drop(classic.open_store_rw(&path2).unwrap());
         let st = next.open_store_rw_with(&path2, &[Layer::Dtm]).unwrap();
-        assert!(st.meta().has(Layer::Dtm) && !st.meta().has(Layer::Instance));
+        assert!(!st.meta().has(Layer::Dtm));
         assert_eq!(generator_of(st.meta()), Some(GeneratorKind::Next));
         drop(st);
         let _ = std::fs::remove_dir_all(&dir);
