@@ -1150,7 +1150,8 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                         let k = max((cv.top - fpl) / max(cv.steps, 1.0), 1.0);
                         let x = w * k;
                         let i = floor(x);
-                        w = lerp(w, (i + smoothstep1(0.4, 0.97, x - i)) / k, cv.step_mix * (1.0 - smoothstep1(0.8, 1.0, w)));
+                        let a = 0.15 + 0.5 * u01k(hash1(0xBE4Clu, i64(i)), 1lu);
+                        w = lerp(w, (i + smoothstep1(a, 0.97, x - i)) / k, cv.step_mix * (1.0 - smoothstep1(0.8, 1.0, w)));
                     }
                     wall = w;
                 }

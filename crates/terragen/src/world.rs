@@ -1248,7 +1248,9 @@ impl World {
                             let k = ((cv.top - fp) / cv.steps.max(1.0)).max(1.0);
                             let x = w * k;
                             let i = x.floor();
-                            w = lerp(w, (i + smoothstep(0.4, 0.97, x - i)) / k, cv.step_mix * (1.0 - smoothstep(0.8, 1.0, w)));
+                            // (each bench its own ledge width: equal ledges drew a staircase)
+                            let a = 0.15 + 0.5 * u01k(hash1(0xBE4C, i as i64), 1);
+                            w = lerp(w, (i + smoothstep(a, 0.97, x - i)) / k, cv.step_mix * (1.0 - smoothstep(0.8, 1.0, w)));
                         }
                         w
                     } else {
