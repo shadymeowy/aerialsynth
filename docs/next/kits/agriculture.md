@@ -28,7 +28,7 @@ share for the core's fields. Systems change at region and ecoregion borders, nev
 | groves | olive, almond, citrus groves; date palms in deserts, apples in cool climates |
 | plantations | oil palm, rubber, tea on contours, cane; estate roads |
 | greenhouse seas | white plastic bays in different states, irrigation ponds; at night an orange glow of grow lights through 20 % of the roofs (`emission`; the system's mean where parcels are unresolved, none at pixels > 300 m) |
-| pastures | mixed farms: paddocks (42 %), hay meadows (18 %, up to 60 % of them mown pale from early summer), crop fields (38 %), livestock trails to troughs, farm dams, savanna trees in warm climates |
+| pastures | mixed farms: paddocks (34 %), hay meadows (16 %, up to 60 % of them mown pale from early summer), crop fields (48 %), hedges on ~45 % of the parcels, a few field trees, livestock trails to troughs, farm dams, savanna trees in warm climates |
 | irrigated pivots | centre pivots in the desert |
 | ranches | huge fenced paddocks (2.2 × 1.5 km), stock trails converging on troughs, farm dams, savanna trees where warm; feedlots |
 
@@ -144,3 +144,6 @@ kit's `KITS` entry commented out (mean of two runs, tiles/s; shared machine, +-3
 Leftovers round B: cotton in autumn is (182, 170, 138) instead of near white; parcel colours fade to the system's mean
 sooner (`k` of the colour uses 10 pixel² instead of 4: small plots no longer read as speckle at 10 km; cover and height
 keep the old `k`, the elevation LOD test of the airport place failed with the new one).
+Polish round 6: parcels up to 35 % smaller where it is wet (1000–1600 mm a year); pasture parcels 320 × 230 m
+(were 420 × 300), plantations 360 × 270 m with more crops (were 480 × 360); greenhouse seas only in warm climates
+(13–18 °C and up) and with more open fields; the survey culture grows the temperate crop mix in oceanic climates.

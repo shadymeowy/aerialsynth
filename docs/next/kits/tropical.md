@@ -199,3 +199,4 @@ burns and swidden plots.
 
 Leftovers round B: burn scars have a 0.2-scale mottling (±22 %), flowering crowns and the fishbone lots are less saturated
 (laterite lots 40 % towards grey).
+Polish round 6: fishbone projects clear forest only (agri ≤ 0.55), not farmland.
