@@ -47,9 +47,9 @@ fn agri_sys(i: u32) -> AgSys {
         case 7u: { return AgSys(1u, vec2<f32>(130.0, 1.3), vec4<u32>(0u, 5u, 1u, 4u), vec4<f32>(0.42, 0.28, 0.2, 0.1), vec2<u32>(3u, 0u), vec2<f32>(0.75, 0.25), vec2<f32>(0.7, 0.9), 1.0, 0.0); }
         case 8u: { return AgSys(0u, vec2<f32>(140.0, 70.0), vec4<u32>(6u, 5u, 4u, 1u), vec4<f32>(0.7, 0.1, 0.1, 0.1), vec2<u32>(5u, 0u), vec2<f32>(0.15, 0.85), vec2<f32>(0.6, 0.8), 0.0, 0.0); }
         case 9u: { return AgSys(1u, vec2<f32>(240.0, 1.4), vec4<u32>(5u, 4u, 0u, 1u), vec4<f32>(0.55, 0.2, 0.15, 0.1), vec2<u32>(3u, 0u), vec2<f32>(0.5, 0.5), vec2<f32>(0.6, 0.8), 0.0, 0.0); }
-        case 10u: { return AgSys(0u, vec2<f32>(480.0, 360.0), vec4<u32>(7u, 13u, 8u, 0u), vec4<f32>(0.45, 0.22, 0.15, 0.18), vec2<u32>(5u, 0u), vec2<f32>(0.9, 0.1), vec2<f32>(0.6, 0.8), 0.0, 0.0); }
-        case 11u: { return AgSys(0u, vec2<f32>(95.0, 60.0), vec4<u32>(10u, 0u, 1u, 11u), vec4<f32>(0.76, 0.13, 0.09, 0.02), vec2<u32>(5u, 0u), vec2<f32>(0.25, 0.75), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
-        case 12u: { return AgSys(0u, vec2<f32>(420.0, 300.0), vec4<u32>(2u, 3u, 0u, 11u), vec4<f32>(0.42, 0.18, 0.38, 0.02), vec2<u32>(0u, 1u), vec2<f32>(0.8, 0.2), vec2<f32>(0.38, 0.5), 0.0, 0.0); }
+        case 10u: { return AgSys(0u, vec2<f32>(360.0, 270.0), vec4<u32>(7u, 13u, 8u, 0u), vec4<f32>(0.4, 0.2, 0.12, 0.28), vec2<u32>(5u, 0u), vec2<f32>(0.9, 0.1), vec2<f32>(0.6, 0.8), 0.0, 0.0); }
+        case 11u: { return AgSys(0u, vec2<f32>(95.0, 60.0), vec4<u32>(10u, 0u, 1u, 11u), vec4<f32>(0.58, 0.24, 0.16, 0.02), vec2<u32>(5u, 0u), vec2<f32>(0.25, 0.75), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
+        case 12u: { return AgSys(0u, vec2<f32>(320.0, 230.0), vec4<u32>(2u, 3u, 0u, 11u), vec4<f32>(0.34, 0.16, 0.48, 0.02), vec2<u32>(0u, 1u), vec2<f32>(0.8, 0.2), vec2<f32>(0.38, 0.5), 0.0, 0.0); }
         case 13u: { return AgSys(3u, vec2<f32>(805.0, 805.0), vec4<u32>(0u, 1u, 0u, 0u), vec4<f32>(0.75, 0.25, 0.0, 0.0), vec2<u32>(6u, 6u), vec2<f32>(1.0, 0.0), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
         default: { return AgSys(0u, vec2<f32>(2200.0, 1500.0), vec4<u32>(2u, 3u, 1u, 11u), vec4<f32>(0.86, 0.04, 0.08, 0.02), vec2<u32>(5u, 0u), vec2<f32>(0.4, 0.6), vec2<f32>(0.38, 0.5), 0.0, 0.0); }
     }
@@ -224,7 +224,7 @@ fn agri_weights(e: EcoV) -> array<f32, 15> {
         }
     }
     let dev = e.dev;
-    m[11] *= 0.3 + 1.4 * dev;
+    m[11] *= (0.3 + 1.4 * dev) * smoothstep1(13.0, 18.0, e.temp);
     m[5] *= 1.6 - 1.0 * dev;
     m[1] *= (0.4 + 1.0 * dev) * (1.0 - 0.8 * smoothstep1(900.0, 1400.0, e.precip));
     m[13] *= (0.4 + 1.0 * dev) * (0.1 + 0.9 * (1.0 - smoothstep1(700.0, 1200.0, e.precip)));
@@ -328,7 +328,7 @@ fn agri_plan(s: ptr<function, Stack>) -> Plan {
     pl.mix = agri_crop_mix(e);
     pl.flags = flags;
     pl.season = r.season;
-    pl.scale = sqrt(e.scale) * (0.75 + 0.5 * u01k(pl.seed, 3lu));
+    pl.scale = sqrt(e.scale) * (0.75 + 0.5 * u01k(pl.seed, 3lu)) * (1.0 - 0.35 * smoothstep1(1000.0, 1600.0, e.precip));
     return pl;
 }
 

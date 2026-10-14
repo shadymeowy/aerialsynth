@@ -165,9 +165,9 @@ const SYS: [SysDef; sys::N] = {
         SysDef { part: VOR, size: [130.0, 1.3], kinds: [CROP, OLIVE, FALLOW, ORCHARD], kw: [0.42, 0.28, 0.2, 0.1], borders: [WALL, MARGIN], bp: [0.75, 0.25], slope: [0.7, 0.9], terraces: 1.0, ..D },
         SysDef { part: GRID, size: [140.0, 70.0], kinds: [VINE, OLIVE, ORCHARD, FALLOW], kw: [0.7, 0.1, 0.1, 0.1], borders: [TRACK, MARGIN], bp: [0.15, 0.85], slope: [0.6, 0.8], ..D },
         SysDef { part: VOR, size: [240.0, 1.4], kinds: [OLIVE, ORCHARD, CROP, FALLOW], kw: [0.55, 0.2, 0.15, 0.1], borders: [WALL, MARGIN], bp: [0.5, 0.5], slope: [0.6, 0.8], ..D },
-        SysDef { part: GRID, size: [480.0, 360.0], kinds: [PALM, RUBBER, TEA, CROP], kw: [0.45, 0.22, 0.15, 0.18], borders: [TRACK, MARGIN], bp: [0.9, 0.1], slope: [0.6, 0.8], ..D },
-        SysDef { part: GRID, size: [95.0, 60.0], kinds: [GREENH, CROP, FALLOW, POND], kw: [0.76, 0.13, 0.09, 0.02], borders: [TRACK, MARGIN], bp: [0.25, 0.75], ..D },
-        SysDef { part: GRID, size: [420.0, 300.0], kinds: [PASTURE, HAY, CROP, POND], kw: [0.42, 0.18, 0.38, 0.02], borders: [MARGIN, HEDGE], bp: [0.8, 0.2], slope: [0.38, 0.5], ..D },
+        SysDef { part: GRID, size: [360.0, 270.0], kinds: [PALM, RUBBER, TEA, CROP], kw: [0.4, 0.2, 0.12, 0.28], borders: [TRACK, MARGIN], bp: [0.9, 0.1], slope: [0.6, 0.8], ..D },
+        SysDef { part: GRID, size: [95.0, 60.0], kinds: [GREENH, CROP, FALLOW, POND], kw: [0.58, 0.24, 0.16, 0.02], borders: [TRACK, MARGIN], bp: [0.25, 0.75], ..D },
+        SysDef { part: GRID, size: [320.0, 230.0], kinds: [PASTURE, HAY, CROP, POND], kw: [0.34, 0.16, 0.48, 0.02], borders: [MARGIN, HEDGE], bp: [0.8, 0.2], slope: [0.38, 0.5], ..D },
         SysDef { part: PIVOT, size: [805.0, 805.0], kinds: [CROP, FALLOW, CROP, CROP], kw: [0.75, 0.25, 0.0, 0.0], borders: [NONE, NONE], bp: [1.0, 0.0], ..D },
         SysDef { part: GRID, size: [2200.0, 1500.0], kinds: [PASTURE, HAY, FALLOW, POND], kw: [0.86, 0.04, 0.08, 0.02], borders: [TRACK, MARGIN], bp: [0.4, 0.6], slope: [0.38, 0.5], ..D },
     ]
@@ -334,7 +334,9 @@ pub fn weights(e: &EcoV) -> [f64; sys::N] {
         }
     }
     let dev = e.dev;
-    m[GREENH as usize] *= 0.3 + 1.4 * dev;
+    // (greenhouse seas in warm climates: a white quilt of plastic over a temperate lake shore read
+    // as a salt crust)
+    m[GREENH as usize] *= (0.3 + 1.4 * dev) * smoothstep(13.0, 18.0, e.temp);
     m[SMALL as usize] *= 1.6 - 1.0 * dev;
     // (sections are the drier plains' grid: in wet lowlands mixed farms and pastures)
     m[SECTION as usize] *= (0.4 + 1.0 * dev) * (1.0 - 0.8 * smoothstep(900.0, 1400.0, e.precip));
@@ -440,7 +442,10 @@ pub fn plan(s: &mut Stack) -> Option<Plan> {
     if e.temp > 20.0 && e.precip > 900.0 {
         flags |= F_TROPIC;
     }
-    Some(Plan { sys, e, seed, mix: crop_mix(&e), flags, season: r.season, scale: e.scale.sqrt() * (0.75 + 0.5 * u01k(seed, 3)) })
+    // (smaller parcels where it is wet: the huge pastures and estates of the survey and plantation
+    // cultures read as flat sheets of one colour next to v0.2.0's patchwork of fields)
+    let wet = 1.0 - 0.35 * smoothstep(1000.0, 1600.0, e.precip);
+    Some(Plan { sys, e, seed, mix: crop_mix(&e), flags, season: r.season, scale: e.scale.sqrt() * (0.75 + 0.5 * u01k(seed, 3)) * wet })
 }
 
 // ============================================================================= layers
