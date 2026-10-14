@@ -151,6 +151,8 @@ struct Ctx {
     frame: u64,
     gbuf_pipe: wgpu::RenderPipeline,
     shade_pipe: wgpu::ComputePipeline,
+    /// the shading kernel has the wall shading ([`walls_compiled`])
+    walls: bool,
     pools: HashMap<Shading, TilePool>,
     targets: Option<Targets>,
     /// unit rays of the renderers' supersampled grids, by renderer id (most recent few)
@@ -158,6 +160,15 @@ struct Ctx {
 }
 
 static CTX: OnceLock<Result<Mutex<Ctx>, String>> = OnceLock::new();
+
+/// Is the wall shading (`render.walls`) compiled into the shading kernel on a GPU of this
+/// backend? Not on DX12: there the kernel goes through FXC, which miscompiles it with the walls
+/// (no error; WARP renders no terrain at all), and DXC fails too (WARP: out of memory creating
+/// the pipeline). Walls are then off on the GPU (`render.walls` is ignored there, with a notice);
+/// the CPU renderer and the other backends have them.
+pub fn walls_compiled(backend: wgpu::Backend) -> bool {
+    backend != wgpu::Backend::Dx12
+}
 
 fn ctx() -> anyhow::Result<&'static Mutex<Ctx>> {
     match CTX.get_or_init(|| Ctx::new().map(Mutex::new).map_err(|e| format!("{e:#}"))) {
@@ -192,7 +203,8 @@ impl Ctx {
         let compiling = gpu.compiling();
         // a shader the backend rejects (e.g. its HLSL / MSL compiler) is an error here, not a
         // device failure that only the next frame reports
-        let (gbuf_pipe, shade_pipe) = gpu.scoped(|| Ok(Self::pipelines(d))).context("the renderer's shaders")?;
+        let walls = walls_compiled(gpu.info.backend);
+        let (gbuf_pipe, shade_pipe) = gpu.scoped(|| Ok(Self::pipelines(d, walls))).context("the renderer's shaders")?;
         drop(compiling);
         Ok(Ctx {
             gpu,
@@ -202,14 +214,15 @@ impl Ctx {
             frame: 0,
             gbuf_pipe,
             shade_pipe,
+            walls,
             pools: HashMap::new(),
             targets: None,
             rays: Vec::new(),
         })
     }
 
-    /// The G-buffer (mesh) and shading pipelines.
-    fn pipelines(d: &wgpu::Device) -> (wgpu::RenderPipeline, wgpu::ComputePipeline) {
+    /// The G-buffer (mesh) and shading pipelines (the latter with the wall shading or without).
+    fn pipelines(d: &wgpu::Device, walls: bool) -> (wgpu::RenderPipeline, wgpu::ComputePipeline) {
         let gmod =
             d.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("mesh"), source: wgpu::ShaderSource::Wgsl(include_str!("mesh.wgsl").into()) });
         let gbuf_pipe = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -249,7 +262,7 @@ impl Ctx {
             layout: None,
             module: &smod,
             entry_point: Some("main"),
-            compilation_options: Default::default(),
+            compilation_options: wgpu::PipelineCompilationOptions { constants: &[("WALLS", if walls { 1.0 } else { 0.0 })], ..Default::default() },
             cache: None,
         });
         (gbuf_pipe, shade_pipe)
@@ -482,6 +495,15 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
     let relit = shading == Shading::Relit;
     let lights = sun_state.lights > 1e-3;
     let split = r.split_flicker && !r.geometry_only && lights && sun_state.flicker.enabled;
+    if r.settings.walls && !c.walls {
+        static NOTE: std::sync::Once = std::sync::Once::new();
+        NOTE.call_once(|| {
+            eprintln!(
+                "render[gpu]: render.walls is off on {:?} (its shader compiler miscompiles the wall shading; the CPU renderer has walls)",
+                c.gpu.info.backend
+            )
+        });
+    }
     let mut flags = 0;
     for (on, f) in [
         (r.geometry_only, F_GEOM),
@@ -493,7 +515,7 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
         (lights && sun_state.flicker.enabled, F_FLICKER),
         (split, F_SPLIT),
         (atmo.p.enabled, F_ATMO),
-        (r.settings.walls, F_WALLS),
+        (r.settings.walls && c.walls, F_WALLS),
     ] {
         if on {
             flags |= f;

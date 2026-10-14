@@ -20,7 +20,8 @@
 //! of its position along the wall, faded to their mean where the pixel footprint is too coarse
 //! to resolve them. The top and the foot of the wall are the DSM texels 2.5 texels against and
 //! along the direction the wall faces. Lighting uses the geometric normal on walls. `shade.wgsl` has the same
-//! functions (`wall_*`); both renderers compute the same patterns.
+//! functions (`wall_*`); both renderers compute the same patterns, except on DX12, where the GPU
+//! renderer has no walls (`gpu::walls_compiled`).
 
 use glam::DVec3;
 use terragen::landcover::{self as lc, Group};

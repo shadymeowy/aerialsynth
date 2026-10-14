@@ -2,10 +2,16 @@
 
 ## Unreleased
 
+- **No walls on the DX12 GPU backend.** On DX12 the shading kernel is built without the wall
+  shading (a pipeline constant) and `render.walls` is ignored by the GPU renderer, with a
+  one-line notice; the CPU renderer and Vulkan / Metal keep the walls. FXC silently miscompiled
+  the kernel once it had the walls (WARP, the Windows CI's device, rendered no terrain, and the
+  self-check failed); DXC fails on it too (WARP: out of memory creating the pipeline), and
+  wgpu's loop bounding stays on.
 - **GPU renderer on software rasterizers.** The G-buffer pass is now submitted before the
   shading pass instead of in the same submission: lavapipe shaded parts of the frame (whole
-  8 × 8 workgroups) before the mesh was drawn there, i.e. as sky, and WARP (Windows CI) drew no
-  terrain at all; a barrier, or a separate command buffer in the same submission, did not help.
+  8 × 8 workgroups) before the mesh was drawn there, i.e. as sky; a barrier, or a separate
+  command buffer in the same submission, did not help.
   A shader the backend rejects is now an error of the renderer's start-up (not a device failure
   reported a frame later), and a GPU render error fails the self-check (auto renders on the
   CPU). The self-check test runs four frames and wants all of them right; CI runs it on lavapipe

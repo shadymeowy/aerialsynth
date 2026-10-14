@@ -244,8 +244,15 @@ the CPU (6 threads).
   CPU`) and the CPU renders. Seen on the virtual GPU of macOS VMs on Intel hosts ("Apple
   Paravirtual device"), which renders nothing. A GPU render that fails in the check (a shader
   the backend rejects) fails it too. `backend: gpu` skips the check. The G-buffer pass is
-  submitted separately from the shading pass that reads it: software rasterizers (Mesa's
-  lavapipe, Windows' WARP) can otherwise shade parts of a G-buffer not yet drawn.
+  submitted separately from the shading pass that reads it: a software rasterizer (Mesa's
+  lavapipe) can otherwise shade parts of a G-buffer not yet drawn.
+- **No walls on DX12 (Windows):** on the DX12 backend the shading kernel is built without the
+  wall shading and `render.walls` is ignored on the GPU, with a one-line notice
+  (`render[gpu]: render.walls is off on Dx12 …`); steep faces then take the top-down texture,
+  as with `walls: false`. DX12's FXC compiler miscompiles the kernel with the walls, silently
+  (Windows' WARP device rendered no terrain at all), and the newer DXC compiler fails on it too
+  (WARP: out of memory creating the pipeline). For walls on Windows render on the CPU
+  (`render.backend: cpu`) or on a Vulkan adapter (`AERIALSYNTH_GPU`, *Several GPUs*).
 
 - **No suitable GPU:** with `backend: auto` (the default) generation and rendering fall back to
   the CPU; `backend: gpu` makes a missing GPU an error instead. Tile generation
