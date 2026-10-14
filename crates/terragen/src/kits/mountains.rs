@@ -533,6 +533,8 @@ pub fn linear(s: &mut Stack) {
         let bandh = if z.badland > 0.2 { 9.0 } else { 14.0 };
         let kb = (ground / bandh + 0.6 * rn).floor();
         let h = hash1(SEED + 40, kb as i64);
+        // (pale clay bands in the badlands; the walls of the arid plateaus' canyons in reds,
+        // oranges and cream: their pale bands read as contour lines on a map)
         let pal = [
             srgb(196.0, 176.0, 154.0),
             srgb(178.0, 135.0, 108.0),
@@ -540,9 +542,16 @@ pub fn linear(s: &mut Stack) {
             srgb(178.0, 149.0, 125.0),
             srgb(186.0, 145.0, 120.0),
             srgb(188.0, 165.0, 140.0),
+            srgb(186.0, 118.0, 84.0),
+            srgb(158.0, 86.0, 60.0),
+            srgb(200.0, 168.0, 128.0),
+            srgb(172.0, 104.0, 74.0),
+            srgb(184.0, 134.0, 98.0),
+            srgb(140.0, 80.0, 60.0),
         ];
-        let col = pal[(u01k(h, 1) * 5.999) as usize] * (0.94 + 0.12 * u01k(h, 2));
-        let floor_col = srgb(190.0, 176.0, 150.0);
+        let off = if z.badland > 0.2 { 0 } else { 6 };
+        let col = pal[off + (u01k(h, 1) * 5.999) as usize] * (0.94 + 0.12 * u01k(h, 2));
+        let floor_col = if z.badland > 0.2 { srgb(190.0, 176.0, 150.0) } else { srgb(172.0, 128.0, 96.0) };
         let col = mixc(floor_col, col, 0.8 * smoothstep(0.25, 0.6, slope));
         s.composite(Layer { cov: cb, albedo: col, cls: if z.badland > 0.2 { cls::BADLANDS } else { cls::CLIFF }, clear: 1.0, ..Default::default() });
         s.m.natural_ok *= 1.0 - cb;
