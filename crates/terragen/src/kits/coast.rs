@@ -541,7 +541,14 @@ fn ponds(s: &mut Stack, zone: f64) {
     }
     let c = area * zone * (e * exact + (1.0 - e) * 0.7 * 0.62);
     if c > 0.0 {
-        s.composite(Layer { cov: c, albedo: mixc(mean_col, col, if salt { 0.4 } else { 0.7 } * e), cls: cls::AQUACULTURE, clear: 1.0, relit: 0.6, ..Default::default() });
+        s.composite(Layer {
+            cov: c,
+            albedo: mixc(mean_col, col, if salt { 0.4 } else { 0.7 } * e),
+            cls: cls::AQUACULTURE,
+            clear: 1.0,
+            relit: 0.6,
+            ..Default::default()
+        });
         s.m.natural_ok *= 1.0 - c;
     }
 }
