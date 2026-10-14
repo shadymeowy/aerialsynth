@@ -17,9 +17,7 @@ pub fn prepare(s: &mut Stack) {
         + 0.6 * smoothstep(0.2, 0.8, t.gully)
         + 0.5 * perlin3(0x5E0, p / 60.0) * band(60.0, gsd)
         + 0.25 * perlin3(0x5E1, p / 18.0) * band(18.0, gsd);
-    // (snow holds on slopes to ~50°: the cut from 42° left half of next's high ranges grey
-    // rock where v0.2.0's are white)
-    s.m.snow = smoothstep(-2.6, -2.8, snow_t) * (1.0 - 0.75 * smoothstep(1.1, 1.9, s.l.slope));
+    s.m.snow = smoothstep(-2.6, -2.8, snow_t) * (1.0 - 0.75 * smoothstep(0.9, 1.6, s.l.slope));
 }
 
 pub fn layer(s: &mut Stack) {
