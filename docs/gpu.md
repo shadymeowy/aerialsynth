@@ -26,8 +26,9 @@ render:
 
 ## First run
 
-The first run on a GPU compiles the generator's compute shaders: about 30 s on a fast desktop
-GPU, longer on laptops and integrated GPUs. `terrain` says so on stderr (`compiling GPU shaders
+The first run on a GPU compiles the generator's compute shaders: about 35 s for `next` on a
+desktop (RTX 2080 Ti, 8 CPU threads: the driver compiles the pipelines in parallel on the CPU),
+longer on laptops and integrated GPUs. `terrain` says so on stderr (`compiling GPU shaders
 for <GPU> ...`, then `GPU shaders ready in N s`), the viewer in its status bar, Python / C with
 `verbose` on. The viewer generates on the CPU meanwhile.
 

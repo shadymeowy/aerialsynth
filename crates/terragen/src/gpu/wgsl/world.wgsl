@@ -640,6 +640,13 @@ struct Relief {
 }
 
 fn relief(c: Ctx, m: Macro, pre: Pre, blk: u32) -> Relief {
+    return relief_kits(c, m, relief_core(c, m, pre), blk);
+}
+
+/// The relief before the kits' operators (`relief_kits`). The point queries run the two halves
+/// in pipelines of their own (each compiles in about half the time; in pass A1 a pipeline of
+/// its own for the kits' operators made pass A1 1.5x slower on a P4).
+fn relief_core(c: Ctx, m: Macro, pre: Pre) -> Relief {
     let p = c.p;
     let gsd = c.gsd;
     let s = m.cont;
@@ -746,17 +753,6 @@ fn relief(c: Ctx, m: Macro, pre: Pre, blk: u32) -> Relief {
         h += cfg.dune_height * sand * dunes(c, m, gsd);
     }
 
-    // the kits' relief operators
-    var rin: ReliefIn;
-    rin.temp = temp0;
-    rin.moist = moist;
-    rin.mountain = mountain;
-    rin.sand = sand;
-    rin.mesa = mesa;
-    rin.smooth_h = smooth_h;
-    rin.blk = blk;
-    kits_relief(c, m, rin, &h);
-
     o.h = h;
     o.smooth_h = smooth_h;
     o.temp0 = temp0;
@@ -768,6 +764,23 @@ fn relief(c: Ctx, m: Macro, pre: Pre, blk: u32) -> Relief {
     o.mesa = mesa;
     o.sand = sand;
     o.gully_n = gully_n;
+    return o;
+}
+
+/// The kits' relief operators on the relief `r` of `relief_core` (block `blk`).
+fn relief_kits(c: Ctx, m: Macro, r: Relief, blk: u32) -> Relief {
+    var rin: ReliefIn;
+    rin.temp = r.temp0;
+    rin.moist = r.moist;
+    rin.mountain = r.mountain;
+    rin.sand = r.sand;
+    rin.mesa = r.mesa;
+    rin.smooth_h = r.smooth_h;
+    rin.blk = blk;
+    var h = r.h;
+    kits_relief(c, m, rin, &h);
+    var o = r;
+    o.h = h;
     return o;
 }
 
