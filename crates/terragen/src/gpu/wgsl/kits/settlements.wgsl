@@ -144,12 +144,15 @@ fn st_rot2(v: vec2<f32>, a: f32) -> vec2<f32> {
     return vec2<f32>(c * v.x + s * v.y, -s * v.x + c * v.y);
 }
 
-fn st_pick_pattern(pl: StPl, did: u64, industrial: bool) -> u32 {
+fn st_pick_pattern(pl: StPl, z: u32, did: u64, industrial: bool) -> u32 {
     if (industrial) {
         return SP_INDUSTRIAL;
     }
     let u = u01k(did, 4lu);
     let a = pl.arch;
+    if (z == SZ_PERI && pl.dev < 0.45 && (a == 0u || a == 1u || a == 2u || a == 3u || a == 8u) && u < 0.65) {
+        return SP_INFORMAL;
+    }
     if (a == 3u) {
         return SP_ORGANIC;
     }
@@ -450,7 +453,7 @@ fn st_district_pattern(pl: StPl, point: vec2<f32>, id: u64) -> vec3<u32> {
             }
         }
     }
-    var pattern = st_pick_pattern(pl, mix64(pl.seed ^ 0x2A7Elu), ind);
+    var pattern = st_pick_pattern(pl, zd, mix64(pl.seed ^ 0x2A7Elu), ind);
     if (pl.level < 2u) {
         pattern = SP_GRID;
     }
@@ -532,12 +535,6 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
         } else if (pattern == SP_ORGANIC) {
             w2cell = select(55.0 + 35.0 * u2, 40.0, pl.arch == 3u);
             sw = select(2.8 + 1.4 * u01k(did, 8lu), 1.7, pl.arch == 3u);
-        } else if (pattern == SP_CURVI) {
-            b = 210.0 + 40.0 * u2;
-            asp = 0.42;
-            sw = 4.5;
-            warp = 42.0;
-            jit = 0.15;
         } else if (pattern == SP_SUPER) {
             b = 280.0 + 110.0 * u2;
             sw = 9.0;
@@ -677,11 +674,8 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         let cy = st_cell(sd, 1li, qr.y, by, jit);
         let near_x = cx.i + select(0li, 1li, cx.off > cx.size - cx.off);
         let near_y = cy.i + select(0li, 1li, cy.off > cy.size - cy.off);
-        var dx = min(cx.off, cx.size - cx.off);
+        let dx = min(cx.off, cx.size - cx.off);
         let dy = min(cy.off, cy.size - cy.off);
-        if (pattern == SP_CURVI && u01k(hash2(sd ^ 0xC0lu, near_x, cy.i), 1lu) > 0.35) {
-            dx = 1e9;
-        }
         let main_x = st_rem(near_x, 4li) == 0li && pattern == SP_GRID;
         let main_y = st_rem(near_y, 4li) == 0li && pattern == SP_GRID;
         let swx = select(sw, sw * 1.5, main_x);

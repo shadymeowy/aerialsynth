@@ -172,13 +172,17 @@ fn rot2(v: DVec2, a: f64) -> DVec2 {
 
 /// The street pattern of a town (culture; industrial districts apart): one layout for the whole
 /// town, its zones differ by their buildings (districts of different patterns and orientations
-/// read as pieces of different towns glued together; v0.2.0 drew one grid per town).
-pub fn pick_pattern(pl: &Pl, did: u64, industrial: bool) -> u32 {
+/// read as pieces of different towns glued together; v0.2.0 drew one grid per town); the
+/// peri-urban ring of poor towns is informal.
+pub fn pick_pattern(pl: &Pl, z: u32, did: u64, industrial: bool) -> u32 {
     use pat::*;
     if industrial {
         return INDUSTRIAL;
     }
     let u = u01k(did, 4);
+    if z == zone::PERI && pl.dev < 0.45 && matches!(pl.arch, 0 | 1 | 2 | 3 | 8) && u < 0.65 {
+        return INFORMAL;
+    }
     match pl.arch {
         3 => ORGANIC,
         5 | 6 | 11 if u < 0.3 => RADIAL,
@@ -444,7 +448,7 @@ pub fn district_pattern(pl: &Pl, point: DVec2, id: u64) -> (u32, u32, bool) {
             }
         }
     }
-    let mut pattern = pick_pattern(pl, mix64(pl.seed ^ 0x2A7E), ind);
+    let mut pattern = pick_pattern(pl, zd, mix64(pl.seed ^ 0x2A7E), ind);
     if pl.level < 2 {
         pattern = pat::GRID;
     }
@@ -510,13 +514,6 @@ pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
             pat::ORGANIC => {
                 w2cell = if pl.arch == 3 { 40.0 } else { 55.0 + 35.0 * u2 };
                 sw = if pl.arch == 3 { 1.7 } else { 2.8 + 1.4 * u01k(did, 8) };
-            }
-            pat::CURVI => {
-                b = 210.0 + 40.0 * u2;
-                asp = 0.42;
-                sw = 4.5;
-                warp = 42.0;
-                jit = 0.15;
             }
             pat::SUPER => {
                 b = 280.0 + 110.0 * u2;
@@ -608,12 +605,8 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         let (biy, bqy, bsy) = cell(1, qr.y, by);
         let near_x = bix + (bqx > bsx - bqx) as i64;
         let near_y = biy + (bqy > bsy - bqy) as i64;
-        let mut dx = bqx.min(bsx - bqx);
+        let dx = bqx.min(bsx - bqx);
         let dy = bqy.min(bsy - bqy);
-        // curvilinear suburbs: most cross streets are missing (long blocks, cul-de-sacs)
-        if pattern == pat::CURVI && u01k(hash2(sd ^ 0xC0, near_x, biy), 1) > 0.35 {
-            dx = 1e9;
-        }
         let main_x = near_x.rem_euclid(4) == 0 && pattern == pat::GRID;
         let main_y = near_y.rem_euclid(4) == 0 && pattern == pat::GRID;
         let (swx, swy) = (if main_x { sw * 1.5 } else { sw }, if main_y { sw * 1.5 } else { sw });
