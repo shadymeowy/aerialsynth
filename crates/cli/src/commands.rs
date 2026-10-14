@@ -395,7 +395,7 @@ pub fn tiles(a: TilesArgs) -> Result<()> {
     if let Some(prefix) = &a.png {
         let at = a.at.as_deref().map(|v| parse_floats(v, 2, "--at lat,lon")).transpose()?.map(|v| (v[0], v[1]));
         let layers = crate::preview::check_args(a.zoom, s.tiles.max_zoom, a.size, &a.layers, at)?;
-        return crate::preview::mosaic(s.world.clone(), at, a.zoom, a.size, &layers, prefix);
+        return crate::preview::mosaic(s.world.clone(), s.tiles.generator, at, a.zoom, a.size, &layers, prefix);
     }
     let gen = pipeline::generator(&s)?;
     let flight = a.list.is_none() && a.bbox.is_none();

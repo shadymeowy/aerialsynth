@@ -101,7 +101,15 @@ impl TileCache {
         }
         let t = match self.store.read_tile(id, &self.layers).ok().flatten() {
             Some(t) => t,
-            None if self.generatable(id) => self.generate(&[id]).ok()?.pop()?,
+            None if self.generatable(id) => match self.generate(&[id]) {
+                Ok(mut v) => v.pop()?,
+                Err(e) => {
+                    // (a hole in the terrain, not a stop: said once, the rest is probably the same)
+                    static WARNED: std::sync::Once = std::sync::Once::new();
+                    WARNED.call_once(|| eprintln!("warning: generating tile {id:?} failed ({e:#}); missing tiles stay empty (this warning is shown once)"));
+                    return None;
+                }
+            },
             None => return None,
         };
         let t = Arc::new(t);

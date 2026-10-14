@@ -17,6 +17,7 @@ pub use tilestore::TileData;
 pub struct NextGenerator {
     pub world: World,
     pub surface: SurfaceModel,
+    #[cfg(feature = "gpu")]
     backend: Backend,
     /// the GPU generator, compiled on first use (Err: unavailable)
     #[cfg(feature = "gpu")]
@@ -160,11 +161,14 @@ impl NextGenerator {
         let mut cfg = Config { generator: crate::config::GeneratorKind::Next, ..cfg };
         // the resolved biome registry is part of the world (stores record it)
         cfg.biomes.resolved = crate::registry::Registry::for_config(&cfg).ok().map(|r| r.resolved.clone());
+        #[cfg(not(feature = "gpu"))]
+        let _ = backend; // (only the GPU path reads it)
         let world = World::new(cfg);
         let surface = SurfaceModel::new(&world);
         NextGenerator {
             world,
             surface,
+            #[cfg(feature = "gpu")]
             backend,
             #[cfg(feature = "gpu")]
             gpu: std::sync::OnceLock::new(),

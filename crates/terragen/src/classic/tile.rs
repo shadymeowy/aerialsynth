@@ -17,6 +17,7 @@ pub use tilestore::TileData;
 pub struct Generator {
     pub world: World,
     pub surface: SurfaceModel,
+    #[cfg(feature = "gpu")]
     backend: Backend,
     /// the GPU generator, compiled on first use (Err: unavailable)
     #[cfg(feature = "gpu")]
@@ -125,11 +126,14 @@ impl Generator {
     /// A generator on `backend` (the GPU generator is compiled on first use).
     pub fn with_backend(cfg: Config, backend: Backend) -> Self {
         let cfg = Config { generator: crate::config::GeneratorKind::Classic, ..cfg };
+        #[cfg(not(feature = "gpu"))]
+        let _ = backend; // (only the GPU path reads it)
         let world = World::new(cfg);
         let surface = SurfaceModel::new(&world);
         Generator {
             world,
             surface,
+            #[cfg(feature = "gpu")]
             backend,
             #[cfg(feature = "gpu")]
             gpu: std::sync::OnceLock::new(),

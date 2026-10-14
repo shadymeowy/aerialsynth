@@ -82,12 +82,12 @@ pub fn check_args(zoom: u8, max_zoom: u8, size: u32, layers: &str, at: Option<(f
 
 /// A mosaic of `size` × `size` tiles of zoom `zoom` around (lat, lon) (deg; default: the
 /// world's home), generated straight into `<out>_<layer>.png` (no tile store). The arguments
-/// are checked by [`check_args`].
-pub fn mosaic(cfg: terragen::Config, at: Option<(f64, f64)>, zoom: u8, size: u32, layers: &[String], out: &std::path::Path) -> Result<()> {
+/// are checked by [`check_args`]; the generator is the world's (`world.generator`) on `backend` (`tiles.generator`).
+pub fn mosaic(cfg: terragen::Config, backend: terragen::Backend, at: Option<(f64, f64)>, zoom: u8, size: u32, layers: &[String], out: &std::path::Path) -> Result<()> {
     let home = cfg.home.clone().unwrap_or_default();
     let (lat, lon) = at.unwrap_or((home.lat, home.lon));
     let (lat, lon) = (lat.to_radians(), lon.to_radians());
-    let gen = Generator::try_new(cfg)?;
+    let gen = Generator::try_with_backend(cfg, backend)?;
     let c = tile_for_latlon(lat, lon, zoom);
     let n = size as i64;
     let max = 1i64 << zoom;
