@@ -287,6 +287,7 @@ pub(crate) fn record(args: &ViewOptions, store: Arc<TileStore>, gen: Arc<Generat
         if !["surface", "elevation", "landcover", "relief", "height", "instance"].contains(&m) {
             bail!("{}: unknown mode {m:?} (surface, elevation, landcover, relief, height, instance)", path.display());
         }
+        crate::check_mode(m, store.meta()).map_err(|e| anyhow::anyhow!("{}: mode {e}", path.display()))?;
     }
     if !(fps > 0.0 && fps.is_finite()) {
         bail!("--fps must be > 0, got {fps}");
@@ -447,6 +448,21 @@ mod tests {
             let (x, z) = (q * DVec3::X, q * DVec3::Z);
             assert!((x - ned(f.dir)).length() < 1e-6 && (z + ned(f.cam_up)).length() < 1e-6, "{lat} {lon} {heading} {tilt}: {roll} {pitch} {yaw}");
         }
+    }
+
+    /// The modes of the optional layers need them in the store (classic stores have none).
+    #[test]
+    fn modes_of_optional_layers_need_them() {
+        let mut meta = tilestore::StoreMeta::default();
+        for m in ["surface", "elevation", "landcover", "relief"] {
+            crate::check_mode(m, &meta).unwrap();
+        }
+        let e = crate::check_mode("height", &meta).unwrap_err().to_string();
+        assert!(e.contains("no dtm layer"), "{e}");
+        assert!(crate::check_mode("instance", &meta).unwrap_err().to_string().contains("no instance layer"));
+        meta.layers.extend([tilestore::Layer::Dtm, tilestore::Layer::Instance]);
+        crate::check_mode("height", &meta).unwrap();
+        crate::check_mode("instance", &meta).unwrap();
     }
 
     #[test]
