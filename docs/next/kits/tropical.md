@@ -200,3 +200,7 @@ burns and swidden plots.
 Leftovers round B: burn scars have a 0.2-scale mottling (±22 %), flowering crowns and the fishbone lots are less saturated
 (laterite lots 40 % towards grey).
 Polish round 6: fishbone projects clear forest only (agri ≤ 0.55), not farmland.
+Polish round 7: gallery forests thin out up the valley sides (gully mask −0.75…0.05: a crisp edge at the valley rim cut
+pale savanna blotches out of the dark forest, the volcano scene); savanna grass with a soft extent (threshold width
+≥ 0.15), paler and less golden (196, 176, 120 / 176, 166, 122), fading out from moisture 0.45–0.62; tropical_dry's dry
+grass (178, 156, 104); the miombo's spring flush muted (128, 98, 70).

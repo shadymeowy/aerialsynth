@@ -322,3 +322,5 @@ road and a track through forest nearby (−7.619, −16.609) from 500 m.
   from night views at zoom ≤ 7.
 
 Leftovers round B: the verge of roads in forest is a darker green (92, 108, 66 at 55 %) instead of a pale yellow-green.
+Polish round 7: cuttings are steep rock faces (2:1, the toe at half the depth) tinted 20 % towards the cut colour, fills
+20 % towards the verge green (1:2 slopes in a pale tint drew 30 m wide white ribbons where roads climb canyon walls).

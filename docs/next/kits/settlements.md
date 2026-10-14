@@ -256,3 +256,8 @@ the horizon (the far districts are still at their mean).
 Polish round 6: town centres (towns, levels ≤ 2) are mostly detached boxes of 3–7 floors on lawns (v0.2.0's
 town centres; perimeter blocks fill a quarter of them, all of a city's); street trees along 40 % of the streets, yard
 trees at a fifth of the houses, courtyard trees in a quarter of the cells.
+Polish round 7: the inner and outer zones of towns (levels ≤ 2, not industrial estates) are lotted like v0.2.0's
+town centres (BSP depth 4: lots of ~13–25 m): houses and low blocks fill the lot minus 1.5–4 m setbacks (half sizes
+up to 13 × 11 m), 3.5–8 m high with a few up to ~20 m, two thirds of them with pitched roofs in the culture's palette
+(the boxes of round 6 were 3–7 floors with flat grey roofs, four per block); their coarse mean follows (green 0.3, paved
+0.3, roofs a third flat). The slate cultures' red tile is less saturated (146, 84, 66).

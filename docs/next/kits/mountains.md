@@ -236,3 +236,10 @@ Leftovers round B: the tower walls still read pale grey in the still although th
 there and bare rock only above slope 3.5 (the cause of the grey is not found: another layer or the lighting; the tops
 are green). The folds are hazy in the 08:00 still (low sun, 10 km); the fjord at 4 km is still wide (2 km), the 1.5 km one
 is a trough with high walls. A canyon is as deep as the plateau allows (the floor is not lowered below 30 m).
+
+Polish round 7: each canyon bench has its own ledge (15–65 % of the step, hashed by the bench in the core's stepped
+profile) and the benches are strong along some stretches of a canyon and faint along others (a 1.4 km noise, 0.45–1):
+equal ledges drew a staircase. In the core, the fine ridged octaves (< 1.8 km) and the erosion gullies of the highest
+ranges saturate at ~3 km of mountain amplitude (`world::ridged_fine`, 3000 / amplitude, 0.55–1): the 5–7 km ranges at
+48–50° N had a mean slope of 37° at 30 m and a fifth of the ground steeper than 50° (steeper than the Himalaya); now 30–32°
+and 6–9 % (`probe_px slopes LAT LON KM STEP_M [classic]`; v0.2.0's alpine places 17–20°).

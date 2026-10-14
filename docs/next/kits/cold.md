@@ -120,3 +120,7 @@ ponds.
 
 Polish round 6: perennial snow holds on slopes to ~45° and 40 % of it on walls steeper than ~60° (the cut was
 35°–50° to 15 %).
+Polish round 7 (random-place audit): grey-brown polar soils (the core `polar` biome had the default palette's red-brown
+soils: orange polar land), greyer bare ice (172, 184, 192) and blue ice (160, 180, 196), crevasses grey (62, 72, 80) at
+60 % and 2.5 m deep, muted sedge in drained basins (lime blobs), a faint snow net in the late melt (a white polygon net
+over brown tundra); tundra, lichen and polar-desert mottling soft (`soft: 0.3`).
