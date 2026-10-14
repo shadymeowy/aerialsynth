@@ -415,12 +415,14 @@ fn flats(s: &mut Stack, ty: &Types) {
     let col = mixc(mud, marsh, high);
     s.composite(Layer { cov: zone, albedo: col, cls: if high > 0.5 { cls::MARSH } else { cls::TIDAL_FLAT }, clear: 1.0, ..Default::default() });
     s.m.natural_ok *= 1.0 - zone;
-    // creeks: dark wet channels (the pixel's own carving shows as shallow water)
+    // creeks: dark wet channels (the pixel's own carving shows as shallow water); dry and only a
+    // little darker on the arid flats (a net of black lines over the desert coasts)
     let win = 1.0 - smoothstep(1.6, 3.2, ground);
     if win > 0.0 {
         let c = creek(p, gsd, fw.max(0.3 * gsd)) * zone * win;
         if c > 0.0 {
-            let cc = mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high);
+            let arid = 1.0 - smoothstep(0.2, 0.34, s.t.moist);
+            let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, 0.7 * arid);
             s.composite(Layer { cov: c, albedo: cc, cls: cls::TIDAL_FLAT, clear: 1.0, ..Default::default() });
         }
     }
@@ -501,7 +503,7 @@ fn ponds(s: &mut Stack, zone: f64) {
     // (pond fields on part of the flats, their colours muted: a quilt of pink, white and teal
     // ponds covered half of every arid delta; salt pans on fewer flats still, muted more)
     let salt = t.moist < 0.45;
-    let area = if salt { smoothstep(0.2, 0.45, perlin3(SEED + 60, p / 2400.0)) } else { smoothstep(0.05, 0.3, perlin3(SEED + 60, p / 2400.0)) };
+    let area = if salt { smoothstep(0.3, 0.55, perlin3(SEED + 60, p / 2400.0)) } else { smoothstep(0.05, 0.3, perlin3(SEED + 60, p / 2400.0)) };
     if area <= 0.0 {
         return;
     }

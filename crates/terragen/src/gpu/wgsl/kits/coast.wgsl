@@ -123,7 +123,8 @@ fn co_flats(s: ptr<function, Stack>, ty: CoTypes) {
     if (win > 0.0) {
         let c = co_creek(p, gsd, max(fw, 0.3 * gsd)) * zone * win;
         if (c > 0.0) {
-            let cc = mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high);
+            let arid = 1.0 - smoothstep1(0.2, 0.34, (*s).t.moist);
+            let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, 0.7 * arid);
             var ly2 = layer_paint(c, cc, LC_TIDAL_FLAT);
             ly2.clear = 1.0;
             composite(s, ly2);
@@ -143,7 +144,7 @@ fn co_ponds(s: ptr<function, Stack>, zone: f32) {
     let fw = (*s).l.fw;
     let salt = t.moist < 0.45;
     let pn = perlin3(CO_SEED + 60lu, p * (1.0lf / 2400.0lf));
-    let area = select(smoothstep1(0.05, 0.3, pn), smoothstep1(0.2, 0.45, pn), salt);
+    let area = select(smoothstep1(0.05, 0.3, pn), smoothstep1(0.3, 0.55, pn), salt);
     if (area <= 0.0) {
         return;
     }
