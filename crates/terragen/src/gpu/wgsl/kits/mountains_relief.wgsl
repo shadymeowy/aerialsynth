@@ -429,7 +429,10 @@ fn mountains_carve(c: Ctx, m: Macro, ci: CarveIn, cv: ptr<function, Carve>) {
             let prov = clamp(0.6 * smoothstep1(-0.05, 0.4, m.uplift) + 0.4 * smoothstep1(0.2, 0.8, m.plateau), 0.0, 1.0);
             (*cv).floor = lerp(f0, max(f0 - (400.0 + 1100.0 * prov), min(f0, 30.0)), cz);
             (*cv).depth_cap = lerp((*cv).depth_cap, 1500.0, cz);
-            (*cv).wall_k *= lerp(1.0, 0.3, cz);
+            let bw = band(450.0, gsd);
+            let re = bw * (1.0 - smoothstep1(0.32, 0.6, mt_crease(perlin3(MT_SEED + 70lu, c.p / 900.0lf))));
+            let sp = bw * perlin3(MT_SEED + 71lu, c.p / 1700.0lf);
+            (*cv).wall_k *= lerp(1.0, 0.3 * (1.0 + 1.1 * re + 0.3 * sp), cz);
             (*cv).fp_w *= lerp(1.0, 0.6, cz);
             (*cv).steps = 50.0;
             (*cv).step_mix = max((*cv).step_mix, cz * band(160.0, gsd));
