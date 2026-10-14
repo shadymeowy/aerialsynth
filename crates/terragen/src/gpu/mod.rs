@@ -147,7 +147,9 @@ struct Kernels {
     l_tables: wgpu::BindGroupLayout,
     l_points: wgpu::BindGroupLayout,
     l_tile: wgpu::BindGroupLayout,
+    /// point queries: the relief, then the rest of pass A (`points.wgsl`)
     points: wgpu::ComputePipeline,
+    points_rest: wgpu::ComputePipeline,
     nodes: wgpu::ComputePipeline,
     inst: wgpu::ComputePipeline,
     a1: wgpu::ComputePipeline,
@@ -155,7 +157,7 @@ struct Kernels {
     a2: wgpu::ComputePipeline,
     region_req: wgpu::ComputePipeline,
     town_req: wgpu::ComputePipeline,
-    /// pass B's stages (`PB_STAGE_STEPS`)
+    /// pass B's stages (`PB_STAGES`)
     pass_b: Vec<wgpu::ComputePipeline>,
     open_min_x: wgpu::ComputePipeline,
     open_min_y: wgpu::ComputePipeline,
@@ -199,6 +201,9 @@ struct Lattice {
     used: usize,
 }
 
+/// The size of a `PointMid` (points.wgsl; `point_mid_size` checks it).
+const POINT_MID_BYTES: u64 = 176;
+
 /// Lattice table slots (~50 bytes each).
 const LAT_CAP: usize = 1 << 23;
 /// Lattice cells per enumeration / gather chunk.
@@ -236,14 +241,17 @@ pub struct GpuGenerator {
     pb_work: Mutex<Option<wgpu::Buffer>>,
 }
 
-/// The first stack step of each pass-B stage (`stack_step_<n>` in stack.wgsl: 0..=9 on land, 10
-/// on standing water, in the last stage). Each stage is one pipeline: the drivers inline the
-/// whole surface model into its entry point and compile time grows faster than its size, so
-/// the stack is cut where the kits' code splits about evenly (`compile_times` in gpu/tests.rs
-/// measures the stages). A boundary after step 5 doubles the state between stages (the
-/// deferred layers and the town: `PB_STATE_FULL`). Four stages since the settlements kit: its
-/// built layer (step 6) with the linear step, the canopy and water steps in a stage of their own.
-pub(crate) const PB_STAGE_STEPS: &[u32] = &[0, 3, 5, 7];
+/// Where each pass-B stage starts: a stack step (`stack_step_<n>` in stack.wgsl: 0..=9 on land,
+/// 10 on standing water, in the last stage) and, mid-slot, the first kit of that step's slot to
+/// run in the stage (`""`: the step from its core layer on; a kit's name: the step's core layer,
+/// biome layers and the kits before it ran in the stage before). Each stage is one pipeline: the
+/// drivers inline the whole surface model into its entry point and compile time grows faster
+/// than its size, so the stack is cut where the code splits about evenly (`inlined_sizes` and
+/// `compile_times` in gpu/tests.rs measure the stages). Every stage evaluates only the kernel
+/// kinds of its slots' biome layers (`kernel_eval_st<n>`). A boundary after step 5 (or in it,
+/// after its core layer) doubles the state between stages (the deferred layers and the town:
+/// `PB_STATE_FULL`); each stage costs a reload of the sample (~2–3 % of pass B).
+pub(crate) const PB_STAGES: &[(u32, &str)] = &[(0, ""), (3, ""), (5, ""), (7, "")];
 
 /// Pass B's work buffer (`pbw` in tile_b.wgsl): header words, samples per round, words per
 /// sample (stage state), per pixel (fields), per pixel (classes, flags).
@@ -252,19 +260,22 @@ const PB_RS: usize = 2;
 const PB_STATE_FULL: bool = {
     let mut full = false;
     let mut i = 0;
-    while i < PB_STAGE_STEPS.len() {
-        full |= PB_STAGE_STEPS[i] > 5;
+    while i < PB_STAGES.len() {
+        full |= PB_STAGES[i].0 > 5 || (PB_STAGES[i].0 == 5 && !PB_STAGES[i].1.is_empty());
         i += 1;
     }
     full
 };
 const PB_ST_F: usize = if PB_STATE_FULL { 55 } else { 29 };
 const _: () = {
-    // stages start at step 0, increase, and the last holds at least step 9 (and 10: water)
-    assert!(PB_STAGE_STEPS[0] == 0);
+    // stages start at step 0, increase, the last holds at least step 9 (and 10: water); a stage
+    // starts mid-slot only before the water steps (the last stage runs every water kit on
+    // standing water)
+    assert!(PB_STAGES[0].0 == 0 && PB_STAGES[0].1.is_empty());
     let mut i = 1;
-    while i < PB_STAGE_STEPS.len() {
-        assert!(PB_STAGE_STEPS[i] > PB_STAGE_STEPS[i - 1] && PB_STAGE_STEPS[i] <= 9);
+    while i < PB_STAGES.len() {
+        assert!(PB_STAGES[i].0 >= PB_STAGES[i - 1].0 && PB_STAGES[i].0 <= 9);
+        assert!(PB_STAGES[i].1.is_empty() || PB_STAGES[i].0 <= 7);
         i += 1;
     }
 };
@@ -277,38 +288,119 @@ const STEP_SLOTS: [usize; 11] = {
     [ZONAL, ALTITUDINAL, AZONAL, DISTURBANCE, AGRICULTURE, LINEAR, BUILT, CANOPY, WATER, SEASONAL, WATER]
 };
 
-/// Pass B's stage runners, kit dispatchers and entry points (`pass_b<n>`).
+/// The core kernels' WGSL functions by kind (`kernel_explicit` in kernels.wgsl).
+const CORE_KERNELS: [&str; 13] =
+    ["k_scatter", "k_rows", "k_cells", "k_stripes", "k_contours", "k_radial", "k_crescent", "k_lobes", "k_patches", "k_linear", "k_stamp", "k_canopy", "k_water"];
+
+/// The (slot, kernel kind) pairs of the builtin registry's biome layers: the kinds pass B's
+/// stages compile (a world's registry differs from the builtin one only in pick weights).
+fn registry_kinds() -> Vec<(usize, u32)> {
+    let r = crate::registry::Registry::builtin().expect("builtin registry");
+    let mut v: Vec<(usize, u32)> = r.biomes.iter().flat_map(|b| b.layers.iter().map(|l| (l.slot, l.k.kind))).collect();
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
+/// A pass-B stage's position in the stack: (step, part) with part 0 the step's core layer and
+/// biome layers, 1 + k the kit `KITS[k]`.
+fn stage_pos(i: usize) -> (u32, usize) {
+    if i >= PB_STAGES.len() {
+        return (11, 0);
+    }
+    let (st, kit) = PB_STAGES[i];
+    if kit.is_empty() {
+        return (st, 0);
+    }
+    let slot = STEP_SLOTS[st as usize];
+    let k = crate::kits::KITS.iter().position(|k| k.name == kit).unwrap_or_else(|| panic!("PB_STAGES: no kit {kit}"));
+    assert!(crate::kits::KITS[k].layers.iter().any(|l| l.0 == slot), "PB_STAGES: kit {kit} has no layer in step {st}");
+    (st, k + 1)
+}
+
+/// Pass B's stage runners, biome-layer loops, kernel and kit dispatchers and entry points
+/// (`pass_b<n>`).
 fn stages_wgsl() -> String {
-    let ns = PB_STAGE_STEPS.len();
+    use std::fmt::Write;
+    let kits = crate::kits::KITS;
+    let np = kits.len() + 1;
+    let kinds = registry_kinds();
+    let kit_kernels: Vec<(u32, &str)> = crate::kits::kernels().map(|k| (k.kind, k.wgsl)).collect();
+    let ns = PB_STAGES.len();
     let mut s = format!(
         "const PB_STAGES: u32 = {ns}u;\nconst PB_STATE_FULL: bool = {PB_STATE_FULL};\nconst PBW_HDR: u32 = {PBW_HDR}u;\nconst PB_RS: u32 = {PB_RS}u;\nconst ST_F: u32 = {PB_ST_F}u;\nconst PFW: u32 = {PB_PFW}u;\nconst ACCW: u32 = {PB_ACCW}u;\n"
     );
-    for (si, &first) in PB_STAGE_STEPS.iter().enumerate() {
+    for si in 0..ns {
         let last_stage = si + 1 == ns;
-        let end = if last_stage { 11 } else { PB_STAGE_STEPS[si + 1] };
-        let steps: Vec<u32> = (first..end).collect();
-        // the kits' layers of the stage's slots
-        let mut slots: Vec<usize> = steps.iter().map(|&st| STEP_SLOTS[st as usize]).collect();
+        let (s0, p0) = stage_pos(si);
+        let (s1, p1) = stage_pos(si + 1);
+        assert!((s0, p0) < (s1, p1), "PB_STAGES: stage {si} is empty");
+        // the stage's steps: (step, parts lo..hi)
+        let mut steps: Vec<(u32, usize, usize)> = Vec::new();
+        for st in s0..=s1.min(10) {
+            let lo = if st == s0 { p0 } else { 0 };
+            let hi = if st == s1 { p1 } else { np };
+            if (st == 10 && !last_stage) || lo >= hi {
+                continue;
+            }
+            steps.push((st, lo, hi));
+        }
+        // the kernel kinds of the slots whose biome layers run here
+        let mut kk: Vec<u32> = steps.iter().filter(|t| t.1 == 0).flat_map(|t| kinds.iter().filter(move |p| p.0 == STEP_SLOTS[t.0 as usize]).map(|p| p.1)).collect();
+        kk.sort_unstable();
+        kk.dedup();
+        s += &format!("fn kernel_eval_st{si}(li: u32, i: KIn) -> KOut {{\n    let l = klayers[li];\n    let k = kp_load(li);\n    let e = kernel_resolved(k, l.sz.x, i);\n    var x = kout_none();\n");
+        if !kk.is_empty() {
+            s += "    if (e > 0.0) {\n        switch k.kind {\n";
+            for &kind in &kk {
+                let call = match CORE_KERNELS.get(kind as usize) {
+                    Some(f) => format!("{f}(k, i)"),
+                    None => format!("{}(li, i)", kit_kernels.iter().find(|x| x.0 == kind).unwrap_or_else(|| panic!("no kernel kind {kind}")).1),
+                };
+                let _ = writeln!(s, "            case {kind}u: {{ x = {call}; }}");
+            }
+            s += "            default: {}\n        }\n    }\n";
+        }
+        s += "    return kernel_blend(e, x, l.mean, l.mean_albedo.xyz, i);\n}\n";
+        s += &format!(
+            "fn biome_layers_st{si}(sp: ptr<function, Stack>, slot: u32) {{\n    var it = bl_begin(sp);\n    while (bl_next(sp, slot, &it)) {{\n        bl_apply(sp, it.li, kernel_eval_st{si}(it.li, it.kin));\n    }}\n}}\n"
+        );
+        // the kits' layers of the stage's slots, `lo..hi`: indices in `KITS`
+        let mut slots: Vec<usize> = steps.iter().map(|t| STEP_SLOTS[t.0 as usize]).collect();
         slots.sort_unstable();
         slots.dedup();
-        s += &format!("fn kits_slot_st{si}(s: ptr<function, Stack>, slot: u32) {{\n    switch slot {{\n");
+        s += &format!("fn kits_slot_st{si}(s: ptr<function, Stack>, slot: u32, lo: u32, hi: u32) {{\n    switch slot {{\n");
         for sl in slots {
-            s += &format!("        case {sl}u: {{ kits_slot_{}(s); }}\n", crate::stack::slot::NAMES[sl]);
+            let name = crate::stack::slot::NAMES[sl];
+            let _ = writeln!(s, "        case {sl}u: {{");
+            for (ki, k) in kits.iter().enumerate() {
+                let part = ki + 1;
+                let any = steps.iter().any(|t| STEP_SLOTS[t.0 as usize] == sl && (t.1..t.2).contains(&part));
+                if any && k.layers.iter().any(|l| l.0 == sl) {
+                    let _ = writeln!(s, "            if (lo <= {part}u && {part}u < hi && !(*s).done) {{ {}_slot_{name}(s); }}", k.name);
+                }
+            }
+            s += "        }\n";
         }
         s += "        default: {}\n    }\n}\n";
-        // the runner: one call site of `biome_layers` and of the kits' dispatcher; the bounds
+        // the runner: one call site of the biome layers and of the kits' dispatcher; the bounds
         // read an opaque 0 (`pbw[2]`) so the driver does not unroll the steps
-        let last_step = if last_stage { 9 } else { end - 1 };
+        let first = steps[0].0;
+        let last_step = steps.iter().map(|t| t.0).filter(|&t| t < 10).max().unwrap_or(first);
         s += &format!("fn stack_stage_{si}(sp: ptr<function, Stack>) {{\n    var step = {first}u + pbw[2];\n    var last = {last_step}u + pbw[2];\n");
         if last_stage {
             s += "    if (stack_water((*sp).l)) {\n        step = 10u + pbw[2];\n        last = step;\n    }\n";
         }
-        s += "    loop {\n        var slot = SLOT_SKIP;\n        switch step {\n";
-        for &st in &steps {
-            s += &format!("            case {st}u: {{ slot = stack_step_{st}(sp); }}\n");
+        s += "    loop {\n        var slot = SLOT_SKIP;\n        var lo = 0u;\n        var hi = 0xffffu;\n        switch step {\n";
+        for &(st, lo, hi) in &steps {
+            let mut body = if lo == 0 { format!("slot = stack_step_{st}(sp);") } else { format!("slot = {}u; lo = {lo}u;", STEP_SLOTS[st as usize]) };
+            if hi < np {
+                body += &format!(" hi = {hi}u;");
+            }
+            let _ = writeln!(s, "            case {st}u: {{ {body} }}");
         }
         s += "            default: {}\n        }\n        if (slot == SLOT_SKIP) {\n            break;\n        }\n";
-        s += &format!("        if (!(*sp).done) {{\n            biome_layers(sp, slot);\n            kits_slot_st{si}(sp, slot);\n        }}\n");
+        s += &format!("        if (lo == 0u && !(*sp).done) {{\n            biome_layers_st{si}(sp, slot);\n        }}\n        if (!(*sp).done) {{\n            kits_slot_st{si}(sp, slot, lo, hi);\n        }}\n");
         s += "        if (step >= last) {\n            break;\n        }\n        step += 1u;\n    }\n}\n";
         s += &format!("@compute @workgroup_size(16, 16)\nfn pass_b{si}(@builtin(global_invocation_id) gid: vec3<u32>) {{\n    pass_b_stage(gid, {si}u);\n}}\n");
     }
@@ -379,6 +471,11 @@ impl GpuGenerator {
         let g_pal = storage(d, "palette", &pal);
         // the biome registry (world-constant)
         let rt = surface.registry.gpu();
+        // (pass B compiles the kernel kinds of the builtin registry's slots)
+        let compiled = registry_kinds();
+        if let Some(l) = surface.registry.biomes.iter().flat_map(|b| &b.layers).find(|l| compiled.binary_search(&(l.slot, l.k.kind)).is_err()) {
+            bail!("the GPU generator has no kernel kind {} in slot {} (pass B compiles the builtin registry's)", l.k.kind, l.slot);
+        }
         let g_biomes = storage(d, "biomes", &rt.biomes);
         let g_crowns = storage(d, "crowns", &rt.crowns);
         let g_zones = storage(d, "zones", &rt.zones);
@@ -388,7 +485,7 @@ impl GpuGenerator {
         let l_globals = layout(d, "globals", &[Uniform, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro]);
         let l_drain = layout(d, "drain", &[Ro, Ro, Ro, Ro, Ro]);
         let l_tables = layout(d, "tables", &[Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro, Ro]);
-        let l_points = layout(d, "points", &[Ro, Rw, Rw, Rw]);
+        let l_points = layout(d, "points", &[Ro, Rw, Rw, Rw, Rw]);
         let l_lat = layout(d, "drainage", &[Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Ro, Ro, Rw, Rw, Rw]);
         let l_tile = layout(d, "tile", &[Ro, Ro, Ro, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw, Rw]);
         let globals = bind(
@@ -449,8 +546,8 @@ impl GpuGenerator {
             "finish",
         ];
         let dnames = ["lat_enum", "lat_heights", "mark_targets", "lat_targets", "mark_sources", "lat_sources", "gather_count", "gather_scan", "gather_write"];
-        let stage_names: Vec<String> = (0..PB_STAGE_STEPS.len()).map(|k| format!("pass_b{k}")).collect();
-        let (points, mut tile, mut drain): (wgpu::ComputePipeline, Vec<wgpu::ComputePipeline>, Vec<wgpu::ComputePipeline>) = std::thread::scope(|s| {
+        let stage_names: Vec<String> = (0..PB_STAGES.len()).map(|k| format!("pass_b{k}")).collect();
+        let (points, mut tile, mut drain): ((wgpu::ComputePipeline, wgpu::ComputePipeline), Vec<wgpu::ComputePipeline>, Vec<wgpu::ComputePipeline>) = std::thread::scope(|s| {
             let hs: Vec<_> = names
                 .iter()
                 .copied()
@@ -461,7 +558,8 @@ impl GpuGenerator {
                 })
                 .collect();
             let hd: Vec<_> = dnames.iter().map(|n| s.spawn(|| pipe(&m_drain, &pl_drain, n))).collect();
-            let points = pipe(&m_points, &pl_points, "eval_points");
+            let hp = s.spawn(|| pipe(&m_points, &pl_points, "eval_points_rest"));
+            let points = (pipe(&m_points, &pl_points, "eval_points"), hp.join().expect("pipeline"));
             (points, hs.into_iter().map(|h| h.join().expect("pipeline")).collect(), hd.into_iter().map(|h| h.join().expect("pipeline")).collect())
         });
         let mut dk = || drain.remove(0);
@@ -483,7 +581,8 @@ impl GpuGenerator {
         let stages = tile.split_off(names.len());
         let mut t = || tile.remove(0);
         let k = Kernels {
-            points,
+            points: points.0,
+            points_rest: points.1,
             nodes: t(),
             inst: t(),
             a1: t(),
@@ -578,19 +677,22 @@ impl GpuGenerator {
             let b_out = output(d, "point results", (pts.len() * std::mem::size_of::<GTerrain>()) as u64);
             let b_reps = output(d, "sink reports", (rep_cap * std::mem::size_of::<GSinkPiece>()) as u64);
             let b_rep_n = output(d, "sink report count", 16);
+            let b_mid = output(d, "point relief", pts.len() as u64 * POINT_MID_BYTES);
             let g1 = bind(d, &self.k.l_drain, &[&dr_out.segs, &empty, &b_sinks, &b_keys, &b_vals]);
-            let g2 = bind(d, &self.k.l_points, &[&b_pts, &b_out, &b_reps, &b_rep_n]);
+            let g2 = bind(d, &self.k.l_points, &[&b_pts, &b_out, &b_reps, &b_rep_n, &b_mid]);
             let mut enc = d.create_command_encoder(&Default::default());
             enc.clear_buffer(&b_rep_n, 0, None);
             {
                 let mut cp = enc.begin_compute_pass(&Default::default());
-                cp.set_pipeline(&self.k.points);
                 cp.set_bind_group(0, &self.globals, &[]);
                 cp.set_bind_group(1, &g1, &[]);
                 cp.set_bind_group(2, &g2, &[]);
                 let groups = (pts.len() as u32).div_ceil(64);
                 let gx = groups.min(65535);
-                cp.dispatch_workgroups(gx, groups.div_ceil(gx), 1);
+                for p in [&self.k.points, &self.k.points_rest] {
+                    cp.set_pipeline(p);
+                    cp.dispatch_workgroups(gx, groups.div_ceil(gx), 1);
+                }
             }
             self.gpu.queue.submit([enc.finish()]);
             let out: Vec<GTerrain> = read_back(&self.gpu, &b_out, pts.len())?;

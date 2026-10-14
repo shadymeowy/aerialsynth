@@ -409,6 +409,17 @@ fn wgsl_compiles() {
     }
 }
 
+/// `POINT_MID_BYTES` is the size of a `PointMid` in WGSL's layout.
+#[test]
+fn point_mid_size() {
+    let (points, _, _) = super::sources();
+    let m = naga::front::wgsl::parse_str(&points).unwrap();
+    let mut l = naga::proc::Layouter::default();
+    l.update(m.to_ctx()).unwrap();
+    let (h, _) = m.types.iter().find(|(_, t)| t.name.as_deref() == Some("PointMid")).unwrap();
+    assert_eq!(l[h].size as u64, super::POINT_MID_BYTES);
+}
+
 /// `src` without the slot and kernel glue lines of the kits in `TERRAGEN_COMPILE_DROP` (a
 /// comma list of kit names: their code is then unreferenced; measurements only).
 fn drop_kits(src: String) -> String {
@@ -445,7 +456,7 @@ fn stub_fns(mut src: String) -> String {
 /// the largest contributors and repeated calls (`TERRAGEN_INLINED_FN=perlin3`: that function's
 /// copies by caller). A cheap proxy of the driver's compile time, which grows faster than the
 /// size (no GPU): `cargo test -p terragen --release --lib inlined_sizes -- --ignored
-/// --nocapture`. (`pass_b<k>` counts every stage; the driver keeps only stage k.)
+/// --nocapture`. (`pass_b<k>` counts stage k only, as the drivers keep only that one.)
 #[test]
 #[ignore]
 fn inlined_sizes() {
@@ -510,7 +521,14 @@ fn inlined_sizes_of(module: &naga::Module, only: Option<&Vec<String>>) {
         for f in &root {
             mult[f.index()] += 1.0;
         }
+        // pass B's entry `pass_b<k>` reaches every stage through a switch on the constant k: the
+        // drivers keep only stage k (`stack_stage_<k>`)
+        let stage = ep.name.strip_prefix("pass_b").map(|k| format!("stack_stage_{k}"));
+        let names: Vec<&str> = module.functions.iter().map(|(_, f)| f.name.as_deref().unwrap_or_default()).collect();
         for i in (0..nf).rev() {
+            if stage.as_ref().is_some_and(|s| names[i].starts_with("stack_stage_") && names[i] != s) {
+                mult[i] = 0.0;
+            }
             if mult[i] == 0.0 {
                 continue;
             }
