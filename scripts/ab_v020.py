@@ -15,6 +15,16 @@ so the identical pose often shows another landscape). The scenes set `world.gene
     # the reference JPEGs from a v0.2.0 showcase output (out/showcase/<scene>/stills.h5)
     scripts/ab_v020.py refs --showcase out/showcase
 
+Audit (unbiased): `scripts/ab_v020/audit_places.csv` lists 30 deterministic pseudo-random land
+places of the next world (`probe_px audit 30 7`: area-uniform, every Köppen group, >= 400 km
+apart, no hand picking) with the nearest classic-world land point. `audit` renders them with the
+camera of the `farmland` still (700 m above the ground, 42° down, 640 x 360, June, the farmland
+still's local solar time 10:41; December south of the equator) with either generator; `sheet --audit` puts them side by side.
+
+    scripts/ab_v020.py audit --terrain target/release/terrain --generator classic --out /tmp/audit_c
+    scripts/ab_v020.py audit --terrain target/release/terrain --generator next --out /tmp/audit_n
+    scripts/ab_v020.py sheet --audit --run classic=/tmp/audit_c --run next=/tmp/audit_n --out sheets/
+
 `sheet` writes one JPEG per 6 scenes (columns: v0.2.0, then each run) and `stats.csv` /
 `stats.md`: per image, the mean saturation, the high-frequency energy (mean |Laplacian| of
 the luma), the share of flat 8 x 8 blocks (luma std < 1.5 DN) and the edge contrast (99th /
@@ -32,6 +42,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CFG = ROOT / "scripts" / "ab_v020"
 REF = ROOT / "docs" / "next" / "ab" / "v020"
+AUDIT = CFG / "audit_places.csv"
 FRAME = 1  # the frame of each sequence shown (of 4)
 
 
@@ -48,17 +59,50 @@ def scenes(names):
     return out
 
 
+def audit_places():
+    with open(AUDIT) as f:
+        return list(csv.DictReader(f))
+
+
+def audit_cfg(place, generator):
+    """The farmland still's config at an audit place (local solar time kept)."""
+    import re
+
+    lat, lon = (place["classic_lat"], place["classic_lon"]) if generator == "classic" else (place["lat"], place["lon"])
+    text = (CFG / "farmland.yaml").read_text()
+    h = (8.5 + (32.775 - float(lon)) / 15.0) % 24.0
+    hh, mm = int(h), int(round((h - int(h)) * 60))
+    if mm == 60:
+        hh, mm = (hh + 1) % 24, 0
+    text = text.replace("generator: next", f"generator: {generator}")
+    text = re.sub(r"\n    lat: .*\n", f"\n    lat: {lat}\n", text)
+    text = re.sub(r"\n    lon: .*\n", f"\n    lon: {lon}\n", text)
+    text = text.replace("time_utc: 08:30:00", f"time_utc: '{hh:02d}:{mm:02d}:00'")
+    if float(lat) < 0:  # the same season: southern summer
+        text = text.replace("date: '2026-06-21'", "date: '2026-12-21'")
+    return f"# audit place {place['id']} ({place['koppen']}, {place['biome']})\n" + text
+
+
+def audit(a):
+    places = [p for p in audit_places() if not a.scenes or p["id"] in a.scenes]
+    run_all(a, [(p["id"], audit_cfg(p, a.generator)) for p in places])
+
+
 def render(a):
+    run_all(a, [(s, (CFG / f"{s}.yaml").read_text()) for s in scenes(a.scenes)])
+
+
+def run_all(a, jobs):
     out = Path(a.out).resolve()
     terrain = str(Path(a.terrain).resolve())
-    for s in scenes(a.scenes):
+    for s, cfg in jobs:
         d = out / s
         if (d / "out" / "seq.h5").exists() and not a.force:
             print(f"{s}: done")
             continue
         shutil.rmtree(d, ignore_errors=True)
         d.mkdir(parents=True)
-        shutil.copy(CFG / f"{s}.yaml", d / "cfg.yaml")
+        (d / "cfg.yaml").write_text(cfg)
         with open(d / "run.log", "w") as log:
             r = subprocess.run([terrain, "run", "-c", "cfg.yaml"], cwd=d, stdout=log, stderr=subprocess.STDOUT)
         # the tiles are not kept (hundreds of MB per scene)
@@ -110,13 +154,17 @@ def sheet(a):
         runs.append((tag, Path(path)))
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    names = scenes(a.scenes)
+    if a.audit:
+        names = [p["id"] for p in audit_places() if not a.scenes or p["id"] in a.scenes]
+        desc = {p["id"]: f"{p['koppen']} {p['biome']}" for p in audit_places()}
+    else:
+        names = scenes(a.scenes)
     rows, table = [], []
     for s in names:
         base = s.split("@")[0]
         ref = REF / f"{base}.jpg"
         cells = []
-        if ref.exists():
+        if ref.exists() and not a.audit:
             im = np.asarray(Image.open(ref).convert("RGB"))
             cells.append(("v0.2.0", im))
         for tag, path in runs:
@@ -133,7 +181,7 @@ def sheet(a):
                 t = Image.fromarray(im).resize((640, 360))
                 st = stats(np.asarray(t))
                 table.append({"scene": s, "run": tag, **{k: round(v, 3) for k, v in st.items()}})
-            label(t, f"{s} | {tag}")
+            label(t, f"{s} {desc[s]} | {tag}" if a.audit else f"{s} | {tag}")
             tiles.append(t)
         rows.append(tiles)
     ncol = max(len(r) for r in rows)
@@ -213,7 +261,14 @@ def main():
     s.add_argument("--out", required=True)
     s.add_argument("--per-sheet", type=int, default=6)
     s.add_argument("--scale", type=float, default=0.5)
+    s.add_argument("--audit", action="store_true", help="the audit places (scenes = place ids)")
     s.add_argument("scenes", nargs="*")
+    u = sub.add_parser("audit", help="render the audit places")
+    u.add_argument("--terrain", required=True)
+    u.add_argument("--out", required=True)
+    u.add_argument("--generator", choices=["next", "classic"], default="next")
+    u.add_argument("--force", action="store_true")
+    u.add_argument("scenes", nargs="*", help="place ids (default: all)")
     f = sub.add_parser("refs")
     f.add_argument("--showcase", required=True)
     f.add_argument("--limit", type=int, default=40000)
@@ -224,7 +279,7 @@ def main():
     t.add_argument("--limit", type=int, default=60000)
     t.add_argument("sheets", nargs="+")
     a = ap.parse_args()
-    {"render": render, "sheet": sheet, "refs": refs, "thumbs": thumbs}[a.cmd](a)
+    {"render": render, "audit": audit, "sheet": sheet, "refs": refs, "thumbs": thumbs}[a.cmd](a)
 
 
 if __name__ == "__main__":
