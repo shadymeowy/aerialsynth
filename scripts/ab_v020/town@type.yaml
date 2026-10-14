@@ -1,4 +1,5 @@
-# town at a place of the same type in the next generator's world: metropolis outer districts (docs/next/kits/settlements.md) (the same local solar time)
+# town at a place of the same type in the next generator's world: the centre of a town of 15 000 (41.528 N 33.168 E,
+# 17 km from v0.2.0's place, same culture; round 5 used a metropolis' outer districts) (the same local solar time)
 world:
   seed: 1
   generator: next
@@ -14,8 +15,8 @@ trajectory:
     altitude_m: 500
     heading_deg: 115
     kind: line
-    lat: 30.45
-    lon: 128.95
+    lat: 41.5303
+    lon: 33.1612
     climb_rate_mps: 14.0
     duration_s: 8.6
 render:
@@ -24,7 +25,7 @@ render:
   lighting:
     mode: clock
     date: '2026-06-21'
-    time_utc: '02:06:06'
+    time_utc: '08:29:14'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
