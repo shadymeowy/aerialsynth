@@ -499,6 +499,12 @@ fn wall_weight(nz: f32) -> f32 {
     return t * t * (3.0 - 2.0 * t);
 }
 
+// rock takes the wall material on gentler faces too (walls::weight_rock)
+fn wall_weight_rock(nz: f32) -> f32 {
+    let t = clamp((0.76 - nz) / 0.22, 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
 // height above the ellipsoid of the point at `range` along a view direction with dot `e` with
 // the camera's up (walls::sample_height)
 fn sample_height(h_cam: f32, e: f32, range: f32) -> f32 {
@@ -589,17 +595,27 @@ fn wall_texel(kind: u32, base: vec3<f32>, s: f32, h: f32, ground: f32, top: f32,
         return TX(mix(mean, col, k), e);
     }
     if kind == WK_ROCK {
-        let b = h / 2.6 + 0.35 * sin(s / 23.0);
+        let b = h / 2.6 + 0.35 * sin(s / 23.0) + 0.15 * sin(s / 7.3 + 1.3);
         let bi = floor(b);
         let fb = b - bi;
-        let layer = 0.8 + 0.4 * wall_hash(i32(bi), 7);
-        let bed = 1.08 - 0.16 * fb;
-        let j = s / 3.5 + wall_hash(i32(bi), 3);
-        let joint = select(1.0, 0.7, j - floor(j) < 0.08);
-        let k = clamp((4.0 - foot) / 2.5, 0.0, 1.0);
-        let f = 1.0 + (layer * bed * joint / 0.976 - 1.0) * k;
-        let rock = mix(base, vec3<f32>(dot(base, vec3<f32>(0.2126, 0.7152, 0.0722))), 0.3);
-        return TX(rock * f, vec3<f32>(0.0));
+        let l0 = wall_hash(i32(bi), 7);
+        let l1 = wall_hash(i32(bi) + 1, 7);
+        let layer = 0.88 + 0.24 * (l0 + (l1 - l0) * smoothstep(0.75, 1.0, fb));
+        let band = 0.95 + 0.10 * wall_hash(i32(floor(h / 19.0)), 11);
+        let bed = 1.0 + 0.04 * cos(6.283185307 * fb);
+        let jw = clamp((0.9 - foot) / 0.5, 0.0, 1.0);
+        let j = s / (6.0 + 8.0 * wall_hash(i32(bi), 5)) + wall_hash(i32(bi), 3);
+        let joint = select(1.0, 1.0 - 0.15 * jw, j - floor(j) < 0.03 && wall_hash(i32(bi), 9) < 0.3);
+        let k = clamp((3.2 - foot) / 2.0, 0.0, 1.0);
+        let k2 = clamp((12.0 - foot) / 8.0, 0.0, 1.0);
+        let f = 1.0 + (layer * bed * joint - 1.0) * k + (band - 1.0) * k2;
+        let sat = 0.3 + 0.3 * (wall_hash(i32(bi), 13) - 0.5) * k;
+        let lb = dot(base, vec3<f32>(0.2126, 0.7152, 0.0722));
+        let rock = mix(base, vec3<f32>(lb), sat);
+        let tl = (1.0 - smoothstep(1.0, 9.0, h - ground)) * clamp((top - ground - 6.0) / 6.0, 0.0, 1.0);
+        let lr = dot(rock, vec3<f32>(0.2126, 0.7152, 0.0722));
+        let scree = mix(rock, vec3<f32>(lr * 1.12), 0.5);
+        return TX(mix(rock * f, scree, 0.6 * tl), vec3<f32>(0.0));
     }
     if kind == WK_VEG {
         let c = wall_hash(i32(floor(s / 3.0)), i32(floor(h / 3.0)));
@@ -638,6 +654,24 @@ fn wall_col(e: u32, q: GP) -> vec4<f32> {
         return vec4<f32>(0.0);
     }
     return vec4<f32>(textureLoad(t_color, vec2<i32>(q.ix & 255, q.iy & 255), i32(e & 0xFFFFu), 0).rgb, 1.0);
+}
+
+// The colour of a rock wall: the bilinear mean of the colour texels three levels up (about 5 m
+// at the finest zoom): a nearest texel there draws the texel grid's skewed tooth edges on a
+// terraced face (w = 0: none).
+fn wall_rock_col(p: GP) -> vec4<f32> {
+    let g = gp_add(gp_coarser(p, min(p.z, 3)), vec2<f32>(-0.5, -0.5));
+    var acc = vec4<f32>(0.0);
+    for (var i = 0; i < 4; i++) {
+        let q = gp_add(g, vec2<f32>(f32(i & 1), f32(i >> 1)));
+        let c = wall_col(tile_of(q.z, q.ix, q.iy), q);
+        let w = select(1.0 - g.fx, g.fx, (i & 1) == 1) * select(1.0 - g.fy, g.fy, (i >> 1) == 1);
+        acc += vec4<f32>(c.xyz * c.w, c.w) * w;
+    }
+    if acc.w <= 0.0 {
+        return vec4<f32>(0.0);
+    }
+    return vec4<f32>(acc.xyz / acc.w, 1.0);
 }
 
 // geometric normal (camera frame, facing the camera; zero when unknown) of the rendered surface
@@ -786,7 +820,8 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32
     let ng = vec3<f32>(dot(n_geo, east), dot(n_geo, north), dot(n_geo, up));
     let hz = vec2<f32>(ng.x, -ng.y);
     let wt = wall_weight(ng.z);
-    if WALLS && wt > 0.0 && dot(hz, hz) > 1e-6 {
+    let wr = wall_weight_rock(ng.z);
+    if WALLS && wr > 0.0 && dot(hz, hz) > 1e-6 {
         let out = normalize(hz);
         let e0 = tile_of(p.z, p.ix, p.iy);
         let pt = gp_add(p, -2.5 * out);
@@ -798,14 +833,16 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32
         if wk == WK_BUILT || wk == WK_GLASS || wk == WK_VEG {
             b = wall_col(et, pt);
         } else {
-            let pc = gp_coarser(p, min(p.z, 2));
-            b = wall_col(tile_of(pc.z, pc.ix, pc.iy), pc);
+            b = wall_rock_col(p);
         }
         wbase = select(vec3<f32>(0.2), b.xyz, b.w > 0.0);
         wtop = wall_h(et, pt, hs);
         wground = wall_h(wall_entry(pg, p, e0), pg, hs);
         wtan = vec2<f32>(-out.y, out.x);
-        ww = wt;
+        ww = select(wt, wr, wk == WK_ROCK);
+        if ww <= 0.0 {
+            wk = WK_NONE;
+        }
     }
     // the class's material (lc_material, lc_forward: generated from terragen::landcover):
     // self-emission with the lights, the snow BRDF, the glint of water and other glossy classes
