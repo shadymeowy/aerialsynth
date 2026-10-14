@@ -165,6 +165,11 @@ struct Bio {
     st: EcoStyle,
     /// site temperature, precipitation, temperature range, dry months
     site: vec4<f32>,
+    /// the style's ecoregions (`eco_vals` indices, -1: none) and blend: pass B's later stages
+    /// rebuild the sample's `Bio` from them (`bio_from`) instead of `bio_at`
+    k1: i32,
+    k2: i32,
+    wst: f32,
 }
 
 /// `eco::ecotone_pick`: weight of the ecoregion across the border at `edge` m.
@@ -245,9 +250,13 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
         o.st.crown = vec4<f32>(1.0);
         o.st.veg = vec4<f32>(1.0, 0.0, 1.0, 1.0);
         o.st.land = vec4<f32>(0.5, 1.0, 1.0, 1.0);
+        o.k1 = -1;
+        o.k2 = -1;
+        o.wst = 0.0;
         return o;
     }
     let ea = eco_vals[ka];
+    var kb2 = ka;
     var wb = 0.0;
     if (ib != 0lu && ib != ia) {
         wb = ecotone_pick(c.p, c.gsd, edge);
@@ -257,6 +266,7 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
         let kb = eco_find(ib);
         if (kb >= 0) {
             eb = eco_vals[kb];
+            kb2 = kb;
         } else {
             surface_missing |= MISS_ECO;
         }
@@ -264,10 +274,14 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
     var e1 = ea;
     var e2 = eb;
     var w = wb;
+    o.k1 = ka;
+    o.k2 = kb2;
     if (wb > 0.5) {
         e1 = eb;
         e2 = ea;
         w = 1.0 - wb;
+        o.k1 = kb2;
+        o.k2 = ka;
     }
     let tz = t.temp + clamp(0.5 * t.temp_range - 10.0, -6.0, 8.0);
     let z1 = zone_of(e1.biome, tz, c.p, c.gsd);
@@ -277,16 +291,46 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
         o.b = z2.z;
         o.w = w;
         o.st = style_mix(eco_style(e1), eco_style(e2), w);
+        o.wst = w;
     } else {
         o.a = z1.z;
         o.b = z1.partner;
         o.w = z1.w;
         o.st = eco_style(e1);
+        o.wst = 0.0;
     }
     if (o.a == o.b) {
         o.w = 0.0;
     }
     o.edge_km = edge / 1000.0;
+    o.site = vec4<f32>(e1.misc.z, e1.misc.w, e1.clim.x, e1.clim.y);
+    return o;
+}
+
+/// The `Bio` that `bio_at` made, from its zones (`a`, `b`, `w`), its style's ecoregions and blend
+/// (`k1`, `k2`, `wst`) and the border distance `edge` (m).
+fn bio_from(a: u32, b: u32, w: f32, k1: i32, k2: i32, wst: f32, edge: f32) -> Bio {
+    var o: Bio;
+    o.a = a;
+    o.b = b;
+    o.w = w;
+    o.k1 = k1;
+    o.k2 = k2;
+    o.wst = wst;
+    o.edge_km = edge / 1000.0;
+    if (k1 < 0) {
+        o.st.grass = vec4<f32>(1.0);
+        o.st.crown = vec4<f32>(1.0);
+        o.st.veg = vec4<f32>(1.0, 0.0, 1.0, 1.0);
+        o.st.land = vec4<f32>(0.5, 1.0, 1.0, 1.0);
+        return o;
+    }
+    let e1 = eco_vals[k1];
+    if (wst > 0.0) {
+        o.st = style_mix(eco_style(e1), eco_style(eco_vals[k2]), wst);
+    } else {
+        o.st = eco_style(e1);
+    }
     o.site = vec4<f32>(e1.misc.z, e1.misc.w, e1.clim.x, e1.clim.y);
     return o;
 }

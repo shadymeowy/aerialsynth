@@ -67,8 +67,7 @@ fn desert_slot_azonal(s: ptr<function, Stack>) {
 The WGSL glue (`kits_slot_<slot>`, `kits_kernel`, `kits_relief`, the family dispatch) is
 generated from `KITS` (`kits::wgsl()`); a WGSL function a kit's `Kit` names must exist with
 exactly that name and signature. On the GPU, pass B runs the stack in stages, one pipeline
-each (`gpu::PB_STAGE_STEPS`: slots zonal–azonal, disturbance–agriculture, linear–built,
-canopy–seasonal and standing water); see *Compile time* below.
+each (`gpu::PB_STAGES`: a stage may start between two kits of a slot); see *Compile time* below.
 
 **Kernel kind ids:** each kit owns 16 ids from `kernels::KIT_BASE` (64), by its position in
 the placeholder list: desert 64, volcanic 80, mountains 96, cold 112, coast 128, tropical 144,
@@ -575,9 +574,11 @@ a kit may add at most **5 %** to the tiles/s of any zoom of the default bench pl
 
 The drivers (NVIDIA most of all) inline every call into the entry point and compile one
 pipeline in time that grows faster than its size (about size^1.4): pass B as one pipeline with
-five kits took 390 s and a sixth kit lost the device. Pass B now runs the stack in four
-pipelines (stages), compiled in parallel; each kit adds its layers to the
-stages of its slots. Rules that keep it there:
+five kits took 390 s and a sixth kit lost the device. Pass B now runs the stack in six
+pipelines (stages), compiled in parallel; each kit adds its layers to the stages of its slots,
+and a stage compiles only the kernel kinds of its slots' biome layers. For the point queries
+the kits' relief operators have a pipeline of their own (`eval_points_kits`). Rules that keep
+it there:
 
 * **One call site per heavy function.** A helper called from three slot functions, or twice in
   one, is compiled three or two times: compute it once and pass the result, or loop.
@@ -597,10 +598,18 @@ compile_times -- --ignored --nocapture` (cold compile time of every pipeline, on
 kit's layers and kernels: its cost). Without a GPU, `cargo test -p terragen --release --lib
 inlined_sizes -- --ignored --nocapture` prints each entry point's inlined size and, with
 `TERRAGEN_COMPILE=<entry>`, the largest contributors and repeated calls. Budget: no pipeline
-above ~30 s cold on the farm; if a stage grows past it, move a boundary in
-`gpu::PB_STAGE_STEPS` (or add one: any step 1–9; boundaries after step 5 carry the deferred
-layers and the town between stages, twice the state). `TERRAGEN_PROFILE=1` prints each
-pipeline's compile time at start-up (in parallel, so ~1.3× the one-at-a-time numbers).
+above ~15 s cold on an RTX 2080 Ti (~20–25 s on the farm's Tesla P4s; an inlined size of
+~80–90k). Now, cold and one at a time on the 2080 Ti: pass B 8–15 s per stage,
+`eval_points_kits` 11 s, and the two pipelines with the whole relief, `pass_a1` 19 s and
+`lat_heights` 16 s (P4: 9–20, 13, 23 and 18 s; a pipeline of its own for pass A1's kit
+operators made pass A1 1.5× slower). If a stage grows past the budget, move or add a boundary
+in `gpu::PB_STAGES`: `(step, "")` starts a stage at a step (1–9), `(step, "<kit>")` between
+that step's kits (steps 0–7; standing water runs every water kit in the last stage).
+Boundaries after step 5's core layer also carry the deferred layers and the town. A boundary
+costs ~3 % of pass B (the reload of the sample and its state) to ~7 % (splitting a stage the
+driver compiled well): `TERRAGEN_PROFILE=passes` prints each stage's GPU time.
+`TERRAGEN_PROFILE=1` prints each pipeline's compile time at start-up (in parallel, so ~1.3×
+the one-at-a-time numbers).
 
 ---
 

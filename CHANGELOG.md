@@ -102,6 +102,9 @@
   `AERIALSYNTH_GPU`), and `AERIALSYNTH_GPU_STALL_S` sets the bound (default 120 s).
 - `AERIALSYNTH_GPU_STRICT=1` makes a failed GPU tile batch an error instead of a switch to
   the CPU (development, CI).
+- `next`: shorter first-run shader compile (Tesla P4 51 → 28 s, RTX 2080 Ti desktop 45 → 36 s):
+  pass B in six pipelines that compile only their slots' kernels, point queries in three;
+  pass B ~5 % faster.
 
 ### Fixes
 
