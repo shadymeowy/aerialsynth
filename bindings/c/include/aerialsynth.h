@@ -246,7 +246,7 @@ extern "C" {
 #endif // __cplusplus
 
 /**
- * The library version ("0.1.0"); a static string.
+ * The library version (the package version, e.g. "0.2.0"); a static string.
  */
 const char *as_version(void);
 

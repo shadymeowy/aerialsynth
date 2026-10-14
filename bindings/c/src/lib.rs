@@ -200,7 +200,7 @@ unsafe fn path(s: *const c_char, what: &str) -> Result<Option<PathBuf>, (c_int, 
     Ok(Some(p))
 }
 
-/// The library version ("0.1.0"); a static string.
+/// The library version (the package version, e.g. "0.2.0"); a static string.
 #[no_mangle]
 pub extern "C" fn as_version() -> *const c_char {
     concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr() as *const c_char

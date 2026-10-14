@@ -101,29 +101,48 @@ impl Generator {
     }
 
     /// [`Generator::open_store_rw`]; a new store also gets the optional layers `extra`. An
-    /// existing store keeps its layers (a note names those it lacks).
+    /// existing store keeps its layers (a note names those it lacks), but for an empty one with
+    /// layers this world does not make: it is made again.
     pub fn open_store_rw_with(&self, path: &std::path::Path, extra: &[Layer]) -> Result<TileStore> {
-        if !path.exists() {
-            if self.config().generator == GeneratorKind::Classic && !extra.is_empty() {
-                eprintln!("note: the classic generator makes none of the optional layers (tiles.layers needs world.generator: next)");
+        let classic = self.config().generator == GeneratorKind::Classic;
+        if classic && !extra.is_empty() {
+            // (once: commands open the store several times)
+            static NOTED: std::sync::Once = std::sync::Once::new();
+            NOTED.call_once(|| eprintln!("note: the classic generator makes none of the optional layers (tiles.layers needs world.generator: next)"));
+        }
+        let meta = self.store_meta_with(extra);
+        if path.exists() {
+            let mut st = TileStore::open_rw(path)?;
+            if !st.is_empty() {
+                self.check_store(&st, true)?;
+                let lacking: Vec<&str> = extra.iter().filter(|l| !classic && !st.meta().has(**l)).map(|l| l.name()).collect();
+                if !lacking.is_empty() {
+                    eprintln!(
+                        "note: tile store {} was created without the layer(s) {} (tiles.layers applies to new stores)",
+                        path.display(),
+                        lacking.join(", ")
+                    );
+                }
+                return Ok(st);
             }
-            return TileStore::create(path, self.store_meta_with(extra));
+            // an empty store is this world's now: re-stamped, or made again when it has layers
+            // this world does not make (the optional layers of a store the next generator
+            // created would refuse the classic generator's tiles, which have none)
+            if st.meta().layers.iter().all(|l| meta.layers.contains(l)) {
+                st.set_generator(&meta)?;
+                let lacking: Vec<&str> = extra.iter().filter(|l| !classic && !st.meta().has(**l)).map(|l| l.name()).collect();
+                if !lacking.is_empty() {
+                    eprintln!(
+                        "note: tile store {} was created without the layer(s) {} (tiles.layers applies to new stores)",
+                        path.display(),
+                        lacking.join(", ")
+                    );
+                }
+                return Ok(st);
+            }
+            drop(st);
         }
-        let mut st = TileStore::open_rw(path)?;
-        if st.is_empty() {
-            st.set_generator(&self.store_meta())?;
-        } else {
-            self.check_store(&st, true)?;
-        }
-        if self.config().generator == GeneratorKind::Classic && !extra.is_empty() {
-            eprintln!("note: the classic generator makes none of the optional layers (tiles.layers needs world.generator: next)");
-            return Ok(st);
-        }
-        let lacking: Vec<&str> = extra.iter().filter(|l| !st.meta().has(**l)).map(|l| l.name()).collect();
-        if !lacking.is_empty() {
-            eprintln!("note: tile store {} was created without the layer(s) {} (tiles.layers applies to new stores)", path.display(), lacking.join(", "));
-        }
-        Ok(st)
+        TileStore::create(path, meta)
     }
 
     /// Open `path` read-only; it must hold this world (another generator version is only a
@@ -352,6 +371,34 @@ mod tests {
         c.atlas.plates = 9;
         c.relief.belt_mountains = 0.1;
         Generator::with_backend(c, Backend::Cpu).open_store_rw(&v020).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An empty store re-used by another world takes that world's layers: a store the next
+    /// generator created with its optional layers (and left empty, e.g. interrupted while the
+    /// shaders compiled) takes the classic generator's tiles, which have none of them.
+    #[test]
+    fn an_empty_store_takes_the_new_worlds_layers() {
+        let dir = temp("layers");
+        let path = dir.join("w.h5");
+        let id = geodesy::tiles::TileId::new(3, 2, 2);
+        let next = Generator::with_backend(cfg(GeneratorKind::Next), Backend::Cpu);
+        drop(next.open_store_rw_with(&path, &[Layer::Dtm, Layer::Instance]).unwrap());
+        assert!(TileStore::open(&path).unwrap().meta().has(Layer::Dtm));
+        let classic = Generator::with_backend(cfg(GeneratorKind::Classic), Backend::Cpu);
+        let st = classic.open_store_rw(&path).unwrap();
+        assert!(!st.meta().has(Layer::Dtm) && !st.meta().has(Layer::Instance));
+        st.write_tiles(&[dummy_tile(id)]).unwrap();
+        drop(st);
+        assert!(classic.open_store_rw(&path).unwrap().contains(id));
+        // the other way the store keeps its layers (the next generator's tiles fill the base
+        // ones), re-stamped for next
+        let path2 = dir.join("w2.h5");
+        drop(classic.open_store_rw(&path2).unwrap());
+        let st = next.open_store_rw_with(&path2, &[Layer::Dtm]).unwrap();
+        assert!(!st.meta().has(Layer::Dtm));
+        assert_eq!(generator_of(st.meta()), Some(GeneratorKind::Next));
+        drop(st);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

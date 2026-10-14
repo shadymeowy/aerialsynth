@@ -354,7 +354,31 @@ static SHARED: std::sync::OnceLock<Result<std::sync::Arc<Gpu>, String>> = std::s
 
 /// The process-wide device (generator, renderer and event sensor share it).
 pub fn shared() -> Result<std::sync::Arc<Gpu>> {
-    SHARED.get_or_init(|| Gpu::new().map(std::sync::Arc::new).map_err(|e| e.to_string())).clone().map_err(|e| anyhow!("{e}"))
+    SHARED
+        .get_or_init(|| {
+            let r = Gpu::new().map(std::sync::Arc::new).map_err(|e| e.to_string());
+            if let Err(e) = &r {
+                let strict = std::env::var("AERIALSYNTH_GPU_STRICT").is_ok_and(|v| !v.is_empty() && v != "0");
+                if let Some(w) = no_gpu_warning(std::env::var(GPU_ENV).ok().as_deref(), strict, e) {
+                    eprintln!("{w}");
+                }
+            }
+            r
+        })
+        .clone()
+        .map_err(|e| anyhow!("{e}"))
+}
+
+/// The warning when the device cannot be made although a GPU was asked for (`AERIALSYNTH_GPU`
+/// names one, or strict mode): with `backend: auto` the generator and the renderer quietly use
+/// the CPU then, so the reason (e.g. a selection that matches no adapter, with the list of
+/// adapters) would never be shown.
+fn no_gpu_warning(sel: Option<&str>, strict: bool, err: &str) -> Option<String> {
+    let sel = sel.map(str::trim).filter(|s| !s.is_empty());
+    if sel.is_some_and(|s| s.eq_ignore_ascii_case("none")) || (sel.is_none() && !strict) {
+        return None;
+    }
+    Some(format!("warning: no GPU ({err}); with backend auto, tiles are generated and frames rendered on the CPU"))
 }
 
 #[cfg(test)]
@@ -397,6 +421,20 @@ mod tests {
         drop(slices);
         rbs.iter().for_each(|rb| rb.unmap());
         Ok(out)
+    }
+
+    /// A GPU that was asked for but cannot be used is reported (not `AERIALSYNTH_GPU=none`, nor
+    /// without a selection outside strict mode: the CPU is then the expected fallback).
+    #[test]
+    fn a_failed_gpu_selection_is_reported() {
+        let w = no_gpu_warning(Some("p5"), false, "AERIALSYNTH_GPU=p5 matches no single GPU; the adapters are: …").unwrap();
+        assert!(w.starts_with("warning: no GPU (AERIALSYNTH_GPU=p5 matches no single GPU") && w.contains("on the CPU"), "{w}");
+        assert!(no_gpu_warning(None, true, "no GPU adapter").is_some());
+        assert!(no_gpu_warning(Some(" "), true, "no GPU adapter").is_some());
+        assert_eq!(no_gpu_warning(Some("none"), true, "AERIALSYNTH_GPU=none: no GPU"), None);
+        assert_eq!(no_gpu_warning(Some("NONE"), false, "AERIALSYNTH_GPU=none: no GPU"), None);
+        assert_eq!(no_gpu_warning(None, false, "no GPU adapter"), None);
+        assert_eq!(no_gpu_warning(Some(""), false, "no GPU adapter"), None);
     }
 
     #[test]

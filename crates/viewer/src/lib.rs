@@ -125,6 +125,7 @@ pub fn run(scn: Scenario, store: Arc<TileStore>, gen: Arc<Generator>, mut opts: 
     opts.max_zoom.get_or_insert(scn.tiles.max_zoom);
     opts.base_zoom.get_or_insert(DEFAULT_BASE_ZOOM.min(scn.tiles.max_zoom));
     check_options(&opts, scn.tiles.max_zoom)?;
+    check_mode(&opts.mode, store.meta()).map_err(|e| anyhow::anyhow!("--mode {e}"))?;
     if store.writable() {
         // (compiling the GPU generator's pipelines the first time takes a while: the CPU
         // generates the first tiles meanwhile)
@@ -173,6 +174,24 @@ pub fn check_options(o: &ViewOptions, tiles_max_zoom: u8) -> Result<()> {
     }
     if let Some(z) = o.max_zoom.filter(|&z| z > geodesy::MAX_ZOOM) {
         anyhow::bail!("--max-zoom {z}: at most {}", geodesy::MAX_ZOOM);
+    }
+    Ok(())
+}
+
+/// A shading mode of an optional layer needs the store to have it (`height`: dtm, `instance`:
+/// instance); without it the map would show nothing.
+pub(crate) fn check_mode(mode: &str, meta: &tilestore::StoreMeta) -> Result<()> {
+    let need = match mode {
+        "height" => tilestore::Layer::Dtm,
+        "instance" => tilestore::Layer::Instance,
+        _ => return Ok(()),
+    };
+    if !meta.has(need) {
+        anyhow::bail!(
+            "{mode}: the tile store has no {} layer (an optional layer of the next generator: world.generator: next with tiles.layers: [{}] in a new store)",
+            need.name(),
+            need.name()
+        );
     }
     Ok(())
 }

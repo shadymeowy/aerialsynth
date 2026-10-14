@@ -101,6 +101,14 @@
 - A directory or a file that is not HDF5 given as a tile store fails with that reason instead
   of an HDF5 error stack (CLI and bindings).
 - `terrain tiles --bbox` rejects swapped latitudes and out-of-range values.
+- An empty store left by `next` with optional layers (e.g. interrupted during the first shader
+  compile) refused classic tiles ("layer dtm has 0 bytes"); it is now made again.
+- `AERIALSYNTH_GPU` naming no adapter (or a GPU failing in strict mode) was silent with
+  `backend: auto`; a warning now gives the reason and the adapter list.
+- The pipeline cache works on Windows (`%LOCALAPPDATA%\terrain` without `HOME`; every run
+  compiled cold) and ignores an empty `XDG_CACHE_HOME`.
+- `terrain view --mode height|instance` on a store without that layer is an error instead of
+  an empty map.
 
 ## 0.2.0 — 2026-10-10
 

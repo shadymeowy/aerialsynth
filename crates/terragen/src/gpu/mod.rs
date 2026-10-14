@@ -1764,12 +1764,20 @@ fn prune_files(dir: &std::path::Path, prefix: &str, suffix: &str, legacy: Option
 
 /// The generator's cache directory: `$XDG_CACHE_HOME/terrain` (`~/.cache/terrain`).
 fn cache_dir() -> Option<std::path::PathBuf> {
-    Some(
-        std::env::var_os("XDG_CACHE_HOME")
-            .map(std::path::PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".cache")))?
-            .join("terrain"),
-    )
+    cache_dir_in(|k| std::env::var_os(k))
+}
+
+/// [`cache_dir`] with the environment `var`: `$XDG_CACHE_HOME/terrain`, else
+/// `$HOME/.cache/terrain`, else `%LOCALAPPDATA%\terrain` (Windows, where `HOME` is usually
+/// unset: without it every run compiled the shaders cold). Empty variables are unset (an empty
+/// `XDG_CACHE_HOME` put the cache in the working directory).
+fn cache_dir_in(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<std::path::PathBuf> {
+    let set = |k: &str| var(k).filter(|v| !v.is_empty());
+    set("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| set("HOME").map(|h| std::path::Path::new(&h).join(".cache")))
+        .or_else(|| set("LOCALAPPDATA").map(std::path::PathBuf::from))
+        .map(|d| d.join("terrain"))
 }
 
 /// Devices without a pipeline cache (Metal, DX12: their drivers cache compiled shaders
@@ -1840,6 +1848,18 @@ impl PipelineCache {
 #[cfg(test)]
 mod cache_tests {
     use super::*;
+
+    #[test]
+    fn cache_directory() {
+        use std::path::PathBuf;
+        let env = |vars: &'static [(&'static str, &'static str)]| move |k: &str| vars.iter().find(|v| v.0 == k).map(|v| std::ffi::OsString::from(v.1));
+        assert_eq!(cache_dir_in(env(&[("XDG_CACHE_HOME", "/x"), ("HOME", "/h")])), Some(PathBuf::from("/x/terrain")));
+        assert_eq!(cache_dir_in(env(&[("XDG_CACHE_HOME", ""), ("HOME", "/h")])), Some(PathBuf::from("/h/.cache/terrain")));
+        // Windows: no HOME
+        assert_eq!(cache_dir_in(env(&[("LOCALAPPDATA", "C:/Users/u/AppData/Local")])), Some(PathBuf::from("C:/Users/u/AppData/Local/terrain")));
+        assert_eq!(cache_dir_in(env(&[("HOME", "/h"), ("LOCALAPPDATA", "C:/l")])), Some(PathBuf::from("/h/.cache/terrain")));
+        assert_eq!(cache_dir_in(env(&[])), None);
+    }
 
     #[test]
     fn cache_names_and_pruning() {
