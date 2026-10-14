@@ -387,150 +387,146 @@ fn sample_in(ti: TileInfo, i: u32, j: u32, sx: u32, sy: u32, slope: f32, grad: v
 
 /// The pass-B work buffer: header (round, first tile of the chunk, an opaque 0, chunk tiles),
 /// then per chunk pixel: the stage state of each sample of the round, its pixel fields, its
-/// samples' classes and flags.
-/// (`PBW_HDR`, `PB_RS` samples per round, `ST_F` words of stage state per sample: masks (19),
-/// colour (3), height, emission (3), lit, class and flags, with `PB_STATE_FULL` (a stage
-/// boundary after step 5) the deferred layers (10) and the town (14); `PFW` words of pixel fields: f (16),
-/// pending, has_stand, stand (2); `ACCW` words of classes (8 bits each, up to 16), flags
-/// (1: finished) and the samples' instance ids (16); the stage state ends with the instance ids
-/// (the stack's; with `PB_STATE_FULL` the deferred layers' and the town's before it):
-/// constants from `gpu::stages_wgsl`)
-@group(2) @binding(22) var<storage, read_write> pbw: array<u32>;
+/// samples' classes and flags. (`PBW_HDR` words, `PB_RS` samples per round, `ST_F` words of
+/// stage state per sample: masks (19), colour (3), height, emission (3), lit, class and flags,
+/// the biomes (`bio_from`: 6), the region index and the instance id, then, where a stage
+/// boundary lies after step 5's core layer (`PB_FULL_IN` / `PB_FULL_OUT`: bits by stage), the
+/// deferred layers (11) and the town (14); `PFW` words of pixel fields: f (16), pending,
+/// has_stand, stand (2); `ACCW` words of classes (8 bits each, up to 16), flags (1: finished)
+/// and the samples' instance ids (16): constants from `gpu::stages_wgsl`.) The state and the
+/// fields are read and written as whole vec4s (fewer, wider memory accesses: the reload of the
+/// state is most of a stage's cost).
+@group(2) @binding(22) var<storage, read_write> pbw: array<vec4<u32>>;
 
-fn st_save(sp: ptr<function, Stack>, b: u32) {
+/// Word `i` of `pbw`.
+fn pbw_get(i: u32) -> u32 {
+    return pbw[i >> 2u][i & 3u];
+}
+
+fn pbw_set(i: u32, v: u32) {
+    pbw[i >> 2u][i & 3u] = v;
+}
+
+/// (`st_save`, `st_load`, `pf_save`, `pf_load`: `b` counts vec4s.)
+fn st_save(sp: ptr<function, Stack>, b: u32, full: bool) {
     let m = (*sp).m;
-    pbw[b + 0u] = bitcast<u32>(m.cover);
-    pbw[b + 1u] = bitcast<u32>(m.rock);
-    pbw[b + 2u] = bitcast<u32>(m.sand);
-    pbw[b + 3u] = bitcast<u32>(m.beach);
-    pbw[b + 4u] = bitcast<u32>(m.snow);
-    pbw[b + 5u] = bitcast<u32>(m.shore_keep);
-    pbw[b + 6u] = bitcast<u32>(m.natural_ok);
-    pbw[b + 7u] = bitcast<u32>(m.flat_ok);
-    pbw[b + 8u] = bitcast<u32>(m.micro);
-    pbw[b + 9u] = bitcast<u32>(m.riparian);
-    pbw[b + 10u] = bitcast<u32>(m.woodlot);
-    pbw[b + 11u] = bitcast<u32>(m.field_cov);
-    pbw[b + 12u] = bitcast<u32>(m.town_urban);
-    pbw[b + 13u] = bitcast<u32>(m.town_cov);
-    pbw[b + 14u] = bitcast<u32>(m.river_clear);
-    pbw[b + 15u] = bitcast<u32>(m.road_major_cov);
-    pbw[b + 16u] = bitcast<u32>(m.road_cov);
-    pbw[b + 17u] = bitcast<u32>(m.river_cov);
-    pbw[b + 18u] = bitcast<u32>(m.veg);
-    pbw[b + 19u] = bitcast<u32>((*sp).col.x);
-    pbw[b + 20u] = bitcast<u32>((*sp).col.y);
-    pbw[b + 21u] = bitcast<u32>((*sp).col.z);
-    pbw[b + 22u] = bitcast<u32>((*sp).height);
-    pbw[b + 23u] = bitcast<u32>((*sp).emission.x);
-    pbw[b + 24u] = bitcast<u32>((*sp).emission.y);
-    pbw[b + 25u] = bitcast<u32>((*sp).emission.z);
-    pbw[b + 26u] = bitcast<u32>((*sp).lit);
-    pbw[b + 27u] = ((*sp).cls & 0xffffu) | select(0u, 0x10000u, (*sp).is_water) | select(0u, 0x20000u, (*sp).done) | select(0u, 0x40000u, (*sp).deferring) | select(0u, 0x80000u, (*sp).no_town);
-    // (instance ids: the last words)
-    pbw[b + ST_F - 1u] = (*sp).inst;
-    if (PB_STATE_FULL) {
-        // (stage boundaries after step 5: the deferred layers and the town)
+    let bio = (*sp).bio;
+    pbw[b + 0u] = vec4<u32>(bitcast<u32>(m.cover), bitcast<u32>(m.rock), bitcast<u32>(m.sand), bitcast<u32>(m.beach));
+    pbw[b + 1u] = vec4<u32>(bitcast<u32>(m.snow), bitcast<u32>(m.shore_keep), bitcast<u32>(m.natural_ok), bitcast<u32>(m.flat_ok));
+    pbw[b + 2u] = vec4<u32>(bitcast<u32>(m.micro), bitcast<u32>(m.riparian), bitcast<u32>(m.woodlot), bitcast<u32>(m.field_cov));
+    pbw[b + 3u] = vec4<u32>(bitcast<u32>(m.town_urban), bitcast<u32>(m.town_cov), bitcast<u32>(m.river_clear), bitcast<u32>(m.road_major_cov));
+    pbw[b + 4u] = vec4<u32>(bitcast<u32>(m.road_cov), bitcast<u32>(m.river_cov), bitcast<u32>(m.veg), bitcast<u32>((*sp).col.x));
+    pbw[b + 5u] = vec4<u32>(bitcast<u32>((*sp).col.y), bitcast<u32>((*sp).col.z), bitcast<u32>((*sp).height), bitcast<u32>((*sp).emission.x));
+    pbw[b + 6u] = vec4<u32>(bitcast<u32>((*sp).emission.y), bitcast<u32>((*sp).emission.z), bitcast<u32>((*sp).lit), ((*sp).cls & 0xffffu) | select(0u, 0x10000u, (*sp).is_water) | select(0u, 0x20000u, (*sp).done) | select(0u, 0x40000u, (*sp).deferring) | select(0u, 0x80000u, (*sp).no_town));
+    pbw[b + 7u] = vec4<u32>(bio.a, bio.b, bitcast<u32>(bio.w), bitcast<u32>(bio.k1));
+    pbw[b + 8u] = vec4<u32>(bitcast<u32>(bio.k2), bitcast<u32>(bio.wst), bitcast<u32>((*sp).ri), (*sp).inst);
+    if (full) {
         let d = (*sp).def;
-        pbw[b + 28u] = bitcast<u32>(d.k);
-        pbw[b + 29u] = bitcast<u32>(d.c.x);
-        pbw[b + 30u] = bitcast<u32>(d.c.y);
-        pbw[b + 31u] = bitcast<u32>(d.c.z);
-        pbw[b + 32u] = bitcast<u32>(d.kh);
-        pbw[b + 33u] = bitcast<u32>(d.ch);
-        pbw[b + 34u] = bitcast<u32>(d.la);
-        pbw[b + 35u] = bitcast<u32>(d.lb);
-        pbw[b + 36u] = bitcast<u32>(d.lmin);
-        pbw[b + 37u] = d.cls;
-        pbw[b + ST_F - 2u] = d.inst;
         let tw = (*sp).town;
-        pbw[b + 38u] = bitcast<u32>((*sp).town_i);
-        pbw[b + 39u] = select(0u, 1u, tw.px.ok) | select(0u, 2u, tw.px.shadow_ok);
-        pbw[b + 40u] = bitcast<u32>(tw.px.col.x);
-        pbw[b + 41u] = bitcast<u32>(tw.px.col.y);
-        pbw[b + 42u] = bitcast<u32>(tw.px.col.z);
-        pbw[b + 43u] = bitcast<u32>(tw.px.h);
-        pbw[b + 44u] = bitcast<u32>(tw.px.cov);
-        pbw[b + 45u] = tw.px.cls;
-        pbw[b + 46u] = bitcast<u32>(tw.px.em.x);
-        pbw[b + 47u] = bitcast<u32>(tw.px.em.y);
-        pbw[b + 48u] = bitcast<u32>(tw.px.em.z);
-        pbw[b + 49u] = bitcast<u32>(tw.px.street);
-        pbw[b + 50u] = bitcast<u32>(tw.px.resolved);
-        pbw[b + 51u] = bitcast<u32>(tw.shadow);
+        pbw[b + 9u] = vec4<u32>(bitcast<u32>(d.k), bitcast<u32>(d.c.x), bitcast<u32>(d.c.y), bitcast<u32>(d.c.z));
+        pbw[b + 10u] = vec4<u32>(bitcast<u32>(d.kh), bitcast<u32>(d.ch), bitcast<u32>(d.la), bitcast<u32>(d.lb));
+        pbw[b + 11u] = vec4<u32>(bitcast<u32>(d.lmin), d.cls, d.inst, bitcast<u32>((*sp).town_i));
+        pbw[b + 12u] = vec4<u32>(select(0u, 1u, tw.px.ok) | select(0u, 2u, tw.px.shadow_ok), bitcast<u32>(tw.px.col.x), bitcast<u32>(tw.px.col.y), bitcast<u32>(tw.px.col.z));
+        pbw[b + 13u] = vec4<u32>(bitcast<u32>(tw.px.h), bitcast<u32>(tw.px.cov), tw.px.cls, bitcast<u32>(tw.px.em.x));
+        pbw[b + 14u] = vec4<u32>(bitcast<u32>(tw.px.em.y), bitcast<u32>(tw.px.em.z), bitcast<u32>(tw.px.street), bitcast<u32>(tw.px.resolved));
+        pbw[b + 15u] = vec4<u32>(bitcast<u32>(tw.shadow), 0u, 0u, 0u);
     }
 }
 
-fn st_load(sp: ptr<function, Stack>, b: u32) {
+fn st_load(sp: ptr<function, Stack>, b: u32, full: bool) {
+    let w0 = pbw[b + 0u];
+    let w1 = pbw[b + 1u];
+    let w2 = pbw[b + 2u];
+    let w3 = pbw[b + 3u];
+    let w4 = pbw[b + 4u];
+    let w5 = pbw[b + 5u];
+    let w6 = pbw[b + 6u];
     var m: Masks;
-    m.cover = bitcast<f32>(pbw[b + 0u]);
-    m.rock = bitcast<f32>(pbw[b + 1u]);
-    m.sand = bitcast<f32>(pbw[b + 2u]);
-    m.beach = bitcast<f32>(pbw[b + 3u]);
-    m.snow = bitcast<f32>(pbw[b + 4u]);
-    m.shore_keep = bitcast<f32>(pbw[b + 5u]);
-    m.natural_ok = bitcast<f32>(pbw[b + 6u]);
-    m.flat_ok = bitcast<f32>(pbw[b + 7u]);
-    m.micro = bitcast<f32>(pbw[b + 8u]);
-    m.riparian = bitcast<f32>(pbw[b + 9u]);
-    m.woodlot = bitcast<f32>(pbw[b + 10u]);
-    m.field_cov = bitcast<f32>(pbw[b + 11u]);
-    m.town_urban = bitcast<f32>(pbw[b + 12u]);
-    m.town_cov = bitcast<f32>(pbw[b + 13u]);
-    m.river_clear = bitcast<f32>(pbw[b + 14u]);
-    m.road_major_cov = bitcast<f32>(pbw[b + 15u]);
-    m.road_cov = bitcast<f32>(pbw[b + 16u]);
-    m.river_cov = bitcast<f32>(pbw[b + 17u]);
-    m.veg = bitcast<f32>(pbw[b + 18u]);
+    m.cover = bitcast<f32>(w0.x);
+    m.rock = bitcast<f32>(w0.y);
+    m.sand = bitcast<f32>(w0.z);
+    m.beach = bitcast<f32>(w0.w);
+    m.snow = bitcast<f32>(w1.x);
+    m.shore_keep = bitcast<f32>(w1.y);
+    m.natural_ok = bitcast<f32>(w1.z);
+    m.flat_ok = bitcast<f32>(w1.w);
+    m.micro = bitcast<f32>(w2.x);
+    m.riparian = bitcast<f32>(w2.y);
+    m.woodlot = bitcast<f32>(w2.z);
+    m.field_cov = bitcast<f32>(w2.w);
+    m.town_urban = bitcast<f32>(w3.x);
+    m.town_cov = bitcast<f32>(w3.y);
+    m.river_clear = bitcast<f32>(w3.z);
+    m.road_major_cov = bitcast<f32>(w3.w);
+    m.road_cov = bitcast<f32>(w4.x);
+    m.river_cov = bitcast<f32>(w4.y);
+    m.veg = bitcast<f32>(w4.z);
     (*sp).m = m;
-    (*sp).col = vec3<f32>(bitcast<f32>(pbw[b + 19u]), bitcast<f32>(pbw[b + 20u]), bitcast<f32>(pbw[b + 21u]));
-    (*sp).height = bitcast<f32>(pbw[b + 22u]);
-    (*sp).emission = vec3<f32>(bitcast<f32>(pbw[b + 23u]), bitcast<f32>(pbw[b + 24u]), bitcast<f32>(pbw[b + 25u]));
-    (*sp).lit = bitcast<f32>(pbw[b + 26u]);
-    let w = pbw[b + 27u];
+    (*sp).col = vec3<f32>(bitcast<f32>(w4.w), bitcast<f32>(w5.x), bitcast<f32>(w5.y));
+    (*sp).height = bitcast<f32>(w5.z);
+    (*sp).emission = vec3<f32>(bitcast<f32>(w5.w), bitcast<f32>(w6.x), bitcast<f32>(w6.y));
+    (*sp).lit = bitcast<f32>(w6.z);
+    let w = w6.w;
     (*sp).cls = w & 0xffffu;
     (*sp).is_water = (w & 0x10000u) != 0u;
     (*sp).done = (w & 0x20000u) != 0u;
     (*sp).deferring = (w & 0x40000u) != 0u;
     (*sp).no_town = (w & 0x80000u) != 0u;
-    (*sp).inst = pbw[b + ST_F - 1u];
-    if (PB_STATE_FULL) {
+    (*sp).inst = pbw[b + 8u].w;
+    if (full) {
+        let v0 = pbw[b + 9u];
+        let v1 = pbw[b + 10u];
+        let v2 = pbw[b + 11u];
+        let v3 = pbw[b + 12u];
+        let v4 = pbw[b + 13u];
+        let v5 = pbw[b + 14u];
+        let v6 = pbw[b + 15u];
         var d: Deferred;
-        d.k = bitcast<f32>(pbw[b + 28u]);
-        d.c = vec3<f32>(bitcast<f32>(pbw[b + 29u]), bitcast<f32>(pbw[b + 30u]), bitcast<f32>(pbw[b + 31u]));
-        d.kh = bitcast<f32>(pbw[b + 32u]);
-        d.ch = bitcast<f32>(pbw[b + 33u]);
-        d.la = bitcast<f32>(pbw[b + 34u]);
-        d.lb = bitcast<f32>(pbw[b + 35u]);
-        d.lmin = bitcast<f32>(pbw[b + 36u]);
-        d.cls = pbw[b + 37u];
-        d.inst = pbw[b + ST_F - 2u];
+        d.k = bitcast<f32>(v0.x);
+        d.c = vec3<f32>(bitcast<f32>(v0.y), bitcast<f32>(v0.z), bitcast<f32>(v0.w));
+        d.kh = bitcast<f32>(v1.x);
+        d.ch = bitcast<f32>(v1.y);
+        d.la = bitcast<f32>(v1.z);
+        d.lb = bitcast<f32>(v1.w);
+        d.lmin = bitcast<f32>(v2.x);
+        d.cls = v2.y;
+        d.inst = v2.z;
         (*sp).def = d;
-        (*sp).town_i = bitcast<i32>(pbw[b + 38u]);
-        let fl = pbw[b + 39u];
+        (*sp).town_i = bitcast<i32>(v2.w);
+        let fl = v3.x;
         var tw: TownOut;
         tw.px.ok = (fl & 1u) != 0u;
         tw.px.shadow_ok = (fl & 2u) != 0u;
-        tw.px.col = vec3<f32>(bitcast<f32>(pbw[b + 40u]), bitcast<f32>(pbw[b + 41u]), bitcast<f32>(pbw[b + 42u]));
-        tw.px.h = bitcast<f32>(pbw[b + 43u]);
-        tw.px.cov = bitcast<f32>(pbw[b + 44u]);
-        tw.px.cls = pbw[b + 45u];
-        tw.px.em = vec3<f32>(bitcast<f32>(pbw[b + 46u]), bitcast<f32>(pbw[b + 47u]), bitcast<f32>(pbw[b + 48u]));
-        tw.px.street = bitcast<f32>(pbw[b + 49u]);
-        tw.px.resolved = bitcast<f32>(pbw[b + 50u]);
-        tw.shadow = bitcast<f32>(pbw[b + 51u]);
+        tw.px.col = vec3<f32>(bitcast<f32>(v3.y), bitcast<f32>(v3.z), bitcast<f32>(v3.w));
+        tw.px.h = bitcast<f32>(v4.x);
+        tw.px.cov = bitcast<f32>(v4.y);
+        tw.px.cls = v4.z;
+        tw.px.em = vec3<f32>(bitcast<f32>(v4.w), bitcast<f32>(v5.x), bitcast<f32>(v5.y));
+        tw.px.street = bitcast<f32>(v5.z);
+        tw.px.resolved = bitcast<f32>(v5.w);
+        tw.shadow = bitcast<f32>(v6.x);
         (*sp).town = tw;
     }
 }
 
+/// The sample's biomes from the state of a stage before (`st_save`; `edge`: the ecoregion border
+/// distance, m).
+fn st_bio(b: u32, edge: f32) -> Bio {
+    let w7 = pbw[b + 7u];
+    let w8 = pbw[b + 8u];
+    return bio_from(w7.x, w7.y, bitcast<f32>(w7.z), bitcast<i32>(w7.w), bitcast<i32>(w8.x), bitcast<f32>(w8.y), edge);
+}
+
+/// The sample's region index from the state of a stage before.
+fn st_region(b: u32) -> i32 {
+    return bitcast<i32>(pbw[b + 8u].z);
+}
+
 fn pf_save(b: u32, pf: PixFields) {
-    for (var k = 0u; k < PF_N; k++) {
-        pbw[b + k] = bitcast<u32>(pf.f[k]);
+    for (var k = 0u; k < 4u; k++) {
+        pbw[b + k] = bitcast<vec4<u32>>(vec4<f32>(pf.f[4u * k], pf.f[4u * k + 1u], pf.f[4u * k + 2u], pf.f[4u * k + 3u]));
     }
-    pbw[b + 16u] = pf.pending;
-    pbw[b + 17u] = pf.has_stand;
-    pbw[b + 18u] = u32(pf.stand & 0xfffffffflu);
-    pbw[b + 19u] = u32(pf.stand >> 32u);
+    pbw[b + 4u] = vec4<u32>(pf.pending, pf.has_stand, u32(pf.stand & 0xfffffffflu), u32(pf.stand >> 32u));
 }
 
 /// The pixel fields `pixel_fields_b` made (with the lazy ones evaluated since).
@@ -545,16 +541,21 @@ fn pf_load(ti: TileInfo, b: u32, p: vec3<f64>, gsd: f32) -> PixFields {
         pf.cut = 0.0;
         pf.split = SPLIT_ALL;
     }
-    for (var k = 0u; k < PF_N; k++) {
-        pf.f[k] = bitcast<f32>(pbw[b + k]);
+    for (var k = 0u; k < 4u; k++) {
+        let v = bitcast<vec4<f32>>(pbw[b + k]);
+        pf.f[4u * k] = v.x;
+        pf.f[4u * k + 1u] = v.y;
+        pf.f[4u * k + 2u] = v.z;
+        pf.f[4u * k + 3u] = v.w;
     }
-    pf.pending = pbw[b + 16u];
-    pf.has_stand = pbw[b + 17u];
-    pf.stand = u64(pbw[b + 18u]) | (u64(pbw[b + 19u]) << 32u);
+    let w = pbw[b + 4u];
+    pf.pending = w.x;
+    pf.has_stand = w.y;
+    pf.stand = u64(w.z) | (u64(w.w) << 32u);
     return pf;
 }
 
-/// Pass B, stage `stage` (a constant per entry point), round `pbw[0]`, per pixel of the tile
+/// Pass B, stage `stage` (a constant per entry point), round `pbw[0].x`, per pixel of the tile
 /// and its 1-pixel apron.
 fn pass_b_stage(gid: vec3<u32>, stage: u32) {
     let i = gid.x;
@@ -562,19 +563,20 @@ fn pass_b_stage(gid: vec3<u32>, stage: u32) {
     if (i >= NA || j >= NA) {
         return;
     }
-    let round = pbw[0];
-    let ch = pbw[3];
-    let ti = tiles[pbw[1] + gid.z];
+    let hdr = pbw[0];
+    let round = hdr.x;
+    let ch = hdr.w;
+    let ti = tiles[hdr.y + gid.z];
     let last = stage + 1u == PB_STAGES;
-    // chunk pixel; its state, fields and classes
+    // chunk pixel; its state, fields (vec4s) and classes (words)
     let lp = (gid.z * NA + j) * NA + i;
-    let pfb = PBW_HDR + ch * NA * NA * PB_RS * ST_F + lp * PFW;
+    let pfb = (PBW_HDR + ch * NA * NA * PB_RS * ST_F + lp * PFW) / 4u;
     let ab = PBW_HDR + ch * NA * NA * (PB_RS * ST_F + PFW) + lp * ACCW;
-    if (round > 0u && (pbw[ab + 4u] & 1u) != 0u) {
+    if (round > 0u && (pbw_get(ab + 4u) & 1u) != 0u) {
         return;
     }
     if (round == 0u && stage == 0u) {
-        pbw[ab + 4u] = 0u;
+        pbw_set(ab + 4u, 0u);
     }
     surface_missing = 0u;
     let ss = ti.ss;
@@ -615,16 +617,25 @@ fn pass_b_stage(gid: vec3<u32>, stage: u32) {
         if (water && !last) {
             continue;
         }
-        var s = stack_new(si.c, si.t, si.l, pf);
-        let sb = PBW_HDR + (lp * PB_RS + k - k0) * ST_F;
-        if (stage > 0u && !water) {
-            s_frame(&s);
-            st_load(&s, sb);
+        let sb = (PBW_HDR + (lp * PB_RS + k - k0) * ST_F) / 4u;
+        // (a later stage: the biomes and region of the sample from the stage state, not
+        // `bio_at` and `region_find` again; standing water starts in the last stage)
+        let fresh = stage == 0u || (last && water);
+        var bio: Bio;
+        if (fresh) {
+            bio = bio_at(si.t, si.l.eco_edge, si.c);
+        } else {
+            bio = st_bio(sb, abs(si.l.eco_edge));
+        }
+        var s = stack_new(si.c, si.t, si.l, pf, bio);
+        if (!fresh) {
+            s_frame_at(&s, st_region(sb));
+            st_load(&s, sb, ((PB_FULL_IN >> stage) & 1u) != 0u);
         }
         stack_stage(&s, stage);
         pf = s.pf;
         if (!last) {
-            st_save(&s, sb);
+            st_save(&s, sb, ((PB_FULL_OUT >> stage) & 1u) != 0u);
             continue;
         }
         // the last stage: the pixel's sums (in `pixb` until it is finished), the samples' classes
@@ -654,11 +665,11 @@ fn pass_b_stage(gid: vec3<u32>, stage: u32) {
         let csh = (k & 3u) * 8u;
         let cv = min(o.cls, LC_MAX_CLASSES - 1u) << csh;
         if ((k & 3u) == 0u) {
-            pbw[cw] = cv;
+            pbw_set(cw, cv);
         } else {
-            pbw[cw] |= cv;
+            pbw_set(cw, pbw_get(cw) | cv);
         }
-        pbw[ab + 5u + k] = o.inst;
+        pbw_set(ab + 5u + k, o.inst);
         var taken = 0u;
         if (adaptive && k == 0u) {
             first_s = o;
@@ -690,14 +701,14 @@ fn pass_b_stage(gid: vec3<u32>, stage: u32) {
 /// A finished pixel: the means of its `taken` samples and their most frequent class (of equals
 /// the highest id, as `max_by_key` over the counts).
 fn pass_b_finish(pb: u32, ab: u32, taken: u32) {
-    pbw[ab + 4u] = 1u;
+    pbw_set(ab + 4u, 1u);
     var cls = 0u;
     var best = 0u;
     for (var a = 0u; a < taken; a++) {
-        let ca = (pbw[ab + a / 4u] >> ((a & 3u) * 8u)) & 0xFFu;
+        let ca = (pbw_get(ab + a / 4u) >> ((a & 3u) * 8u)) & 0xFFu;
         var cnt = 0u;
         for (var b = 0u; b < taken; b++) {
-            if (((pbw[ab + b / 4u] >> ((b & 3u) * 8u)) & 0xFFu) == ca) {
+            if (((pbw_get(ab + b / 4u) >> ((b & 3u) * 8u)) & 0xFFu) == ca) {
                 cnt += 1u;
             }
         }
@@ -709,8 +720,8 @@ fn pass_b_finish(pb: u32, ab: u32, taken: u32) {
     // the instance of the first sample of the pixel's class
     var inst = 0u;
     for (var a = 0u; a < taken; a++) {
-        if (((pbw[ab + a / 4u] >> ((a & 3u) * 8u)) & 0xFFu) == cls) {
-            inst = pbw[ab + 5u + a];
+        if (((pbw_get(ab + a / 4u) >> ((a & 3u) * 8u)) & 0xFFu) == cls) {
+            inst = pbw_get(ab + 5u + a);
             break;
         }
     }

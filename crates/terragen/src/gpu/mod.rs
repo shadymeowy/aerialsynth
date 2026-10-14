@@ -266,7 +266,7 @@ const PB_STATE_FULL: bool = {
     }
     full
 };
-const PB_ST_F: usize = if PB_STATE_FULL { 55 } else { 29 };
+const PB_ST_F: usize = if PB_STATE_FULL { 64 } else { 36 };
 const _: () = {
     // stages start at step 0, increase, the last holds at least step 9 (and 10: water); a stage
     // starts mid-slot only before the water steps (the last stage runs every water kit on
@@ -281,6 +281,8 @@ const _: () = {
 };
 const PB_PFW: usize = 20;
 const PB_ACCW: usize = 21;
+// (the state and the pixel fields are vec4s: `st_save`, `pf_save`)
+const _: () = assert!(PBW_HDR == 4 && PB_ST_F % 4 == 0 && PB_PFW == 20);
 
 /// The slot of each stack step.
 const STEP_SLOTS: [usize; 11] = {
@@ -328,8 +330,12 @@ fn stages_wgsl() -> String {
     let kit_kernels: Vec<(u32, &str)> = crate::kits::kernels().map(|k| (k.kind, k.wgsl)).collect();
     let ns = PB_STAGES.len();
     let mut s = format!(
-        "const PB_STAGES: u32 = {ns}u;\nconst PB_STATE_FULL: bool = {PB_STATE_FULL};\nconst PBW_HDR: u32 = {PBW_HDR}u;\nconst PB_RS: u32 = {PB_RS}u;\nconst ST_F: u32 = {PB_ST_F}u;\nconst PFW: u32 = {PB_PFW}u;\nconst ACCW: u32 = {PB_ACCW}u;\n"
+        "const PB_STAGES: u32 = {ns}u;\nconst PBW_HDR: u32 = {PBW_HDR}u;\nconst PB_RS: u32 = {PB_RS}u;\nconst ST_F: u32 = {PB_ST_F}u;\nconst PFW: u32 = {PB_PFW}u;\nconst ACCW: u32 = {PB_ACCW}u;\n"
     );
+    // the stages that load / save the deferred layers and the town: those after step 5's core
+    let full = |i: usize| i < ns && stage_pos(i) > (5, 0);
+    let bits = |f: &dyn Fn(usize) -> bool| (0..ns).filter(|&i| f(i)).fold(0u32, |b, i| b | 1 << i);
+    s += &format!("const PB_FULL_IN: u32 = {}u;\nconst PB_FULL_OUT: u32 = {}u;\n", bits(&|i| full(i)), bits(&|i| full(i + 1)));
     for si in 0..ns {
         let last_stage = si + 1 == ns;
         let (s0, p0) = stage_pos(si);
@@ -384,12 +390,12 @@ fn stages_wgsl() -> String {
         }
         s += "        default: {}\n    }\n}\n";
         // the runner: one call site of the biome layers and of the kits' dispatcher; the bounds
-        // read an opaque 0 (`pbw[2]`) so the driver does not unroll the steps
+        // read an opaque 0 (`pbw[0].z`) so the driver does not unroll the steps
         let first = steps[0].0;
         let last_step = steps.iter().map(|t| t.0).filter(|&t| t < 10).max().unwrap_or(first);
-        s += &format!("fn stack_stage_{si}(sp: ptr<function, Stack>) {{\n    var step = {first}u + pbw[2];\n    var last = {last_step}u + pbw[2];\n");
+        s += &format!("fn stack_stage_{si}(sp: ptr<function, Stack>) {{\n    var step = {first}u + pbw[0].z;\n    var last = {last_step}u + pbw[0].z;\n");
         if last_stage {
-            s += "    if (stack_water((*sp).l)) {\n        step = 10u + pbw[2];\n        last = step;\n    }\n";
+            s += "    if (stack_water((*sp).l)) {\n        step = 10u + pbw[0].z;\n        last = step;\n    }\n";
         }
         s += "    loop {\n        var slot = SLOT_SKIP;\n        var lo = 0u;\n        var hi = 0xffffu;\n        switch step {\n";
         for &(st, lo, hi) in &steps {
@@ -1287,12 +1293,13 @@ impl GpuGenerator {
         let pb_max = ((pb_budget as usize / 4 - PBW_HDR) / pb_tile_words).max(1);
         // (equal chunks)
         let pb_chunk = nt.div_ceil(nt.div_ceil(pb_max));
-        let pb_bytes = ((PBW_HDR + pb_chunk * pb_tile_words) * 4) as u64;
+        // (whole vec4s)
+        let pb_bytes = ((PBW_HDR + pb_chunk * pb_tile_words).next_multiple_of(4) * 4) as u64;
         let b_pbw = if full {
             match self.pb_work.lock().unwrap().take() {
                 Some(b) if b.size() >= pb_bytes => b,
                 // (sized for a full batch of 16 tiles, so smaller batches reuse it)
-                _ => output(d, "pass b work", pb_bytes.max(((PBW_HDR + 16usize.div_ceil(16usize.div_ceil(pb_max)) * pb_tile_words) * 4) as u64)),
+                _ => output(d, "pass b work", pb_bytes.max(((PBW_HDR + 16usize.div_ceil(16usize.div_ceil(pb_max)) * pb_tile_words).next_multiple_of(4) * 4) as u64)),
             }
         } else {
             output(d, "-", 256)
@@ -1544,16 +1551,34 @@ impl GpuGenerator {
             let t_b = std::time::Instant::now();
             let mut enc = d.create_command_encoder(&Default::default());
             enc.clear_buffer(&b_counters, 0, None);
+            // (TERRAGEN_PROFILE=passes: each stage's dispatches submitted and timed on their own)
+            let mut t_stage = vec![0.0; self.k.pass_b.len()];
             for &(off, cn) in &steps {
                 enc.copy_buffer_to_buffer(&b_hdrs, off, &b_pbw, 0, 16);
-                let mut cp = enc.begin_compute_pass(&Default::default());
-                cp.set_bind_group(0, &self.globals, &[]);
-                cp.set_bind_group(1, &g1, &[]);
-                cp.set_bind_group(2, &g2, &[]);
-                for p in &self.k.pass_b {
-                    cp.set_pipeline(p);
-                    cp.dispatch_workgroups(wg(NA), wg(NA), cn as u32);
+                let stages: Vec<(usize, &[wgpu::ComputePipeline])> =
+                    if time_passes { (0..self.k.pass_b.len()).map(|si| (si, &self.k.pass_b[si..si + 1])).collect() } else { vec![(0, &self.k.pass_b[..])] };
+                for (si, ps) in stages {
+                    let t = std::time::Instant::now();
+                    {
+                        let mut cp = enc.begin_compute_pass(&Default::default());
+                        cp.set_bind_group(0, &self.globals, &[]);
+                        cp.set_bind_group(1, &g1, &[]);
+                        cp.set_bind_group(2, &g2, &[]);
+                        for p in ps {
+                            cp.set_pipeline(p);
+                            cp.dispatch_workgroups(wg(NA), wg(NA), cn as u32);
+                        }
+                    }
+                    if time_passes {
+                        self.gpu.queue.submit([std::mem::replace(&mut enc, d.create_command_encoder(&Default::default())).finish()]);
+                        let _ = d.poll(wgpu::PollType::wait_indefinitely());
+                        t_stage[si] += t.elapsed().as_secs_f64();
+                    }
                 }
+            }
+            if time_passes {
+                let ts: Vec<String> = t_stage.iter().map(|t| format!("{t:.4}")).collect();
+                eprintln!("    pass b stages: {}", ts.join(" "));
             }
             self.gpu.queue.submit([enc.finish()]);
             if time_passes {

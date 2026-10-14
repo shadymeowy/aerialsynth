@@ -116,6 +116,8 @@ struct Stack {
     bio: Bio,
     m: Masks,
     has_region: bool,
+    /// the region's index in `regions` (-1: none; pass B's stages keep it: `s_frame_at`)
+    ri: i32,
     r: Region,
     q_loc: vec2<f32>,
     q_rot: vec2<f32>,
@@ -320,20 +322,29 @@ fn s_field(s: ptr<function, Stack>, f: u32) -> f32 {
 
 /// The local frame (`layers::frame`).
 fn s_frame(s: ptr<function, Stack>) {
-    let p = (*s).c.p;
-    (*s).has_region = false;
+    var ri = -1;
     if ((*s).t.region_id != 0lu) {
-        let ri = region_find((*s).t.region_id);
-        if (ri >= 0) {
-            let r = regions[ri];
-            (*s).r = r;
-            (*s).has_region = true;
-            let d = vec3<f32>(p - r.center.xyz);
-            (*s).q_loc = vec2<f32>(dot(d, r.east.xyz), dot(d, r.north.xyz));
-            (*s).q_rot = vec2<f32>(dot(d, r.ex.xyz), dot(d, r.ey.xyz));
-            return;
+        ri = region_find((*s).t.region_id);
+        if (ri < 0) {
+            surface_missing |= MISS_REGION;
         }
-        surface_missing |= MISS_REGION;
+    }
+    s_frame_at(s, ri);
+}
+
+/// The local frame in region `ri` (`regions` index; -1: none).
+fn s_frame_at(s: ptr<function, Stack>, ri: i32) {
+    let p = (*s).c.p;
+    (*s).ri = ri;
+    (*s).has_region = false;
+    if (ri >= 0) {
+        let r = regions[ri];
+        (*s).r = r;
+        (*s).has_region = true;
+        let d = vec3<f32>(p - r.center.xyz);
+        (*s).q_loc = vec2<f32>(dot(d, r.east.xyz), dot(d, r.north.xyz));
+        (*s).q_rot = vec2<f32>(dot(d, r.ex.xyz), dot(d, r.ey.xyz));
+        return;
     }
     (*s).q_loc = vec2<f32>(f32(dot(p, vec3<f64>((*s).c.east))), f32(dot(p, vec3<f64>((*s).c.north))));
 }
@@ -1087,14 +1098,16 @@ fn masks_none() -> Masks {
     return m;
 }
 
-/// A sub-sample's stack before its first layer (`stack::eval`).
-fn stack_new(c: Ctx, t: Terrain, l: Local, pf: PixFields) -> Stack {
+/// A sub-sample's stack before its first layer (`stack::eval`), with its biomes `bio`
+/// (`bio_at(t, l.eco_edge, c)`).
+fn stack_new(c: Ctx, t: Terrain, l: Local, pf: PixFields, bio: Bio) -> Stack {
     var s: Stack;
     s.c = c;
     s.t = t;
     s.l = l;
     s.pf = pf;
-    s.bio = bio_at(t, l.eco_edge, c);
+    s.bio = bio;
+    s.ri = -1;
     s.m = masks_none();
     s.has_region = false;
     s.q_loc = vec2<f32>(0.0);
