@@ -918,7 +918,29 @@ fn layer_canopy(s: ptr<function, Stack>) {
     }
     let floor_ = smoothstep1(0.25, 0.8, dens);
     composite(s, layer_paint(floor_ * 0.85, spal(s, BP_FLOOR) * 0.7, 0u));
-    let tr = trees(layers, all, (*s).q_loc, gsd, fw, p);
+    // the crowns (`it` 0), then each layer's crowns shifted towards the sun (their shadows): one
+    // call site of `trees`
+    let shadows = (cfg.flags & CF_SHADOWS) != 0u;
+    var tr: Trees;
+    var shadow = 0.0;
+    for (var it = 0u; it <= n; it++) {
+        var mask = all;
+        var off = vec2<f32>(0.0);
+        if (it > 0u) {
+            let li = it - 1u;
+            if (!shadows || tr.cov >= 0.99 || layers[li].density <= 0.0 || layers[li].cell < 2.0 * gsd) {
+                continue;
+            }
+            mask = 1u << li;
+            off = vec2<f32>(cfg.sun_hx, cfg.sun_hy) * (0.6 * layers[li].height / cfg.sun_tan);
+        }
+        let t = trees(layers, mask, (*s).q_loc + off, gsd, fw, p);
+        if (it == 0u) {
+            tr = t;
+        } else {
+            shadow = max(shadow, t.cov);
+        }
+    }
     if (tr.cov > 0.0) {
         let stv = s_pf_lazy(s, PF_STAND);
         let tc = tr.col * vec3<f32>(1.0 + 0.10 * stv, 1.0 + 0.14 * stv, 1.0 + 0.05 * stv);
@@ -942,16 +964,7 @@ fn layer_canopy(s: ptr<function, Stack>) {
         }
         composite(s, ly);
     }
-    if ((cfg.flags & CF_SHADOWS) != 0u && tr.cov < 0.99) {
-        var shadow = 0.0;
-        for (var li = 0u; li < n; li++) {
-            if (layers[li].density <= 0.0 || layers[li].cell < 2.0 * gsd) {
-                continue;
-            }
-            let off = vec2<f32>(cfg.sun_hx, cfg.sun_hy) * (0.6 * layers[li].height / cfg.sun_tan);
-            let sc = trees(layers, 1u << li, (*s).q_loc + off, gsd, fw, p).cov;
-            shadow = max(shadow, sc);
-        }
+    if (shadows && tr.cov < 0.99) {
         (*s).lit = min((*s).lit, 1.0 - 0.9 * shadow * (1.0 - tr.cov));
     }
     if (tr.cov < 0.01 && dens > 0.0) {

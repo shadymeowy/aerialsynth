@@ -32,8 +32,9 @@ struct SinkRep {
 @group(2) @binding(2) var<storage, read_write> reps: array<SinkRep>;
 @group(2) @binding(3) var<storage, read_write> rep_n: array<atomic<u32>>;
 
-/// A point's macro fields and relief, from `eval_points` to `eval_points_rest` (two pipelines:
-/// the relief and the rest of pass A each compile in about half the time of both).
+/// A point's macro fields and relief, from `eval_points` to `eval_points_kits` and
+/// `eval_points_rest` (three pipelines: the core relief, the kits' relief operators and the rest
+/// of pass A each compile in a fraction of the time of all three).
 struct PointMid {
     m: Macro,
     r: Relief,
@@ -48,7 +49,7 @@ fn point_ctx(q: PointIn) -> Ctx {
     return ctx_make(q.p.xyz, q.sl, q.cl, q.so, q.co, q.lat, q.gsd);
 }
 
-/// The macro fields and the relief of a point.
+/// The macro fields and the relief of a point before the kits' operators.
 @compute @workgroup_size(64)
 fn eval_points(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>) {
     let i = point_index(gid, nwg);
@@ -63,8 +64,23 @@ fn eval_points(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workg
     let m = macro_at(ctx.p, ctx.gsd);
     var o: PointMid;
     o.m = m;
-    o.r = relief(ctx, m, pre_none(), 0xffffffffu);
+    o.r = relief_core(ctx, m, pre_none());
     pmid[i] = o;
+}
+
+/// The kits' relief operators at a point (after `eval_points`).
+@compute @workgroup_size(64)
+fn eval_points_kits(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) nwg: vec3<u32>) {
+    let i = point_index(gid, nwg);
+    if (i >= arrayLength(&pts)) {
+        return;
+    }
+    let q = pts[i];
+    if (q.mode == MODE_REPORT) {
+        return;
+    }
+    let mid = pmid[i];
+    pmid[i].r = relief_kits(point_ctx(q), mid.m, mid.r, 0xffffffffu);
 }
 
 /// The rest of pass A at a point (after `eval_points`), or its sink pieces (`MODE_REPORT`).

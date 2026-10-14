@@ -149,10 +149,13 @@ struct Kernels {
     l_tile: wgpu::BindGroupLayout,
     /// point queries: the relief, then the rest of pass A (`points.wgsl`)
     points: wgpu::ComputePipeline,
+    points_kits: wgpu::ComputePipeline,
     points_rest: wgpu::ComputePipeline,
     nodes: wgpu::ComputePipeline,
     inst: wgpu::ComputePipeline,
+    /// pass A1: the macro fields and core relief, then the kits' relief operators
     a1: wgpu::ComputePipeline,
+    a1_kits: wgpu::ComputePipeline,
     bins: wgpu::ComputePipeline,
     a2: wgpu::ComputePipeline,
     region_req: wgpu::ComputePipeline,
@@ -251,7 +254,7 @@ pub struct GpuGenerator {
 /// kinds of its slots' biome layers (`kernel_eval_st<n>`). A boundary after step 5 (or in it,
 /// after its core layer) doubles the state between stages (the deferred layers and the town:
 /// `PB_STATE_FULL`); each stage costs a reload of the sample (~2–3 % of pass B).
-pub(crate) const PB_STAGES: &[(u32, &str)] = &[(0, ""), (3, ""), (5, ""), (7, "")];
+pub(crate) const PB_STAGES: &[(u32, &str)] = &[(0, ""), (2, "cold"), (3, "temperate"), (4, "agriculture"), (5, ""), (7, "")];
 
 /// Pass B's work buffer (`pbw` in tile_b.wgsl): header words, samples per round, words per
 /// sample (stage state), per pixel (fields), per pixel (classes, flags).
@@ -540,6 +543,7 @@ impl GpuGenerator {
             "grid_nodes",
             "instance_lists",
             "pass_a1",
+            "pass_a1_kits",
             "bin_segments",
             "pass_a2",
             "region_requests",
@@ -553,7 +557,7 @@ impl GpuGenerator {
         ];
         let dnames = ["lat_enum", "lat_heights", "mark_targets", "lat_targets", "mark_sources", "lat_sources", "gather_count", "gather_scan", "gather_write"];
         let stage_names: Vec<String> = (0..PB_STAGES.len()).map(|k| format!("pass_b{k}")).collect();
-        let (points, mut tile, mut drain): ((wgpu::ComputePipeline, wgpu::ComputePipeline), Vec<wgpu::ComputePipeline>, Vec<wgpu::ComputePipeline>) = std::thread::scope(|s| {
+        let (points, mut tile, mut drain): ((wgpu::ComputePipeline, wgpu::ComputePipeline, wgpu::ComputePipeline), Vec<wgpu::ComputePipeline>, Vec<wgpu::ComputePipeline>) = std::thread::scope(|s| {
             let hs: Vec<_> = names
                 .iter()
                 .copied()
@@ -564,8 +568,9 @@ impl GpuGenerator {
                 })
                 .collect();
             let hd: Vec<_> = dnames.iter().map(|n| s.spawn(|| pipe(&m_drain, &pl_drain, n))).collect();
-            let hp = s.spawn(|| pipe(&m_points, &pl_points, "eval_points_rest"));
-            let points = (pipe(&m_points, &pl_points, "eval_points"), hp.join().expect("pipeline"));
+            let hk = s.spawn(|| pipe(&m_points, &pl_points, "eval_points_kits"));
+            let hr = s.spawn(|| pipe(&m_points, &pl_points, "eval_points_rest"));
+            let points = (pipe(&m_points, &pl_points, "eval_points"), hk.join().expect("pipeline"), hr.join().expect("pipeline"));
             (points, hs.into_iter().map(|h| h.join().expect("pipeline")).collect(), hd.into_iter().map(|h| h.join().expect("pipeline")).collect())
         });
         let mut dk = || drain.remove(0);
@@ -588,10 +593,12 @@ impl GpuGenerator {
         let mut t = || tile.remove(0);
         let k = Kernels {
             points: points.0,
-            points_rest: points.1,
+            points_kits: points.1,
+            points_rest: points.2,
             nodes: t(),
             inst: t(),
             a1: t(),
+            a1_kits: t(),
             bins: t(),
             a2: t(),
             region_req: t(),
@@ -695,7 +702,7 @@ impl GpuGenerator {
                 cp.set_bind_group(2, &g2, &[]);
                 let groups = (pts.len() as u32).div_ceil(64);
                 let gx = groups.min(65535);
-                for p in [&self.k.points, &self.k.points_rest] {
+                for p in [&self.k.points, &self.k.points_kits, &self.k.points_rest] {
                     cp.set_pipeline(p);
                     cp.dispatch_workgroups(gx, groups.div_ceil(gx), 1);
                 }
@@ -1401,6 +1408,7 @@ impl GpuGenerator {
                     (&self.k.nodes, [((NG * NG) as u32).div_ceil(64), nt as u32, 1]),
                     (&self.k.inst, [((NBIN * NBIN * nfam) as u32).div_ceil(64).max(1), 1, nt as u32]),
                     (&self.k.a1, [wg(NA2), wg(NA2), nt as u32]),
+                    (&self.k.a1_kits, [wg(NA2), wg(NA2), nt as u32]),
                     (&self.k.bins, [(NBIN * NBIN) as u32, nt as u32, 1]),
                 ],
                 true,
