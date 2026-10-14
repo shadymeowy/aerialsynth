@@ -96,6 +96,16 @@
   the CPU (development, CI).
 
 ### Fixes
+
+- A GPU generator that fails to set up (device or pipeline compile) is an error with
+  `backend: gpu` and under `AERIALSYNTH_GPU_STRICT=1`, as a failed batch was; `auto` still falls back to the CPU.
+- Worlds set up at the same time share one pipeline compile (the cache is read under the compile lock).
+- The atlas disk cache works on Windows (`%LOCALAPPDATA%`), like the pipeline cache.
+- `terrain tiles --png` uses the configured `world.generator` and `tiles.generator`.
+- A lazily generated tile that fails to generate is reported once instead of leaving a silent hole.
+- `cargo check -p terragen --no-default-features` is warning-free (checked in CI).
+- A classic world says once when the config sets `next`-only keys (`atlas`, `ecoregions`, `biomes`,
+  `relief.tectonic_mountains`, `relief.belt_mountains`).
 - On the DX12 GPU backend the renderer is built without the new wall shading (DX12's shader
   compilers miscompile it; Windows' WARP device rendered no terrain); a notice says so.
 - The GPU renderer submits its G-buffer pass before the shading pass (software rasterizers such
