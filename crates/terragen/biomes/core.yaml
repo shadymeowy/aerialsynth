@@ -133,4 +133,6 @@
   palette:
     tundra: [126, 120, 96]
     grass_cold: [110, 112, 84]
+    # (grey-brown frost-shattered ground: the default palette's red-brown soils drew orange polar land)
+    soil: [[118, 110, 98], [108, 102, 94], [128, 120, 106], [102, 98, 92]]
   vegetation: { trees: 0.6, conifer: 0.3 }

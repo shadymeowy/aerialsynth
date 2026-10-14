@@ -341,7 +341,7 @@ fn lake_mean_albedo(lat: &LakeLat, frozen: bool) -> DVec3 {
         let w = |c: DVec3| mixc(c, mixc(c, srgb(98.0, 104.0, 86.0), 0.5), 0.3);
         w(srgb(16.0, 28.0, 42.0)) * 0.55 + w(srgb(36.0, 38.0, 28.0)) * 0.25 + w(srgb(58.0, 88.0, 94.0)) * 0.2
     };
-    let basin = mixc(srgb(104.0, 126.0, 60.0), srgb(82.0, 100.0, 58.0), 0.3);
+    let basin = mixc(srgb(112.0, 120.0, 74.0), srgb(92.0, 98.0, 66.0), 0.3);
     mixc(basin, lake, lat.p_lake)
 }
 
@@ -398,7 +398,7 @@ fn lakes(s: &mut Stack, lat: &LakeLat, sc: f64, frozen: bool) {
             }
         } else {
             // drained basin: sedge meadow, wetter towards the centre
-            xa = mixc(srgb(104.0, 126.0, 60.0), srgb(82.0, 100.0, 58.0), smoothstep(0.55, 0.0, hit.rn))
+            xa = mixc(srgb(112.0, 120.0, 74.0), srgb(92.0, 98.0, 66.0), smoothstep(0.55, 0.0, hit.rn))
                 * (1.0 + 0.08 * perlin3(hit.h ^ 0xBA5, p / 9.0) * band(9.0, gsd));
             ly.cls = cls::MARSH;
             ly.hmode = hmode::BLEND;
@@ -742,7 +742,7 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     let firn = srgb(236.0, 241.0, 247.0) * (1.0 + tex);
     // bare ice: blue-grey, dirtier towards the margin and the snout
     let dirt = smoothstep(-0.2, 0.5, perlin3(SEED_ICE + 6, p / 150.0) * band(150.0, gsd) + 0.6 * smoothstep(-1.4, -0.4, g.g));
-    let bare = mixc(srgb(158.0, 190.0, 212.0), srgb(128.0, 128.0, 124.0), 0.6 * dirt) * (1.0 + 1.5 * tex);
+    let bare = mixc(srgb(172.0, 184.0, 192.0), srgb(128.0, 128.0, 124.0), 0.6 * dirt) * (1.0 + 1.5 * tex);
     let mut col = mixc(firn, bare, abl);
     let mut dh = 0.0;
     // blue ice on cold flat ice caps
@@ -750,7 +750,7 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
         let bi = smoothstep(0.32, 0.36, perlin3(SEED_ICE + 7, p / 900.0) + 0.3 * perlin3(SEED_ICE + 8, p / 300.0) * band(300.0, gsd))
             * smoothstep(-4.0, -6.0, g.p)
             * (1.0 - smoothstep(0.04, 0.08, slope));
-        col = mixc(col, srgb(150.0, 186.0, 212.0), bi);
+        col = mixc(col, srgb(160.0, 180.0, 196.0), bi);
     }
     // ogives: arcs of darker ice below icefalls (bands along the contours, 35 m in height)
     let sl = slope.max(0.03);
@@ -776,7 +776,7 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
         // the mean of unresolved crevasses: their area share
         cr += (1.0 - e) * on * (2.4 / spacing).min(1.0);
         let cr = cr * cs;
-        col = mixc(col, srgb(34.0, 62.0, 88.0), cr);
+        col = mixc(col, srgb(62.0, 72.0, 80.0), cr);
         dh -= 4.0 * cr;
     }
     // medial moraines along the valley's axis (the drainage line under the ice) and beside it
@@ -842,7 +842,7 @@ fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
         if b18 > 0.0 {
             let wc = worley3(SEED_SNOW + 6, p, 18.0, 0.9);
             let ed = worley_edge_dist(&wc, p);
-            x += 1.2 * (u01k(wc.id, 1) - 0.5) * b18 - 1.6 * (1.0 - smoothstep(0.0, 1.8, ed)) * b18;
+            x += 1.2 * (u01k(wc.id, 1) - 0.5) * b18 - 0.7 * (1.0 - smoothstep(0.0, 3.0, ed)) * b18;
         }
     }
     let mut cov = smoothstep(-0.55, -1.25, x) * (1.0 - smoothstep(0.75, 1.3, s.l.slope));
