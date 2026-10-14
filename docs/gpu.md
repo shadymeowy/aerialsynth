@@ -45,7 +45,7 @@ default; `stderr_observer()` gives the CLI's messages).
 | environment variable | |
 |---|---|
 | `AERIALSYNTH_GPU` | the GPU to use (CLI, viewer, C and Python): an index, a PCI bus id (`0000:83:00.0`) or part of the adapter name (`6000`); `none` hides every GPU (everything on the CPU). Unset: the first high-performance adapter. A value that matches no single GPU is an error listing the adapters (`AERIALSYNTH_GPU=list`) |
-| `AERIALSYNTH_GPU_STRICT=1` | a failed GPU tile batch is an error instead of a switch to the CPU (development, CI) |
+| `AERIALSYNTH_GPU_STRICT=1` | a failed GPU tile batch, or a GPU generator that fails to set up (device, pipeline compile), is an error instead of a switch to the CPU (development, CI) |
 | `AERIALSYNTH_GPU_STALL_S` | seconds without a completed read-back before the GPU counts as stalled (default 120) |
 | `TERRAGEN_PROFILE=1` | prints each pipeline's compile time and each generated batch's time |
 
