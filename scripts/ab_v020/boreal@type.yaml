@@ -1,5 +1,5 @@
 # boreal at a place of the same type in the next generator's world: needleleaf forest hills with open patches and a
-# river (58.0 N; round 5 used a uniform mixed forest at 55.8 S) (the same local solar time and date)
+# river (57.9 N; round 5 used a uniform mixed forest at 55.8 S) (the same local solar time and date)
 world:
   seed: 1
   generator: next
@@ -13,8 +13,8 @@ trajectory:
     rate_hz: 400
     speed_mps: 50
     kind: line
-    lat: 57.99
-    lon: -117.95
+    lat: 57.896
+    lon: -117.876
     heading_deg: 60
     altitude_m: 900
     duration_s: 8.6
@@ -24,7 +24,7 @@ render:
   lighting:
     mode: clock
     date: '2026-06-21'
-    time_utc: '18:46:13'
+    time_utc: '18:45:51'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
