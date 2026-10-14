@@ -49,7 +49,7 @@ fn agri_sys(i: u32) -> AgSys {
         case 9u: { return AgSys(1u, vec2<f32>(240.0, 1.4), vec4<u32>(5u, 4u, 0u, 1u), vec4<f32>(0.55, 0.2, 0.15, 0.1), vec2<u32>(3u, 0u), vec2<f32>(0.5, 0.5), vec2<f32>(0.6, 0.8), 0.0, 0.0); }
         case 10u: { return AgSys(0u, vec2<f32>(480.0, 360.0), vec4<u32>(7u, 13u, 8u, 0u), vec4<f32>(0.45, 0.22, 0.15, 0.18), vec2<u32>(5u, 0u), vec2<f32>(0.9, 0.1), vec2<f32>(0.6, 0.8), 0.0, 0.0); }
         case 11u: { return AgSys(0u, vec2<f32>(95.0, 60.0), vec4<u32>(10u, 0u, 1u, 11u), vec4<f32>(0.76, 0.13, 0.09, 0.02), vec2<u32>(5u, 0u), vec2<f32>(0.25, 0.75), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
-        case 12u: { return AgSys(0u, vec2<f32>(420.0, 300.0), vec4<u32>(2u, 3u, 0u, 11u), vec4<f32>(0.6, 0.22, 0.16, 0.02), vec2<u32>(0u, 1u), vec2<f32>(0.8, 0.2), vec2<f32>(0.38, 0.5), 0.0, 0.0); }
+        case 12u: { return AgSys(0u, vec2<f32>(420.0, 300.0), vec4<u32>(2u, 3u, 0u, 11u), vec4<f32>(0.42, 0.18, 0.38, 0.02), vec2<u32>(0u, 1u), vec2<f32>(0.8, 0.2), vec2<f32>(0.38, 0.5), 0.0, 0.0); }
         case 13u: { return AgSys(3u, vec2<f32>(805.0, 805.0), vec4<u32>(0u, 1u, 0u, 0u), vec4<f32>(0.75, 0.25, 0.0, 0.0), vec2<u32>(6u, 6u), vec2<f32>(1.0, 0.0), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
         default: { return AgSys(0u, vec2<f32>(2200.0, 1500.0), vec4<u32>(2u, 3u, 1u, 11u), vec4<f32>(0.86, 0.04, 0.08, 0.02), vec2<u32>(5u, 0u), vec2<f32>(0.4, 0.6), vec2<f32>(0.38, 0.5), 0.0, 0.0); }
     }
@@ -1071,6 +1071,10 @@ fn agri_paddy_mean(season: f32) -> vec3<f32> {
     return acc / 5.0;
 }
 
+fn agri_hay_cut(ph: f32) -> f32 {
+    return 0.6 * smoothstep1(0.3, 0.5, ph);
+}
+
 fn agri_kind_mean(pl: Plan, k: u32, px: AgPx) -> vec3<f32> {
     switch k {
         case 0u: {
@@ -1083,7 +1087,7 @@ fn agri_kind_mean(pl: Plan, k: u32, px: AgPx) -> vec3<f32> {
         }
         case 1u: { return mixc(px.soil * 0.8, mixc(px.soil, px.grass_dry, 0.5), 0.5 - 0.4 * px.season); }
         case 2u: { return agri_pasture_col(px) * vec3<f32>(1.0, 0.985, 0.91); }
-        case 3u: { return agri_pasture_col(px) * 1.05; }
+        case 3u: { return mixc(agri_pasture_col(px) * 1.05, srgb(166.0, 156.0, 96.0), 0.75 * agri_hay_cut(px.season)); }
         case 4u: { return mixc(mixc(px.grass, px.soil, 0.3), px.crown * 1.1, 0.4); }
         case 5u: { return mixc(px.soil * 1.15, srgb(104.0, 112.0, 84.0), 0.3); }
         case 6u: { return mixc(px.soil * 1.2, agri_vine_col(px.season, 0.5), 0.35); }
@@ -1175,8 +1179,11 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
             }
             let cc = agri_crop(c);
             let row = cc[3];
-            let ph = clamp(px.season + 0.3 * (u01k(id, 20lu) - 0.5), 0.0, 1.0);
+            let ph = clamp(px.season + 0.45 * (u01k(id, 20lu) - 0.5), 0.0, 1.0);
             col = agri_stage(cc, ph) * (0.95 + 0.10 * u01k(id, 8lu));
+            if (k == AK_HAY && u01k(id, 36lu) < agri_hay_cut(ph)) {
+                col = mixc(col, srgb(166.0, 156.0, 96.0) * (0.92 + 0.16 * u01k(id, 37lu)), 0.75);
+            }
             col *= 1.0 + 0.2 * perlin3(id, p * (1.0lf / 35.0lf)) * band(35.0, gsd) + 0.11 * perlin3(id ^ 1lu, p * (1.0lf / 120.0lf)) * band(120.0, gsd);
             col *= 1.0 + 0.22 * perlin3(id ^ 0x7E1lu, p * (1.0lf / 7.0lf)) * band(7.0, gsd) + 0.14 * perlin3(id ^ 0x7E2lu, p * (1.0lf / 2.5lf)) * band(2.5, gsd);
             let gz = perlin3(id ^ 0x6A0lu, p * (1.0lf / 55.0lf)) * band(55.0, gsd);
