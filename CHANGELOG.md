@@ -94,6 +94,10 @@
   the CPU (development, CI).
 
 ### Fixes
+- On the DX12 GPU backend the renderer is built without the new wall shading (DX12's shader
+  compilers miscompile it; Windows' WARP device rendered no terrain); a notice says so.
+- The GPU renderer submits its G-buffer pass before the shading pass (software rasterizers such
+  as lavapipe shaded an undrawn G-buffer); a shader the backend rejects is a start-up error.
 
 - The shared GPU device could hang when several generators compiled at once (parallel tests,
   threads of the bindings), and crashed at exit on some drivers.

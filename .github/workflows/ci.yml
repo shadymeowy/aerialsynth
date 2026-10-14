@@ -76,7 +76,8 @@ jobs:
         run: cargo test --release --workspace
 
       # Lavapipe (Mesa's software Vulkan) runs the GPU tests that fit its limits: the event
-      # sensor against the CPU sensor and the WGSL noise against the CPU noise. The full GPU tile
+      # sensor against the CPU sensor, the WGSL noise against the CPU noise and the renderer's
+      # self-check (GPU frames against CPU frames; it must pass). The full GPU tile
       # generator needs 256 MiB storage bindings (lavapipe allows 128 MiB): there it falls back to
       # the CPU, so the tile comparisons stay on GPU machines.
       - name: Install lavapipe
@@ -86,8 +87,11 @@ jobs:
 
       - name: Test (GPU on lavapipe)
         shell: bash
+        env:
+          AERIALSYNTH_EXPECT_GPU_CHECK: pass
         run: |
-          cargo test --release --workspace -- --nocapture gpu::events:: gpu::tests::noise_matches_the_cpu 2>&1 | tee gpu-tests.log
+          set -o pipefail
+          cargo test --release --workspace -- --nocapture gpu::events:: gpu::tests::noise_matches_the_cpu gpu::selfcheck:: 2>&1 | tee gpu-tests.log
           # the tests return early without an adapter: make sure they did run
           if grep -q "skipped" gpu-tests.log; then
             echo "::error::GPU tests were skipped: lavapipe gave no usable adapter"

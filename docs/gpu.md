@@ -56,6 +56,10 @@ default; `stderr_observer()` gives the CLI's messages).
   clearly differs is not used (`render.backend auto: the GPU (…) renders a test frame wrongly
   (…); rendering on the CPU`); seen on the virtual GPU of macOS VMs on Intel hosts.
   `backend: gpu` skips the check.
+- **No walls on DX12 (Windows):** the GPU renderer's shading kernel is built without the wall
+  shading on DX12 (both of its shader compilers, FXC and DXC, fail on it), with a one-line
+  notice; steep faces then take the top-down texture. For walls on Windows use the CPU renderer
+  (`render.backend: cpu`) or a Vulkan adapter (`AERIALSYNTH_GPU`).
 - **"the GPU stalled (no read-back completed in 120 s)":** the GPU finished no work for two
   minutes, usually because another process (a training job) is using it heavily. Pick another
   adapter with `AERIALSYNTH_GPU`, or wait longer with `AERIALSYNTH_GPU_STALL_S`. A driver that

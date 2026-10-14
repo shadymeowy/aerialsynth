@@ -40,6 +40,9 @@ const F_FLICKER: u32 = 64u;
 const F_LIGHTS: u32 = 128u;
 const F_POLLUTION: u32 = 256u;
 const F_WALLS: u32 = 512u;
+// the wall shading is compiled in (a pipeline constant: false on DX12, gpu::walls_compiled; its
+// code is then dead and the backend's compiler drops it)
+override WALLS: bool = true;
 
 const HAS_COLOR: u32 = 1u;
 const HAS_NORMAL: u32 = 2u;
@@ -783,7 +786,7 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32
     let ng = vec3<f32>(dot(n_geo, east), dot(n_geo, north), dot(n_geo, up));
     let hz = vec2<f32>(ng.x, -ng.y);
     let wt = wall_weight(ng.z);
-    if wt > 0.0 && dot(hz, hz) > 1e-6 {
+    if WALLS && wt > 0.0 && dot(hz, hz) > 1e-6 {
         let out = normalize(hz);
         let e0 = tile_of(p.z, p.ix, p.iy);
         let pt = gp_add(p, -2.5 * out);
@@ -915,7 +918,7 @@ fn texture_fetch(ps: PS, p: GP, hs: f32) -> TX {
     // a wall's material at the sample's height and position along the wall
     var wall = TX(vec3<f32>(0.0), vec3<f32>(0.0));
     let ww = 2.0 * fract(ps.wkw);
-    if ww > 0.0 {
+    if WALLS && ww > 0.0 {
         // (metres per texel of the sample's zoom, and the patterns' footprint: two sub-samples)
         let minor = ps.range * u.cam_up.w;
         let tz = minor * exp2(f32(ps.z - p.z) - ps.lam);
@@ -985,7 +988,7 @@ fn texture_fetch(ps: PS, p: GP, hs: f32) -> TX {
     if wsum > 0.0 {
         c0 = col / wsum;
     }
-    if ww > 0.0 {
+    if WALLS && ww > 0.0 {
         c0 += (wall.col - c0) * ww;
         e0 += (wall.emis - e0) * ww;
     }
@@ -1077,7 +1080,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 shadow = sun_visibility(p);
             }
             var n_geo = vec3<f32>(0.0);
-            if has(F_WALLS) {
+            if WALLS && has(F_WALLS) {
                 n_geo = r_cam * geo_normal(i32(x), i32(y), ray * range);
             }
             pc = pixel_shade(p, range, dir_w, shadow, n_geo, hs);
