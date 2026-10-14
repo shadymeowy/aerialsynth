@@ -221,8 +221,8 @@ fn forest_est(s: &Stack) -> f64 {
     let t = s.t;
     let td = s.world.cfg.vegetation.tree_density;
     let trees_mult = s.veg(|v| v.trees) * s.bio.style.trees;
-    let cold = (1.0 - smoothstep(0.0, 8.0, t.temp)) * (1.0 - smoothstep(0.15, 0.4, t.mountain));
-    let base_cover = smoothstep(0.3 - 0.14 * cold, 0.68 - 0.24 * cold, t.moist) * smoothstep(-6.0, 2.0, t.temp) * td * trees_mult;
+    let cold = (1.0 - smoothstep(0.0, 8.0, t.temp)) * (1.0 - smoothstep(0.35, 0.7, t.mountain));
+    let base_cover = smoothstep(0.3 - 0.2 * cold, 0.68 - 0.36 * cold, t.moist) * smoothstep(-6.0, 2.0, t.temp) * td * trees_mult;
     let fpu = 0.5 + 0.5 * s.pf.forest;
     let forest = smoothstep(-0.03, 0.03, base_cover - fpu);
     let clear = 1.0 - 0.85 * smoothstep(0.05, 0.4, s.agri()) * (1.0 - smoothstep(0.45, 0.7, s.l.slope));
