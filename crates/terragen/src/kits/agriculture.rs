@@ -737,7 +737,7 @@ fn draw(s: &mut Stack, pl: &Plan) {
     // of soil and growth across the fields (as the core's)
     let fv = 1.0 + 0.09 * s.sm.pf_lazy(s.pf, crate::surface::PF_FIELD_VAR);
     // (and soil and moisture patches of tens of metres within every parcel)
-    let mottle = if cov > 0.0 { 0.11 * perlin3(pc.id ^ 0x3077, p / 24.0) * band(24.0, gsd) } else { 0.0 };
+    let mottle = if cov > 0.0 { 0.16 * perlin3(pc.id ^ 0x3077, p / 24.0) * band(24.0, gsd) } else { 0.0 };
     let col = field_tone(col) * (fv + mottle);
     let a = cov_m * keep;
     s.m.field_cov = a;
@@ -1195,7 +1195,7 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
             col = stage(&cc, ph) * (0.95 + 0.10 * u01k(id, 8));
             col *= 1.0 + 0.2 * perlin3(id, p / 35.0) * band(35.0, gsd) + 0.11 * perlin3(id ^ 1, p / 120.0) * band(120.0, gsd);
             // soil and growth texture (band-limited)
-            col *= 1.0 + 0.15 * perlin3(id ^ 0x7E1, p / 7.0) * band(7.0, gsd) + 0.10 * perlin3(id ^ 0x7E2, p / 2.5) * band(2.5, gsd);
+            col *= 1.0 + 0.22 * perlin3(id ^ 0x7E1, p / 7.0) * band(7.0, gsd) + 0.14 * perlin3(id ^ 0x7E2, p / 2.5) * band(2.5, gsd);
             let gz = perlin3(id ^ 0x6A0, p / 55.0) * band(55.0, gsd);
             // growth zones (soil, moisture): yellower and greener patches of tens of metres
             col = mixc(col, col * DVec3::new(1.12, 1.04, 0.82), 0.55 * smoothstep(0.0, 0.6, gz));
@@ -1480,7 +1480,7 @@ fn scatter_tree(seed: u64, q: DVec2, cell: f64, dens: f64, gsd: f64, fw: f64) ->
 fn pasture(pl: &Plan, pc: &Parcel, px: &Px, id: u64, q: DVec2) -> (DVec3, f64, u8) {
     let (p, gsd, fw) = (px.p, px.gsd, px.fw);
     let mut col = pasture_col(px) * (0.86 + 0.28 * u01k(id, 8));
-    col *= 1.0 + 0.08 * perlin3(id ^ 0x9A5, p / 14.0) * band(14.0, gsd) + 0.05 * perlin3(id ^ 0x9A6, p / 4.0) * band(4.0, gsd);
+    col *= 1.0 + 0.15 * perlin3(id ^ 0x9A5, p / 14.0) * band(14.0, gsd) + 0.10 * perlin3(id ^ 0x9A6, p / 4.0) * band(4.0, gsd);
     // tussocks and grazed patches
     let tus = perlin3(id ^ 0x9A7, p / 1.7) * band(1.7, gsd);
     col *= 1.0 + 0.10 * tus + 0.12 * perlin3(id ^ 0x9A8, p / 40.0) * band(40.0, gsd);

@@ -631,7 +631,7 @@ fn agri_draw(s: ptr<function, Stack>, pl: Plan) {
     let fv = 1.0 + 0.09 * s_pf_lazy(s, PF_FIELD_VAR);
     var mottle = 0.0;
     if (cov > 0.0) {
-        mottle = 0.11 * perlin3(pc.id ^ 0x3077lu, p * (1.0lf / 24.0lf)) * band(24.0, gsd);
+        mottle = 0.16 * perlin3(pc.id ^ 0x3077lu, p * (1.0lf / 24.0lf)) * band(24.0, gsd);
     }
     let y = dot(col, vec3<f32>(0.2126, 0.7152, 0.0722));
     col = mixc(col, vec3<f32>(y), 0.25) * (fv + mottle);
@@ -1164,7 +1164,7 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
             let ph = clamp(px.season + 0.3 * (u01k(id, 20lu) - 0.5), 0.0, 1.0);
             col = agri_stage(cc, ph) * (0.95 + 0.10 * u01k(id, 8lu));
             col *= 1.0 + 0.2 * perlin3(id, p * (1.0lf / 35.0lf)) * band(35.0, gsd) + 0.11 * perlin3(id ^ 1lu, p * (1.0lf / 120.0lf)) * band(120.0, gsd);
-            col *= 1.0 + 0.15 * perlin3(id ^ 0x7E1lu, p * (1.0lf / 7.0lf)) * band(7.0, gsd) + 0.10 * perlin3(id ^ 0x7E2lu, p * (1.0lf / 2.5lf)) * band(2.5, gsd);
+            col *= 1.0 + 0.22 * perlin3(id ^ 0x7E1lu, p * (1.0lf / 7.0lf)) * band(7.0, gsd) + 0.14 * perlin3(id ^ 0x7E2lu, p * (1.0lf / 2.5lf)) * band(2.5, gsd);
             let gz = perlin3(id ^ 0x6A0lu, p * (1.0lf / 55.0lf)) * band(55.0, gsd);
             col = mixc(col, col * vec3<f32>(1.12, 1.04, 0.82), 0.55 * smoothstep1(0.0, 0.6, gz));
             col = mixc(col, col * vec3<f32>(0.84, 0.92, 0.86), 0.5 * smoothstep1(0.0, 0.6, -gz));
@@ -1433,7 +1433,7 @@ fn agri_pasture(pl: Plan, pc: Parcel, px: AgPx, id: u64, q: vec2<f32>) -> Shade 
     let gsd = px.gsd;
     let fw = px.fw;
     var col = agri_pasture_col(px) * (0.86 + 0.28 * u01k(id, 8lu));
-    col *= 1.0 + 0.08 * perlin3(id ^ 0x9A5lu, p * (1.0lf / 14.0lf)) * band(14.0, gsd) + 0.05 * perlin3(id ^ 0x9A6lu, p * (1.0lf / 4.0lf)) * band(4.0, gsd);
+    col *= 1.0 + 0.15 * perlin3(id ^ 0x9A5lu, p * (1.0lf / 14.0lf)) * band(14.0, gsd) + 0.10 * perlin3(id ^ 0x9A6lu, p * (1.0lf / 4.0lf)) * band(4.0, gsd);
     let tus = perlin3(id ^ 0x9A7lu, p * (1.0lf / 1.7lf)) * band(1.7, gsd);
     col *= 1.0 + 0.10 * tus + 0.12 * perlin3(id ^ 0x9A8lu, p * (1.0lf / 40.0lf)) * band(40.0, gsd);
     var cls = LC_PASTURE;
