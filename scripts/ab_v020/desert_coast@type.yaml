@@ -1,4 +1,6 @@
-# desert_coast at a place of the same type in the next generator's world: arid gravel coast (survey) (the same local solar time)
+# desert_coast at a place of the same type in the next generator's world: a desert river ending in a fan delta at the
+# coast (15.00 N 71.73 E, 171 mm a year), the camera over the river looking down it to the delta (heading 320 instead
+# of 255; round 4 showed an arid gravel coast's inland river) (the same local solar time)
 world:
   seed: 1
   generator: next
@@ -12,9 +14,9 @@ trajectory:
     rate_hz: 400
     speed_mps: 50
     kind: line
-    lat: 33.3035
-    lon: 149.052
-    heading_deg: 255
+    lat: 14.985
+    lon: 71.755
+    heading_deg: 320
     altitude_m: 900
     duration_s: 8.6
 render:
@@ -23,7 +25,7 @@ render:
   lighting:
     mode: clock
     date: '2026-06-21'
-    time_utc: '23:33:44'
+    time_utc: '04:42:39'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:

@@ -141,7 +141,7 @@ fn co_ponds(s: ptr<function, Stack>, zone: f32) {
     let p = (*s).c.p;
     let gsd = (*s).c.gsd;
     let fw = (*s).l.fw;
-    let area = smoothstep1(-0.2, 0.1, perlin3(CO_SEED + 60lu, p * (1.0lf / 2400.0lf)));
+    let area = smoothstep1(0.05, 0.3, perlin3(CO_SEED + 60lu, p * (1.0lf / 2400.0lf)));
     if (area <= 0.0) {
         return;
     }
@@ -190,7 +190,7 @@ fn co_ponds(s: ptr<function, Stack>, zone: f32) {
     }
     let c = area * zone * (e * exact + (1.0 - e) * 0.7 * 0.62);
     if (c > 0.0) {
-        var ly = layer_paint(c, mixc(mean_col, col, e), LC_AQUACULTURE);
+        var ly = layer_paint(c, mixc(mean_col, col, 0.7 * e), LC_AQUACULTURE);
         ly.clear = 1.0;
         ly.relit = 0.6;
         composite(s, ly);
@@ -229,10 +229,12 @@ fn coast_slot_agriculture(s: ptr<function, Stack>) {
     }
     let arid = 1.0 - smoothstep1(0.2, 0.34, t.moist);
     let low = 1.0 - smoothstep1(0.6, 1.1, ground + 0.3 * co_nz(CO_SEED + 60lu, p, 90.0, gsd));
-    let silt = srgb(144.0, 134.0, 114.0) * (1.0 + 0.1 * co_nz(CO_SEED + 65lu, p, 38.0, gsd));
+    let soil = mixc(spal(s, BP_SOIL), spal(s, BP_SOIL + 3u), 0.5);
+    let hue = mixc(vec3<f32>(1.0), soil / max(dot(soil, vec3<f32>(0.2126, 0.7152, 0.0722)), 0.01), 0.6);
+    let silt = srgb(144.0, 134.0, 114.0) * hue * (1.0 + 0.1 * co_nz(CO_SEED + 65lu, p, 38.0, gsd));
     let salt = smoothstep1(0.2, 0.45, co_nz(CO_SEED + 66lu, p, 120.0, gsd) + 0.5 * co_nz(CO_SEED + 67lu, p, 33.0, gsd)) * (1.0 - low);
     let dry = mixc(silt, srgb(192.0, 186.0, 170.0), 0.7 * salt);
-    let mud = mixc(mixc(srgb(118.0, 106.0, 88.0), srgb(84.0, 76.0, 66.0), low), mixc(dry, srgb(96.0, 90.0, 78.0), low), arid);
+    let mud = mixc(mixc(srgb(118.0, 106.0, 88.0), srgb(84.0, 76.0, 66.0), low) * hue, mixc(dry, srgb(96.0, 90.0, 78.0) * hue, low), arid);
     let reed = mixc(srgb(96.0, 106.0, 62.0), srgb(134.0, 112.0, 70.0), smoothstep1(0.0, 0.7, co_nz(CO_SEED + 61lu, p, 260.0, gsd)));
     let m = (1.0 - arid) * (1.0 - low);
     var col = mixc(mud, reed, m) * (1.0 + 0.08 * co_nz(CO_SEED + 62lu, p, 9.0, gsd));

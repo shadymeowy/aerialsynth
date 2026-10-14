@@ -461,11 +461,14 @@ pub fn agriculture(s: &mut Stack) {
     }
     let arid = 1.0 - smoothstep(0.2, 0.34, t.moist);
     let low = 1.0 - smoothstep(0.6, 1.1, ground + 0.3 * nz(SEED + 60, p, 90.0, gsd));
-    // grey silt drying out to salt crusts on the higher flats, darker where wet
-    let silt = srgb(144.0, 134.0, 114.0) * (1.0 + 0.1 * nz(SEED + 65, p, 38.0, gsd));
+    // silt drying out to salt crusts on the higher flats, darker where wet; silt and mud take
+    // the hue of the land's soil (grey silt stood out against red desert soils)
+    let soil = mixc(s.pal(crate::registry::pal::SOIL), s.pal(crate::registry::pal::SOIL + 3), 0.5);
+    let hue = mixc(DVec3::ONE, soil / soil.dot(DVec3::new(0.2126, 0.7152, 0.0722)).max(0.01), 0.6);
+    let silt = srgb(144.0, 134.0, 114.0) * hue * (1.0 + 0.1 * nz(SEED + 65, p, 38.0, gsd));
     let salt = smoothstep(0.2, 0.45, nz(SEED + 66, p, 120.0, gsd) + 0.5 * nz(SEED + 67, p, 33.0, gsd)) * (1.0 - low);
     let dry = mixc(silt, srgb(192.0, 186.0, 170.0), 0.7 * salt);
-    let mud = mixc(mixc(srgb(118.0, 106.0, 88.0), srgb(84.0, 76.0, 66.0), low), mixc(dry, srgb(96.0, 90.0, 78.0), low), arid);
+    let mud = mixc(mixc(srgb(118.0, 106.0, 88.0), srgb(84.0, 76.0, 66.0), low) * hue, mixc(dry, srgb(96.0, 90.0, 78.0) * hue, low), arid);
     let reed = mixc(srgb(96.0, 106.0, 62.0), srgb(134.0, 112.0, 70.0), smoothstep(0.0, 0.7, nz(SEED + 61, p, 260.0, gsd)));
     let m = (1.0 - arid) * (1.0 - low);
     let mut col = mixc(mud, reed, m) * (1.0 + 0.08 * nz(SEED + 62, p, 9.0, gsd));
@@ -491,7 +494,9 @@ fn ponds(s: &mut Stack, zone: f64) {
         return;
     }
     let (p, gsd, fw) = (s.ctx.p, s.ctx.gsd, s.l.fw);
-    let area = smoothstep(-0.2, 0.1, perlin3(SEED + 60, p / 2400.0));
+    // (pond fields on part of the flats, their colours muted: a quilt of pink, white and teal
+    // ponds covered half of every arid delta)
+    let area = smoothstep(0.05, 0.3, perlin3(SEED + 60, p / 2400.0));
     if area <= 0.0 {
         return;
     }
@@ -530,7 +535,7 @@ fn ponds(s: &mut Stack, zone: f64) {
     }
     let c = area * zone * (e * exact + (1.0 - e) * 0.7 * 0.62);
     if c > 0.0 {
-        s.composite(Layer { cov: c, albedo: mixc(mean_col, col, e), cls: cls::AQUACULTURE, clear: 1.0, relit: 0.6, ..Default::default() });
+        s.composite(Layer { cov: c, albedo: mixc(mean_col, col, 0.7 * e), cls: cls::AQUACULTURE, clear: 1.0, relit: 0.6, ..Default::default() });
         s.m.natural_ok *= 1.0 - c;
     }
 }

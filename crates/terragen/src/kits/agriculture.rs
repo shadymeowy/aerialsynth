@@ -167,7 +167,7 @@ const SYS: [SysDef; sys::N] = {
         SysDef { part: VOR, size: [240.0, 1.4], kinds: [OLIVE, ORCHARD, CROP, FALLOW], kw: [0.55, 0.2, 0.15, 0.1], borders: [WALL, MARGIN], bp: [0.5, 0.5], slope: [0.6, 0.8], ..D },
         SysDef { part: GRID, size: [480.0, 360.0], kinds: [PALM, RUBBER, TEA, CROP], kw: [0.45, 0.22, 0.15, 0.18], borders: [TRACK, MARGIN], bp: [0.9, 0.1], slope: [0.6, 0.8], ..D },
         SysDef { part: GRID, size: [95.0, 60.0], kinds: [GREENH, CROP, FALLOW, POND], kw: [0.76, 0.13, 0.09, 0.02], borders: [TRACK, MARGIN], bp: [0.25, 0.75], ..D },
-        SysDef { part: GRID, size: [420.0, 300.0], kinds: [PASTURE, HAY, CROP, POND], kw: [0.6, 0.22, 0.16, 0.02], borders: [MARGIN, HEDGE], bp: [0.8, 0.2], slope: [0.38, 0.5], ..D },
+        SysDef { part: GRID, size: [420.0, 300.0], kinds: [PASTURE, HAY, CROP, POND], kw: [0.42, 0.18, 0.38, 0.02], borders: [MARGIN, HEDGE], bp: [0.8, 0.2], slope: [0.38, 0.5], ..D },
         SysDef { part: PIVOT, size: [805.0, 805.0], kinds: [CROP, FALLOW, CROP, CROP], kw: [0.75, 0.25, 0.0, 0.0], borders: [NONE, NONE], bp: [1.0, 0.0], ..D },
         SysDef { part: GRID, size: [2200.0, 1500.0], kinds: [PASTURE, HAY, FALLOW, POND], kw: [0.86, 0.04, 0.08, 0.02], borders: [TRACK, MARGIN], bp: [0.4, 0.6], slope: [0.38, 0.5], ..D },
     ]
@@ -1098,7 +1098,7 @@ fn kind_mean(pl: &Plan, k: u32, px: &Px) -> DVec3 {
         }
         kind::FALLOW => mixc(px.soil * 0.8, mixc(px.soil, px.grass_dry, 0.5), 0.5 - 0.4 * px.season),
         kind::PASTURE => pasture_col(px) * DVec3::new(1.0, 0.985, 0.91), // (0.97, with the mean of the yellow patches)
-        kind::HAY => pasture_col(px) * 1.05,
+        kind::HAY => mixc(pasture_col(px) * 1.05, hay_cut_col(), 0.75 * hay_cut(px.season)),
         kind::ORCHARD => mixc(mixc(px.grass, px.soil, 0.3), px.crown * 1.1, 0.4),
         kind::OLIVE => mixc(px.soil * 1.15, srgb(104.0, 112.0, 84.0), 0.3),
         kind::VINE => mixc(px.soil * 1.2, vine_col(px.season, 0.5), 0.35),
@@ -1110,6 +1110,15 @@ fn kind_mean(pl: &Plan, k: u32, px: &Px) -> DVec3 {
         kind::YARD => srgb(172.0, 140.0, 108.0),
         _ => srgb(40.0, 70.0, 38.0) * 0.9,
     }
+}
+
+/// The share of hay meadows mown at phase `ph`, and their colour.
+fn hay_cut(ph: f64) -> f64 {
+    0.6 * smoothstep(0.3, 0.5, ph)
+}
+
+fn hay_cut_col() -> DVec3 {
+    srgb(166.0, 156.0, 96.0)
 }
 
 fn pasture_col(px: &Px) -> DVec3 {
@@ -1202,8 +1211,13 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
             let u_crop = if u01k(id, 16) < 0.7 { u01k(cluster, 6) } else { u01k(id, 6) };
             let c = if k == kind::HAY { 6 } else { pick_crop(pl.mix, u_crop) };
             let (cc, row) = CROPS[c as usize];
-            let ph = (px.season + 0.3 * (u01k(id, 20) - 0.5)).clamp(0.0, 1.0);
+            // (fields of a region in different stages: v0.2.0's patchwork of green, ripe and cut)
+            let ph = (px.season + 0.45 * (u01k(id, 20) - 0.5)).clamp(0.0, 1.0);
             col = stage(&cc, ph) * (0.95 + 0.10 * u01k(id, 8));
+            // (hay meadows mown from early summer: pale straw, not one more green parcel)
+            if k == kind::HAY && u01k(id, 36) < hay_cut(ph) {
+                col = mixc(col, hay_cut_col() * (0.92 + 0.16 * u01k(id, 37)), 0.75);
+            }
             col *= 1.0 + 0.2 * perlin3(id, p / 35.0) * band(35.0, gsd) + 0.11 * perlin3(id ^ 1, p / 120.0) * band(120.0, gsd);
             // soil and growth texture (band-limited)
             col *= 1.0 + 0.22 * perlin3(id ^ 0x7E1, p / 7.0) * band(7.0, gsd) + 0.14 * perlin3(id ^ 0x7E2, p / 2.5) * band(2.5, gsd);

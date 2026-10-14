@@ -52,14 +52,17 @@ landscapes but looks worse in places, which is why it is not the default:
 
 - **Fields:** irregular field systems are four-sided cadastral parcels of about v0.2.0's size
   and texture; survey sections are rarer in wet climates and cut into forties (round 4), and
-  streams in farmland carry tree lines, but the patchwork is greener and less varied in colour
-  than v0.2.0's; smallholder mosaics speckle at 10 km.
-- **Towns** draw one street grid each with mostly built lots (round 4), but their buildings are
-  smaller and lower than v0.2.0's blocks and towns can grow together into large built areas;
-  **lakes** can look broken where rivers, basins and kits meet.
-- **Deltas** are lobate with wandering distributaries (round 4), but their grey silt plain stands
-  out against red desert soils; **canyons** read flat from 1 km (bench lines without
-  side gullies or talus), barchan plains and warm forests differ from v0.2.0's look.
+  streams in farmland carry tree lines; pasture regions farm a third of their parcels and mow
+  their hay meadows (round 5), but wet regions' patchwork is still greener and less varied in
+  colour than v0.2.0's; smallholder mosaics speckle at 10 km.
+- **Towns** draw one street grid each with mostly built lots and houses of v0.2.0's size
+  (round 5), but their blocks are fuller and their houses lower than v0.2.0's boxes, and towns
+  can grow together into large built areas; **lakes** can look broken where rivers, basins and
+  kits meet.
+- **Deltas** are lobate with wandering distributaries, their silt in the land's hue (round 5);
+  **canyons** have stepped walls that wander into side canyons and spurs (round 5), but their
+  benches are regular and their floors flat; deserts are blotchier and barchan plains differ
+  from v0.2.0's look; temperate forests have v0.2.0's crowns but render darker.
 - **Speed:** tiles cost about 2–3× classic's on a GPU (Tesla P4, 64 cold tiles at z12 / z14 /
   z16: 11.2 / 6.5 / 5.6 s against 3.8 / 3.4 / 2.9 s), mostly the kits' pass B and the host-built
   routes of a new area.
@@ -154,7 +157,10 @@ fields at 53° N, and a hard, circular biome border in the oblique view (one of 
 `scripts/ab_v020/<scene>.yaml` are the same scenes with `generator: next`, and
 `<scene>@type.yaml` the same camera at a place of the same landscape type in next's world.
 [`ab/next_quality/`](ab/next_quality/) has the sheets of the latest comparison (columns:
-v0.2.0, round 3, round 4) and their image statistics (`stats.md`).
+v0.2.0, round 4, round 5) and their image statistics (`stats.md`). Scenes whose pose shows
+another landscape in next's world (sea at `bank` and `coast`, farmland at `night` and `dusk`)
+have an `@type` twin at a place of v0.2.0's landscape; `probe_px towns LAT LON R_KM` lists the
+settlements near a point to find one.
 
 ```sh
 scripts/ab_v020.py render --terrain target/release/terrain --out /tmp/ab [SCENE ...]   # on a GPU machine

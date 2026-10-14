@@ -1,4 +1,5 @@
-# forest at a place of the same type in the next generator's world: broadleaf forest with a river (survey) (the same local solar time)  (southern summer: December)
+# forest at a place of the same type in the next generator's world: temperate broadleaf forest with a river
+# (broadleaf_deciduous, 39.06 N; round 4 used a tropical forest) (the same local solar time)
 world:
   seed: 1
   generator: next
@@ -14,16 +15,16 @@ trajectory:
     altitude_m: 900
     heading_deg: 68
     kind: line
-    lat: -2.2821
-    lon: -43.4505
+    lat: 39.05
+    lon: 28.48
     duration_s: 8.1
 render:
   supersample: 2
   shading: relit
   lighting:
     mode: clock
-    date: '2026-12-21'
-    time_utc: '10:46:30'
+    date: '2026-06-21'
+    time_utc: '05:58:47'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:

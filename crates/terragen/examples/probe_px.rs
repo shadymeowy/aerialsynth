@@ -5,6 +5,7 @@
 //!     cargo run --release -p terragen --example probe_px -- sinks LAT LON R_KM
 //!     cargo run --release -p terragen --example probe_px -- info LAT LON [LAT LON ...]
 //!     cargo run --release -p terragen --example probe_px -- bands
+//!     cargo run --release -p terragen --example probe_px -- towns LAT LON R_KM [MIN_LEVEL]
 //!
 //! The first prints the world fields at one point (default 5 m pixels); `scan` prints one line of
 //! features per grid point (200 m pixels) to look for places; `sinks` lists the rivers ending in
@@ -59,6 +60,21 @@ fn main() {
         for s in g.world.river_segments(ctx.p, a[2] * 1000.0, 50.0).iter().filter(|s| s.sink) {
             let ge = geodesy::ecef2geodetic(s.b, &g.world.ell);
             println!("sink {:.5} {:.5} level {} hw {:.1} h {:.0}", ge.lat.to_degrees(), ge.lon.to_degrees(), s.level, s.hw, s.hb);
+        }
+        return;
+    }
+    if args[0] == "towns" {
+        // towns LAT LON R_KM [MIN_LEVEL]: the settlements within R_KM km (level ≥ MIN_LEVEL,
+        // default 2: towns), with the terrain at their centre (to find A/B places)
+        let a: Vec<f64> = args[1..].iter().map(|s| s.parse().unwrap()).collect();
+        let ctx = terragen::world::Ctx::new(a[0].to_radians(), a[1].to_radians(), 50.0, &g.world.ell);
+        let min = a.get(3).copied().unwrap_or(2.0) as u8;
+        for s in terragen::kits::settlements::places::settlements_near_min_level(&g.world, ctx.p, a[2] * 1000.0, min) {
+            let (t, _, c) = g.probe(s.lat_deg.to_radians(), s.lon_deg.to_radians(), 200.0);
+            println!(
+                "{:.4} {:.4} level {} pop {:.0} R {:.0} arch {} dev {:.2} coastal {} temp {:.1} moist {:.2} agri {:.2} ground {:.0} class {c}",
+                s.lat_deg, s.lon_deg, s.level, s.population, s.radius_m, s.archetype, s.development, s.coastal, t.temp, t.moist, t.agri, t.ground
+            );
         }
         return;
     }

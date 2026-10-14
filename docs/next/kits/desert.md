@@ -162,3 +162,4 @@ so they cost little outside deserts.
   (qanats, below the oasis fields); see their sections.
 
 Leftovers round B: desert varnish patches are 240 m (was 520 m), 3 octaves, lighter (140, 112, 86): less blotchy.
+Polish round 5: varnish on a fifth of the pavement (was 0.3; red deserts 0.18), lighter (164, 136, 104).

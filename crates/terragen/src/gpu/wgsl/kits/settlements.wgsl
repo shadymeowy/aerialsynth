@@ -1163,13 +1163,11 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             }
         } else if (pattern != SP_DISPERSED && pattern != SP_KRAAL) {
             // lots by BSP and buildings by typology
-            var depth = 4u;
+            var depth = 3u;
             if (z == SZ_CBD) {
                 depth = 1u;
             } else if (z == SZ_INNER) {
                 depth = 2u;
-            } else if (z == SZ_OUTER) {
-                depth = 3u;
             }
             if (pattern == SP_INDUSTRIAL) {
                 depth = 2u;
@@ -1264,7 +1262,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     half = vec2<f32>(0.5 * lw - 9.0, 0.5 * ld - 9.0);
                     hb = 8.0 + 6.0 * u01k(lh, 4lu);
                 } else if (t == STY_ROW) {
-                    half = vec2<f32>(0.5 * lw - 0.4, min(0.5 * ld - 2.0, 6.0));
+                    half = vec2<f32>(0.5 * lw - 0.4, min(0.5 * ld - 2.0, 7.5));
                     hb = 3.0 * (2.0 + floor(1.6 * u01k(lh, 4lu)));
                     flat = u01k(lh, 6lu) < 0.3 || a == 3u;
                 } else if (t == STY_PERIM) {
@@ -1272,9 +1270,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     hb = 3.0 * (3.0 + 3.0 * u01k(lh, 4lu)) * select(0.7, 1.0, pl.level >= 3u);
                     flat = u01k(lh, 6lu) < 0.35;
                 } else {
-                    let sb = 2.5 + 3.0 * u01k(lh, 1lu);
-                    half = vec2<f32>(min(0.5 * lw - sb, 7.0 + 2.0 * u01k(lh, 7lu)), min(0.5 * ld - sb, 5.5 + 2.0 * u01k(lh, 8lu)));
-                    hb = 3.2 + 3.0 * select(0.0, 1.0, u01k(lh, 4lu) < 0.4);
+                    let sb = 2.0 + 2.5 * u01k(lh, 1lu);
+                    half = vec2<f32>(min(0.5 * lw - sb, 8.0 + 4.0 * u01k(lh, 7lu)), min(0.5 * ld - sb, 6.5 + 4.0 * u01k(lh, 8lu)));
+                    hb = 3.5 + 4.0 * u01k(lh, 4lu);
                     flat = a == 3u || u01k(lh, 6lu) < 0.12;
                 }
                 var podium = 0.0;
@@ -1359,7 +1357,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                         let pool = st_aa(st_min2(dp), fw);
                         col = mixc(col, srgb(70.0, 170.0, 190.0), pool);
                     }
-                    if (u01k(lh, 14lu) < 0.5) {
+                    if (u01k(lh, 14lu) < 0.35) {
                         let tp = vec2<f32>(0.6 * (0.5 * lw) * (u01k(lh, 15lu) - 0.5) * 2.0, -(half.y + 0.5 * (0.5 * ld - half.y)));
                         tree = st_aa(3.0 + 1.5 * u01k(lh, 16lu) - length(rl - tp), fw);
                         tree_h = 8.0 + 5.0 * u01k(lh, 17lu);
