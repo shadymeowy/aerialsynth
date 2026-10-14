@@ -69,15 +69,8 @@ aerialsynth.LAYERS["normal"]   # LayerInfo(name='normal', dtype=dtype('int8'), c
 | `instance` | uint32 | 256 × 256 | *optional:* instance id (building lot, field, forest stand); 0 = none |
 
 The optional layers exist only in stores of the experimental `next` generator created with
-`tiles.layers: [dtm, instance]` in the config; `w.layers` lists what a store holds, and a layer
-it lacks raises `ValueError`:
-
-```python
-# world.yaml:  tiles: { layers: [dtm, instance] }
-w = aerialsynth.World("world.h5", config="world.yaml", generator="next")
-ndsm = w.tile(16, 39117, 25113, "elevation") - w.tile(16, 39117, 25113, "dtm")   # building / tree heights
-ids = w.tile(16, 39117, 25113, "instance")                                       # 0: no instance
-```
+`tiles.layers: [dtm, instance]` ([example](../../docs/next/README.md#enabling-it)); `w.layers`
+lists what a store holds, and a layer it lacks raises `ValueError`.
 
 ## Rendering
 

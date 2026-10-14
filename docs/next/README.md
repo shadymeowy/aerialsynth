@@ -26,7 +26,10 @@ terrain view --generator next                    # (run, tiles, view, survey, co
 ```
 
 ```python
-w = aerialsynth.World("out/next.h5", generator="next")       # C: as_open_generator(..., "next")
+# world.yaml:  tiles: { layers: [dtm, instance] }      (optional layers, below)
+w = aerialsynth.World("out/next.h5", config="world.yaml", generator="next")   # C: as_open_generator
+ndsm = w.tile(16, 39117, 25113, "elevation") - w.tile(16, 39117, 25113, "dtm")   # building / tree heights
+ids = w.tile(16, 39117, 25113, "instance")                                       # 0: no instance
 ```
 
 - **One generator per store:** a tile store records its generator (version 4 for `next`, 3 for
