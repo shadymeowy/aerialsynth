@@ -272,7 +272,7 @@ fn agri_crop_mix(e: EcoV) -> u32 {
         return 3u;
     } else if (e.precip < 650.0 && e.temp < 12.0) {
         return 2u;
-    } else if (e.arch == 7u) {
+    } else if (e.arch == 7u && e.koppen != 14u && e.koppen != 15u) {
         return 1u;
     }
     return 0u;

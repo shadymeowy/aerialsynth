@@ -384,7 +384,9 @@ fn crop_mix(e: &EcoV) -> u32 {
         3
     } else if e.precip < 650.0 && e.temp < 12.0 {
         2
-    } else if e.arch == 7 {
+    } else if e.arch == 7 && e.koppen != 14 && e.koppen != 15 {
+        // (the corn belt's maize and soy are green all summer: in oceanic climates the survey
+        // culture grows the temperate mix, v0.2.0's patchwork of ripe grain and green)
         1
     } else {
         0
