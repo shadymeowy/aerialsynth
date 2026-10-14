@@ -643,8 +643,9 @@ fn relief(c: Ctx, m: Macro, pre: Pre, blk: u32) -> Relief {
     return relief_kits(c, m, relief_core(c, m, pre), blk);
 }
 
-/// The relief before the kits' operators (`relief_kits`). Pass A1 and the point queries run
-/// the two halves in pipelines of their own (each compiles in about half the time).
+/// The relief before the kits' operators (`relief_kits`). The point queries run the two halves
+/// in pipelines of their own (each compiles in about half the time; in pass A1 a pipeline of
+/// its own for the kits' operators made pass A1 1.5x slower on a P4).
 fn relief_core(c: Ctx, m: Macro, pre: Pre) -> Relief {
     let p = c.p;
     let gsd = c.gsd;

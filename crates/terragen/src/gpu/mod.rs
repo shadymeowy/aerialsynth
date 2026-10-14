@@ -153,9 +153,7 @@ struct Kernels {
     points_rest: wgpu::ComputePipeline,
     nodes: wgpu::ComputePipeline,
     inst: wgpu::ComputePipeline,
-    /// pass A1: the macro fields and core relief, then the kits' relief operators
     a1: wgpu::ComputePipeline,
-    a1_kits: wgpu::ComputePipeline,
     bins: wgpu::ComputePipeline,
     a2: wgpu::ComputePipeline,
     region_req: wgpu::ComputePipeline,
@@ -252,8 +250,11 @@ pub struct GpuGenerator {
 /// than its size, so the stack is cut where the code splits about evenly (`inlined_sizes` and
 /// `compile_times` in gpu/tests.rs measure the stages). Every stage evaluates only the kernel
 /// kinds of its slots' biome layers (`kernel_eval_st<n>`). A boundary after step 5 (or in it,
-/// after its core layer) doubles the state between stages (the deferred layers and the town:
-/// `PB_STATE_FULL`); each stage costs a reload of the sample (~2–3 % of pass B).
+/// after its core layer) adds the deferred layers and the town to the state it carries
+/// (`PB_FULL_IN` / `PB_FULL_OUT` in WGSL, `PB_STATE_FULL` sizes it). A boundary costs ~3–7 % of pass B (the reload of the sample and its state;
+/// `TERRAGEN_PROFILE=passes` times each stage). Six stages: zonal–azonal up to volcanic, azonal
+/// from cold to disturbance (desert), disturbance from temperate to agriculture (coast), the
+/// agriculture kit, linear–built, canopy–water.
 pub(crate) const PB_STAGES: &[(u32, &str)] = &[(0, ""), (2, "cold"), (3, "temperate"), (4, "agriculture"), (5, ""), (7, "")];
 
 /// Pass B's work buffer (`pbw` in tile_b.wgsl): header words, samples per round, words per
@@ -294,8 +295,21 @@ const STEP_SLOTS: [usize; 11] = {
 };
 
 /// The core kernels' WGSL functions by kind (`kernel_explicit` in kernels.wgsl).
-const CORE_KERNELS: [&str; 13] =
-    ["k_scatter", "k_rows", "k_cells", "k_stripes", "k_contours", "k_radial", "k_crescent", "k_lobes", "k_patches", "k_linear", "k_stamp", "k_canopy", "k_water"];
+const CORE_KERNELS: [&str; 13] = [
+    "k_scatter",
+    "k_rows",
+    "k_cells",
+    "k_stripes",
+    "k_contours",
+    "k_radial",
+    "k_crescent",
+    "k_lobes",
+    "k_patches",
+    "k_linear",
+    "k_stamp",
+    "k_canopy",
+    "k_water",
+];
 
 /// The (slot, kernel kind) pairs of the builtin registry's biome layers: the kinds pass B's
 /// stages compile (a world's registry differs from the builtin one only in pick weights).
@@ -355,7 +369,8 @@ fn stages_wgsl() -> String {
             steps.push((st, lo, hi));
         }
         // the kernel kinds of the slots whose biome layers run here
-        let mut kk: Vec<u32> = steps.iter().filter(|t| t.1 == 0).flat_map(|t| kinds.iter().filter(move |p| p.0 == STEP_SLOTS[t.0 as usize]).map(|p| p.1)).collect();
+        let mut kk: Vec<u32> =
+            steps.iter().filter(|t| t.1 == 0).flat_map(|t| kinds.iter().filter(move |p| p.0 == STEP_SLOTS[t.0 as usize]).map(|p| p.1)).collect();
         kk.sort_unstable();
         kk.dedup();
         s += &format!("fn kernel_eval_st{si}(li: u32, i: KIn) -> KOut {{\n    let l = klayers[li];\n    let k = kp_load(li);\n    let e = kernel_resolved(k, l.sz.x, i);\n    var x = kout_none();\n");
@@ -543,7 +558,6 @@ impl GpuGenerator {
             "grid_nodes",
             "instance_lists",
             "pass_a1",
-            "pass_a1_kits",
             "bin_segments",
             "pass_a2",
             "region_requests",
@@ -557,7 +571,11 @@ impl GpuGenerator {
         ];
         let dnames = ["lat_enum", "lat_heights", "mark_targets", "lat_targets", "mark_sources", "lat_sources", "gather_count", "gather_scan", "gather_write"];
         let stage_names: Vec<String> = (0..PB_STAGES.len()).map(|k| format!("pass_b{k}")).collect();
-        let (points, mut tile, mut drain): ((wgpu::ComputePipeline, wgpu::ComputePipeline, wgpu::ComputePipeline), Vec<wgpu::ComputePipeline>, Vec<wgpu::ComputePipeline>) = std::thread::scope(|s| {
+        let (points, mut tile, mut drain): (
+            (wgpu::ComputePipeline, wgpu::ComputePipeline, wgpu::ComputePipeline),
+            Vec<wgpu::ComputePipeline>,
+            Vec<wgpu::ComputePipeline>,
+        ) = std::thread::scope(|s| {
             let hs: Vec<_> = names
                 .iter()
                 .copied()
@@ -598,7 +616,6 @@ impl GpuGenerator {
             nodes: t(),
             inst: t(),
             a1: t(),
-            a1_kits: t(),
             bins: t(),
             a2: t(),
             region_req: t(),
@@ -1306,7 +1323,11 @@ impl GpuGenerator {
             match self.pb_work.lock().unwrap().take() {
                 Some(b) if b.size() >= pb_bytes => b,
                 // (sized for a full batch of 16 tiles, so smaller batches reuse it)
-                _ => output(d, "pass b work", pb_bytes.max(((PBW_HDR + 16usize.div_ceil(16usize.div_ceil(pb_max)) * pb_tile_words).next_multiple_of(4) * 4) as u64)),
+                _ => output(
+                    d,
+                    "pass b work",
+                    pb_bytes.max(((PBW_HDR + 16usize.div_ceil(16usize.div_ceil(pb_max)) * pb_tile_words).next_multiple_of(4) * 4) as u64),
+                ),
             }
         } else {
             output(d, "-", 256)
@@ -1408,7 +1429,6 @@ impl GpuGenerator {
                     (&self.k.nodes, [((NG * NG) as u32).div_ceil(64), nt as u32, 1]),
                     (&self.k.inst, [((NBIN * NBIN * nfam) as u32).div_ceil(64).max(1), 1, nt as u32]),
                     (&self.k.a1, [wg(NA2), wg(NA2), nt as u32]),
-                    (&self.k.a1_kits, [wg(NA2), wg(NA2), nt as u32]),
                     (&self.k.bins, [(NBIN * NBIN) as u32, nt as u32, 1]),
                 ],
                 true,

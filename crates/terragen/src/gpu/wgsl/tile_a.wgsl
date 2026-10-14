@@ -407,6 +407,10 @@ fn pass_a1(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocat
     let ti = tiles[gid.z];
     let i = gid.x;
     let j = gid.y;
+    if (li == 0u) {
+        atomicStore(&wg_hmax, 0u);
+    }
+    workgroupBarrier();
     if (i < NA2 && j < NA2) {
         let r = rows[ti.row_a + j];
         let c = cols[ti.col_a + i];
@@ -421,8 +425,7 @@ fn pass_a1(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocat
         } else {
             m = macro_at(ctx.p, ctx.gsd);
         }
-        // (the kits' operators: `pass_a1_kits`; the lake requests do not read the height)
-        let rl = relief_core(ctx, m, pre);
+        let rl = relief(ctx, m, pre, ti.bin0 + wg.y * NBIN + wg.x);
         let b = (ti.pix0 + j * NA2 + i) * PIX_F;
         pix_put(b, m);
         pix_a[b + PIX_REL + 0u] = rl.h;
@@ -436,6 +439,7 @@ fn pass_a1(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocat
         pix_a[b + PIX_REL + 8u] = rl.mesa;
         pix_a[b + PIX_REL + 9u] = rl.sand;
         pix_a[b + PIX_REL + 10u] = rl.gully_n;
+        atomicMax(&wg_hmax, orderable(rl.h));
         lake_requests(ctx, m, pre, rl, li);
     } else {
         wg_lake_id[2u * li] = 0lu;
@@ -443,33 +447,8 @@ fn pass_a1(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocat
     }
     workgroupBarrier();
     if (li == 0u) {
+        bins[ti.bin0 + wg.y * NBIN + wg.x].z = atomicLoad(&wg_hmax);
         flush_lake_requests();
-    }
-}
-
-/// Pass A1's second half: the kits' relief operators on the relief of `pass_a1`, and each bin's
-/// highest relief.
-@compute @workgroup_size(16, 16)
-fn pass_a1_kits(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation_index) li: u32, @builtin(workgroup_id) wg: vec3<u32>) {
-    let ti = tiles[gid.z];
-    let i = gid.x;
-    let j = gid.y;
-    let blk = ti.bin0 + wg.y * NBIN + wg.x;
-    if (li == 0u) {
-        atomicStore(&wg_hmax, 0u);
-    }
-    workgroupBarrier();
-    if (i < NA2 && j < NA2) {
-        let r = rows[ti.row_a + j];
-        let ctx = row_col_ctx(r, cols[ti.col_a + i], r.gsd);
-        let b = (ti.pix0 + j * NA2 + i) * PIX_F;
-        let rl = relief_kits(ctx, pix_macro(b), pix_relief(b), blk);
-        pix_a[b + PIX_REL + 0u] = rl.h;
-        atomicMax(&wg_hmax, orderable(rl.h));
-    }
-    workgroupBarrier();
-    if (li == 0u) {
-        bins[blk].z = atomicLoad(&wg_hmax);
     }
 }
 

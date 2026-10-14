@@ -409,6 +409,24 @@ fn wgsl_compiles() {
     }
 }
 
+/// `CORE_KERNELS` names the functions of `kernel_explicit`'s kinds; every stage of pass B
+/// compiles the kernel kinds of the builtin registry's slots it runs.
+#[test]
+fn stage_kernels() {
+    for (i, f) in super::CORE_KERNELS.iter().enumerate() {
+        assert!(super::KERNELS_WGSL.contains(&format!("case {i}u: {{ return {f}(k, i); }}")), "{f}");
+    }
+    let (_, tile, _) = super::sources();
+    for (slot, kind) in super::registry_kinds() {
+        let n = (0..super::PB_STAGES.len()).filter(|si| {
+            let a = tile.find(&format!("fn kernel_eval_st{si}(")).unwrap();
+            let body = &tile[a..a + tile[a..].find("\n}\n").unwrap()];
+            body.contains(&format!("case {kind}u:"))
+        });
+        assert!(n.count() >= 1, "slot {slot} kind {kind}");
+    }
+}
+
 /// `POINT_MID_BYTES` is the size of a `PointMid` in WGSL's layout.
 #[test]
 fn point_mid_size() {
