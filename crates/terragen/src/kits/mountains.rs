@@ -491,7 +491,12 @@ pub fn carve(_w: &World, ci: &CarveIn, cv: &mut Carve) {
             let prov = (0.6 * smoothstep(-0.05, 0.4, m.uplift) + 0.4 * smoothstep(0.2, 0.8, m.plateau)).clamp(0.0, 1.0);
             cv.floor = lerp(f0, (f0 - (400.0 + 1100.0 * prov)).max(f0.min(30.0)), cz);
             cv.depth_cap = lerp(cv.depth_cap, 1500.0, cz);
-            cv.wall_k *= lerp(1.0, 0.3, cz);
+            // (side canyons and spurs: the walls' width wanders, wide in re-entrants where a
+            // noise creases; walls of one width drew the benches as contour lines along the river)
+            let bw = band(450.0, gsd);
+            let re = bw * (1.0 - smoothstep(0.32, 0.6, crease(perlin3(SEED + 70, ci.ctx.p / 900.0))));
+            let sp = bw * perlin3(SEED + 71, ci.ctx.p / 1700.0);
+            cv.wall_k *= lerp(1.0, 0.3 * (1.0 + 1.1 * re + 0.3 * sp), cz);
             cv.fp_w *= lerp(1.0, 0.6, cz);
             cv.steps = 50.0;
             cv.step_mix = cv.step_mix.max(cz * band(160.0, gsd));
@@ -530,7 +535,8 @@ pub fn linear(s: &mut Stack) {
     let bad = z.badland * smoothstep(0.2, 0.45, slope);
     let cb = bad.max(wall);
     if cb > 0.0 {
-        let bandh = if z.badland > 0.2 { 9.0 } else { 14.0 };
+        // (canyon strata tens of metres thick: 14 m bands drew contour lines)
+        let bandh = if z.badland > 0.2 { 9.0 } else { 34.0 };
         let kb = (ground / bandh + 0.6 * rn).floor();
         let h = hash1(SEED + 40, kb as i64);
         // (pale clay bands in the badlands; the walls of the arid plateaus' canyons in reds,
@@ -552,7 +558,9 @@ pub fn linear(s: &mut Stack) {
         let off = if z.badland > 0.2 { 0 } else { 6 };
         let col = pal[off + (u01k(h, 1) * 5.999) as usize] * (0.94 + 0.12 * u01k(h, 2));
         let floor_col = if z.badland > 0.2 { srgb(190.0, 176.0, 150.0) } else { srgb(172.0, 128.0, 96.0) };
-        let col = mixc(floor_col, col, 0.8 * smoothstep(0.25, 0.6, slope));
+        // (cliff faces of the canyons darker than their ledges and talus: varnish and shade)
+        let cliff = if z.badland > 0.2 { 0.0 } else { smoothstep(0.7, 1.3, slope) };
+        let col = mixc(floor_col, col * (1.0 - 0.2 * cliff), 0.8 * smoothstep(0.25, 0.6, slope));
         s.composite(Layer { cov: cb, albedo: col, cls: if z.badland > 0.2 { cls::BADLANDS } else { cls::CLIFF }, clear: 1.0, ..Default::default() });
         s.m.natural_ok *= 1.0 - cb;
     }

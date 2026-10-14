@@ -1071,8 +1071,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     let depth = match z {
                         zone::CBD => 1,
                         zone::INNER => 2,
-                        zone::OUTER => 3,
-                        _ => 4,
+                        _ => 3,
                     };
                     let depth = if pattern == pat::INDUSTRIAL { 2 } else { depth };
                     let min_side = if pattern == pat::INDUSTRIAL {
@@ -1181,14 +1180,16 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                             }
                             typ::WAREHOUSE => (DVec2::new(0.5 * lw - 9.0, 0.5 * ld - 9.0), 8.0 + 6.0 * u01k(lh, 4), true),
                             typ::ROW => {
-                                (DVec2::new(0.5 * lw - 0.4, (0.5 * ld - 2.0).min(6.0)), 3.0 * (2.0 + (1.6 * u01k(lh, 4)).floor()), u01k(lh, 6) < 0.3 || a == 3)
+                                (DVec2::new(0.5 * lw - 0.4, (0.5 * ld - 2.0).min(7.5)), 3.0 * (2.0 + (1.6 * u01k(lh, 4)).floor()), u01k(lh, 6) < 0.3 || a == 3)
                             }
                             typ::PERIM => (DVec2::splat(1e4), 3.0 * (3.0 + 3.0 * u01k(lh, 4)) * if pl.level >= 3 { 1.0 } else { 0.7 }, u01k(lh, 6) < 0.35),
                             _ => {
-                                let sb = 2.5 + 3.0 * u01k(lh, 1);
+                                // (v0.2.0's houses: 10-25 m footprints, 3.5-7.5 m high; the
+                                // smaller, lower houses of 8-15 m read as a sparse town)
+                                let sb = 2.0 + 2.5 * u01k(lh, 1);
                                 (
-                                    DVec2::new((0.5 * lw - sb).min(7.0 + 2.0 * u01k(lh, 7)), (0.5 * ld - sb).min(5.5 + 2.0 * u01k(lh, 8))),
-                                    3.2 + 3.0 * (u01k(lh, 4) < 0.4) as u32 as f64,
+                                    DVec2::new((0.5 * lw - sb).min(8.0 + 4.0 * u01k(lh, 7)), (0.5 * ld - sb).min(6.5 + 4.0 * u01k(lh, 8))),
+                                    3.5 + 4.0 * u01k(lh, 4),
                                     a == 3 || u01k(lh, 6) < 0.12,
                                 )
                             }
@@ -1272,7 +1273,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                                 let pool = aa(dp.min_element(), fw);
                                 col = mixc(col, srgb(70.0, 170.0, 190.0), pool);
                             }
-                            if u01k(lh, 14) < 0.5 {
+                            if u01k(lh, 14) < 0.35 {
                                 let tp = DVec2::new(0.6 * (0.5 * lw) * (u01k(lh, 15) - 0.5) * 2.0, -(half.y + 0.5 * (0.5 * ld - half.y)));
                                 tree = aa(3.0 + 1.5 * u01k(lh, 16) - (rl - tp).length(), fw);
                                 tree_h = 8.0 + 5.0 * u01k(lh, 17);

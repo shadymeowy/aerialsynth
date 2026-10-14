@@ -16,10 +16,12 @@
   min_share: 0.012
   layers:
     # desert varnish: dark brown patches on old, stable surfaces of the stony desert (reg)
+    # (fewer and softer than they were: hundreds of metres of crisp dark and pale blots read as
+    # camouflage from 1 km, where v0.2.0's desert floor is even)
     - slot: azonal
       kernel: patches
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.3, 0.45], moist: [null, null, 0.26, 0.36] }
-      params: { scale: 240, fraction: 0.3, octaves: 3, roughness: 0.65, colour: [140, 112, 86], colour2: [124, 100, 78], colour_var: 0.2 }
+      params: { scale: 240, fraction: 0.2, octaves: 3, roughness: 0.65, colour: [164, 136, 104], colour2: [154, 128, 98], colour_var: 0.2 }
       class: gravel
     # pale gravel and silt mottling of the pavement
     - slot: azonal
@@ -57,7 +59,7 @@
     - slot: azonal
       kernel: patches
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.3, 0.45], moist: [null, null, 0.26, 0.36] }
-      params: { scale: 560, fraction: 0.26, octaves: 3, roughness: 0.55, colour: [118, 70, 50], colour2: [104, 64, 48], colour_var: 0.2 }
+      params: { scale: 560, fraction: 0.18, octaves: 3, roughness: 0.55, colour: [130, 80, 58], colour2: [118, 74, 54], colour_var: 0.2 }
       class: gravel
     - slot: azonal
       kernel: patches

@@ -53,7 +53,7 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
     let bad = z.badland * smoothstep1(0.2, 0.45, slope);
     let cb = max(bad, wall);
     if (cb > 0.0) {
-        var bandh = 14.0;
+        var bandh = 34.0;
         var cl = LC_CLIFF;
         if (z.badland > 0.2) {
             bandh = 9.0;
@@ -68,7 +68,11 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
             floor_col = srgb(190.0, 176.0, 150.0);
         }
         let col0 = mt_strata_col(off + u32(u01k(h, 1lu) * 5.999)) * (0.94 + 0.12 * u01k(h, 2lu));
-        let col = mixc(floor_col, col0, 0.8 * smoothstep1(0.25, 0.6, slope));
+        var cliff = smoothstep1(0.7, 1.3, slope);
+        if (z.badland > 0.2) {
+            cliff = 0.0;
+        }
+        let col = mixc(floor_col, col0 * (1.0 - 0.2 * cliff), 0.8 * smoothstep1(0.25, 0.6, slope));
         var ly = layer_paint(cb, col, cl);
         ly.clear = 1.0;
         composite(s, ly);
