@@ -1012,7 +1012,7 @@ fn snow_prepare(s: ptr<function, Stack>) {
                 snow_t += 0.25 * perlin3(0x5E1lu, p * (1.0lf / 18.0lf)) * b18;
             }
         }
-        snow = smoothstep1(-2.6, -2.8, snow_t) * (1.0 - 0.75 * smoothstep1(0.9, 1.6, (*s).l.slope));
+        snow = smoothstep1(-2.6, -2.8, snow_t) * (1.0 - 0.75 * smoothstep1(1.1, 1.9, (*s).l.slope));
     }
     (*s).m.snow = snow;
 }
