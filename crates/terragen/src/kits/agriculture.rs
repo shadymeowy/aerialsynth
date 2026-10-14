@@ -445,8 +445,10 @@ pub fn plan(s: &mut Stack) -> Option<Plan> {
         flags |= F_TROPIC;
     }
     // (smaller parcels where it is wet: the huge pastures and estates of the survey and plantation
-    // cultures read as flat sheets of one colour next to v0.2.0's patchwork of fields)
-    let wet = 1.0 - 0.35 * smoothstep(1000.0, 1600.0, e.precip);
+    // cultures read as flat sheets of one colour next to v0.2.0's patchwork of fields; the
+    // systems of big parcels only)
+    let big = matches!(sys, sys::PASTURE | sys::PLANT | sys::RANCH | sys::SHELTER | sys::SECTION);
+    let wet = if big { 1.0 - 0.35 * smoothstep(1000.0, 1600.0, e.precip) } else { 1.0 };
     Some(Plan { sys, e, seed, mix: crop_mix(&e), flags, season: r.season, scale: e.scale.sqrt() * (0.75 + 0.5 * u01k(seed, 3)) * wet })
 }
 

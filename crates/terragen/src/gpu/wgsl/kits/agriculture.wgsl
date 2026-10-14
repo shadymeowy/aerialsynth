@@ -328,7 +328,8 @@ fn agri_plan(s: ptr<function, Stack>) -> Plan {
     pl.mix = agri_crop_mix(e);
     pl.flags = flags;
     pl.season = r.season;
-    pl.scale = sqrt(e.scale) * (0.75 + 0.5 * u01k(pl.seed, 3lu)) * (1.0 - 0.35 * smoothstep1(1000.0, 1600.0, e.precip));
+    let big = sy == AG_PASTURE || sy == 10u || sy == AG_RANCH || sy == AG_SHELTER || sy == AG_SECTION;
+    pl.scale = sqrt(e.scale) * (0.75 + 0.5 * u01k(pl.seed, 3lu)) * select(1.0, 1.0 - 0.35 * smoothstep1(1000.0, 1600.0, e.precip), big);
     return pl;
 }
 

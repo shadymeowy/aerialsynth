@@ -1310,7 +1310,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                 rf_flat = flat;
                 rf_mul = 0.84 + 0.32 * u01k(lh, 11lu);
                 var frac = 0.55;
-                if (t == STY_HOUSE || town_box) {
+                if (town_box) {
+                    frac = min(4.0 * max(half.x, 0.0) * max(half.y, 0.0) / max(lw * ld, 1.0), 1.0);
+                } else if (t == STY_HOUSE) {
                     frac = 0.3;
                 } else if (t == STY_TOWER) {
                     frac = 0.75;

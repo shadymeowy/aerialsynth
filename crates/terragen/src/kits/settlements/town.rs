@@ -1241,7 +1241,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         );
                         let frac = match t {
                             typ::HOUSE => 0.3,
-                            _ if town_box => 0.3,
+                            // (a town's box: its footprint's share of the lot, the mean height
+                            // of the lot where it is below the pixel)
+                            _ if town_box => (4.0 * half.x.max(0.0) * half.y.max(0.0) / (lw * ld).max(1.0)).min(1.0),
                             typ::TOWER => 0.75,
                             typ::WAREHOUSE => 0.6,
                             _ => 0.55,
