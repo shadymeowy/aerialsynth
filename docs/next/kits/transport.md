@@ -1,17 +1,15 @@
 # Transport kit: roads, railways, power lines
 
-> [!NOTE]
-> This kit belongs to the **next** generator (`world.generator: next`, a preview; see
-> [`docs/simulation.md`](../simulation.md)). The default generator, `classic` (v0.2.0's), has no
-> kits: worlds made with it do not show what this page describes.
+A kit of the experimental [next generator](../README.md) (`world.generator: next`). *The default
+world* on this page is seed 1 of the next generator.
 
 `crates/terragen/src/kits/transport.rs` (the kit, slots 7 and 8), `transport/net.rs` (the graph),
 `transport/route.rs` (routing), `transport/build.rs` (the features of an area: profiles,
 segments, crossings, interchanges, stations, yards, site roads, power lines), `transport/px.rs`
 (the looks), `transport/tests.rs`, and the WGSL twin `src/gpu/wgsl/kits/transport.wgsl` (`tr_*`,
 same names and order of operations). No biomes, no kernels. Design:
-[terrain-next.md §3.5, §6.3, §6.4, P2/P3](../design/terrain-next.md); contract:
-[kit-guide.md](../design/kit-guide.md). The kit builds on the settlements kit
+[terrain-next.md §3.5, §6.3, §6.4, P2/P3](https://github.com/shadymeowy/aerialsynth/blob/terrain-design/docs/design/terrain-next.md); contract:
+[kit-guide.md](../kit-guide.md). The kit builds on the settlements kit
 ([settlements.md](settlements.md)): its places are the graph's nodes, its sites the
 destinations.
 

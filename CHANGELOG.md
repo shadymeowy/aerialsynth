@@ -2,467 +2,113 @@
 
 ## Unreleased
 
-- **Fixed** `terrain view --mode height|instance` (and `look:` keys of `--record`) on a store without the `dtm` / `instance` layer (every classic store) showing an empty map: an error names the missing layer.
-- **Fixed** the GPU pipeline cache on Windows (no `HOME`: every run compiled the shaders cold; now `%LOCALAPPDATA%\terrain`) and with an empty `XDG_CACHE_HOME` (the cache went to the working directory).
-- **Fixed** `AERIALSYNTH_GPU` naming no adapter (or a GPU failing in strict mode) being silent with `backend: auto`: a one-line warning gives the reason and the adapter list before the CPU takes over.
-- **Fixed** an empty tile store left by the `next` generator with optional layers (e.g. interrupted during the first shader compile) refusing the classic generator's tiles ("layer dtm has 0 bytes"): an empty store re-used by another world is made again with that world's layers; the classic generator's optional-layers note is printed once.
-- **Fixed** a flaky GPU read-back panic (`TargetAlignmentGreaterAndInputNotAligned`): mapped
-  buffer ranges are not guaranteed to be aligned for the element type, so read-backs now copy
-  through `bytemuck::pod_collect_to_vec` (hit `classic::gpu::tests::tiles_match_the_cpu` under
-  contention).
-- **Rendering side** (design §8). *Walls:* steep faces (the geometric normal of the rendered
-  mesh from the G-buffer, slope > ~52–66°) get a wall material instead of the top-down texture
-  stretched down them: building facades from the roof's colour with floors, window bays and
-  lit windows at night (hashed), glass curtain walls on tall buildings and greenhouses
-  (reflecting with the wall's normal), rock strata on cliffs and karst towers, crown-coloured
-  canopy sides; lit with the geometric normal (`render.walls`, both renderers,
-  `render::walls`). *Materials:* the sun glint is Fresnel-weighted and normalized (Blinn-Phong,
-  capped), reflections show the banks where the DSM rises above the reflected ray (narrow
-  rivers in forest were silvery lines of horizon sky), snow and ice scatter forward
-  (`Material::forward`, a renderer-only `lc_forward` table). *Emission:* lit greenhouses through
-  the `emission` layer (20 % of them, sodium orange, gone at pixels > 300 m; the greenhouse material is no longer
-  self-emissive); runway / taxiway lights, port and stadium floods, flares and turbine beacons
-  were there. *Optional tile layers* (tile store format 2; the `next` generator only): `dtm` (bare ground) and `instance`
-  (building lots, fields, forest stands; `Layer::inst` through the stack, per-sample ids in
-  pass B) with `tiles.layers` (off by default: about +50 % store size); identical on both
-  backends (parity tests: ≤ 0.008 % of the pixels off); readable from Rust, C
-  (`AS_LAYER_DTM`, `AS_LAYER_INSTANCE`, `as_has_layer`) and Python (`World.layers`); viewer
-  modes *Height above ground*, *Instances*; version-1 stores open without them. Seasons are
-  the render date (documented; no `world.season` yet). Tesla P4, 960×540, GPU shading pass
-  18 → 20–21 ms (CBD), 22–23 → 26–27 ms (karst), whole frames +3–5 % (75–90 ms with read-back);
-  shade pipeline cold compile 0.39 → 0.65 s; pass B cold compile within the farm's noise in
-  stages 0, 1, 3 (+0.4–0.9 s), stage 2 +~3 s (A/B on one P4 under load: 40.0 / 41.8 / 27.0 /
-  35.4 → 40.9 / 42.2 / 30.3 / 35.8 s).
+### Highlights
 
-- **The classic generator is the default again** (`world.generator: classic | next`, default
-  `classic`). Compared with v0.2.0 at identical poses, the new modular generator looked worse
-  (field mosaics, towns grown together, broken lakes), so the terrain of v0.2.0 is back as the
-  default and the modular generator is `generator: next`, a preview. Everything else since
-  v0.2.0 (C / Python camera rendering, wheels, renderer, CLI, viewer, survey, notices, GPU
-  robustness, pipeline cache) is unchanged and serves both.
-  - **Classic = v0.2.0, bit-identical:** v0.2.0's terrain code (CPU and WGSL) is
-    `crates/terragen/src/classic`, unchanged but for module paths. It shares only
-    infrastructure with `next`: the config type (a superset of v0.2.0's; classic ignores
-    `ecoregions`, `biomes`, `atlas`, `relief.tectonic_mountains` / `belt_mountains`), the
-    land-cover ids (v2 keeps 0–17, the only ones classic emits: the identity mapping), the GPU
-    device (`AERIALSYNTH_GPU` selection, stall and device-lost errors, concurrent read-backs,
-    the exit fix), strict mode (`AERIALSYNTH_GPU_STRICT`), and a shared compile session (compile
-    notices, the device-wide compile lock, the pipeline cache under `pipelines-classic-*` file
-    names, so switching generators does not evict the other's cache).
-    `scripts/classic_v020_check.sh V020_TERRAIN` compares tiles of the v0.2.0 binary and of
-    this one byte by byte: 24 tiles (zooms 6–16 at four places) identical on the CPU and on
-    the GPU (Tesla P4), every layer. A v0.2.0 store opens with the default config and takes new
-    tiles.
-  - **API:** `terragen::Generator` is the world's generator (classic or next, from the config);
-    the modular one is `terragen::NextGenerator`, the classic one `terragen::classic::Generator`.
-    `Generator::ell()` replaces `gen.world.ell`, `Generator::biome` is `None` for classic,
-    `terragen::GeneratorKind`, `CLASSIC_GENERATOR_VERSION` (3; `GENERATOR_VERSION` stays 4, the
-    next generator's).
-  - **Everywhere:** `--generator classic|next` on `terrain run / tiles / view / survey /
-    config`; the CLI template and `configs/` name `generator: classic`; `terrain info` shows a
-    store's generator. Bindings: Python `World(..., generator="next")`, `World.generator`,
-    `aerialsynth.GENERATORS`, `CLASSIC_GENERATOR_VERSION`; C `as_open_generator`,
-    `as_generator`.
-  - **Stores** record the generator (`generator:` in the world config; version 3 classic, 4
-    next) and refuse the other generator's tiles with a message naming it. Stores without the
-    key are told apart by their version: v0.2.0 stores (version 3) open with the classic
-    generator and take more tiles; stores of master before this change (version 4) need
-    `generator: next`.
-  - **Tests:** the next generator's suites (kits, parity, invariants) build their worlds with
-    `NextGenerator`; classic has v0.2.0's tests (CPU/GPU parity, `classic_invariants`), store
-    tests for both generators and for pre-switch stores, and the C and Python binding tests run
-    both generators.
-  - **Example** `camera-footprint`: the v0.2.0 showcase's boreal pose (52.97924 N, 16.41426 W,
-    900 m above the ground, heading 60°, 32° below the horizon, midsummer noon) on the default
-    generator; `cargo run --release -p camera-footprint OUT next ALT` renders the next
-    generator's. Its corner rays meet the terrain by marching (¼ elevation pixel steps) and
-    bisection to 1 cm instead of a fixed-point iteration, which oscillated on steep ground (the
-    boreal upland's far corner: 1575 ↔ 1992 m).
+- **The terrain of v0.2.0 stays the default**, bit-identical: v0.2.0 tile stores open and grow
+  as before. A second, **experimental** terrain generator, `next`, is opt-in
+  (`world.generator: next`, [`docs/next/`](docs/next/README.md)).
+- **Renderer:** wall materials on steep faces, Fresnel glints with reflections of the banks,
+  forward-scattering snow; land-cover classes v2 in the datasets.
+- **`terrain survey`:** find diverse places of a world and render stills of them.
+- **Faster first renders** from C and Python, with progress reports; clearer GPU errors and
+  first-run messages.
 
-- **`next` towards v0.2.0's look** (A/B at the v0.2.0 showcase poses and at places of the same
-  landscape type in next's world: `scripts/ab_v020.py`, `scripts/ab_v020/*.yaml`, reference
-  stills `docs/ab/v020/`, sheets `docs/ab/next_quality/`; `probe_px info LAT LON` names a
-  point's biome, Köppen class, culture, field system and relief instances).
-  - **Fields** (agriculture kit, core): the irregular systems (bocage, smallholder plots,
-    terraces, groves, the core's irregular style) were a Voronoi honeycomb with thick dark
-    hedges; now cadastral blocks cut by recursive splits into four-sided fields of varied size
-    and orientation (`part_cad`; open-field furlongs are those blocks). Hedges 2–4 m, on half
-    the bocage borders; pasture paddocks 420 × 300 m with hay and crops; colours 25 % towards
-    their grey, mottled per parcel, with v0.2.0's growth zones; no chevrons at the headland.
-  - **Farmland** (agriculture kit, core): woodlots are forest whatever the climate's forest
-    share (they were bare meadow with a few trees); gallery trees along the streams of drier
-    farmland too (moisture 0.18 up, belt 7 m + 0.6 × the half width, box-filtered by the
-    pixel); hedges have gaps and hedgerow trees bulging out every few tens of metres and are
-    fewer (share × (0.3 + 0.7 hedges)); field margins subtler; a third of the paddocks keep a
-    smaller trampled disc around the trough (a bare disc in every paddock dotted the land);
-    tilled soil a dull brown of the biome's soils (the palette's red one drew maroon fields).
-  - **Towns** (settlements kit): one street pattern per zone ring and town, one layout per
-    pattern (blocks run on across district borders), one street orientation per town,
-    arterials only between different layouts and narrower (3.5–7.5 m half width), streets and
-    lots end where the town thins out (density 0.42: a grid of empty streets ran on into the
-    fields, houses were strewn over them), density 0.8–1 per district; yards take after the
-    ground around.
-  - **Climate:** the heated continents pull the wind belts far (4° + 7° × land) only in the
-    tropics and subtropics, 4° beyond 50° (at 55° the winter polar easterlies dried the
-    continents' interiors into a monsoon climate: dry winters, Dw, on 58 % of the land at
-    50–60° N, paddy cultures at 60° N, olive steppe at the v0.2.0 boreal pose, 53° N);
-    subarctic dry-winter ecoregions draw boreal cultures; cold-winter steppes need less than
-    520 mm (at 600 mm and 7 °C the land is forest); grass stays green at less rain in cool
-    climates (by the ecoregion's mean temperature, not in mountains). `ATLAS_VERSION` 6;
-    `probe_px bands`: Köppen classes and biomes per latitude band.
-  - **No winter ecoregions** (cold kit): 35 % of the ecoregions were dated in winter (snowy
-    taiga as grey ground with black dots, frozen grey lakes in summer datasets); every date is
-    now mid May .. late September. Kettle lakes have bays and points.
-  - **Lakes:** dark humic water; the bottom shows only in the last 3.5 m, olive and patchy (a
-    5 m turquoise ring read as a plastic rim, and river channels carved through it as dark
-    bands across the lakes).
-  - **Boreal forest:** cold steppes (BSk / BWk below 3 °C, > 150 mm) take the subarctic forest's
-    biomes; the canopy closes at lower moisture below 8 °C in the lowlands (taiga of dry
-    continental interiors); altitudinal zones follow a continentality-corrected temperature
-    (krummholz no longer covers the hills of hot-summer continental climates), dithered ±2 °C
-    (its 90 m octave band-limited). Managed stands: about 0.5 % cut a year, most cuts years old
-    and greening, darker slash, in a frame warped by ~25 m with ragged edges (pale rectangles);
-    fens and beaver meadows duller (lime blobs in the taiga).
-  - **Ecotones:** the border mosaic's pick is normalized by the spread of the octaves present
-    (uniform at every pixel size); its 80 m octave stays 0.35 (0.6 broke the desert kit's LOD).
-  - **Look:** cinder cones twice as steep relative to their size and without light baked into
-    their albedo; muted gobi gravel, desert pavement and barchans; softer canyon strata.
-  - Tests: the LOD, seam, parity and determinism tests unchanged and passing (the atlas'
-    face-seam test allows one f16 step of a value); agriculture's WGSL tables re-blessed.
+### Terrain generators
 
-- **Example `camera-footprint`** (`examples/camera-footprint`, `cargo run --release -p
-  camera-footprint`): a teaching program, read top to bottom, that makes the coordinate frames
-  explicit (geodetic ↔ ECEF ↔ ENU ↔ camera ↔ pixels; fractional XYZ tiles ↔ stitched-map pixels).
-  It renders an oblique and a nadir pinhole image from one position (with the bindings'
-  `Camera`), intersects the oblique image's corner rays with the elevation tiles, prints the
-  corners in GPS / ECEF and as fractional tiles with the tile range, stitches the albedo and
-  elevation tiles, draws the footprint, and warps the map into the camera by the homography of
-  the 4 corners (DLT); a check against the rendered depth measures the alignment.
+- `world.generator: classic | next` (default `classic`), `--generator` on `terrain run`,
+  `tiles`, `view`, `survey` and `config`; `terrain info` shows a store's generator. A store
+  records its generator (version 3 classic, 4 next) and refuses the other's tiles; v0.2.0
+  stores, which have no `generator` key, open with `classic`.
+- `classic` is v0.2.0's code (`crates/terragen/src/classic`), unchanged:
+  `scripts/classic_v020_check.sh` compares 24 tiles (zooms 6–16 at four places) of the v0.2.0
+  binary and of this one byte by byte, on the CPU and on the GPU.
+- `next` (experimental; status, known limits and kits in [`docs/next/`](docs/next/README.md)):
+  a planetary atlas (climate from winds and moisture advection, tectonic plates, lithology,
+  cultures), ecoregions with biomes and cultures, biomes as data over a kernel library, and ten
+  landscape kits (agriculture, coast, cold, desert, mountains, settlements, temperate,
+  transport, tropical, volcanic). Its settings: `world.atlas`, `world.ecoregions`,
+  `world.biomes`, `world.relief.tectonic_mountains` / `belt_mountains`.
+- **Optional tile layers** (tile store format 2; `next` only): `tiles.layers: [dtm, instance]`
+  adds the bare ground and instance ids (building lots, fields, forest stands) to a new store;
+  the viewer's map shadings *Height above ground* and *Instances* show them. Format-1 stores
+  open as before.
+- Rust API: `terragen::Generator` is the world's generator (classic or next, from the config);
+  `terragen::NextGenerator`, `terragen::classic::Generator`, `GeneratorKind`,
+  `Generator::ell()` (replaces `gen.world.ell`), `CLASSIC_GENERATOR_VERSION` (3;
+  `GENERATOR_VERSION` 4 is next's).
 
-- **Visual polish, round B** (see the kits' Known limits): tower karst on a rounder, taller profile with forest paint on
-  the walls; fjords as narrow troughs (new `Carve::narrow` in the carve hook: the valley's extent from the walls alone);
-  folds and fault blocks taller, with coherent regional strike, fault basins flat; canyon depth 400-1500 m
-  by province (pass B 31.2 / 31.3 / 20.3 / 26.3 s, pass A1 21.2 s, eval_points 23.1 s); volcanic ash in rays, higher shaded cinder cones; settlement districts with wandering borders and fewer
-  arterials; softer cotton, smallholder, flowering, fishbone, regrowth, varnish, burn-scar and road-verge colours.
+### Rendering
 
-- **Host work no longer stalls the GPU** (outputs bit-identical: `tilediff` of the 738 tiles of
-  two views and 64 z16 tiles at 39.9N 32.8E against the previous master; parity and
-  determinism tests pass). The kits' host features of a GPU batch are built in parallel on the
-  host while the GPU runs pass A, with exact host point evaluations (the kits re-take close
-  decisions exactly, so either backend's samples give the same features; the GPU rounds took
-  20–30 settle rounds per cold batch), on a thread pool of the generator's own (`crate::pool`).
-  A new `Kit::prepare` hook computes what a batch's tiles share once, in parallel (transport:
-  every edge near the batch routed once; settlements: the places, top-down); a route's
-  corridor probes and fine corridors run in parallel. Point queries of the drainage
-  (`World::river_segments_of`, radius ≤ 100 m) and of instance families (`instances::near`,
-  `r = 0`) filter short per-query-cell lists instead of scanning hundreds of lattice cells;
-  wider drainage queries, flow points, node pieces, lake levels, places and `edges_near` are
-  memoized in shared sharded tables (`memo::Memo`). Sites list the towns of an area only at
-  pixel sizes where a site is drawn (a zoom-2 tile resolved every town of a continent). The
-  tile store writes a batch while the next one is generated; the planner estimates a tile's
-  children with it (one GPU evaluation instead of five). Fixed a deadlock when tiles are
-  generated from rayon's pool while the generator's host work used it
-  (`parallel_callers_do_not_deadlock`). Tesla P4, 960×540 nadir views at 39.9N 32.8E: 3 km
-  834 → 33 s, 10 km 827 → 41–46 s (v0.2.0: 50 / 56 s), the GPU busy 90–95 % of the time;
-  64 cold tiles z12 / z14 / z16: 86 / 39 / 31 → 11.2 / 6.5 / 5.6 s (v0.2.0: 3.8 / 3.4 /
-  2.9 s; most of the rest is the kits' pass B on the GPU and the cold area's routes); survey
-  of 3 places × 3/9/16 km views 253 → 161 s; `places_stay_on_the_gpu` > 60 min → 73 s,
-  `glow_keeps_the_mean` 12 → 3 min.
+- **Walls** (`render.walls`, on by default, both renderers): steep faces get a wall material
+  instead of the top-down texture stretched down them: facades with floors, windows and lit
+  windows at night, glass curtain walls, rock strata on cliffs, canopy sides; lit with the
+  geometric normal. About +3–5 % per GPU frame.
+- **Materials:** the sun glint is Fresnel-weighted and normalized; reflections show the banks
+  where the surface rises above the reflected ray (narrow rivers in forest were silvery lines of
+  horizon sky); snow and ice scatter forward at grazing views.
+- **Land-cover classes v2** ([`docs/formats.md`](docs/formats.md#land-cover-classes)): one
+  table of 82 classes with stable ids (0–17 keep their meaning), 11 groups, a legacy class,
+  colour and material each. `output.landcover: v2 | legacy | group` chooses the values the
+  `landcover` datasets hold, described by new attributes `class_groups`, `class_legacy`,
+  `class_mapping`. The default generator emits classes 0–17, as before.
+- Seasons: the season of a render is its date (documented; there is no `world.season`).
 
-- **Deltas** (coast kit, design §5.5): fan and bird's-foot deltas (2–12 km) at the mouths of the
-  major rivers, found where the river meets the *drawn* coast (host, exact f64 samples along the
-  meander-warped centre line, the same for both backends; `kits/coast/delta.rs`): lobate flat
-  land 0.5–2 m extending the shoreline over the shelf, a shallow front, distributaries carved
-  below the sea; reed marsh or mud on top (slot 5), mangroves in the tropics (the tropical
-  biomes' land layer). New core hook for pass-A stamps (`Kit::astamps`, `Kit::astamp`: applied
-  after the drainage carve in tiles and points; on the GPU in the sink-lake list with a negative
-  radius). Tests `deltas_sit_at_river_mouths` (301 deltas at 24 coastal regions: 297 on their
-  river at the mouth, 255 grown seaward), `deltas_are_tile_independent`; delta places in the
-  coast kit's GPU/CPU, LOD and seam tests.
-- **Confluences at an angle.** All the channels draining into a drainage node were bent into its
-  outflow by the same quadratic curve, so they met tangentially and ran side by side for
-  kilometres before joining (two rivers 100–200 m apart over 1–2 km). Now the main stem (the
-  inflow that continues straightest into the outflow) keeps the bend, and every other channel's
-  last reach is a cubic from the middle of its edge (entered along its own direction) to a
-  junction on the main stem's bend, met at 35–80° to the main stem; the tributaries of one node
-  join at different points (by rank). CPU `World::node_pieces` and WGSL `node_pieces` alike
-  (`lat_main`, `trib_controls`); the pieces stay zoom-independent. Test
-  `tributaries_join_at_an_angle` (no two channels of a level meet at < 12°; 26 of 421 before).
-- **Road decks are backend-independent.** The engineered profiles' point samples (ground and
-  water level) are quantized to 1 m, from the exact sample where the backend's is within 4 cm of
-  a rounding boundary or near a water decision (`transport::build::deck_sample`), so GPU and CPU
-  build the same decks, bridges, tunnels and portals; `sites_and_routes_match_the_cpu` now
-  compares them too.
-- **Towns and cities stay out of lakes.** The best candidate of a town, city or metropolis gives
-  way to the next where a lattice lake or a closed-basin lake of the major rivers can reach its
-  centre (cheap conservative screens over a few drainage lattice points, no drainage pieces,
-  ~0.05 ms per town: `World::lattice_lake_near`, `World::sink_near_level`). Test
-  `towns_avoid_lakes` (3 of 3000 centres in pass A's water, in streams' ponds; 7 before).
+### Tools
 
-- **Qanats** (desert kit, design P2): dotted lines of shaft mounds (pale spoil rings around a
-  dark shaft every 30–55 m) from the piedmont down to a common outlet, 1–3 lines of 3–8 km per
-  group; host segments (`qanat_group`, 9 km lattice, by culture, aridity and the smooth relief's
-  slope), drawn in slot 6 with their mean along the line below the pixel.
-- **Ranches and feedlots** (agriculture kit, design P2): a `ranch` field system (2.2 × 1.5 km
-  paddocks, stock trails to troughs, farm dams, savanna trees where warm), weighted to semi-arid
-  steppe climates and pastoral, steppe and survey-grid cultures; feedlots in some ranch regions
-  (slot 6): pens of dark manure along feed alleys and bunks, cattle, a feed mill with silage
-  bunkers and silos, two manure lagoons.
-- **Fishbone deforestation** (tropical kit, design P3): colonization projects in the rainforest
-  lowlands with a trunk road, feeder roads every 4.4 km and lots of 250 m cleared from the roads
-  to depths of their own (pasture, fresh burns, red soil, crops, regrowth), in the canopy slot.
-- **Tropical river water** (tropical kit, design P0): white-water rivers in café au lait, black-
-  water rivers (tea-black) in the very wet lowlands of a regional style channel's provinces,
-  slot 8 over the core's river colour.
-- **Known limits** sections in the desert, tropical, temperate, cold and agriculture kit docs.
+- **`terrain survey`:** random points on land and coasts are classified with cheap point
+  queries and `--count` places chosen by theme (coast, mountains, town, river, desert, …);
+  each is rendered in `--views` (oblique, nadir, high, custom) into stills, a labelled contact
+  sheet and `places.csv`; `--places FILE.csv` renders a list again (regression stills).
+- Planning: the dry runs of `run` / `tiles` no longer add margins around tiles of unknown
+  range, and tiles above a downward view cone are culled (the old `configs/quick.yaml` needed
+  357 + 280 tiles, now 357 + 2). `configs/quick.yaml` is a 3 s smoke test (320 × 256, ~75
+  tiles).
+- `terrain view` checks for a display and a GPU first and creates no store when it cannot
+  start.
+- New example `examples/camera-footprint`: camera ↔ geodetic / ECEF / ENU ↔ XYZ tiles, a
+  camera's ground footprint on the stitched map, the map warped into the camera.
 
-- **Settlements avoid open water and like rivers.** Hamlet and village candidates whose centre
-  lies in the sea, a lake or a level 0–1 river channel (pass A at the point) are dropped, water
-  on a ring around a candidate lowers its score, a river within 2.5 km raises it (design §6.1
-  water access); towns and larger keep the smooth-relief test (their candidates are visited
-  over continents by the transport kit's trunk networks). Hamlets and villages flooded
-  by a reservoir are drowned (not drawn), and a dam that would flood a town or a city is not
-  built. Test `places_avoid_open_water` (0 of 362 centres in pass A's water).
-- **Sites are backend-independent.** Airports, dams, ports, quarries, solar and wind farms and
-  flares take close decisions (within 0.5 m of a threshold or of a competitor) with exact
-  samples (`World::terrain`, the CPU backend's own) and keep exact heights, so GPU (f32) and CPU
-  (f64) point samples build the same sites, and the transport kit the same network: new GPU test
-  `sites_and_routes_match_the_cpu` (stamps and segments bit for bit at six places).
-- **Settlement glow at low zooms.** Where a level's places are no longer listed (hamlets below
-  z11, villages below z8, towns below z6, cities below z4), the settlements kit draws their
-  expected built cover and street lights per pixel (`places::expected_places` × the place
-  model's mean over a footprint, calibrated against the final places), so night views from
-  altitude keep their lights and coarse pixels keep the finer zooms' mean.
+### C and Python bindings
 
-- **Drainage: no straight trenches into inland basins.** A lattice point without a lower
-  neighbour looked up to 3 cells farther for an outlet anywhere; inland that drew channels up to
-  24 km long, straight across the higher ground between (canal-like water strips, several
-  converging side by side on the next basin's lake; 7 level-1 and 42 level-2 such pieces within
-  20 km of the 24 survey places). The farther search now only finds the sea (its original
-  purpose): an inland point without a lower neighbour is a closed basin and holds its own
-  closed-basin lake (lake share of land at the survey places 0.14 % → 0.37 %). CPU
-  `World::flow_target` and WGSL `lat_target` alike.
+- **First renders at a new place:** the level-of-detail selection learns the elevation ranges
+  it needs one zoom level at a time instead of refining unknown tiles to the finest zoom: the C
+  example generates 220 tiles in ~3 min on 4 CPU cores (was 2,900 tiles, 13 min), the Python
+  example 500 tiles in 4.6 min (was 1,900, 8.5 min). A render that generates its tiles now
+  gives exactly the image of one that reads them. The same applies to `terrain run --lazy`.
+- Progress on stderr: C `as_set_verbose`, Python `World(..., verbose=True)` / `World.verbose`.
+- The terrain generator: Python `World(..., generator=)`, `World.generator`,
+  `aerialsynth.GENERATORS`; C `as_open_generator`, `as_generator`.
+- Optional layers: `AS_LAYER_DTM`, `AS_LAYER_INSTANCE`, `as_has_layer`, `World.layers`.
+- Python: tile coordinates, zooms, seeds and sizes must be integers (`TypeError` instead of
+  truncating floats); the type stub covers the whole extension.
+- The release archives ship the documents the README links to.
 
-- **Mountains kit** (`kits/mountains.rs`, `gpu/wgsl/kits/mountains{,_relief}.wgsl`,
-  `docs/kits/mountains.md`): tower karst (a 3D Worley lattice of 420 m cells, oval towers 90-260 m
-  over flattened floors, drowned to islands at the coast) and cockpit karst on carbonate (atlas
-  lithology x warm humid / cooler climate); folded ridges (old orogens and foreland belts) and
-  fault blocks (extensional provinces) as parallel ridges on an 8-corner lattice with per-corner
-  strike, wavelength and phase (R-wave safe), bent and plunging by noise; creased badlands with
-  banded strata on soft sediment x arid; alluvial fans at the fronts of dry mountains (family
-  `mountains_fans`, pale radial apron); glacial U-troughs, cirques with tarns at the heads of
-  glaciated tributaries, hanging tributaries, fjords (the floor of a glaciated coastal river goes
-  to -70 .. -530 m and the ocean floods it, fading into the open sea) and stepped canyons with
-  benches on arid sedimentary plateaus, all through a new **carve hook**. Core: `Kit::carve`
-  (`kits::{Carve, CarveIn, has_carve, carve}`, WGSL `kits_carve`, `CarveIn`, `Carve`): the kit
-  changes the valley profile of the drainage carve (floor, floodplain width, wall slope, depth
-  cap, U profile, benches, a small lake at a channel's head); `RiverHit` gains `u`, `spring` and
-  `reach`; the carve is bounded by the piece's reach (a no-op in the core). Pass B: banded
-  badland and mesa strata, karst cliffs, glacial rock walls, fans, in slot 6 (the only stage with
-  compile headroom).
+### GPU
 
-- **Transport kit** (`kits/transport.rs`, `transport/{net,route,build,px}.rs`,
-  `docs/kits/transport.md`): a host-built road, rail and power network over the settlements kit's
-  places and sites — relative-neighbourhood graphs per network (motorways and trunk roads between
-  cities, trunk roads between towns, secondary roads between villages, local roads to hamlets,
-  farm and forest tracks, railways between cities and large towns, a high-voltage grid), spurs
-  from towns to passing motorways, roads to airports, ports, dams, quarries, solar and wind farms,
-  rail spurs and yards at ports, power lines from dams, solar and wind farms; routing on corridor
-  grids over the analytic relief (refined per piece, smoothed, switchbacks on steep minor roads);
-  engineered profiles from point samples (cut and fill with 1:2 slopes in the DSM, bridges with
-  parapets and shadows, tunnels with portals); interchanges (cloverleaf, partial cloverleaf,
-  diamond, trumpet), overpasses, roundabouts by culture and at town entries; per-pixel decks over
-  rivers, reservoirs, lakes and the sea; motorway, trunk, secondary, local and track
-  cross-sections with markings, cars and their shadows, lamps (thinned with their energy kept);
-  railways with sleepers, rails, masts, trains, stations and yards; power lines with cleared
-  corridors, pylons, wires and their shadows; parked cars in the settlements kit's parking lots
-  and airport car parks. Core: `Kit::replaces_roads` / `kits::legacy_roads()` switch the
-  noise-network roads off (pass A distances, the road pre-pass, WGSL `KITS_LEGACY_ROADS`); the
-  farm tracks along region borders stay.
+- The first-run shader compile is announced (CLI, viewer status bar, Python / C with verbose
+  on) with its duration; the pipeline cache is keyed by GPU, driver and shader version, and
+  stale files are deleted. Metal / DX12 keep a marker so later runs stay quiet.
+- A stalled GPU fails with an actionable message (another process using it,
+  `AERIALSYNTH_GPU`), and `AERIALSYNTH_GPU_STALL_S` sets the bound (default 120 s).
+- `AERIALSYNTH_GPU_STRICT=1` makes a failed GPU tile batch an error instead of a switch to
+  the CPU (development, CI).
 
-- **Transport routing** (`kits/transport/{route,build}.rs`, `docs/kits/transport.md`): routes go
-  around water and sites and follow valleys. Each edge gets a scene along its corridor: the
-  relief with the valleys of drainage levels 0–1 carved in (the core's valley profile), the sea,
-  the core's lattice and closed-basin lakes, the cold kit's large kettle lakes, river crossings
-  (a cost per crossing, up to ×3 when oblique); a second stage adds the settlements kit's sites
-  near the route (airports, quarries, solar and wind farms as no-go footprints, reservoirs as
-  water) and routes again where it touches one. Lakes are crossed only on bridges over narrow
-  necks (500 m major, 160 m minor; reservoirs and the sea ×3), no more causeways; an edge that
-  cannot go around is dropped; ends in water move to the shore. Roads end on a town's arterials
-  (the settlements kit's district edges) instead of converging on its centre; power lines at its
-  edge. New tests `routes_avoid_water_and_sites` (~400 routes over 20 regions: 101 points in
-  water or sites before, 0 after) and `roads_end_at_town_arterials`; ignored `routing_time` and
-  finders. Core: `World::relief_terrain`, `World::river_segments_of` (some levels only), host
-  accessors of the lakes' levels.
+### Fixes
 
-- **Settlements kit** (`kits/settlements.rs`, `settlements/{places,town,sites}.rs`,
-  `docs/kits/settlements.md`): a central-place hierarchy (hamlet, village, town, city,
-  metropolis; host-side and analytic, `kits::settlements::places::settlements_near` for the
-  transport kit) with culture-, climate- and terrain-driven density, sub-centres in
-  conurbations; city morphology per pixel (zones, W2 districts with arterials, grid, radial,
-  organic, curvilinear, superblock, informal and industrial patterns, hashed-BSP lots, houses,
-  row houses, perimeter blocks, mid-rises, towers with podiums, warehouses, parks, plazas,
-  parking lots, sports fields, cemeteries, stadiums, pools, street trees, cast shadows, zone-based
-  night lights with energy-preserving lamp thinning); village forms by culture (nucleated,
-  street villages, forest-strip Waldhufen villages with their strips, dispersed farms, kraals,
-  perched hilltop villages; a plaza with church, mosque or temple); airports (runways by size
-  along the wind, taxiways, apron, terminal, lights, graded plane), ports (container yards,
-  cranes, piers, ships, breakwaters), dams and reservoirs on the drainage (upstream pieces,
-  water level, bathtub ring), quarries and open-pit mines with tailings ponds, solar farms, wind
-  farms, gas flares. Core: `Kit::replaces_towns` / `kits::legacy_towns()` switch the grid towns
-  off (pass A site, host requests, WGSL `KITS_LEGACY_TOWNS`); pass B runs in four stages
-  (`gpu::PB_STAGE_STEPS` `[0, 3, 5, 7]`).
-
-- **Coast and ocean kit** (`kits/coast.rs`, `docs/kits/coast.md`): coast types per ~50 km
-  stretch (atlas uplift, mountains, glaciation, sea-level temperature × noise); cliffs with
-  wave-cut platforms and strata, skerries and archipelagos with kelp, tidal flats and salt marsh
-  with dendritic creeks, barrier islands and lagoons, fringing and barrier reefs with coral
-  heads, salt and aquaculture ponds, and an instance family of atolls with motus. All
-  height-domain remaps near sea level in pass A (no distance to the coast); no core changes.
-- **Low-zoom tiles in seconds again**: `configs/quick.yaml` (70 tiles, z0–z15) generated in
-  187 s on an RTX 6000 Ada (2.7 s now) and 437 s on the CPU (33 s now, 6 threads). The
-  instance lists of a zoom-0 block scanned millions of lattice cells per family (37 s per
-  batch); a family is now left out of blocks whose finest pixel is at least its reach
-  (`instances::sub_pixel`, both backends: its instances cover at most a pixel there). Bench
-  stills: z5–z16 identical; z3–z4 deserts ≤ 0.2 % of the pixels change (≤ 0.013 % by more than
-  8 DN); z0–z2 lose sub-pixel inselbergs, playas and drumlins, of which the lists kept 8
-  arbitrary ones per block before. A batch whose land-use site requests outgrow their buffers
-  grows them and repeats only the request passes, instead of halving the batch and generating
-  it again (three halvings cost 110 s per run). z8–z16 throughput unchanged (`zoom_bench`).
-- **Fewer spurious warnings**: "more than 8 instances of a family reach a 16-pixel block" only
-  for blocks no wider than the family's cell (the kit's density problem, zoom ~8 and up; the
-  desert playas and inselbergs and the cold kit's drumlins stay below it at the 13 bench
-  places, z8–z16), and "ecoregion sites
-  found only by a global search" not for tiles of zoom ≤ 2, whose corner discs do not bound
-  them.
-- **GPU stalls are actionable**: the error names the likely cause (another process using the
-  GPU), `AERIALSYNTH_GPU` to pick another adapter, and the new `AERIALSYNTH_GPU_STALL_S` to
-  wait longer than the default 120 s (`docs/gpu.md`, *Troubleshooting*).
-- **Shader compile notice on Metal / DX12**: devices without a wgpu pipeline cache keep a
-  marker file per adapter and shader version in `$XDG_CACHE_HOME/terrain/`, so later runs are
-  announced as warm (a message only if the compile takes more than 5 s) instead of as a
-  first-run compile every time.
-
-- **First-run shader compile is announced, the pipeline cache is pruned**: the CLI, viewer
-  (status bar), Python (`verbose=True`) and C (`as_set_verbose`) say when the GPU shaders
-  are being compiled (~30 s once per GPU, driver and version) and how long it took; the cache
-  file is keyed by adapter and shader hash, so stale versions are deleted instead of piling
-  up (`terragen::gpu::set_compile_observer`, `docs/gpu.md`).
-- **GPU compile time** (cold, RTX 6000 Ada, five kits): pass B 390 s -> three pipelines of
-  17–23 s (pass B runs the stack in stages, compiled in parallel; one call site of the kernel
-  library and of every kit layer instead of eleven), pass A1 16 s -> 12 s, point and drainage
-  pipelines 18 / 13 s -> 15 / 10 s; start-up with empty caches ~30 s instead of ~6 min, and
-  the volcanic kit no longer loses the device. Same tiles (52 bench stills: 50 identical, two
-  with one pixel 1 DN off), same speed or faster (pass A 35 % faster: flat Worley loops; agriculture places z12–z16 ~10 %
-  faster). Kits read
-  instances in layers with the new `inst_count` / `inst_get` / `inst_list_bin`; the kit guide
-  has compile-time rules and the `compile_times` / `inlined_sizes` measurements.
-- **Volcanic kit** (`docs/kits/volcanic.md`): stratovolcanoes with craters, three tiers of radial
-  gullies and rim wobble, calderas with flat floors and lakes, shield volcanoes, and cinder-cone
-  fields with maars (three instance families placed by the atlas' volcanism, plate boundary and
-  hotspot fields; volcanoes are pass-A relief, so the drainage follows the cones and oceanic
-  ones make islands); ash and scoria on the upper cone and as an ash-fall apron, lava tongues
-  from fresh black to weathered brown to moss-green, hydrothermal patches, crater and maar
-  lakes at a flat water level, black-sand beaches, two volcanic-rock biomes with old lava fans.
-- **Agriculture kit** (`docs/kits/agriculture.md`): field systems by culture x climate x terrain
-  instead of one farmland look everywhere: 1-mile section grids with centre pivots and
-  section-line roads, shelterbelt steppe, open-field strips (furlongs, reverse-S), bocage with
-  hedgerows, smallholder mosaics with homestead compounds, rice paddies (flooded, green or ripe
-  by season) and contour terraces, stone-walled dry terraces, vineyards, olive / almond / citrus /
-  date groves, plantations on contours, greenhouse seas, paddocks with livestock trails and farm
-  dams, irrigated pivots in deserts; each land-use region draws one system by its ecoregion's
-  culture, climate and development.
-- **Cold kit** (`docs/kits/cold.md`): polygon tundra, shrub tundra, polar desert and forest
-  tundra; glaciers with firn, bare ice, crevasses, ogives and moraines by the summer
-  temperature and aspect; thermokarst and kettle lakes, drained basins, pingos; drumlin fields
-  with eskers (instance family); sea ice (fast ice, floes, leads, pressure ridges), frozen lakes
-  and rivers; seasonal snow and nevé.
-- **Temperate, boreal and wetland kit** (`docs/kits/temperate.md`): 12 biomes (deciduous,
-  mixed and taiga forest, lichen woodland, maquis, garrigue, chaparral, feather-grass steppe,
-  heath, moor, krummholz, alpine meadow); raised and string bogs, fens, reed marshes, beaver
-  ponds; managed forest stands with clear-cuts, young plantations, logging roads, windthrow
-  and firebreaks; autumn crowns and larches.
-- **Tropical and savanna kit** (`docs/kits/tropical.md`): rainforest with emergent and
-  flowering crowns, meander scars and oxbow lakes, mangroves, cloud forest and páramo zones,
-  savannas with dry-season grass, burn scars, termite mounds, waterholes, gallery forests,
-  baobabs and palms, monsoon, dry and miombo woodland, slash-and-burn frontiers.
-- **Desert kit** (`docs/kits/desert.md`): sand seas whose dunes follow the atlas wind and its
-  variability (transverse ridges, linear seif dunes with Y-junctions, star dunes, small dunes on
-  the big ones), barchans on a stony fringe, playas with salt crust, cracks, brine pools and
-  paleo-shorelines, arid lakes dried into salt pans, braided dry washes, yardangs, inselbergs;
-  sand colours by palette and lithology; six desert biomes (erg, hamada, basalt harrat,
-  gypsum, scrubland, Gobi) and the kit's textures on the two core deserts.
-- **Lazy tile generation** (the bindings' cameras, `terrain run --lazy`):
-  - The level of detail no longer over-refines a new place: tiles of unknown elevation range
-    were refined on a default range (-100..6000 m), which put the camera inside their bounding
-    spheres, so the first render generated the finest zoom around it (the C example: 2,900
-    tiles to z18 for a 160 × 120 image whose pixels are ~14 m on the ground; > 6 GB, 13 min on
-    4 CPU cores). The selection now generates the tiles whose range it needs, one zoom level
-    per pass, and selects again until it knows them all (`lod::Selection::unknown`): 220 tiles
-    to z15, 1 GB, ~3 min (the Python example: 1,900 tiles, 3.4 GB, 8.5 min before; 500
-    tiles, 1.3 GB, 4.6 min now).
-  - The same call gives the same image: the selection is the one a store holding every tile
-    gives, so a render that generates its tiles and one that reads them select the same tiles
-    (the first render differed by up to 1 DN before).
-  - Missing tiles are generated in batches (`tiles.cache_tiles` bounds what the cache holds;
-    before, one render's missing tiles were generated in a single batch).
-  - Progress: `terrain run` prints the tiles a render generates; the bindings report
-    generation on stderr with `as_set_verbose(w, 1)` (C) / `World(..., verbose=True)`,
-    `World.verbose` (Python).
-- **Planning:** the dry runs of `terrain run` / `terrain tiles` no longer add margin rings around
-  tiles of unknown range (only around the tiles the renderer keeps), and the plan includes the
-  tiles its selection refines: the previous `configs/quick.yaml` needed 357 + 280 tiles, now 357 + 2.
-  A new cull drops tiles above the top of a downward view cone (the coarse tiles beside a low
-  nadir camera, whose bounding spheres contain it).
-- `configs/quick.yaml` is quick: 3 s at 5 fps, a 320 × 256 camera, zoom 15, margin 1 (~75 tiles).
-- `terrain view` checks for a display and a GPU first ("terrain view needs a GPU (see
-  docs/viewer.md): …") and creates no tile store when it cannot start.
-- `terrain tiles --bbox` refuses lat_min >= lat_max (swapped bounds selected nothing) and
-  out-of-range values; lon_min > lon_max stays a box across the antimeridian.
-- A directory or a file that is not HDF5 given as a tile store fails with "… is a directory" /
-  "… is not an HDF5 file" instead of an HDF5 error stack (CLI and bindings).
-- Python: tile coordinates, zooms, seeds and sizes must be integers (`operator.index`: Python or
-  numpy integers); `w.tile(3.5, 0, 0)` raises `TypeError` instead of truncating. The type stub
-  `_native.pyi` covers the whole extension module.
-- **Terrain generator version 4** (`docs/design/terrain-next.md`; stores of version 3 are
-  refused for writing, as for any generator change):
-  - **Composite stack:** pass B is a fixed stack of layers (zonal ground, altitudinal zone,
-    azonal overrides, disturbance, agriculture, canopy, linear, built, water, seasonal), each a
-    `Layer { cov, albedo, dh, cls, emit, lit, mat }`; the previous look is ported into it
-    (`stack.rs`, `layers/`, `gpu/wgsl/stack.wgsl`).
-  - **Biome registry:** biomes are YAML data (`crates/terragen/biomes/`): Köppen classes,
-    climate envelopes, lithology, weights, palettes, vegetation parameters, crown layers,
-    zonations and up to 8 kernel layers with masks over named fields. Compiled at start-up,
-    validated with keyed errors, per-GSD-band layer lists; the resolved registry is stored in
-    the world config (`biomes.resolved`), `world.biomes.overrides` changes weights.
-  - **Kernel library** (`kernels.rs`, `gpu/wgsl/kernels.wgsl`): scatter, rows, cells, stripes,
-    contours, radial, crescent, lobes, patches, linear, stamp, canopy, water and relief
-    operators, each with a calibrated mean (coarse pixels show the mean of fine ones); a CPU /
-    GPU parity harness for every kernel.
-  - **Ecoregions and cultures** (`eco.rs`, `world.ecoregions`): ~100 km ecoregions pick their
-    biome by the climate at their site and draw a style (lithology soils and rocks, tints, tree
-    density and species mix, season); 12 culture archetypes set field systems, field size,
-    hedges, roofs, building heights, blocks, lamps, agriculture and town density. Dithered
-    ecotones (10 km).
-  - **Planetary atlas wired in:** mountain ranges along plate boundaries
-    (`relief.tectonic_mountains`; the noise belts become old orogens, `relief.belt_mountains`),
-    climate from the atlas (rain shadows, currents, monsoons), biomes by Köppen class, cultures
-    from the atlas' culture areas, town density by population, roads and lights by development.
-    The atlas builds its elevation in two steps (pre-tectonic for the plates, then with their
-    uplift); `ATLAS_VERSION` 3.
-  - **Kits** (`src/kits/`, `docs/design/kit-guide.md`): biomes, kernels, layer functions,
-    relief operators, **instance families** (sparse lattices listed per 16-pixel block on both
-    backends) and **host-built linear features and stamps** (binned per tile), each kit in its
-    own files and registered by one line.
-  - Land cover: forest types (tropical, broadleaf, needleleaf, mixed), shrubs, hedgerows and
-    tracks of the v2 classes.
-  - Performance (RTX 6000 Ada, shared server, `examples/zoom_bench`, ms per tile, version 3 →
-    4): z4 ~51 → ~63, z8 ~77 → ~87, z12 ~7 → ~9, z14 ~6 → ~8, z16 ~6 → ~7; pass B alone within
-    +7 %, the rest pass A over more mountains and the atlas fields. CPU (6 threads): 0.86–0.98×
-    of version 3's time. `TERRAGEN_PROFILE=passes` times each tile kernel.
-  - Tests: tile parity asserted (< 0.1 % of pixels), kernel parity, LOD of albedo and
-    land-cover groups, variety budget (`tests/variety.rs`), a CPU speed smoke test, and
-    `wgsl_compiles` (every entry point to SPIR-V with naga, no GPU needed).
+- The shared GPU device could hang when several generators compiled at once (parallel tests,
+  threads of the bindings), and crashed at exit on some drivers.
+- A flaky GPU read-back panic (`TargetAlignmentGreaterAndInputNotAligned`).
+- A directory or a file that is not HDF5 given as a tile store fails with that reason instead
+  of an HDF5 error stack (CLI and bindings).
+- `terrain tiles --bbox` rejects swapped latitudes and out-of-range values.
+- An empty store left by `next` with optional layers (e.g. interrupted during the first shader
+  compile) refused classic tiles ("layer dtm has 0 bytes"); it is now made again.
+- `AERIALSYNTH_GPU` naming no adapter (or a GPU failing in strict mode) was silent with
+  `backend: auto`; a warning now gives the reason and the adapter list.
+- The pipeline cache works on Windows (`%LOCALAPPDATA%\terrain` without `HOME`; every run
+  compiled cold) and ignores an empty `XDG_CACHE_HOME`.
+- `terrain view --mode height|instance` on a store without that layer is an error instead of
+  an empty map.
 
 ## 0.2.0 — 2026-10-10
 
@@ -492,45 +138,6 @@
   - Snapshots report the first drawn tiles and the view's tiles in; `TERRAGEN_PROFILE=1` prints
     pipeline compile times and the viewer's batch times; `examples/base_levels` times z0..=Z.
 
-- **Land-cover classes v2** (`terragen::landcover`, `docs/formats.md`): one table of 82 classes
-  as data (id, name, group, legacy class, display colour, material). Ids 0–17 keep their
-  meaning; the new classes (20–110: reservoirs, sea ice, glaciers, lava, forest types, savanna,
-  rice paddies, vineyards, greenhouses, residential / industrial, motorways, runways, …) are
-  reserved for the coming terrain kits (the generator still emits 0–17). 11 stable groups.
-  - The shaders get the table as WGSL generated from it (`gpu/wgsl/classes.wgsl`, checked by a
-    test): `LC_*` / `LG_*` constants, `lc_group`, `lc_material`, `lc_palette`.
-  - Materials replace the water test in both renderers: glint weight, specular F0, roughness
-    and self-emission per class (water renders as before).
-  - The tile generator's majority vote of a pixel's class counts 128 classes (CPU and GPU).
-  - Sequence files: `output.landcover: v2 | legacy | group` (default `v2`) chooses the values
-    `landcover` datasets hold; new attributes `class_groups`, `class_legacy`, `class_mapping`
-    next to `class_names`.
-  - The viewer's and `terrain tiles --png`'s land-cover palettes come from the table.
-- **`terrain survey`:** finds diverse places of a world quickly and renders stills of them.
-  Random points on land and coasts (`--seed-places`) are classified with cheap point queries
-  (class mix, elevation, relief, coast, river, town, climate); `--count` places are chosen by
-  theme (coast, mountains, town, river, snow and ice, desert, forest, farmland, wetland,
-  plateau, lake, tundra) and farthest-point sampling. Each place is rendered with the dataset
-  renderer (GPU when available) in the `--views` (oblique from 1.5 km, nadir from 800 m,
-  optionally high from 10 km, or custom), the sun at a fixed local time; tiles are generated
-  into one store (`--tiles`). Outputs: stills, a labelled contact sheet `sheet.jpg` and
-  `places.csv`; `--places FILE.csv` renders a fixed list again (regression stills).
-  `docs/design/survey_places.csv` and `survey_places_seed2.csv` hold 24 places of worlds 1
-  and 2 (the redesign's "before" baselines). ~20 s per place with two views on an RTX 6000 Ada.
-
-- **Planetary atlas** (`terragen::atlas`, groundwork of the next generator; the generated world is
-  unchanged): a deterministic cube map (6 × 512², ~20 km texels, 58 MB) of world-scale fields
-  computed once per world: smooth elevation, signed coast distance, prevailing wind, annual
-  precipitation from seasonal moisture advection with rain shadows and coastal deserts, sea-level
-  temperature with ocean currents, seasonality, precipitation regime, tectonic plates (boundary
-  kind, distance, closing speed, uplift, volcanism, hotspot tracks), lithology, glaciation,
-  culture areas with archetypes, development and population potential. `Atlas::sample(dir)` and
-  WGSL `atlas_sample(dir)` (bound to the GPU generator's kernels) read the same data; a Köppen
-  classifier (`atlas::koppen`). Built in ~3–4 s on 8 threads, cached in the process and in
-  `~/.cache/terrain/atlas-<key>.bin` (`TERRAGEN_ATLAS_CACHE`). New `world.atlas` settings
-  (resolution, plates, hotspots, culture cell, rain shadow, currents, monsoon, precipitation,
-  advection steps). Preview: `cargo run --release -p terragen --example atlas_preview -- OUT_DIR`.
-  See `docs/simulation.md`.
 - **Bindings** (`bindings/`): tile access from C and Python. Open a world's tile store (the
   world given like `terrain -c FILE --seed N`) and get a layer of tile z/x/y; missing tiles are
   generated (GPU if available, else CPU) and stored first.

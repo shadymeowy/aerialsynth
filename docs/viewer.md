@@ -21,7 +21,7 @@ Both views share one flight and one tile store. By default the tiles a view want
 generated in the background and stored (`--no-generate`: stored tiles only, the store opened
 read-only, so a store of another generator version can be viewed). On start, levels
 z0..=`--base-zoom` (4) are completed for the whole planet (341 tiles; low zooms are the
-slowest tiles to generate, see `docs/gpu.md`): z0–z2 first (the first frame waits for z0
+slowest tiles to generate, see [`gpu.md`](gpu.md#tile-generation)): z0–z2 first (the first frame waits for z0
 only), then the tiles the view wants, and the rest of the base levels whenever the view wants
 nothing generated. `--base-zoom` is at most 8 (87,381 tiles) and `tiles.max_zoom`. While the
 GPU generator's pipelines compile (the first run on a machine, ~30 s), tiles are generated on
@@ -44,8 +44,8 @@ over SSH X forwarding it runs, but slowly.
   generation activity.
 - **Side panel:**
   - Map: shading (surface, elevation, land cover, relief; *height above ground* and
-    *instances* when the store has the optional `dtm` / `instance` layers, `docs/formats.md`)
-    and relief exaggeration; a *Display*
+    *instances* for stores with the [next generator's](next/README.md) optional layers) and
+    relief exaggeration; a *Display*
     group with the level-of-detail bias, finest level, tile borders and light; and, when
     orbiting, *Whole planet / Home / North up / Top down*.
   - Camera: the camera and its resolution, *Look forward* (15° down instead of the scenario's
@@ -75,57 +75,29 @@ over SSH X forwarding it runs, but slowly.
 
 ## How it works
 
-Code: `crates/viewer`:
-- `lib.rs`: the app and its options;
-- `globe.rs` + `globe.wgsl`: the map renderer;
-- `camera.rs`: the camera view;
-- `fly.rs`: the flight;
-- `tiles.rs`: the tile service;
-- `snapshot.rs`: headless snapshots and recordings.
+Code: `crates/viewer` (`lib.rs` the app and its options, `globe.rs` + `globe.wgsl` the map,
+`camera.rs` the camera view, `fly.rs` the flight, `tiles.rs` the tile service, `snapshot.rs`
+headless snapshots and recordings); wgpu (shared with the dataset renderer) and egui / eframe.
 
-It uses wgpu 30 (shared with the dataset renderer) and egui / eframe 0.36.
-
-- **Flight (`fly.rs`):**
-  - A position (ECEF) with heading / pitch / roll relative to the local horizon, so level
-    flight stays level anywhere on the planet.
-  - The plane is arcade-style: stick rates, wings that level themselves, a coordinated turn
-    rate g·tan(bank)/V, and a throttle.
-  - Ground clearance is 2 m: under the map, from the finest resident tile (exaggerated as
-    drawn); under the camera, from the finest stored tile's DSM.
-- **Tile service (`tiles.rs`):**
-  - Two loader threads read tiles from the store. A generator thread generates in batches of
-    half the cores and writes them to the store: base levels z0–z2 first (one level per
-    batch), then the view's wishes, then the deeper base levels.
-  - The GPU generator is set up on a background thread; the CPU generates until it is ready.
-  - The active view replaces the wish lists every frame.
-- **Map (`globe.rs`):**
-  - **Level of detail:** a quadtree from z0, with frustum and horizon culling. A tile is
-    refined while its texels look larger than *pixels per texel*, and only if a finer tile can
-    be had.
-  - **No holes:** a tile that has not arrived is drawn with the region of its nearest resident
-    ancestor. Requests are ordered by how blurry that stand-in looks on screen, so the ground
-    near the camera sharpens first.
-  - **Geometry:**
-    - Each tile is a 33×33 grid (+ skirts) relative to its own centre in f64, drawn
-      camera-relative, so it is precise from orbit to a few metres. Reversed-Z infinite
-      projection.
-    - Heights are box-filtered over the grid spacing. The full-resolution slope shades,
-      capped at ~50° so building walls do not turn into needles.
-  - **Residency:** texture arrays with least-recently-used eviction.
-  - **Sky:** a full-screen pass gives the limb glow, a sky near the ground and the stars.
-    Polar caps cover latitudes beyond the Mercator limit.
-- **Camera (`camera.rs`):**
-  - **Threads:** a render thread renders the newest pose with `render::Renderer`; a sensor
-    thread develops frame *k* while frame *k* + 1 renders (the UI stays at the display rate).
-  - **Read-back:** `Renderer::radiance_only` skips reading back depth, points and land cover
-    (the stars still need them at night).
-  - **Tiles:** the renderer uses stored tiles only. Every 0.3 s its own tile selection runs
-    with an oracle in which every tile exists. The tiles it would want that are not stored,
-    with their missing ancestors, are generated coarse to fine.
-  - **Time:** the lighting runs on the scenario clock plus the slider offset; the auto exposure
-    runs on wall-clock time.
-  - **Not drawn:** motion blur and the ground truth modalities. To record, write a trajectory
-    and use `terrain run`.
+- **Flight:** a position (ECEF) with heading / pitch / roll relative to the local horizon, so
+  level flight stays level anywhere on the planet. The plane is arcade-style (stick rates,
+  self-levelling wings, coordinated turns at g·tan(bank)/V, a throttle). Ground clearance is
+  2 m above the finest tile drawn (map) or stored (camera).
+- **Tiles:** two loader threads read the store; a generator thread generates in batches of half
+  the cores (base levels z0–z2 first, then the view's wishes, then the deeper base levels) and
+  writes them to the store. The GPU generator is set up in the background while the CPU
+  generates.
+- **Map:** a quadtree from z0 with frustum and horizon culling; a tile is refined while its
+  texels look larger than *pixels per texel*. A tile that has not arrived is drawn from its
+  nearest resident ancestor, and requests are ordered by how blurry that stand-in looks, so the
+  ground near the camera sharpens first. Tiles are 33×33 grids (+ skirts) relative to their own
+  centre in f64, drawn camera-relative with reversed-Z, precise from orbit to a few metres.
+- **Camera:** a render thread renders the newest pose with `render::Renderer` while a sensor
+  thread develops the previous frame. Every 0.3 s the renderer's own tile selection runs as if
+  every tile existed, and the tiles it would want are generated coarse to fine. The lighting
+  runs on the scenario clock plus the slider offset, the auto exposure on wall-clock time.
+  Motion blur and the ground truth modalities are not drawn: to record, write a trajectory and
+  use `terrain run`.
 
 ## Snapshots
 
@@ -186,7 +158,6 @@ On the author's machine (RTX 2080 Ti, Xeon W-2125):
 | generation | ~6.5 tiles/s in low flight with the CPU generator (z13–z17); z5–z12 are slower |
 
 - **Camera limits:** the GPU → CPU read-back and the CPU sensor (bloom, chromatic aberration,
-  noise, tone). A GPU sensor writing straight into the displayed texture would make 720p run
-  at ≥ 30 frames/s.
+  noise, tone).
 - **Unexplored ground:** distant terrain stays coarse for the first minute or so of low flight,
   until its tiles are generated.

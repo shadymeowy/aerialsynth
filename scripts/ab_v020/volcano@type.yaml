@@ -1,4 +1,4 @@
-# volcano at a place of the same type in the next generator's world: crater lake volcano (docs/kits/volcanic.md) (the same local solar time)
+# volcano at a place of the same type in the next generator's world: crater lake volcano (docs/next/kits/volcanic.md) (the same local solar time)
 world:
   seed: 1
   generator: next

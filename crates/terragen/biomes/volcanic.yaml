@@ -1,9 +1,9 @@
-# Volcanic kit biomes (docs/kits/volcanic.md): the ecoregions on volcanic rock outside the
+# Volcanic kit biomes (docs/next/kits/volcanic.md): the ecoregions on volcanic rock outside the
 # deserts (the desert kit has its basalt harrat): dark andosol ground, black-sand beaches (the
 # beach palette), old lava fans in the volcanic fields. Volcanoes, craters, flows, ash and crater
 # lakes are drawn by the kit's code (kits/volcanic.rs) wherever its instances are, in any biome.
 #
-# Schema: docs/design/kit-guide.md ("Biomes").
+# Schema: docs/next/kit-guide.md ("Biomes").
 
 # Warm and temperate volcanic country: dark soils under thin scrub and open woodland, black
 # beaches, weathered lava fans.

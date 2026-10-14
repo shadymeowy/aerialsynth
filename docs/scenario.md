@@ -5,7 +5,7 @@ template of the main settings; `terrain config --all` lists every setting with i
 `terrain config -c my.yaml` shows a scenario with its defaults filled in (and checks it).
 
 ```
-world        the planet: generator (classic | next), seed, continents, relief, rivers, climate, vegetation, land use
+world        the planet: seed, continents, relief, rivers, climate, vegetation, land use
 tiles        the tile store: file, zoom range, generation while rendering
 trajectory   the flight: a CSV, synthesised from `synth` (path, speed, wind, vibration, gimbal)
 render       backend, supersampling, level of detail, lighting, atmosphere, stars
@@ -30,15 +30,12 @@ output       the sequence file: body pose rate, time window, PNG export, compres
   generation, rendering). `render.texel_px` sets the level of detail within it; planning
   refines to 0.8× that. `min_zoom` is at most 6 (the tile selection tests every tile of that
   level for every frame).
-- **Terrain generator:** `world.generator: classic` (default) is the generator of v0.2.0,
-  unchanged (bit-identical tiles); `world.generator: next` is the modular generator with the
-  biome kits (`docs/kits/`), a preview. `--generator` on the command line overrides it. The
-  classic generator reads the settings v0.2.0 had; `world.ecoregions`, `world.biomes`,
-  `world.atlas`, `world.relief.tectonic_mountains` and `world.relief.belt_mountains` only
-  affect `next` (`docs/simulation.md`). A tile store holds one generator's tiles.
 - **Generation:** `tiles.generator: auto` (default) generates tiles on the GPU when it can, else
-  on the CPU; `gpu` / `cpu` force one. Both build the same world (`docs/gpu.md`). (Not to be
-  confused with `world.generator`, which picks the terrain generator.)
+  on the CPU; `gpu` / `cpu` force one. Both build the same world ([`gpu.md`](gpu.md)).
+- **Terrain generator:** `world.generator: classic` (the default; `--generator` overrides it).
+  `next` is experimental, and so are the settings only it reads (`world.ecoregions`,
+  `world.biomes`, `world.atlas`, `world.relief.tectonic_mountains` / `belt_mountains`) and
+  `tiles.layers`: [`next/`](next/README.md).
 - **Paths:** relative paths are relative to the working directory.
 
 Examples: `configs/quick.yaml` (3 s smoke test), `configs/dataset.yaml` (60 s with wind,
@@ -145,32 +142,4 @@ output: { file: out/seq.h5, pose: { path: /pose, rate_hz: 200 } }
 | `render.water_glint` | the reflections of the glossy classes (water, glass, greenhouses, solar panels, wet tidal flats, ice; the class table's materials, [`formats.md`](formats.md)) |
 | `render.walls` | steep walls (facades, cliffs, steep canopy) get a wall material (floors and windows, lit windows at night; rock strata; canopy sides) instead of the top-down texture stretched down them (default on) |
 
-Walls (`render.walls`; before | after, GPU renders over the same tiles): CBD towers 100 m
-above the ground, tower karst from 300 m. Glossy water: the reflection of a river in forest
-(600 m, 20° down) was the bright horizon (silvery lines), now the banks where they rise above
-the reflected ray. Night (the `emission` layer, 22:00): airport (apron floods, blue taxiway
-edge lights), port, a gas flare, CBD facades with lit windows, wind turbines' red beacons near
-a village, lit greenhouses.
-
-![walls: CBD](images/render_walls_cbd.jpg)
-![walls: tower karst](images/render_walls_karst.jpg)
-![river reflection](images/render_river_reflection.jpg)
-![night sources](images/render_night_sources.jpg)
-
-### Seasons
-
-The season of a render is its date: with `render.lighting.mode: clock` the sun and the moon
-follow `date` and `time_utc` (the sun's height and path, day length, twilight, the night lights
-coming on). Nothing in the renderer depends on the season otherwise, and the ground is the
-world's: one look per world (an annual-mean, late-summer state; crops at the phase of their
-culture, snow and ice from the annual climate). There is no `world.season` setting yet (the
-design's `world.season.day_of_year`, `docs/design/terrain-next.md` §12): a winter scene has
-winter light over the summer ground.
-
-```yaml
-render:
-  lighting:
-    mode: clock
-    date: 2026-12-21          # winter solstice: a low sun all day in the north
-    time_utc: "10:00:00"      # (the sun's local time is time_utc + longitude / 15°)
-```
+The season of a render is its date: [`simulation.md`](simulation.md#rendering-cratesrender).

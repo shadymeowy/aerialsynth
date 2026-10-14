@@ -1,4 +1,4 @@
-//! The mountains kit (`docs/design/terrain-next.md` §5.3, §5.4, `docs/kits/mountains.md`): karst,
+//! The mountains kit (`docs/design/terrain-next.md` §5.3, §5.4, `docs/next/kits/mountains.md`): karst,
 //! folded and fault-block ranges, canyons, badlands, glacial troughs with cirques and tarns,
 //! fjords and alluvial fans. The WGSL twins are `gpu/wgsl/kits/mountains_relief.wgsl` (zones,
 //! relief, carve hook, fans) and `mountains.wgsl` (the layer): the same functions in the same

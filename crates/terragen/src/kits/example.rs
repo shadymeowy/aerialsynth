@@ -1,7 +1,7 @@
 //! A test-only kit exercising every hook (compiled in the crate's unit tests only): an instance
 //! family of cones with a relief operator (pass A, so the drainage follows them), an azonal
 //! layer drawing ash on them, a kit kernel used by a biome layer, and a biome. It is also the
-//! worked example of `docs/design/kit-guide.md`.
+//! worked example of `docs/next/kit-guide.md`.
 
 use crate::instances::{Family, InstSite};
 use crate::kernels::{KIn, KOut, KParams, KernelSpec, P};

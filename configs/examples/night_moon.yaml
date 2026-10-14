@@ -1,6 +1,6 @@
 # Night flight over towns: low-light camera, horizon in view (sky, stars, town glow).
 # Full-moon night (2026-03-03): moonlit terrain, moon disc in the sky.
-world: { generator: classic, seed: 1 }   # generator: classic (default) | next (preview)
+world: { generator: classic, seed: 1 }   # generator: classic (default) | next (experimental, docs/next/)
 tiles: { file: out/night_moon/world.h5, max_zoom: 17, lazy: true }
 trajectory:
   file: out/night_moon/traj.csv

@@ -23,10 +23,9 @@ A world is given like the CLI's `terrain -c CONFIG --seed N --generator G`:
   `tiles.max_zoom` the zoom limit; the other sections are ignored), or of a bare world config
   (the contents of a `world:` section), or none for the default world;
 - **seed:** overrides the config's seed;
-- **generator:** overrides the config's terrain generator (`world.generator`): `"classic"`, the
-  default (the generator of v0.2.0, bit-identical tiles), or `"next"` (the modular generator
-  with the biome kits, a preview). Python: `World(..., generator="next")`, `World.generator`;
-  C: `as_open_generator(tiles, config, seed, "next")`, `as_generator(w)`.
+- **generator:** overrides the config's terrain generator (`world.generator`): `"classic"`,
+  the default, or the experimental `"next"` ([`docs/next/`](../docs/next/README.md)). Python:
+  `World(..., generator=)`, `World.generator`; C: `as_open_generator`, `as_generator`.
 
 A tile store holds exactly one world. Opening a store made by another world, generator or
 generator version fails, naming what differs; a missing store is created (with its directory),
@@ -44,17 +43,15 @@ pixel-centre registered, channels last, little-endian:
 | albedo | u8 | 3 | unlit surface colour, sRGB encoded |
 | elevation | f32 | 1 | DSM (ground, canopy, buildings, water surface), metres above the WGS84 ellipsoid, at pixel centres |
 | normal | i8 | 3 | unit surface normal (east, north, up) × 127 |
-| landcover | u8 | 1 | class id: 0 unknown, 1 ocean, 2 lake, 3 river, 4 beach, 5 sand, 6 rock, 7 snow, 8 grass, 9 shrub, 10 forest, 11 crop, 12 building, 13 road, 14 wetland, 15 tundra, 16 bare, 17 urban; classes v2 add 20–110 (`docs/formats.md`) |
+| landcover | u8 | 1 | class id: 0 unknown, 1 ocean, 2 lake, 3 river, 4 beach, 5 sand, 6 rock, 7 snow, 8 grass, 9 shrub, 10 forest, 11 crop, 12 building, 13 road, 14 wetland, 15 tundra, 16 bare, 17 urban; the next generator also 20–110 ([classes](../docs/formats.md#land-cover-classes)) |
 | emission | u8 | 3 | night-time artificial light, linear radiance = 16 (v/255)³ |
-| dtm | f32 | 1 | *optional:* bare ground (DTM), metres above the WGS84 ellipsoid (the bed under water); `elevation - dtm` = heights above ground |
-| instance | u32 | 1 | *optional:* instance id (building lot, field, forest stand; hashed, in [2^23, 2^30)); 0 = none |
+| dtm | f32 | 1 | *optional:* bare ground (DTM), metres above the WGS84 ellipsoid (the bed under water) |
+| instance | u32 | 1 | *optional:* instance id (building lot, field, forest stand); 0 = none |
 
-The optional layers are in a store only when it was created with them (by the `next`
-generator: `world.generator: next`; the classic generator makes none): `tiles.layers: [dtm,
-instance]` in the config given to `as_open` / `World(...)` (a scenario's `tiles` section), off by
-default (they add about half to the store). `as_has_layer` / `World.layers` tell what a store
-holds; a layer it lacks is refused (`AS_ERR_INVALID_ARGUMENT` / `ValueError`). Stores of format
-version 1 (before the optional layers) open as before, without them (`docs/formats.md`).
+The optional layers exist only in stores of the experimental `next` generator created with
+`tiles.layers: [dtm, instance]` in the config ([`docs/formats.md`](../docs/formats.md#tile-store-tilesfile)).
+`as_has_layer` / `World.layers` tell what a store holds; a layer it lacks is refused
+(`AS_ERR_INVALID_ARGUMENT` / `ValueError`).
 
 A generated tile is stored with all its layers, so the other layers of it are read, not
 generated. Tiles are deterministic: the same world gives the same bytes.
@@ -71,8 +68,7 @@ before any work).
 **Cache:** a handle keeps the decoded tiles it reads or generates in memory: one entry per layer
 of a tile (as returned), the least recently used dropped beyond the cache size (default 256 MiB;
 a generated tile goes in with all its layers, ~1.1 MiB; an `rgb` layer is 192 KiB). A cached
-tile is copied instead of read and decompressed. One lock guards the index and is held only to
-look up, insert or evict (no copying under it). Size 0 turns the cache off (`as_set_cache_mb` /
+tile is copied instead of read and decompressed. Size 0 turns the cache off (`as_set_cache_mb` /
 `World(..., cache_mb=)`, `World.cache_mb`). Prefetched tiles are not cached.
 
 **Threads:** a handle (`as_world *` / `aerialsynth.World`) may be used by several threads at
@@ -125,18 +121,16 @@ starts from zoom 2 and refines a tile while one of its texels covers more than a
 a 160 × 120 camera 1.5 km above the ground needs zoom 15 at most, a 640 × 480 one 300 m up zoom
 18 near the camera. Each level's tiles are generated before the next level is selected (the
 selection needs their elevation ranges), then the neighbours and ancestors of the selected tiles:
-a few hundred tiles in all for a new place. With a GPU that generates tiles that takes 20–30 s
-(one small batch per zoom level); **on the CPU it takes minutes** (4 cores: the C example
-`examples/render.c` ~3 min, 220 tiles; the Python example of [the README](../README.md#bindings)
+a few hundred tiles in all for a new place. With a GPU that generates tiles that takes 20–30 s;
+**on the CPU it takes minutes** (4 cores: the C example
+`examples/render.c` ~3 min, 220 tiles; the Python example of [the README](../README.md#python-and-c)
 4.6 min, 500 tiles), coarse tiles being the slowest. Later renders there read the tiles from
 the store (0.4 s and 0.9 s). To see
 the progress: `as_set_verbose(w, 1)` / `World(..., verbose=True)` (a line per batch of tiles on
 stderr). To make the tiles ahead, e.g. for many renders over an area: `as_prefetch` /
 `World.prefetch` over the area, or `terrain tiles --bbox`.
 
-The same call gives the same image: a render that generates its tiles selects the same tiles as
-one that reads them from the store (the selection is the one a store holding every tile gives,
-whatever it held before), and a generated tile is used exactly as it is stored.
+The same call gives the same image, whether the render generated its tiles or read them.
 
 **Threads:** renders of one camera are serialized (it holds one renderer); different cameras,
 also of the same world, render concurrently (GPU work is serialized by the device). Python
@@ -290,53 +284,15 @@ store; the OS file cache is warm), "cached" a second read.
 | elevation: store one call each / store batch / cached | 0.79 / **0.35** / **0.036** | 0.65 / **0.18** / **0.032** |
 | landcover: store one call each / store batch / cached | 0.084 / **0.043** / **0.008** | 0.12 / **0.04** / **0.005** |
 
-Before the cache and the batch calls, every read cost the "one call each, from the store" time
-(rgb 0.85 ms, elevation 0.7 ms, landcover 0.08 ms on a quiet machine) and a missing tile was
-generated alone (48 ms per tile on the GPU, ~250 ms on the CPU on a quiet machine; `terrain
-tiles` makes about 60 tiles/s on the GPU). Batch decompression is limited by the HDF5 reads,
-which are serialized.
+Batch decompression is limited by the HDF5 reads, which are serialized.
 
 ## Python
 
-See [`python/README.md`](python/README.md).
-
-```python
-import aerialsynth
-
-with aerialsynth.World("out/world.h5", config=None, seed=None) as w:   # created if missing
-    rgb = w.tile(12, 2200, 1500, "rgb")          # np.uint8 (256, 256, 3)
-    h = w.tile(12, 2200, 1500, "elevation")      # np.float32 (256, 256)
-    hs = w.tiles([(12, 2200, 1500), (12, 2201, 1500)], "elevation")  # np.float32 (2, 256, 256)
-    cam = w.camera(width=640, height=480, hfov=90)               # or w.camera(config="scenario.yaml", camera="/cam0")
-    f = cam.render(lat=45.0, lon=10.0, height=w.surface_height(45.0, 10.0) + 300,
-                   roll=0, pitch=-30, yaw=90, time="2026-06-21T07:30:00Z", depth=True)
-    f.rgb, f.depth                               # np.uint8 (480, 640, 3), np.float32 (480, 640)
-aerialsynth.LAYERS["elevation"]                  # LayerInfo(name, dtype, channels, shape, size, description)
-```
-
-```sh
-cd bindings/python
-maturin build --release -o dist          # dist/aerialsynth-0.2.0-cp310-abi3-<platform>.whl
-python3 -m venv .venv && .venv/bin/pip install dist/aerialsynth-*.whl pytest && .venv/bin/pytest tests
-```
-
-Release wheels are built by `.github/workflows/wheels.yml` and attached to the GitHub release
-of each `v*` tag: `manylinux_2_28` x86_64 and aarch64 (in the manylinux container: glibc 2.28 or
-newer), macOS arm64 and x86_64 (macOS 11 or newer) and Windows x86_64. Each is checked to link
-only system libraries (`auditwheel`, `delocate` / `otool -L`, the PE imports) and tested on
-CPython 3.10 and 3.13. The Linux build runs locally with
-`docker run quay.io/pypa/manylinux_2_28_x86_64` and `maturin build --release --manylinux 2_28`.
-
-The extension uses the stable ABI (PyO3 `abi3-py310`): one wheel for CPython 3.10 and newer.
-It returns tiles and images as `bytearray`s and the Python layer views them with `np.frombuffer`
-(writable arrays, no copy), so the extension needs no numpy C API; numpy is the only dependency.
-
-### Cargo and libpython
+The `aerialsynth` package: [`python/README.md`](python/README.md) (install, API, building the
+wheel).
 
 The extension crate (`bindings/python`, `aerialsynth-python`) is a workspace member, so
 `cargo build / clippy / test --workspace` build it too. PyO3's `extension-module` feature is on,
-so it never links libpython (the interpreter provides the symbols when it loads the module), and
-the crate has no Rust test targets (`test = false`, `doctest = false`): a test executable could
-not link without libpython. Its logic is tested in `aerialsynth-core`, the module itself by
-`python/tests` against a built wheel. maturin builds it from the same workspace (the shared
-`target/`).
+so it never links libpython, and the crate has no Rust test targets (a test executable could not
+link without libpython): its logic is tested in `aerialsynth-core`, the module itself by
+`python/tests` against a built wheel.
