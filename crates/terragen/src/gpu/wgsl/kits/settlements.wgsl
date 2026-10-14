@@ -1230,7 +1230,10 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     col = mixc(st_concrete(), st_asphalt(), 0.4 * u01k(lh, 10lu));
                     cls = LC_INDUSTRIAL;
                 } else if (t == STY_TOWER || t == STY_MIDRISE) {
-                    col = mixc(st_paving(), yard, select(0.25, 0.75, town_box));
+                    col = mixc(st_paving(), yard, 0.25);
+                    if (town_box) {
+                        col = mixc(mixc(yard, srgb(86.0, 112.0, 54.0), 0.45), st_paving(), 0.2);
+                    }
                     cls = select(LC_RESIDENTIAL, LC_COMMERCIAL, t == STY_TOWER || z == SZ_CBD);
                 } else if (t == STY_PERIM) {
                     col = mixc(mixc(yard, st_paving(), 0.35), srgb(84.0, 112.0, 60.0), 0.25 + 0.35 * clamp(e.moist, 0.0, 1.0));
@@ -1261,7 +1264,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                         fill = vec2<f32>(60.0, 60.0);
                     }
                     half = min(vec2<f32>(0.5 * lw - 2.5, 0.5 * ld - 2.5), fill);
-                    hb = 3.0 * (select(4.0, 2.0, town_box) + 4.0 * u01k(lh, 4lu)) + select(0.0, 12.0, z == SZ_CBD);
+                    hb = 3.0 * (select(4.0, 3.0, town_box) + 4.0 * u01k(lh, 4lu)) + select(0.0, 12.0, z == SZ_CBD);
                 } else if (t == STY_WAREHOUSE) {
                     half = vec2<f32>(0.5 * lw - 9.0, 0.5 * ld - 9.0);
                     hb = 8.0 + 6.0 * u01k(lh, 4lu);

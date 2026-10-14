@@ -1152,7 +1152,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         cov_lot = 1.0;
                         col = match t {
                             typ::WAREHOUSE => mixc(c_concrete(), c_asphalt(), 0.4 * u01k(lh, 10)),
-                            typ::TOWER | typ::MIDRISE => mixc(c_paving(), yard, if town_box { 0.75 } else { 0.25 }),
+                            // (a town's blocks of flats stand on watered lawns: v0.2.0's green lots)
+                            typ::MIDRISE if town_box => mixc(mixc(yard, srgb(86.0, 112.0, 54.0), 0.45), c_paving(), 0.2),
+                            typ::TOWER | typ::MIDRISE => mixc(c_paving(), yard, 0.25),
                             // (courtyards: gardens and trees, not a bare paved square)
                             typ::PERIM => mixc(mixc(yard, c_paving(), 0.35), srgb(84.0, 112.0, 60.0), 0.25 + 0.35 * e.moist.clamp(0.0, 1.0)),
                             _ => yard,
@@ -1176,7 +1178,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                                 (DVec2::splat(s), 40.0 + 360.0 * ps * u01k(lh, 4).powi(3) + 40.0 * u01k(lh, 5), true)
                             }
                             typ::MIDRISE => {
-                                // (a town's: a box of 2-6 floors in its lot, lawn around)
+                                // (a town's: a box of 3-7 floors in its lot, lawn around)
                                 let fill = if town_box {
                                     DVec2::new(9.0 + 7.0 * u01k(lh, 6), 7.0 + 6.0 * u01k(lh, 7))
                                 } else if z <= zone::INNER {
@@ -1184,7 +1186,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                                 } else {
                                     DVec2::new(40.0, 14.0 + 10.0 * u01k(lh, 6))
                                 };
-                                let fl = if town_box { 2.0 } else { 4.0 };
+                                let fl = if town_box { 3.0 } else { 4.0 };
                                 (
                                     DVec2::new(0.5 * lw - 2.5, 0.5 * ld - 2.5).min(fill),
                                     3.0 * (fl + 4.0 * u01k(lh, 4)) + if z == zone::CBD { 12.0 } else { 0.0 },
