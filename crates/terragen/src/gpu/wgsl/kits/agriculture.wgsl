@@ -178,6 +178,8 @@ fn agri_weights(e: EcoV) -> array<f32, 15> {
         m[6] = 0.1;
         m[13] = 0.0;
         m[14] = 0.0;
+        m[1] = 0.3;
+        m[2] = 0.3;
     } else if (k == 10u || k == 13u) {
         m[6] = 1.8;
         m[10] = 1.2;
@@ -224,7 +226,7 @@ fn agri_weights(e: EcoV) -> array<f32, 15> {
     let dev = e.dev;
     m[11] *= 0.3 + 1.4 * dev;
     m[5] *= 1.6 - 1.0 * dev;
-    m[1] *= 0.4 + 1.0 * dev;
+    m[1] *= (0.4 + 1.0 * dev) * (1.0 - 0.8 * smoothstep1(900.0, 1400.0, e.precip));
     m[13] *= (0.4 + 1.0 * dev) * (0.1 + 0.9 * (1.0 - smoothstep1(700.0, 1200.0, e.precip)));
     var total = 0.0;
     for (var i = 0u; i < AG_N; i++) {
@@ -926,10 +928,24 @@ fn agri_part_section(seed: u64, q: vec2<f32>, fw: f32, pivot_p: f32) -> Parcel {
     }
     let mode = u01k(hq, 1lu);
     var n = 4.0;
-    if (mode < 0.25) {
+    if (mode < 0.1) {
         n = 1.0;
-    } else if (mode < 0.6) {
+    } else if (mode < 0.4) {
         n = 2.0;
+    }
+    o.bedge = min(min(lq.x, half - lq.x), min(lq.y, half - lq.y));
+    o.circ = 0.0;
+    if (n == 4.0 && u01k(hq, 3lu) < 0.5) {
+        let f = 0.5 * half;
+        let fi = clamp(floor(lq / f), vec2<f32>(0.0), vec2<f32>(1.0));
+        let r = lq - fi * f;
+        o.id = mix64(hq ^ (16lu + 2lu * u64(fi.x) + u64(fi.y)));
+        o.fx = r.x;
+        o.fy = r.y;
+        o.edge = min(min(r.x, f - r.x), min(r.y, f - r.y));
+        o.fc = o0 + (fi + 0.5) * f;
+        o.size = f;
+        return o;
     }
     let along_x = u01k(hq, 2lu) < 0.5;
     var a = lq.y;
@@ -952,8 +968,6 @@ fn agri_part_section(seed: u64, q: vec2<f32>, fw: f32, pivot_p: f32) -> Parcel {
     o.edge = min(min(a, half - a), min(fy, sw - fy));
     o.fc = o0 + fco;
     o.size = sw;
-    o.bedge = min(min(lq.x, half - lq.x), min(lq.y, half - lq.y));
-    o.circ = 0.0;
     return o;
 }
 

@@ -275,7 +275,8 @@ pub fn weights(e: &EcoV) -> [f64; sys::N] {
         m[PLANT as usize] = 0.0;
         m[RANCH as usize] = 0.6;
     } else if k == 14 || k == 15 {
-        // oceanic: hedged pastures
+        // oceanic: hedged pastures and mixed farms (survey sections and shelterbelt grids of
+        // big uniform fields are the continental plains')
         m[BOCAGE as usize] = 2.5;
         m[PASTURE as usize] = 1.6;
         m[VINE as usize] = 0.4;
@@ -283,6 +284,8 @@ pub fn weights(e: &EcoV) -> [f64; sys::N] {
         m[PADDY as usize] = 0.1;
         m[PIVOT as usize] = 0.0;
         m[RANCH as usize] = 0.0;
+        m[SECTION as usize] = 0.3;
+        m[SHELTER as usize] = 0.3;
     } else if k == 10 || k == 13 {
         // humid subtropical: rice
         m[PADDY as usize] = 1.8;
@@ -333,7 +336,8 @@ pub fn weights(e: &EcoV) -> [f64; sys::N] {
     let dev = e.dev;
     m[GREENH as usize] *= 0.3 + 1.4 * dev;
     m[SMALL as usize] *= 1.6 - 1.0 * dev;
-    m[SECTION as usize] *= 0.4 + 1.0 * dev;
+    // (sections are the drier plains' grid: in wet lowlands mixed farms and pastures)
+    m[SECTION as usize] *= (0.4 + 1.0 * dev) * (1.0 - 0.8 * smoothstep(900.0, 1400.0, e.precip));
     m[PIVOT as usize] *= (0.4 + 1.0 * dev) * (0.1 + 0.9 * (1.0 - smoothstep(700.0, 1200.0, e.precip)));
     let mut total = 0.0;
     for (i, wi) in w.iter_mut().enumerate() {
@@ -999,14 +1003,22 @@ fn part_section(seed: u64, q: DVec2, fw: f64, pivot_p: f64) -> Parcel {
     }
     let mode = u01k(hq, 1);
     // (most quarters cut into halves or forties: whole quarters made the land a quilt of
-    // 800 m squares)
-    let n = if mode < 0.25 {
+    // 800 m squares; forties as square 40-acre fields or as strips)
+    let n = if mode < 0.1 {
         1.0
-    } else if mode < 0.6 {
+    } else if mode < 0.4 {
         2.0
     } else {
         4.0
     };
+    let bedge = lq.x.min(half - lq.x).min(lq.y).min(half - lq.y);
+    if n == 4.0 && u01k(hq, 3) < 0.5 {
+        let f = 0.5 * half;
+        let fi = (lq / f).floor().clamp(DVec2::ZERO, DVec2::ONE);
+        let r = lq - fi * f;
+        let id = mix64(hq ^ (16 + 2 * fi.x as u64 + fi.y as u64));
+        return Parcel { id, fx: r.x, fy: r.y, edge: r.x.min(f - r.x).min(r.y).min(f - r.y), fc: o + (fi + 0.5) * f, size: f, inside: 1.0, bedge, circ: 0.0 };
+    }
     let along_x = u01k(hq, 2) < 0.5;
     // strips across the axis: (along, across)
     let (a, c) = if along_x { (lq.x, lq.y) } else { (lq.y, lq.x) };
@@ -1015,7 +1027,6 @@ fn part_section(seed: u64, q: DVec2, fw: f64, pivot_p: f64) -> Parcel {
     let fy = c - k * sw;
     let cc = (k + 0.5) * sw;
     let fc = o + if along_x { DVec2::new(0.5 * half, cc) } else { DVec2::new(cc, 0.5 * half) };
-    let bedge = lq.x.min(half - lq.x).min(lq.y).min(half - lq.y);
     Parcel { id: mix64(hq ^ k as u64), fx: a, fy, edge: a.min(half - a).min(fy).min(sw - fy), fc, size: sw, inside: 1.0, bedge, circ: 0.0 }
 }
 
