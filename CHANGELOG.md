@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Fixed** the GPU pipeline cache on Windows (no `HOME`: every run compiled the shaders cold; now `%LOCALAPPDATA%\\terrain`) and with an empty `XDG_CACHE_HOME` (the cache went to the working directory).
 - **Fixed** `AERIALSYNTH_GPU` naming no adapter (or a GPU failing in strict mode) being silent with `backend: auto`: a one-line warning gives the reason and the adapter list before the CPU takes over.
 - **Fixed** an empty tile store left by the `next` generator with optional layers (e.g. interrupted during the first shader compile) refusing the classic generator's tiles ("layer dtm has 0 bytes"): an empty store re-used by another world is made again with that world's layers; the classic generator's optional-layers note is printed once.
 - **Fixed** a flaky GPU read-back panic (`TargetAlignmentGreaterAndInputNotAligned`): mapped
