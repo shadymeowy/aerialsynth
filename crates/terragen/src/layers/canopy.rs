@@ -167,7 +167,7 @@ pub fn layer(s: &mut crate::stack::Stack) {
     let clear = 1.0 - 0.85 * smoothstep(0.05, 0.4, s.agri()) * (1.0 - smoothstep(0.45, 0.7, slope)) * (1.0 - m.woodlot);
     let mut dens = (forest * 0.9 * clear + savanna + groves) * base;
     let mut dens_sav = savanna * base;
-    dens = dens.max(0.8 * m.riparian * veg.tree_density);
+    dens = dens.max(m.riparian * veg.tree_density);
     // drainage lines carry scrub (crowns clipped into slivers there made spikes)
     let gully_scrub = 0.55 * smoothstep(0.2, 0.9, -t.gully) * smoothstep(0.2, 0.5, wet) * m.natural_ok * (1.0 - m.field_cov);
     // steep slopes, the tree line, the snow line, what claims the ground above
@@ -237,6 +237,11 @@ pub fn layer(s: &mut crate::stack::Stack) {
         };
     }
     let layers = &layers[..n];
+    // riparian belts: lush grass and scrub under their trees (the dry land's bare soil between
+    // them read as brown streaks along the streams)
+    if m.riparian > 0.0 {
+        s.composite(Layer::paint(0.85 * m.riparian * limit, mixc(s.pal(pal::GRASS_WET), s.pal(pal::FLOOR), 0.4)));
+    }
     // forest floor: shaded litter and understory, not sunlit grass, between the crowns
     let floor = smoothstep(0.25, 0.8, dens);
     s.composite(Layer::paint(floor * 0.85, s.pal(pal::FLOOR) * 0.7));

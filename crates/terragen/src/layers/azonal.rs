@@ -84,18 +84,17 @@ pub fn finish_ground(s: &mut Stack) {
     m.flat_ok = 1.0 - smoothstep(0.22, 0.32, s.l.slope);
     // riparian belt along rivers
     let l = s.l;
-    if l.river_hw > 0.0 && t.river_wet > 0.3 {
+    // (gallery trees along the streams of dry farmland too: v0.2.0's tree lines; also along the
+    // intermittent streams of sub-humid land, which drew bare sandy streaks across the fields)
+    let rwet = t.river_wet.max(0.85 * smoothstep(0.26, 0.4, t.moist));
+    if l.river_hw > 0.0 && rwet > 0.3 {
         let ad = l.river_d.abs();
-        // (gallery trees along the streams of dry farmland too: v0.2.0's tree lines)
         // (the belt's area in the pixel, box-filtered: a soft edge sampled at the pixel centre
         // drew belts narrower than coarse pixels at the wrong strength in every zoom)
         let belt = 7.0 + 0.6 * l.river_hw.min(60.0);
         let fwr = l.fw.max(0.35 * gsd);
         let area = ((ad + 0.5 * fwr).min(l.river_hw + belt) - (ad - 0.5 * fwr).max(0.0)).max(0.0) / fwr;
-        s.m.riparian = area.min(1.0)
-            * smoothstep(0.18, 0.42, t.moist)
-            * smoothstep(0.3, 0.7, t.river_wet)
-            * s.m.natural_ok
-            * (0.55 + 0.45 * smoothstep(-0.3, 0.3, s.pf.patch));
+        s.m.riparian =
+            area.min(1.0) * smoothstep(0.18, 0.42, t.moist) * smoothstep(0.3, 0.7, rwet) * s.m.natural_ok * (0.55 + 0.45 * smoothstep(-0.3, 0.3, s.pf.patch));
     }
 }

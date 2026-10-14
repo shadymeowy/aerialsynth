@@ -583,13 +583,14 @@ fn finish_ground(s: ptr<function, Stack>) {
     (*s).m.flat_ok = 1.0 - smoothstep1(0.22, 0.32, (*s).l.slope);
     let l = (*s).l;
     let t = (*s).t;
-    if (l.river_hw > 0.0 && t.river_wet > 0.3) {
+    let rwet = max(t.river_wet, 0.85 * smoothstep1(0.26, 0.4, t.moist));
+    if (l.river_hw > 0.0 && rwet > 0.3) {
         let ad = abs(l.river_d);
         let belt = 7.0 + 0.6 * min(l.river_hw, 60.0);
         let fwr = max(l.fw, 0.35 * (*s).c.gsd);
         let area = max(min(ad + 0.5 * fwr, l.river_hw + belt) - max(ad - 0.5 * fwr, 0.0), 0.0) / fwr;
         (*s).m.riparian = min(area, 1.0) * smoothstep1(0.18, 0.42, t.moist)
-            * smoothstep1(0.3, 0.7, t.river_wet) * (*s).m.natural_ok * (0.55 + 0.45 * smoothstep1(-0.3, 0.3, (*s).pf.f[PF_PATCH]));
+            * smoothstep1(0.3, 0.7, rwet) * (*s).m.natural_ok * (0.55 + 0.45 * smoothstep1(-0.3, 0.3, (*s).pf.f[PF_PATCH]));
     }
 }
 
@@ -806,7 +807,7 @@ fn layer_canopy(s: ptr<function, Stack>) {
     let clear = 1.0 - 0.85 * smoothstep1(0.05, 0.4, s_agri(s)) * (1.0 - smoothstep1(0.45, 0.7, slope)) * (1.0 - m.woodlot);
     var dens = (forest * 0.9 * clear + savanna + groves) * base;
     var dens_sav = savanna * base;
-    dens = max(dens, 0.8 * m.riparian * td);
+    dens = max(dens, m.riparian * td);
     let gully_scrub = 0.55 * smoothstep1(0.2, 0.9, -t.gully) * smoothstep1(0.2, 0.5, wet) * m.natural_ok * (1.0 - m.field_cov);
     let snow_n = (*s).pf.f[PF_SNOW];
     let limit = (1.0 - smoothstep1(0.9, 1.4, slope)) * (1.0 - smoothstep1(0.0, 0.6, t.mountain * smoothstep1(-2.0, -6.0, temp)))
@@ -871,6 +872,9 @@ fn layer_canopy(s: ptr<function, Stack>) {
         );
     }
     let all = (1u << n) - 1u;
+    if (m.riparian > 0.0) {
+        composite(s, layer_paint(0.85 * m.riparian * limit, mixc(spal(s, BP_GRASS_WET), spal(s, BP_FLOOR), 0.4), 0u));
+    }
     let floor_ = smoothstep1(0.25, 0.8, dens);
     composite(s, layer_paint(floor_ * 0.85, spal(s, BP_FLOOR) * 0.7, 0u));
     let tr = trees(layers, all, (*s).q_loc, gsd, fw, p);
@@ -971,7 +975,7 @@ fn layer_rivers(s: ptr<function, Stack>) {
     wcol = mixc(wcol, srgb(96.0, 138.0, 140.0), 0.7 * t.mountain * smoothstep1(8.0, 0.0, temp));
     let ice = smoothstep1(-1.5, -4.0, temp + 1.5 * (*s).pf.f[PF_SNOW]);
     wcol = mixc(wcol, mixc(pal3(PAL_SNOW) * 0.9, srgb(170.0, 190.0, 200.0), 0.35 * (0.5 + 0.5 * detail)), ice);
-    let dry_col = mixc((*s).col, mixc(pal3(PAL_GRAVEL), pal3(PAL_SAND + 2u), 0.5) * (1.0 + 0.1 * detail), 0.55);
+    let dry_col = mixc((*s).col, mixc(pal3(PAL_GRAVEL), pal3(PAL_SAND + 2u), 0.5) * (1.0 + 0.1 * detail), 0.55 * (1.0 - 0.7 * (*s).m.riparian));
     let rc = mixc(dry_col, wcol, wet_r);
     let frozen = ice > 0.5 && wet_r > 0.5;
     var cls = LC_SAND;

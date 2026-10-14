@@ -827,7 +827,8 @@ pub fn washes(s: &mut Stack) {
     if l.river_hw <= 0.0 || t.river_wet >= 0.5 || t.sand > 0.45 {
         return;
     }
-    let ar = (1.0 - smoothstep(0.25, 0.42, t.moist)) * smoothstep(-4.0, 0.0, t.temp) * (1.0 - smoothstep(0.3, 0.45, t.sand));
+    // (arid land only: in sub-humid farmland the streams carry tree lines, not sandy washes)
+    let ar = (1.0 - smoothstep(0.2, 0.34, t.moist)) * smoothstep(-4.0, 0.0, t.temp) * (1.0 - smoothstep(0.3, 0.45, t.sand));
     if ar <= 0.0 {
         return;
     }
