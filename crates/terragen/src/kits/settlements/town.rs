@@ -322,6 +322,8 @@ pub struct Env {
     pub n: f64,
     pub moist: f64,
     pub detail: f64,
+    /// the ground below the place (fields, grass): yards and gardens take after it
+    pub ground: DVec3,
 }
 
 // ---- colours (sRGB)
@@ -493,10 +495,42 @@ pub struct Dist {
     pub w2cell: f64,
 }
 
+/// The pattern of the district of site `point` (place frame) and id `id`, the zone at its site
+/// and whether it is industrial (wedges around the downwind direction). The pattern is drawn
+/// per town and zone (one look per ring of the town), not per district.
+pub fn district_pattern(pl: &Pl, point: DVec2, id: u64) -> (u32, u32, bool) {
+    let rd = rel0(pl, point);
+    let zd = zone_of(pl, rd);
+    // industrial wedges: angular sectors around the downwind direction
+    let ang = point.y.atan2(point.x);
+    let mut ind = false;
+    let nw = if pl.level >= 3 {
+        2
+    } else if pl.level == 2 {
+        1
+    } else {
+        0
+    };
+    for k in 0..2u32 {
+        if k < nw {
+            let a0 = if k == 0 { pl.wind } else { pl.wind + std::f64::consts::PI * 1.4 * (u01k(pl.seed, 41) - 0.5) };
+            let hw = 0.22 + 0.2 * u01k(pl.seed, 42 + k as u64);
+            if wrap_pi(ang - a0).abs() < hw && rd > 0.25 && rd < 0.95 && u01k(id, 3) < 0.8 {
+                ind = true;
+            }
+        }
+    }
+    let mut pattern = pick_pattern(pl, zd, mix64(pl.seed ^ 0x2A7E ^ zd as u64), ind);
+    if pl.level < 2 {
+        pattern = pat::GRID;
+    }
+    (pattern, zd, ind)
+}
+
 /// The district at `q` (relative distance `rel_here` at the sample).
 pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
     let fm = pl.form;
-    let mut pattern;
+    let pattern;
     let mut z = zone_of(pl, rel_here);
     let mut theta = 0.0;
     let mut did = pl.seed;
@@ -518,38 +552,26 @@ pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
             + DVec2::new((q.y / (0.4 * wl) + 6.0 * u01k(pl.seed, 54)).sin(), (q.x / (0.43 * wl) + 6.0 * u01k(pl.seed, 55)).sin()) * (0.045 * dcell);
         let dc = worley2(pl.seed ^ 0xD15, qd, dcell, 0.85);
         did = dc.id;
-        if pl.level >= 2 && u01k(dc.id ^ dc.id2, 53) < 0.6 {
-            art = worley2_edge_dist(&dc, qd);
-        }
-        let rd = rel0(pl, dc.point);
-        let zd = zone_of(pl, rd);
-        // industrial wedges: angular sectors around the downwind direction
-        let ang = dc.point.y.atan2(dc.point.x);
-        let mut ind = false;
-        let nw = if pl.level >= 3 {
-            2
-        } else if pl.level == 2 {
-            1
-        } else {
-            0
-        };
-        for k in 0..2u32 {
-            if k < nw {
-                let a0 = if k == 0 { pl.wind } else { pl.wind + std::f64::consts::PI * 1.4 * (u01k(pl.seed, 41) - 0.5) };
-                let hw = 0.22 + 0.2 * u01k(pl.seed, 42 + k as u64);
-                if wrap_pi(ang - a0).abs() < hw && rd > 0.25 && rd < 0.95 && u01k(did, 3) < 0.8 {
-                    ind = true;
-                }
+        let (pt, zd, ind) = district_pattern(pl, dc.point, dc.id);
+        pattern = pt;
+        // arterials only between districts of different layouts (a town's districts of one
+        // pattern share one street layout: no seams through its blocks)
+        if pl.level >= 2 {
+            let (pt2, _, _) = district_pattern(pl, dc.point2, dc.id2);
+            if pt2 != pt || pt == pat::INDUSTRIAL || pt == pat::SUPER {
+                art = worley2_edge_dist(&dc, qd);
             }
         }
-        pattern = pick_pattern(pl, zd, did, ind);
-        if pl.level < 2 {
-            pattern = pat::GRID;
-        }
         z = if ind { zone::OUTER } else { zd.max(z.min(zone::INNER)).min(zone::PERI) };
+        // one layout per pattern and town (estates of industry and superblocks: per district)
+        if pt != pat::INDUSTRIAL && pt != pat::SUPER {
+            did = mix64(pl.seed ^ 0x1A70 ^ pt as u64);
+        }
         let survey = pl.arch == 7;
         let ud = u01k(did, 5);
-        theta = if survey || zd <= zone::INNER { 0.0 } else { (ud - 0.5) * 0.6 };
+        // (one street orientation per town: districts turned against each other read as pieces
+        // of different towns)
+        theta = if survey { 0.0 } else { (u01k(pl.seed ^ 0x7E7A, 5) - 0.5) * 0.3 };
         let bf = [1.0, 1.0, 0.9, 0.85, 1.0, 0.9, 1.05, 1.25, 0.8, 1.0, 0.9, 0.9][pl.arch as usize % 12];
         let u2 = u01k(did, 6);
         match pattern {
@@ -622,7 +644,7 @@ pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
             }
         }
     }
-    let dmul = if fm == form::CITY as u32 && pl.level >= 2 { (0.55 + 0.9 * u01k(did, 13)).min(1.0) } else { 1.0 };
+    let dmul = if fm == form::CITY as u32 && pl.level >= 2 { (0.8 + 0.4 * u01k(did, 13)).min(1.0) } else { 1.0 };
     Dist { did, zone: z, pattern, theta, art, dmul, b, asp, sw, jit, warp, w2cell }
 }
 
@@ -769,10 +791,13 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     o.sid = blk.sid;
     o.major = blk.major;
     // ---- streets and arterials
-    let street_ok = dens_here > 0.3;
-    let art_hw = [4.0, 4.0, 6.0, 7.5, 9.0][pl.level as usize];
+    // (streets end where the town thins out: they ran on far into the fields, a grid of empty
+    // streets around every town; arterials narrower: they drew a dark outline around every
+    // district, the districts read as pieces of different towns)
+    let street_ok = dens_here > 0.42;
+    let art_hw = [3.5, 3.5, 5.0, 6.0, 7.5][pl.level as usize];
     let has_streets = !matches!(pattern, pat::DISPERSED | pat::KRAAL);
-    if art < art_hw + 2.0 * fw && dens_here > 0.25 {
+    if art < art_hw + 2.0 * fw && dens_here > 0.35 {
         let c = band_cov(art, art_hw, fw);
         if c > 0.0 {
             o.ds = art;
@@ -814,7 +839,8 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     let mut tree = 0.0;
     let mut tree_h = 0.0;
     let mut em = DVec3::ZERO;
-    let yard = c_yard(e.moist, u01k(blk.id, 19));
+    // (yards and gardens: the land around, a little trodden; not a uniform lot colour)
+    let yard = mixc(e.ground * (0.92 + 0.16 * u01k(blk.id, 19)), c_yard(e.moist, u01k(blk.id, 19)), 0.35);
     // the roof drawn at the sample (one colour evaluation: culture or code, hash, flat, tint),
     // its coverage and shading; the mean of a lot where its buildings are below the pixel
     // (ground colour, roof fraction, height)
@@ -1146,7 +1172,10 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     let lc = DVec2::new(0.5 * (lr[0] + lr[2]), 0.5 * (lr[1] + lr[3]));
                     let lot_dq = rot2(lc - ublk, -theta);
                     let dl = dens_at(lot_dq);
-                    let built = u01k(lh, 3) < dl.powf(0.7) * 1.05;
+                    // (a town's lots end where its streets do: houses strewn over the fields
+                    // beyond read as a broken town)
+                    let edge = if fm == form::CITY as u32 { smoothstep(0.3, 0.42, dl) } else { 1.0 };
+                    let built = u01k(lh, 3) < dl.powf(0.7) * 1.05 * edge;
                     // typology
                     let a = pl.arch;
                     let ut = u01k(lh, 12);

@@ -229,7 +229,7 @@ pub fn warp_min_wavelength(w: &World) -> f64 {
 }
 
 /// Weight (0..1) of the ecoregion across the border at `edge` m from it: within the ecotone a
-/// crisp mosaic of ~220 m patches (0 or 1), blended to the probability where the patches are
+/// crisp mosaic of ragged ~220 m patches (0 or 1), blended to the probability where the patches are
 /// below the pixel.
 pub fn ecotone_pick(w: &World, p: DVec3, gsd: f64, edge: f64) -> f64 {
     let wd = w.cfg.ecoregions.ecotone_km * KM;
@@ -244,9 +244,15 @@ pub fn ecotone_pick(w: &World, p: DVec3, gsd: f64, edge: f64) -> f64 {
         return pb;
     }
     let s = w.seed();
-    let n = 0.75 * perlin3(s ^ 0xEC7, p / 220.0) + 0.35 * perlin3(s ^ 0xEC8, p / 80.0) * band(80.0, gsd);
+    // (ragged patches: a strong 80 m octave; with a weak one the patches of a strongly
+    // different neighbour read as smooth, hard-edged discs. A blended edge was tried: it broke
+    // the LOD of the DSM, crowns and vegetation of two biomes do not blend linearly)
+    let b80 = band(80.0, gsd);
+    let n = 0.75 * perlin3(s ^ 0xEC7, p / 220.0) + 0.35 * perlin3(s ^ 0xEC8, p / 80.0) * b80;
     // ~uniform 0..1 (logistic of the noise over its spread)
-    let u = 1.0 / (1.0 + (-1.7 * n / 0.29).exp());
+    // (normalized by the spread of the octaves present: u stays uniform, so the patches cover
+    // the probability at every pixel size and a parent matches its children)
+    let u = 1.0 / (1.0 + (-1.7 * n / (0.3504 * (0.5625 + 0.1225 * b80 * b80).sqrt())).exp());
     let crisp = if u < pb { 1.0 } else { 0.0 };
     pb + (crisp - pb) * ex
 }
@@ -307,7 +313,11 @@ pub fn compute(w: &World, reg: &Registry, id: u64, site: DVec3) -> EcoParams {
     let dry = dry_months(&s);
     let climate = SiteClimate { temp_c: temp, precip_mm: s.precip_mm, temp_range_c: s.temp_range_c, dry_months: dry, koppen: k as u32 };
     let arch = s.archetype as usize;
-    let biome = reg.pick(k as u32, temp, s.precip_mm, dry, s.regime, s.temp_range_c, s.litho as u8, u01k(id, 0xB10), |_| 1.0);
+    // cold steppes are open taiga (Köppen's dry threshold makes the larch and spruce forests of
+    // cold continental interiors, Yakutia, interior Alaska, "arid"): their biome is the
+    // subarctic forest's
+    let kb = if matches!(k, atlas::Koppen::BSk | atlas::Koppen::BWk) && temp < 3.0 && s.precip_mm > 150.0 { atlas::Koppen::Dfc } else { k };
+    let biome = reg.pick(kb as u32, temp, s.precip_mm, dry, s.regime, s.temp_range_c, s.litho as u8, u01k(id, 0xB10), |_| 1.0);
     let style = draw_style(id, &s, arch, temp);
     EcoParams { id, site: surface, climate, biome, culture: s.culture, style }
 }

@@ -99,9 +99,13 @@ ponds.
 
 ## Known limits
 
-* Snow-covered clear-cuts of the temperate kit's managed boreal forest read as crisp white
-  rectangles in the snowy taiga (kettle still); the cuts and the snow are both correct, but the
-  stands' straight edges are conspicuous under snow.
+* Every ecoregion's date lies in the warm season (mid May to late September, by its season):
+  seasonal snow lies only where that date is still cold (high mountains, the polar regions),
+  lakes freeze only there. Winter landscapes need render-time seasons (35 % of the ecoregions
+  were dated in winter: snowy taiga and frozen grey lakes in summer datasets, with hard borders
+  to their summer neighbours).
+* Kettle lakes are lobed ellipsoid slices (shore noise 0.24 at 2.6 per radius): bays and points,
+  but no islands, no chains along eskers.
 * Glaciers, moraines and seasonal snow are pass-B surfaces (colour, class, height in the
   seasonal slot): the DTM and the drainage keep the valley below them; troughs and cirques come
   from the mountains kit's carve hook, not from the glaciers drawn here.

@@ -3,12 +3,12 @@
 
 fn mt_strata_col(i: u32) -> vec3<f32> {
     switch i {
-        case 0u: { return srgb(204.0, 194.0, 176.0); }
-        case 1u: { return srgb(168.0, 112.0, 84.0); }
-        case 2u: { return srgb(216.0, 198.0, 160.0); }
-        case 3u: { return srgb(168.0, 140.0, 118.0); }
-        case 4u: { return srgb(184.0, 132.0, 108.0); }
-        default: { return srgb(188.0, 172.0, 148.0); }
+        case 0u: { return srgb(196.0, 176.0, 154.0); }
+        case 1u: { return srgb(178.0, 135.0, 108.0); }
+        case 2u: { return srgb(202.0, 178.0, 146.0); }
+        case 3u: { return srgb(178.0, 149.0, 125.0); }
+        case 4u: { return srgb(186.0, 145.0, 120.0); }
+        default: { return srgb(188.0, 165.0, 140.0); }
     }
 }
 
@@ -55,7 +55,7 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
         }
         let kb = floor(ground / bandh + 0.6 * rn);
         let h = hash1(MT_SEED + 40lu, i64(kb));
-        let col0 = mt_strata_col(u32(u01k(h, 1lu) * 5.999)) * (0.9 + 0.2 * u01k(h, 2lu));
+        let col0 = mt_strata_col(u32(u01k(h, 1lu) * 5.999)) * (0.94 + 0.12 * u01k(h, 2lu));
         let col = mixc(srgb(190.0, 176.0, 150.0), col0, 0.8 * smoothstep1(0.25, 0.6, slope));
         var ly = layer_paint(cb, col, cl);
         ly.clear = 1.0;

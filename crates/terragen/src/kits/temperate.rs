@@ -221,7 +221,8 @@ fn forest_est(s: &Stack) -> f64 {
     let t = s.t;
     let td = s.world.cfg.vegetation.tree_density;
     let trees_mult = s.veg(|v| v.trees) * s.bio.style.trees;
-    let base_cover = smoothstep(0.3, 0.68, t.moist) * smoothstep(-6.0, 2.0, t.temp) * td * trees_mult;
+    let cold = (1.0 - smoothstep(0.0, 8.0, t.temp)) * (1.0 - smoothstep(0.15, 0.4, t.mountain));
+    let base_cover = smoothstep(0.3 - 0.14 * cold, 0.68 - 0.24 * cold, t.moist) * smoothstep(-6.0, 2.0, t.temp) * td * trees_mult;
     let fpu = 0.5 + 0.5 * s.pf.forest;
     let forest = smoothstep(-0.03, 0.03, base_cover - fpu);
     let clear = 1.0 - 0.85 * smoothstep(0.05, 0.4, s.agri()) * (1.0 - smoothstep(0.45, 0.7, s.l.slope));
@@ -334,7 +335,7 @@ fn mires(s: &mut Stack) {
     let (col, pool, clear) = if fen > 0.5 {
         // fen: sedge and moss, tussocks, willow and birch scrub, a few pools
         let g = smoothstep(-0.3, 0.4, perlin3(SEED_MIRE ^ 0x31, p / 30.0) * band(30.0, gsd));
-        let col = mixc(rgb(126.0, 134.0, 68.0), rgb(152.0, 150.0, 86.0), g) * (1.0 + 0.16 * mot);
+        let col = mixc(rgb(110.0, 114.0, 72.0), rgb(134.0, 128.0, 90.0), g) * (1.0 + 0.16 * mot);
         let e = band(40.0, gsd);
         let pu = perlin3(SEED_MIRE ^ 0x32, p / 22.0) + 0.5 * perlin3(SEED_MIRE ^ 0x33, p / 9.0) * band(9.0, gsd);
         let pool = e * smoothstep(0.5, 0.56, pu) * smoothstep(0.3, 0.5, dpt) + (1.0 - e) * 0.02 * smoothstep(0.3, 0.5, dpt);
@@ -476,7 +477,7 @@ fn beaver_ponds(s: &mut Stack) {
         return;
     }
     s.m.natural_ok *= 1.0 - meadow;
-    let grass = rgb(130.0, 140.0, 72.0) * (1.0 + 0.12 * s.pf.detail);
+    let grass = rgb(114.0, 120.0, 76.0) * (1.0 + 0.12 * s.pf.detail);
     s.composite(Layer { cov: meadow, albedo: grass, cls: lc::GRASS, clear: 1.0, ..Default::default() });
     // the flooded ring: dead trees standing in shallow water and sedge
     let ring = ((1.5 * wp + 8.0 - rd) / fw + 0.5).clamp(0.0, 1.0);
@@ -524,7 +525,9 @@ fn stands(s: &mut Stack, fe: f64) {
         return;
     }
     let (p, gsd, fw) = (s.ctx.p, s.ctx.gsd, s.l.fw);
-    let q = s.q_rot;
+    // (the stands' frame warped by ~25 m: straight-edged rectangles read as a plan, not a forest)
+    // (the pixel fields' noise: no extra noise evaluations, pass B's compile time is at its limit)
+    let q = s.q_rot + DVec2::new(s.pf.warp2, s.pf.patch) * 24.0;
     let seed = mix64(s.t.region.id ^ SEED_STAND);
     let wc = 150.0 + 150.0 * u01k(seed, 1);
     let xc = q.x / wc;
@@ -538,31 +541,36 @@ fn stands(s: &mut Stack, fe: f64) {
     let bid = hash2(seed, cx as i64, cy as i64);
     let inside = smoothstep(0.35, 0.65, fe);
     // the stand's state: cut `age` years ago (0..16) with a probability by the forestry
-    let pc = (0.32 * fi).min(0.42);
+    // (~0.5 % of the stands a year, most of the cuts years old and greening: 42 % cut within
+    // 16 years, a fifth of them fresh, made the taiga a patchwork of bright rectangles)
+    let pc = (0.07 * fi).min(0.09);
     let uc = u01k(bid, 3);
     if uc < pc && inside > 0.0 {
-        let age = 16.0 * uc / pc;
+        let age = 16.0 * (uc / pc).powf(0.6);
         let ex = fx.min(1.0 - fx) * wc;
         let ey = fy.min(1.0 - fy) * hr;
+        // ragged edges: seed trees and uncut corners left along the border
+        let en = 18.0 * s.pf.detail;
+        let inside = inside * ((ex.min(ey) - 8.0 + en) / fw + 0.5).clamp(0.0, 1.0);
         let mot = perlin3(SEED_STAND ^ 0x11, p / 6.0) * band(6.0, gsd) + 0.5 * perlin3(SEED_STAND ^ 0x12, p / 2.0) * band(2.0, gsd);
         let (col, clear) = if age < 3.0 {
             // fresh: slash (brown, reddish dead needles), skid trails along the stand, a landing
             // at its edge, a few trees left standing
-            let c0 = mixc(rgb(116.0, 104.0, 88.0), rgb(134.0, 110.0, 86.0), smoothstep(-0.3, 0.4, mot));
+            let c0 = mixc(rgb(92.0, 84.0, 70.0), rgb(106.0, 90.0, 72.0), smoothstep(-0.3, 0.4, mot));
             let c1 = mixc(c0, s.pal(pal::SOIL), 0.15) * (1.0 + 0.22 * mot);
             let tr = q.x / 19.0 + u01k(bid, 4);
             let trail = kernels::band_cov((tr - tr.floor() - 0.5) * 19.0, 1.6, fw) * band(19.0, gsd) * smoothstep(4.0, 14.0, ey);
-            let c2 = mixc(c1, rgb(162.0, 144.0, 114.0), 0.7 * trail);
+            let c2 = mixc(c1, rgb(128.0, 116.0, 94.0), 0.7 * trail);
             let landing = kernels::band_cov(ey, 12.0, fw) * kernels::band_cov(ex - 0.5 * wc, 22.0, fw);
-            let col = mixc(c2, rgb(170.0, 156.0, 128.0), landing);
+            let col = mixc(c2, rgb(138.0, 126.0, 104.0), landing);
             (col, 0.93)
         } else {
             // grass and herbs, fireweed in flower, then the young trees close in
             let g = smoothstep(3.0, 7.0, age);
             // (the regrowth's green differs by stand, and a 40 m patchwork runs through each)
-            let gt = mixc(rgb(104.0, 116.0, 68.0), rgb(84.0, 102.0, 64.0), u01k(bid, 6));
+            let gt = mixc(rgb(92.0, 102.0, 64.0), rgb(78.0, 92.0, 60.0), u01k(bid, 6));
             let mot2 = perlin3(SEED_STAND ^ 0x14, p / 40.0) * band(40.0, gsd);
-            let c0 = mixc(rgb(138.0, 124.0, 82.0), gt, g) * (1.0 + 0.16 * mot + 0.14 * mot2);
+            let c0 = mixc(rgb(110.0, 104.0, 70.0), gt, g) * (1.0 + 0.16 * mot + 0.14 * mot2);
             let fire =
                 smoothstep(-0.1, 0.3, perlin3(SEED_STAND ^ 0x13, p / 14.0) * band(14.0, gsd)) * smoothstep(2.5, 4.0, age) * (1.0 - smoothstep(6.0, 9.0, age));
             let col = mixc(c0, rgb(166.0, 92.0, 132.0), 0.55 * fire * (0.6 + 0.4 * smoothstep(0.4, 0.7, s.bio.style.season)));
@@ -571,7 +579,7 @@ fn stands(s: &mut Stack, fe: f64) {
         s.composite(Layer { cov: inside, albedo: col, cls: lc::CLEAR_CUT, clear, ..Default::default() });
         if age > 3.0 {
             // the young trees: planted in rows (the stand's frame), growing with the age
-            let grow = ((age - 3.0) / 10.0).clamp(0.0, 1.0);
+            let grow = ((age - 3.0) / 7.0).clamp(0.0, 1.0);
             let kp = kernel_parts(s, K_YOUNG, inside * (0.25 + 0.75 * grow), q, 0.0);
             let tc = if u01k(bid, 5) < 0.65 { rgb(44.0, 70.0, 42.0) } else { rgb(84.0, 112.0, 50.0) };
             let ly = kernel_layer(s, K_YOUNG, &kp, tc, tc, 0.6 * (age - 2.0));

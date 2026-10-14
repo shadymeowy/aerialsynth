@@ -14,12 +14,19 @@ pub fn standing(s: &mut Stack) {
     let p = s.ctx.p;
     let gsd = s.ctx.gsd;
     let depth = l.water - l.ground;
+    let wn = s.sm.pf_lazy(s.pf, PF_WATER);
     let mut col = match l.water_kind {
         water::OCEAN => mixc(pal.ocean_shallow, pal.ocean_deep, smoothstep(0.0, 28.0, depth)),
-        _ => mixc(mixc(pal.river, pal.ocean_shallow, 0.25), pal.lake_deep, smoothstep(0.0, 5.0, depth)),
+        // lakes: dark (humic) open water; the bottom shows only in the last metre or two, olive
+        // and patchy (a turquoise ring of shallow water 5 m wide read as a plastic rim, and a
+        // channel carved through it as a dark band across the lake)
+        _ => {
+            let sh = 1.0 - smoothstep(0.0, 3.5, depth * (1.0 + 0.5 * wn).max(0.2));
+            mixc(mixc(pal.lake_deep, srgb(26.0, 32.0, 26.0), 0.35), mixc(pal.river, srgb(78.0, 76.0, 56.0), 0.6), 0.7 * sh)
+        }
     };
     // sediment / plankton variation
-    col *= 1.0 + 0.06 * s.sm.pf_lazy(s.pf, PF_WATER);
+    col *= 1.0 + 0.06 * wn;
     if l.water_kind == water::OCEAN && depth < 3.0 {
         // the sandy bottom shows through clear shallow water
         let sh = 1.0 - smoothstep(0.0, 3.0, depth);

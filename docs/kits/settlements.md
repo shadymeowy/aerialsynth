@@ -37,7 +37,7 @@ culture, development, population, downwind direction) drives:
 |---|---|
 | footprint | relative distance in the elongated frame / (R (1 + two noise octaves)); density 1 → 0 over its outer half |
 | zones | CBD (cities: 7–16 % of R), inner, outer, suburb, peri-urban; industrial wedges: 1–2 angular sectors around the downwind direction |
-| districts | W2 cells in the place frame (400 m villages … 1.4 km metropolises); their edges are arterials (4–9 m half width); per-district pattern, angle, block size, density multiplier (some districts dense, some half fields: the coarse look is a patchwork) |
+| districts | W2 cells in the place frame (400 m villages … 1.4 km metropolises); their edges are arterials (3.5–7.5 m half width) where the layouts differ; one pattern per zone ring, one layout per pattern and one street orientation per town; streets and city lots end where the density falls below ~0.42; density multiplier 0.8–1 per district |
 | patterns | grid / rotated grid (jittered lines, main streets every fourth), radial-concentric (rings, spokes doubling per band), organic (warped W2 at 40–90 m; medinas narrow), curvilinear suburbs (warped long blocks, most cross streets missing), superblocks (280–390 m, slab and point towers in rows, green and parking), informal (W2 at 7.5 m: tiny corrugated roofs, alleys, thinning with the footprint), industrial (230–340 m blocks) |
 | lots | hashed BSP of the block, depth 1 (CBD) … 4 (suburbs); a lot exists by the density at its centre (lots stay whole) |
 | buildings | by zone × culture × lot: detached houses with setbacks (pools in rich suburbs, yard trees, porch lights), row houses, perimeter blocks with courtyards (European, Mediterranean, monsoon cultures), mid-rises, towers on podiums (40–440 m, by population), warehouses with tanks; gable or flat roofs, roof palettes by culture (terracotta, slate, metal, shingles, thatch, corrugated, whitewashed) |
@@ -225,8 +225,12 @@ villages and farmsteads as points.
   still reach into a lake or river.
 * Confluences and river mouths get no extra bonus beyond the river's proximity (the coast bonus
   is the atlas coast distance).
-* Streets are not connected between districts (district edges are arterials) nor to the core's
-  rural roads; the transport kit's graph will link places.
+* A town draws one street pattern per zone ring (old core, inner, outer, suburbs, peri-urban),
+  drawn per town; the districts of one pattern share one street layout (their blocks run on
+  across district borders). Arterials follow district borders only where the layouts differ:
+  between rings of different patterns, around industrial estates and superblocks (each its
+  own layout). Buildings next to such an arterial are cut by its verge, and the pattern
+  changes there abruptly. Streets are not connected to the core's rural roads.
 * Towers cast shadows only within their own block (3 steps of 3.5 m); tall towers' long shadows
   across streets are missing.
 * Reservoirs fill every ground below the water level within their reach upstream of the dam,

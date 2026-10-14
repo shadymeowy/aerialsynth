@@ -263,7 +263,7 @@
     - slot: azonal
       kernel: patches
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.3, 0.45] }
-      params: { scale: 600, fraction: 0.35, octaves: 3, roughness: 0.6, colour: [74, 70, 66], colour2: [94, 88, 80], colour_var: 0.2 }
+      params: { scale: 600, fraction: 0.35, octaves: 3, roughness: 0.6, colour: [116, 106, 94], colour2: [132, 120, 104], colour_var: 0.2 }
       class: gravel
     - slot: azonal
       kernel: patches

@@ -414,3 +414,14 @@ pub fn wgsl_relief() -> String {
     s.push_str("}\n");
     s
 }
+
+/// The agriculture kit's field system of land-use region `rid` in ecoregion `e` (its name).
+pub fn agriculture_system(e: &crate::eco::EcoParams, rid: u64) -> &'static str {
+    agriculture::sys::NAMES[agriculture::pick_system(&agriculture::EcoV::of(e), rid) as usize]
+}
+
+/// The agriculture kit's cadastral partition (the core's irregular fields): parcel id,
+/// coordinates in the parcel's frame, distance to its border, its centre (`q`'s frame).
+pub(crate) fn cadastral_parcel(seed: u64, q: glam::DVec2, cell: f64, aspect: f64) -> (u64, f64, f64, f64, glam::DVec2) {
+    agriculture::cadastral_parcel(seed, q, cell, aspect)
+}

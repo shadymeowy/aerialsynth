@@ -126,6 +126,7 @@ fn no_seams_across_faces() {
     let a = small();
     let r = a.resolution();
     let mut worst = [0.0f64; 15];
+    let mut at = [0.0f64; 15];
     let mut scale = [0.0f64; 15];
     let mut n = 0;
     for f in 0..6 {
@@ -163,7 +164,10 @@ fn no_seams_across_faces() {
                 assert_ne!(geom::face_of(p_out), f);
                 let (vi, vo, vf) = (continuous(&a.sample(p_in)), continuous(&a.sample(p_out)), continuous(&a.sample(p_far)));
                 for c in 0..15 {
-                    worst[c] = worst[c].max((vi[c] - vo[c]).abs());
+                    if (vi[c] - vo[c]).abs() > worst[c] {
+                        worst[c] = (vi[c] - vo[c]).abs();
+                        at[c] = vi[c].abs();
+                    }
                     scale[c] += (vi[c] - vf[c]).abs();
                 }
                 n += 1;
@@ -173,8 +177,8 @@ fn no_seams_across_faces() {
     for c in 0..15 {
         let mean_step = scale[c] / n as f64;
         eprintln!("{:12} max jump across faces {:10.4}, mean change over one texel {:10.4}", NAMES[c], worst[c], mean_step);
-        // (the samples are 2e-6 rad apart: ~1e-4 of a texel)
-        assert!(worst[c] <= 0.01 * mean_step + 1e-6 * vi_scale(c), "{}: jump {} vs one-texel change {}", NAMES[c], worst[c], mean_step);
+        // (the samples are 2e-6 rad apart: ~1e-4 of a texel; plus one f16 step of the value)
+        assert!(worst[c] <= 0.01 * mean_step + 1e-6 * vi_scale(c) + at[c] / 1024.0, "{}: jump {} vs one-texel change {}", NAMES[c], worst[c], mean_step);
     }
 }
 

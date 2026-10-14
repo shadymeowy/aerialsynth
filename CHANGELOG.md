@@ -75,6 +75,57 @@
     bisection to 1 cm instead of a fixed-point iteration, which oscillated on steep ground (the
     boreal upland's far corner: 1575 ↔ 1992 m).
 
+- **`next` towards v0.2.0's look** (A/B at the v0.2.0 showcase poses and at places of the same
+  landscape type in next's world: `scripts/ab_v020.py`, `scripts/ab_v020/*.yaml`, reference
+  stills `docs/ab/v020/`, sheets `docs/ab/next_quality/`; `probe_px info LAT LON` names a
+  point's biome, Köppen class, culture, field system and relief instances).
+  - **Fields** (agriculture kit, core): the irregular systems (bocage, smallholder plots,
+    terraces, groves, the core's irregular style) were a Voronoi honeycomb with thick dark
+    hedges; now cadastral blocks cut by recursive splits into four-sided fields of varied size
+    and orientation (`part_cad`; open-field furlongs are those blocks). Hedges 2–4 m, on half
+    the bocage borders; pasture paddocks 420 × 300 m with hay and crops; colours 25 % towards
+    their grey, mottled per parcel, with v0.2.0's growth zones; no chevrons at the headland.
+  - **Farmland** (agriculture kit, core): woodlots are forest whatever the climate's forest
+    share (they were bare meadow with a few trees); gallery trees along the streams of drier
+    farmland too (moisture 0.18 up, belt 7 m + 0.6 × the half width, box-filtered by the
+    pixel); hedges have gaps and hedgerow trees bulging out every few tens of metres and are
+    fewer (share × (0.3 + 0.7 hedges)); field margins subtler; a third of the paddocks keep a
+    smaller trampled disc around the trough (a bare disc in every paddock dotted the land);
+    tilled soil a dull brown of the biome's soils (the palette's red one drew maroon fields).
+  - **Towns** (settlements kit): one street pattern per zone ring and town, one layout per
+    pattern (blocks run on across district borders), one street orientation per town,
+    arterials only between different layouts and narrower (3.5–7.5 m half width), streets and
+    lots end where the town thins out (density 0.42: a grid of empty streets ran on into the
+    fields, houses were strewn over them), density 0.8–1 per district; yards take after the
+    ground around.
+  - **Climate:** the heated continents pull the wind belts far (4° + 7° × land) only in the
+    tropics and subtropics, 4° beyond 50° (at 55° the winter polar easterlies dried the
+    continents' interiors into a monsoon climate: dry winters, Dw, on 58 % of the land at
+    50–60° N, paddy cultures at 60° N, olive steppe at the v0.2.0 boreal pose, 53° N);
+    subarctic dry-winter ecoregions draw boreal cultures; cold-winter steppes need less than
+    520 mm (at 600 mm and 7 °C the land is forest); grass stays green at less rain in cool
+    climates (by the ecoregion's mean temperature, not in mountains). `ATLAS_VERSION` 6;
+    `probe_px bands`: Köppen classes and biomes per latitude band.
+  - **No winter ecoregions** (cold kit): 35 % of the ecoregions were dated in winter (snowy
+    taiga as grey ground with black dots, frozen grey lakes in summer datasets); every date is
+    now mid May .. late September. Kettle lakes have bays and points.
+  - **Lakes:** dark humic water; the bottom shows only in the last 3.5 m, olive and patchy (a
+    5 m turquoise ring read as a plastic rim, and river channels carved through it as dark
+    bands across the lakes).
+  - **Boreal forest:** cold steppes (BSk / BWk below 3 °C, > 150 mm) take the subarctic forest's
+    biomes; the canopy closes at lower moisture below 8 °C in the lowlands (taiga of dry
+    continental interiors); altitudinal zones follow a continentality-corrected temperature
+    (krummholz no longer covers the hills of hot-summer continental climates), dithered ±2 °C
+    (its 90 m octave band-limited). Managed stands: about 0.5 % cut a year, most cuts years old
+    and greening, darker slash, in a frame warped by ~25 m with ragged edges (pale rectangles);
+    fens and beaver meadows duller (lime blobs in the taiga).
+  - **Ecotones:** the border mosaic's pick is normalized by the spread of the octaves present
+    (uniform at every pixel size); its 80 m octave stays 0.35 (0.6 broke the desert kit's LOD).
+  - **Look:** cinder cones twice as steep relative to their size and without light baked into
+    their albedo; muted gobi gravel, desert pavement and barchans; softer canyon strata.
+  - Tests: the LOD, seam, parity and determinism tests unchanged and passing (the atlas'
+    face-seam test allows one f16 step of a value); agriculture's WGSL tables re-blessed.
+
 - **Example `camera-footprint`** (`examples/camera-footprint`, `cargo run --release -p
   camera-footprint`): a teaching program, read top to bottom, that makes the coordinate frames
   explicit (geodetic ↔ ECEF ↔ ENU ↔ camera ↔ pixels; fractional XYZ tiles ↔ stitched-map pixels).

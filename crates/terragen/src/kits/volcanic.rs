@@ -357,7 +357,7 @@ fn apply(h: &mut f64, c: &Cone) {
 /// Mean heights of the lattice's cones and maars over cell × amplitude (the profiles' volumes
 /// and the size distributions; a test checks them against explicit averages), and the mean
 /// cover of cinder cones and lava tongues.
-const K_CONE: f64 = 0.006_007_1;
+const K_CONE: f64 = 0.008_581_6;
 const K_MAAR: f64 = -0.001_225_1;
 const MEAN_CINDER: f64 = 0.1790;
 /// mean lava tongue cover × cell (m)
@@ -486,7 +486,7 @@ pub(crate) fn field(it: &Instance, p: DVec3, gsd: f64, fw: f64, look: bool) -> F
                 }
             } else {
                 let rc = cs * (0.16 + 0.2 * u01k(h, 4));
-                let hc = 1.4 * rc * (0.2 + 0.16 * u01k(h, 5)) * amp;
+                let hc = 2.0 * rc * (0.2 + 0.16 * u01k(h, 5)) * amp;
                 let rho = ragged(qx, qy, rc, h);
                 if rho < 1.0 {
                     zs += hc * cone_profile(rho);
@@ -754,9 +754,10 @@ fn field_look(s: &mut Stack, it: &Instance) {
         // dark crater, pale rim, weathered to the ash at the foot
         col *= mix1(1.0, 0.72, smoothstep(0.22, 0.12, rho)) * (1.0 + 0.15 * smoothstep(0.15, 0.22, rho) * smoothstep(0.4, 0.22, rho));
         col = mixc(col, ash_col(u01k(f.chash, 17)) * 0.9, 0.5 * smoothstep(0.55, 0.95, rho));
-        // a cone is lit towards its top and dark at its foot (the relief alone did not read at a nadir)
-        col *= mix1(0.8, 1.14, smoothstep(0.95, 0.3, rho));
-        let col = col * (1.0 + 0.1 * nz(SEED_ASH + 6, p, 9.0, gsd));
+        // (no light baked into the albedo: the cones are steeper instead, and their lower flanks
+        // weather and grow over into the ground around them)
+        col = mixc(col, s.col, 0.5 * smoothstep(0.55, 1.0, rho));
+        let col = col * (1.0 + 0.18 * nz(SEED_ASH + 6, p, 9.0, gsd));
         s.composite(Layer { cov: f.cinder, albedo: col, cls: cls::VOLCANIC_ASH, clear: 1.0, ..Default::default() });
         s.m.natural_ok *= 1.0 - f.cinder;
     }

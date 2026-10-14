@@ -107,6 +107,6 @@ Islands of oceanic ecoregions have no vegetation. Lava follows radial lines, not
 At globe zooms (z < 6) more than 8 instances reach a block and the first 8 by id are kept.
 
 Leftovers round B: the ash edge is azimuth harmonics (7, 17, 41 per turn, band-limited by the radius) plus a 90 m noise, so
-the ash lies in rays down the ravines instead of blobs; the cinder cones are 1.4 x higher (`K_CONE` 0.0060071) and
-shaded light at the top, dark at the foot. Not found: the road up the cone, the river line across a caldera lake (not
+the ash lies in rays down the ravines instead of blobs; the cinder cones are 2.0 x higher than at first (`K_CONE` 0.0085816; no light baked into their
+albedo: the renderer shades them), their lower flanks blend into the ground around them. Not found: the road up the cone, the river line across a caldera lake (not
 visible in the places re-rendered).

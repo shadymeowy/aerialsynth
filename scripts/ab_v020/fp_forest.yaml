@@ -1,0 +1,75 @@
+# the camera-footprint example's scene (oblique camera, 1024 x 768 at fx 900 scaled to 640 x 480)
+world:
+  seed: 1
+  generator: next
+tiles:
+  file: out/world.h5
+  max_zoom: 18
+  margin: 0
+  plan_every: 5
+trajectory:
+  synth:
+    rate_hz: 400
+    speed_mps: 50
+    altitude_m: 900
+    altitude_ref: ellipsoid
+    heading_deg: 115
+    kind: line
+    lat: 59.7458
+    lon: 15.248
+    duration_s: 8.1
+render:
+  supersample: 2
+  shading: relit
+  lighting:
+    mode: clock
+    date: '2026-06-21'
+    time_utc: '09:00:00'
+    time_scale: 1.0
+    sky_intensity: 0.55
+  atmosphere:
+    visibility_km: 40
+    inscatter: 1.0
+cameras:
+- path: /cam0
+  intrinsics:
+    model: pinhole
+    width: 640
+    height: 480
+    intrinsics:
+    - 562.5
+    - 562.5
+    - 319.5
+    - 239.5
+  extrinsics:
+    mount: forward
+    pitch_deg: -40
+    roll_deg: 4
+  frame_rate: 0.49180327868852464
+  rgb:
+    sensor:
+      exposure:
+        mode: auto
+        tau_s: 0.4
+        target: 0.13
+      motion_blur:
+        enabled: true
+        max_samples: 24
+      optics:
+        defocus_px: 0.25
+        chromatic_aberration_px: 0.3
+        vignette: 0.25
+        bloom: 0.06
+      noise:
+        enabled: true
+        read: 0.08
+        shot: 0.1
+      tone:
+        curve: filmic
+        saturation: 0.92
+    supersample: 2
+output:
+  start: 1.0
+  compression:
+    level: 1
+  end: 7.1

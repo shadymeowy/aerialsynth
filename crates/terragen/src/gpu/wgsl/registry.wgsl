@@ -179,8 +179,9 @@ fn ecotone_pick(p: vec3<f64>, gsd: f32, edge: f32) -> f32 {
     if (ex <= 0.0) {
         return pb;
     }
-    let n = 0.75 * perlin3(cfg.seed ^ 0xEC7lu, p * (1.0lf / 220.0lf)) + 0.35 * perlin3(cfg.seed ^ 0xEC8lu, p * (1.0lf / 80.0lf)) * band(80.0, gsd);
-    let u = 1.0 / (1.0 + exp(-1.7 * n / 0.29));
+    let b80 = band(80.0, gsd);
+    let n = 0.75 * perlin3(cfg.seed ^ 0xEC7lu, p * (1.0lf / 220.0lf)) + 0.35 * perlin3(cfg.seed ^ 0xEC8lu, p * (1.0lf / 80.0lf)) * b80;
+    let u = 1.0 / (1.0 + exp(-1.7 * n / (0.3504 * sqrt(0.5625 + 0.1225 * b80 * b80))));
     let crisp = select(0.0, 1.0, u < pb);
     return pb + (crisp - pb) * ex;
 }
@@ -201,13 +202,13 @@ fn zone_of(b: u32, temp: f32, p: vec3<f64>, gsd: f32) -> ZoneSel {
     if (bz.r0.w == 0u) {
         return o;
     }
-    let n = perlin3(0x20E5lu, p * (1.0lf / 260.0lf)) * 0.8 + 0.4 * perlin3(0x20E6lu, p * (1.0lf / 90.0lf));
+    let n = perlin3(0x20E5lu, p * (1.0lf / 260.0lf)) * 0.8 + 0.4 * perlin3(0x20E6lu, p * (1.0lf / 90.0lf)) * band(90.0, gsd);
     let ex = band(260.0, gsd);
-    let tt = temp + 1.2 * n * ex;
+    let tt = temp + 2.0 * n * ex;
     var pw = 0.0;
     for (var k = 0u; k < bz.r0.w; k++) {
         let zn = zones[bz.r0.z + k];
-        let wz = (1.0 - ex) * (1.0 - smoothstep1(zn.below - 1.0, zn.below + 1.0, temp));
+        let wz = (1.0 - ex) * (1.0 - smoothstep1(zn.below - 1.6, zn.below + 1.6, temp));
         if (tt < zn.below) {
             o.z = zn.biome;
         } else if (wz > pw) {
@@ -268,9 +269,10 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
         e2 = ea;
         w = 1.0 - wb;
     }
-    let z1 = zone_of(e1.biome, t.temp, c.p, c.gsd);
+    let tz = t.temp + clamp(0.5 * t.temp_range - 10.0, -6.0, 8.0);
+    let z1 = zone_of(e1.biome, tz, c.p, c.gsd);
     if (w > 0.0) {
-        let z2 = zone_of(e2.biome, t.temp, c.p, c.gsd);
+        let z2 = zone_of(e2.biome, tz, c.p, c.gsd);
         o.a = z1.z;
         o.b = z2.z;
         o.w = w;

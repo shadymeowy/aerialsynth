@@ -145,17 +145,23 @@ pub fn layer(s: &mut crate::stack::Stack) {
     let st = &t.style;
     let style = s.bio.style;
     let trees_mult = s.veg(|v| v.trees) * style.trees;
-    let base_cover = smoothstep(0.3, 0.68, wet) * smoothstep(-6.0, 2.0, temp) * veg.tree_density * trees_mult;
-    let fpu = 0.5 + 0.5 * pf.forest; // ~[0, 1]
-                                     // forests where the patch field is below the cover fraction (crisp but noisy edges)
-    let forest = smoothstep(-0.03, 0.03, base_cover - fpu);
+    // (cold climates need less rain for a closed forest: the boreal forest of dry continental
+    // interiors, not the mountains; the moisture window shifts down below 8 C)
+    let cold = (1.0 - smoothstep(0.0, 8.0, temp)) * (1.0 - smoothstep(0.15, 0.4, t.mountain));
+    let base_cover = smoothstep(0.3 - 0.14 * cold, 0.68 - 0.24 * cold, wet) * smoothstep(-6.0, 2.0, temp) * veg.tree_density * trees_mult;
+    // ~[0, 1]
+    let fpu = 0.5 + 0.5 * pf.forest;
+    // forests where the patch field is below the cover fraction (crisp but noisy edges), and the
+    // farmland's woodlots whatever the climate's cover (they were bare meadow with a few trees
+    // where the forest share is low)
+    let forest = smoothstep(-0.03, 0.03, base_cover - fpu).max(m.woodlot * smoothstep(0.05, 0.4, s.agri()));
     // savanna / steppe scattered trees, groves
     let savanna = smoothstep(0.18, 0.35, wet) * (1.0 - smoothstep(0.55, 0.7, wet)) * smoothstep(12.0, 20.0, temp) * 0.12 * s.veg(|v| v.savanna);
     let groves = 0.04 * smoothstep(0.15, 0.3, wet) * s.veg(|v| v.groves);
+    let base = m.natural_ok * (1.0 - m.field_cov) * veg.tree_density;
     // farmland is cleared except on steep ground (and its woodlots): what cannot be a field
     // there is meadow, not forest
     let clear = 1.0 - 0.85 * smoothstep(0.05, 0.4, s.agri()) * (1.0 - smoothstep(0.45, 0.7, slope)) * (1.0 - m.woodlot);
-    let base = m.natural_ok * (1.0 - m.field_cov) * veg.tree_density;
     let mut dens = (forest * 0.9 * clear + savanna + groves) * base;
     let mut dens_sav = savanna * base;
     dens = dens.max(0.8 * m.riparian * veg.tree_density);

@@ -271,7 +271,7 @@ fn place(s: &mut Stack, pl: &town::Pl, rel: f64, n: f64, q: DVec2, sun: DVec3) {
     if dens <= 0.0 && !strips {
         return;
     }
-    let env = Env { gsd, fw, n, moist: t.moist, detail: s.pf.detail };
+    let env = Env { gsd, fw, n, moist: t.moist, detail: s.pf.detail, ground: s.col };
     let city = pl.form == crate::kits::settlements::places::form::CITY as u32;
     let block = if city { 90.0 } else { 40.0 };
     let e_blk = band(block, gsd);

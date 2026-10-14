@@ -44,11 +44,13 @@ gets the steppe class.
   patches, open water in the core and a network of creeks; beaver ponds on small streams — a
   lens-shaped pond, a ring of dead grey trees, the beaver meadow; floodplain meadows with
   swales parallel to the channel. Pools and ponds are class *lake*; mires *bog*, reed *marsh*.
-* **Managed forest** (disturbance slot): rectangular stands (a brick pattern of columns
-  150–300 m wide in the land-use region's frame) where the culture manages its forests (boreal,
-  survey-grid and temperate archetypes, by development and a per-ecoregion draw), some cut in the
-  last 16 years — fresh slash with skid trails, a landing and a few seed trees, then grass and
-  fireweed, then dense young plantations in rows — with logging roads along the column edges
+* **Managed forest** (disturbance slot): stands (a brick pattern of columns 150–300 m wide in
+  the land-use region's frame, warped by ~25 m) where the culture manages its forests (boreal,
+  survey-grid and temperate archetypes, by development and a per-ecoregion draw), about 0.5 %
+  of them cut a year (at most 9 % within 16 years; most cuts years old) with ragged edges (seed
+  trees and uncut corners along the border) — fresh dark slash with skid trails, a landing and a
+  few seed trees, then grass and fireweed, then dense young plantations in rows — with logging
+  roads along the column edges
   (class *clear-cut*, roads *track*); windthrow — patches of fallen trunks lying in the storm's
   direction; firebreaks — straight cleared strips with a track through the forests and scrub of
   dry-summer climates (and the managed boreal forest).
@@ -121,12 +123,12 @@ kit's `KITS` entry commented out (mean of two runs, shared machine, so +-3 % noi
 
 ## Known limits
 
-* Regrowth on clear-cuts is a uniform lime green (grass and fireweed, then young rows): from
-  1.5 km up a cut of a few years reads as a flat bright rectangle; there is no gradient of ages
+* Up to 18 % of the managed stands are cut within 16 years (42 % before: the taiga was a
+  patchwork of bright rectangles); regrowth is a muted green and the young rows close within 7
+  years, but a cut still reads as a flat rectangle from 1.5 km up; there is no gradient of ages
   within a stand.
 * Managed stands are a brick pattern of rectangles in the land-use region's frame: their edges
-  are straight and axis-aligned within a region, regardless of slope, streams and roads; under
-  seasonal snow the cuts read as white rectangles in the forest (the cold kit's kettle still).
+  are straight and axis-aligned within a region, regardless of slope, streams and roads.
 * Bogs, string bogs and fens are drawn by masks on the drainage and the relief (no peat
   hydrology): a raised bog can sit on a gentle slope, and string-bog strings follow a slow flow
   field rather than the real slope.

@@ -1074,9 +1074,10 @@ impl BioSample {
         let eb = if wb > 0.0 { sm.eco.params(world, reg, cache, ib, cb) } else { ea };
         // the sample's ecoregion and the one blended in (where the mosaic is below the pixel)
         let (e1, e2, w) = if wb > 0.5 { (eb, ea, 1.0 - wb) } else { (ea, eb, wb) };
-        let z1 = zone(reg, e1.biome, t.temp, ctx.p, ctx.gsd);
+        let tz = zone_temp(t.temp, t.temp_range);
+        let z1 = zone(reg, e1.biome, tz, ctx.p, ctx.gsd);
         let (a, b, wz) = if w > 0.0 {
-            let z2 = zone(reg, e2.biome, t.temp, ctx.p, ctx.gsd);
+            let z2 = zone(reg, e2.biome, tz, ctx.p, ctx.gsd);
             (z1.0, z2.0, w)
         } else {
             z1
@@ -1107,22 +1108,34 @@ impl BioSample {
     }
 }
 
+/// The temperature the altitudinal zones are chosen by: the annual mean shifted by the
+/// continentality (treelines follow the summer: a continental climate with hot summers keeps
+/// its forest at annual means where an oceanic one has krummholz). The zone limits (`below_c`)
+/// hold for a warmest − coldest month range of 20 °C.
+#[inline]
+pub fn zone_temp(temp: f64, range: f64) -> f64 {
+    temp + (0.5 * range - 10.0).clamp(-6.0, 8.0)
+}
+
 /// The zone of biome `b` at temperature `temp`: (zone, partner across the nearest zone
-/// border, partner weight); dithered over ±1 °C where the dither is resolved.
+/// border, partner weight); dithered over ±2 °C where the dither is resolved (an ecotone
+/// mosaic, not a line along the contours).
 fn zone(reg: &Registry, b: u16, temp: f64, p: DVec3, gsd: f64) -> (u16, u16, f64) {
     let bz = &reg.biomes[b as usize];
     if bz.zones.is_empty() {
         return (b, b, 0.0);
     }
     // zones sorted warmest first: the sample's zone is the last whose upper limit is above temp
-    let n = perlin3(0x20E5, p / 260.0) * 0.8 + 0.4 * perlin3(0x20E6, p / 90.0);
+    // (the 90 m octave band-limited: aliased at coarse pixels, it flipped zones between a parent
+    // and its children)
+    let n = perlin3(0x20E5, p / 260.0) * 0.8 + 0.4 * perlin3(0x20E6, p / 90.0) * band(90.0, gsd);
     let ex = band(260.0, gsd);
-    let tt = temp + 1.2 * n * ex;
+    let tt = temp + 2.0 * n * ex;
     let mut cur = b;
     let mut partner = (b, 0.0);
     for &(below, zb) in &bz.zones {
         // weight of the colder zone across this border (blend where the dither is unresolved)
-        let wz = (1.0 - ex) * (1.0 - smoothstep(below - 1.0, below + 1.0, temp));
+        let wz = (1.0 - ex) * (1.0 - smoothstep(below - 1.6, below + 1.6, temp));
         if tt < below {
             cur = zb;
         } else if wz > partner.1 {
