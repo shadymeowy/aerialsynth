@@ -43,10 +43,12 @@ the atlas coast distance (−100..30 km) and on a window of `h0` before any nois
 * *Pass A, after the drainage carve* (a new core hook: `Kit::astamps` / `Kit::astamp`, pass-A
   stamps that reach the GPU in the sink-lake list as entries with a negative radius): in a frame
   at the mouth with the apex a quarter radius inland, the margin is a ±72° fan with lobes (three
-  angular harmonics) or four fingers (the longest ahead along the river); inside, low ground is
+  angular harmonics) that opens downstream (±27° at the apex, ±72° from half a radius on, its
+  sides wavy) or four fingers (the longest ahead along the river); inside, low ground is
   raised and slightly higher ground flattened to 2 m at the apex falling to 0.5 m at the radius;
-  a shallow front (−2 m) around the lobes; distributaries radiate from the apex (fan: five,
-  forking halfway; bird's-foot: along the fingers), carved to −1.5 m (sea water), box-filtered
+  a shallow front (−2 m) around the lobes; distributaries leave the river's line and spread to
+  their angles over half a radius, wiggling (fan: five, forking halfway; bird's-foot: along the
+  fingers), carved to −1.5 m (sea water), box-filtered
   by the pixel; the river's own channel upstream of the mouth stays. Lobes fade out over a shelf
   deeper than 35–60 m.
 * *Pass B (slot 5)* from a stamp (`delta::TEMPLATE` 128): reed marsh on the plain, mud where it
@@ -151,6 +153,6 @@ mangroves with their creeks. Distributaries hold sea water.
 * Deltas: only at the major rivers' mouths (drainage level 0), 2–12 km, not drawn in tiles with
   pixels above 3 km (they appear at ~z6); a lobe over a shelf deeper than 35 m is only partly
   raised (a shallow mound under water); the plain is flat (no levees or abandoned lobes); the
-  distributaries are near-straight rays (a gentle wiggle, no meanders) and read geometric from
-  a few kilometres; two mouths close together overlap.
+  distributaries are smooth curves (a wiggle, no meanders) and read geometric from a few
+  kilometres; two mouths close together overlap.
 * A straight scarp inside a tidal-flat view is the core's arid mesa terrace, not a seam.

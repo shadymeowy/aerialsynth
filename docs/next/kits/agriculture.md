@@ -17,12 +17,12 @@ share for the core's fields. Systems change at region and ecoregion borders, nev
 
 | system | look |
 |---|---|
-| section grid | 1-mile sections, quarter sections, centre pivots where dry, farmsteads, section-line roads |
+| section grid | 1-mile sections, quarter sections (most cut into halves or forties), centre pivots where dry, farmsteads, section-line roads |
 | shelterbelt steppe | huge fields bordered by tree belts, strip-fallow stripes |
 | open-field strips | furlongs of long narrow strips, each its own crop, reverse-S curves |
-| bocage | small irregular pastures and fields (cadastral blocks) inside hedgerows on about half their borders, trees in the hedges |
-| smallholder mosaic | tiny irregular plots, scattered trees, homestead compounds |
-| rice paddies | bunded plots, flooded / transplanted / green / ripe by season; contour terraces on slopes; canals, fish ponds |
+| bocage | irregular pastures and fields (cadastral blocks of ~260 m parcels) inside hedgerows on about half their borders, trees in the hedges |
+| smallholder mosaic | tiny irregular plots (~64 m), scattered trees, homestead compounds |
+| rice paddies | bunded plots, flooded / transplanted / green / ripe by season (stages spread ±0.225 around it); contour terraces on slopes; canals, a few fish ponds |
 | dry terraces | stone-walled benches with grain, olives and orchards on contours |
 | vineyards | parcels of vine rows along the field axis or the contours |
 | groves | olive, almond, citrus groves; date palms in deserts, apples in cool climates |
@@ -44,11 +44,15 @@ Parcels are crisp units with hashed ids (their crops are the parcel's instance i
 band-limited and blend to the system's mean at coarse pixels. Field tracks only: roads are the transport kit's.
 
 **Around the fields** (core and kit): the farmland's woodlots (the most forest-prone patches,
-about a seventh of the land by the biome and culture) are forest whatever the climate's forest
+about a sixth of the land by the biome and culture) are forest whatever the climate's forest
 share; streams carry gallery trees wherever the moisture is above 0.18 (a belt 7 m + 0.6 × the
 channel's half width, box-filtered by the pixel); hedges have gaps (gateways, missing
 stretches) and hedgerow trees bulging out of them every few tens of metres (shelter belts are
-continuous); tilled soil is a dull brown of the biome's soils.
+continuous); tilled soil is a dull brown of the biome's soils, 40 % towards v0.2.0's ploughland
+brown. Neighbouring parcels often grow the same crop (70 % draw it from a 700 m cluster cell);
+cereals show v0.2.0's ~1 m drill rows at low altitude; pastures stay green down to a moisture of
+0.15–0.5 (managed grass); idle parcels (4 %) are rough grass. Farmed floodplains carry fewer reed
+marshes (the temperate kit's marsh amount × 0.2 where the agricultural intensity is above 0.6).
 
 ## Stills
 
