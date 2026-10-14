@@ -170,96 +170,24 @@ fn rot2(v: DVec2, a: f64) -> DVec2 {
     DVec2::new(c * v.x + s * v.y, -s * v.x + c * v.y)
 }
 
-/// The street pattern of a district (zone at its centre, culture, development).
+/// The street pattern of a town (culture; industrial districts apart): one layout for the whole
+/// town, its zones differ by their buildings (districts of different patterns and orientations
+/// read as pieces of different towns glued together; v0.2.0 drew one grid per town); the
+/// peri-urban ring of poor towns is informal.
 pub fn pick_pattern(pl: &Pl, z: u32, did: u64, industrial: bool) -> u32 {
     use pat::*;
     if industrial {
         return INDUSTRIAL;
     }
     let u = u01k(did, 4);
-    let a = pl.arch;
-    let poor = pl.dev < 0.45 && matches!(a, 0 | 1 | 2 | 3 | 8);
-    match z {
-        zone::CBD => {
-            if matches!(a, 6 | 9 | 4) && u < 0.3 {
-                RADIAL
-            } else {
-                GRID
-            }
-        }
-        zone::INNER => match a {
-            3 => ORGANIC,
-            5 | 6 | 11 => {
-                if u < 0.5 {
-                    ORGANIC
-                } else if u < 0.75 {
-                    RADIAL
-                } else {
-                    GRID
-                }
-            }
-            7 | 10 => GRID,
-            4 | 9 => {
-                if u < 0.5 {
-                    SUPER
-                } else {
-                    GRID
-                }
-            }
-            _ => {
-                if u < 0.5 {
-                    GRID
-                } else {
-                    ORGANIC
-                }
-            }
-        },
-        zone::OUTER => match a {
-            7 => GRID,
-            4 | 9 => {
-                if u < 0.7 {
-                    SUPER
-                } else {
-                    GRID
-                }
-            }
-            8 => {
-                if pl.dev > 0.5 && u < 0.5 {
-                    SUPER
-                } else {
-                    GRID
-                }
-            }
-            _ => {
-                if u < 0.7 {
-                    GRID
-                } else {
-                    CURVI
-                }
-            }
-        },
-        zone::SUBURB => {
-            if poor && u < 0.5 {
-                INFORMAL
-            } else if a == 7 || ((a == 5 || a == 6 || a == 11) && u < 0.5) {
-                if a == 7 && u > 0.7 {
-                    GRID
-                } else {
-                    CURVI
-                }
-            } else {
-                GRID
-            }
-        }
-        _ => {
-            if (poor || (a == 4 && pl.dev < 0.5)) && u < 0.65 {
-                INFORMAL
-            } else if (a == 7 || a == 6) && u < 0.5 {
-                CURVI
-            } else {
-                GRID
-            }
-        }
+    if z == zone::PERI && pl.dev < 0.45 && matches!(pl.arch, 0 | 1 | 2 | 3 | 8) && u < 0.65 {
+        return INFORMAL;
+    }
+    match pl.arch {
+        3 => ORGANIC,
+        5 | 6 | 11 if u < 0.3 => RADIAL,
+        4 | 9 if u < 0.5 => SUPER,
+        _ => GRID,
     }
 }
 
@@ -497,7 +425,7 @@ pub struct Dist {
 
 /// The pattern of the district of site `point` (place frame) and id `id`, the zone at its site
 /// and whether it is industrial (wedges around the downwind direction). The pattern is drawn
-/// per town and zone (one look per ring of the town), not per district.
+/// per town (`pick_pattern`), not per district or zone.
 pub fn district_pattern(pl: &Pl, point: DVec2, id: u64) -> (u32, u32, bool) {
     let rd = rel0(pl, point);
     let zd = zone_of(pl, rd);
@@ -520,7 +448,7 @@ pub fn district_pattern(pl: &Pl, point: DVec2, id: u64) -> (u32, u32, bool) {
             }
         }
     }
-    let mut pattern = pick_pattern(pl, zd, mix64(pl.seed ^ 0x2A7E ^ zd as u64), ind);
+    let mut pattern = pick_pattern(pl, zd, mix64(pl.seed ^ 0x2A7E), ind);
     if pl.level < 2 {
         pattern = pat::GRID;
     }
@@ -558,17 +486,16 @@ pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
         // pattern share one street layout: no seams through its blocks)
         if pl.level >= 2 {
             let (pt2, _, _) = district_pattern(pl, dc.point2, dc.id2);
-            if pt2 != pt || pt == pat::INDUSTRIAL || pt == pat::SUPER {
+            if pt2 != pt || pt == pat::INDUSTRIAL {
                 art = worley2_edge_dist(&dc, qd);
             }
         }
         z = if ind { zone::OUTER } else { zd.max(z.min(zone::INNER)).min(zone::PERI) };
-        // one layout per pattern and town (estates of industry and superblocks: per district)
-        if pt != pat::INDUSTRIAL && pt != pat::SUPER {
+        // one layout per pattern and town (estates of industry: per district)
+        if pt != pat::INDUSTRIAL {
             did = mix64(pl.seed ^ 0x1A70 ^ pt as u64);
         }
         let survey = pl.arch == 7;
-        let ud = u01k(did, 5);
         // (one street orientation per town: districts turned against each other read as pieces
         // of different towns)
         theta = if survey { 0.0 } else { (u01k(pl.seed ^ 0x7E7A, 5) - 0.5) * 0.3 };
@@ -588,18 +515,10 @@ pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
                 w2cell = if pl.arch == 3 { 40.0 } else { 55.0 + 35.0 * u2 };
                 sw = if pl.arch == 3 { 1.7 } else { 2.8 + 1.4 * u01k(did, 8) };
             }
-            pat::CURVI => {
-                b = 210.0 + 40.0 * u2;
-                asp = 0.42;
-                sw = 4.5;
-                warp = 42.0;
-                jit = 0.15;
-            }
             pat::SUPER => {
                 b = 280.0 + 110.0 * u2;
                 sw = 9.0;
                 jit = 0.1;
-                theta = (ud - 0.5) * 0.8;
             }
             pat::INFORMAL => {
                 b = 60.0 + 20.0 * u2;
@@ -686,12 +605,8 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         let (biy, bqy, bsy) = cell(1, qr.y, by);
         let near_x = bix + (bqx > bsx - bqx) as i64;
         let near_y = biy + (bqy > bsy - bqy) as i64;
-        let mut dx = bqx.min(bsx - bqx);
+        let dx = bqx.min(bsx - bqx);
         let dy = bqy.min(bsy - bqy);
-        // curvilinear suburbs: most cross streets are missing (long blocks, cul-de-sacs)
-        if pattern == pat::CURVI && u01k(hash2(sd ^ 0xC0, near_x, biy), 1) > 0.35 {
-            dx = 1e9;
-        }
         let main_x = near_x.rem_euclid(4) == 0 && pattern == pat::GRID;
         let main_y = near_y.rem_euclid(4) == 0 && pattern == pat::GRID;
         let (swx, swy) = (if main_x { sw * 1.5 } else { sw }, if main_y { sw * 1.5 } else { sw });
@@ -1172,9 +1087,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     let lc = DVec2::new(0.5 * (lr[0] + lr[2]), 0.5 * (lr[1] + lr[3]));
                     let lot_dq = rot2(lc - ublk, -theta);
                     let dl = dens_at(lot_dq);
-                    // (a town's lots end where its streets do: houses strewn over the fields
+                    // (a town's lots end where its streets do (above their density 0.42): houses strewn over the fields
                     // beyond read as a broken town)
-                    let edge = if fm == form::CITY as u32 { smoothstep(0.3, 0.42, dl) } else { 1.0 };
+                    let edge = if fm == form::CITY as u32 { smoothstep(0.42, 0.47, dl) } else { 1.0 };
                     let built = u01k(lh, 3) < dl.powf(0.7) * 1.05 * edge;
                     // typology
                     let a = pl.arch;

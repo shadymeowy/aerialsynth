@@ -54,7 +54,6 @@ const S_REG1: u64 = 0xDE5E_0003;
 const S_REG2: u64 = 0xDE5E_0004;
 const S_TRANS: u64 = 0xDE5E_0010;
 const S_SEIF: u64 = 0xDE5E_0011;
-const S_SMALL: u64 = 0xDE5E_0012;
 const S_YARD: u64 = 0xDE5E_0013;
 const S_YZONE: u64 = 0xDE5E_0014;
 const S_STAR: u64 = 0xDE5E_0020;
@@ -81,7 +80,6 @@ const LC_GRAVEL: u8 = 33;
 // dune fields: wavelengths (m), waves per lattice cell, kernel extents (crest, wave, up; cells)
 const TRANS_LAM: f64 = 600.0;
 const SEIF_LAM: f64 = 1700.0;
-const SMALL_LAM: f64 = 240.0;
 const YARD_LAM: f64 = 180.0;
 const TRANS_EXT: [f64; 3] = [1.3, 0.9, 0.9];
 const SEIF_EXT: [f64; 3] = [1.5, 0.8, 0.8];
@@ -108,7 +106,7 @@ const PLAYA_REACH: f64 = 16000.0;
 const PLAYA_DENS: f64 = 0.55;
 // barchans: cell (m), density, radius range (m), area and volume of the shape / R², (H R²)
 const BAR_CELL: f64 = 380.0;
-const BAR_DENS: f64 = 0.8;
+const BAR_DENS: f64 = 0.5;
 const BAR_R: [f64; 2] = [35.0, 95.0];
 const BAR_CA: f64 = 1.4777;
 const BAR_CV: f64 = 0.2252;
@@ -545,21 +543,15 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
                 }
                 sum += wl * 1.9 * v;
             }
-            if wl + ws > 0.0 {
-                let b = band(SMALL_LAM, gsd);
-                let mut v = TRANS_MEAN;
-                if b > 0.0 {
-                    let lee = (2.5 * gsd / SMALL_LAM).clamp(0.14, 0.5);
-                    v += (ridges(seed ^ S_SMALL, c.p / (2.0 * SMALL_LAM), ew, ec, c.up, 2.0, TRANS_EXT, 0, lee, 0.15) - TRANS_MEAN) * b;
-                }
-                sum += (wl + ws) * 0.14 * v;
-            }
         }
         let mut star = 0.0;
         if ws * env > 0.0 {
             star = stars(w, seed, c, ws * env) * (dh / 35.0);
         }
-        *h += dh * r.sand * env * sum + star - core;
+        // (the small dunes over the big ones: v0.2.0's network of ridged noise in three frames, the
+        // core's, kept at half its height; the kit's own small transverse ridges drew a regular
+        // comb in the corridors)
+        *h += dh * r.sand * env * sum + star - 0.5 * core;
     }
     // ---- inselbergs
     let ins = r.instances(w, fam_inselbergs());
@@ -817,7 +809,8 @@ pub fn barchan_field(s: &mut Stack) {
     let (cov, dh) = barchans(w, w.seed, c.p, c.east, c.north, wd, zb, c.gsd, s.l.fw);
     if cov > 0.0 {
         let cls = if s.bio.style.litho == 3 { LC_VOLCANIC_ASH } else { LC_SAND };
-        let sc = sand_colour(s) * 0.98;
+        // (the pavement's tone in their sand: pale crescents on a dark plain read as a pattern)
+        let sc = mixc(sand_colour(s), s.pal(pal::SOIL + 1), 0.5) * 0.98;
         s.composite(Layer { cov, albedo: sc, dh, hmode: hmode::ADD, cls, clear: 1.0, ..Default::default() });
     }
 }

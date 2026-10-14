@@ -158,13 +158,13 @@ const SYS: [SysDef; sys::N] = {
         D,
         SysDef { part: SECTION, size: [402.336, 402.336], kinds: [CROP, PASTURE, FALLOW, POND], kw: [0.84, 0.07, 0.07, 0.02], borders: [BELT, DITCH], bp: [0.06, 0.08], ..D },
         SysDef { part: GRID, size: [1300.0, 900.0], kinds: [CROP, FALLOW, PASTURE, HAY], kw: [0.68, 0.22, 0.06, 0.04], borders: [BELT, TRACK], bp: [0.82, 0.1], ..D },
-        SysDef { part: STRIP, size: [520.0, 24.0], kinds: [CROP, FALLOW, HAY, PASTURE], kw: [0.72, 0.12, 0.12, 0.04], borders: [MARGIN, MARGIN], bp: [1.0, 0.0], ..D },
-        SysDef { part: VOR, size: [170.0, 1.5], kinds: [PASTURE, CROP, HAY, FALLOW], kw: [0.5, 0.3, 0.14, 0.06], borders: [HEDGE, WALL], bp: [0.55, 0.06], slope: [0.3, 0.42], ..D },
-        SysDef { part: VOR, size: [48.0, 1.8], kinds: [CROP, FALLOW, PASTURE, YARD], kw: [0.6, 0.24, 0.1, 0.06], borders: [MARGIN, HEDGE], bp: [0.6, 0.08], slope: [0.3, 0.42], trees: 0.3, ..D },
-        SysDef { part: GRID, size: [130.0, 90.0], kinds: [PADDY, POND, CROP, YARD], kw: [0.9, 0.025, 0.065, 0.01], borders: [NONE, CANAL], bp: [0.75, 0.25], slope: [0.7, 0.9], terraces: 1.0, ..D },
-        SysDef { part: VOR, size: [110.0, 1.3], kinds: [CROP, OLIVE, FALLOW, ORCHARD], kw: [0.42, 0.28, 0.2, 0.1], borders: [WALL, MARGIN], bp: [0.75, 0.25], slope: [0.7, 0.9], terraces: 1.0, ..D },
+        SysDef { part: STRIP, size: [600.0, 34.0], kinds: [CROP, FALLOW, HAY, PASTURE], kw: [0.72, 0.12, 0.12, 0.04], borders: [MARGIN, MARGIN], bp: [1.0, 0.0], ..D },
+        SysDef { part: VOR, size: [260.0, 1.5], kinds: [PASTURE, CROP, HAY, FALLOW], kw: [0.5, 0.3, 0.14, 0.06], borders: [HEDGE, WALL], bp: [0.55, 0.06], slope: [0.3, 0.42], ..D },
+        SysDef { part: VOR, size: [64.0, 1.8], kinds: [CROP, FALLOW, PASTURE, YARD], kw: [0.6, 0.24, 0.1, 0.06], borders: [MARGIN, HEDGE], bp: [0.6, 0.08], slope: [0.3, 0.42], trees: 0.3, ..D },
+        SysDef { part: GRID, size: [130.0, 90.0], kinds: [PADDY, POND, CROP, YARD], kw: [0.92, 0.01, 0.06, 0.01], borders: [NONE, CANAL], bp: [0.75, 0.25], slope: [0.7, 0.9], terraces: 1.0, ..D },
+        SysDef { part: VOR, size: [130.0, 1.3], kinds: [CROP, OLIVE, FALLOW, ORCHARD], kw: [0.42, 0.28, 0.2, 0.1], borders: [WALL, MARGIN], bp: [0.75, 0.25], slope: [0.7, 0.9], terraces: 1.0, ..D },
         SysDef { part: GRID, size: [140.0, 70.0], kinds: [VINE, OLIVE, ORCHARD, FALLOW], kw: [0.7, 0.1, 0.1, 0.1], borders: [TRACK, MARGIN], bp: [0.15, 0.85], slope: [0.6, 0.8], ..D },
-        SysDef { part: VOR, size: [190.0, 1.4], kinds: [OLIVE, ORCHARD, CROP, FALLOW], kw: [0.55, 0.2, 0.15, 0.1], borders: [WALL, MARGIN], bp: [0.5, 0.5], slope: [0.6, 0.8], ..D },
+        SysDef { part: VOR, size: [240.0, 1.4], kinds: [OLIVE, ORCHARD, CROP, FALLOW], kw: [0.55, 0.2, 0.15, 0.1], borders: [WALL, MARGIN], bp: [0.5, 0.5], slope: [0.6, 0.8], ..D },
         SysDef { part: GRID, size: [480.0, 360.0], kinds: [PALM, RUBBER, TEA, CROP], kw: [0.45, 0.22, 0.15, 0.18], borders: [TRACK, MARGIN], bp: [0.9, 0.1], slope: [0.6, 0.8], ..D },
         SysDef { part: GRID, size: [95.0, 60.0], kinds: [GREENH, CROP, FALLOW, POND], kw: [0.76, 0.13, 0.09, 0.02], borders: [TRACK, MARGIN], bp: [0.25, 0.75], ..D },
         SysDef { part: GRID, size: [420.0, 300.0], kinds: [PASTURE, HAY, CROP, POND], kw: [0.6, 0.22, 0.16, 0.02], borders: [MARGIN, HEDGE], bp: [0.8, 0.2], slope: [0.38, 0.5], ..D },
@@ -194,12 +194,12 @@ const ARCH_W: [[f64; sys::N]; 12] = [
 /// Crops: colour (sRGB) in spring, summer, autumn; row spacing (m), row contrast, height (m).
 #[rustfmt::skip]
 const CROPS: [([[f64; 3]; 3], [f64; 3]); 12] = [
-    ([[98.0, 122.0, 60.0], [196.0, 172.0, 104.0], [186.0, 170.0, 132.0]], [0.17, 0.06, 0.8]),   // wheat
-    ([[112.0, 102.0, 76.0], [72.0, 108.0, 48.0], [178.0, 160.0, 110.0]], [0.76, 0.14, 2.2]),    // maize
-    ([[112.0, 102.0, 80.0], [84.0, 118.0, 52.0], [172.0, 140.0, 78.0]], [0.5, 0.1, 0.8]),       // soy
-    ([[214.0, 198.0, 72.0], [108.0, 110.0, 66.0], [140.0, 120.0, 90.0]], [0.2, 0.05, 1.2]),     // rapeseed
+    ([[98.0, 122.0, 60.0], [196.0, 172.0, 104.0], [186.0, 170.0, 132.0]], [1.1, 0.1, 0.8]),   // wheat
+    ([[112.0, 102.0, 76.0], [88.0, 112.0, 62.0], [178.0, 160.0, 110.0]], [0.76, 0.14, 2.2]),    // maize
+    ([[112.0, 102.0, 80.0], [94.0, 118.0, 64.0], [172.0, 140.0, 78.0]], [0.5, 0.1, 0.8]),       // soy
+    ([[214.0, 198.0, 72.0], [108.0, 110.0, 66.0], [140.0, 120.0, 90.0]], [0.9, 0.08, 1.2]),     // rapeseed
     ([[100.0, 116.0, 64.0], [214.0, 180.0, 48.0], [84.0, 70.0, 52.0]], [0.7, 0.1, 1.8]),        // sunflower
-    ([[126.0, 104.0, 82.0], [60.0, 96.0, 48.0], [128.0, 106.0, 84.0]], [0.75, 0.2, 0.6]),       // potato / vegetables
+    ([[126.0, 104.0, 82.0], [84.0, 106.0, 62.0], [128.0, 106.0, 84.0]], [0.75, 0.2, 0.6]),       // potato / vegetables
     ([[86.0, 122.0, 56.0], [112.0, 136.0, 66.0], [98.0, 122.0, 62.0]], [6.5, 0.1, 0.5]),        // alfalfa / hay (windrows)
     ([[140.0, 112.0, 86.0], [90.0, 116.0, 62.0], [182.0, 170.0, 138.0]], [1.0, 0.12, 1.0]),     // cotton (open bolls: not white)
     ([[98.0, 132.0, 62.0], [86.0, 128.0, 58.0], [124.0, 136.0, 72.0]], [1.5, 0.08, 3.0]),       // sugarcane
@@ -679,7 +679,8 @@ fn draw(s: &mut Stack, pl: &Plan) {
         ground: s.l.ground,
         // (a brown of the biome's soils: its second one alone, a red, drew maroon ploughland)
         // (and 30 % towards its grey: tilled soil is a dull brown)
-        soil: field_soil(mixc(mixc(s.pal(pal::SOIL), s.pal(pal::SOIL + 2), 0.5), s.pal(pal::SOIL + 1), 0.3)),
+        // (and 40 % towards v0.2.0's ploughland brown: the biome's soils alone drew mauve parcels)
+        soil: mixc(field_soil(mixc(mixc(s.pal(pal::SOIL), s.pal(pal::SOIL + 2), 0.5), s.pal(pal::SOIL + 1), 0.3)), PLOUGH, 0.4),
         grass: s.pal(pal::GRASS_WET),
         grass_dry: s.pal(pal::GRASS_DRY),
         crown: s.pal(pal::CROWN_DECID),
@@ -701,8 +702,10 @@ fn draw(s: &mut Stack, pl: &Plan) {
         let key = [c3.x.to_bits(), c3.y.to_bits(), c3.z.to_bits(), pl.seed ^ 0xA9];
         let sm = s.sm;
         let (mask, cluster) = *s.cache.fields.entry(key).or_insert_with(|| (sm.cultivated_mask(c3, gsd), worley2(pl.seed ^ 0xC1C, pc.fc, 700.0, 1.0).id));
-        if mask < cult && u01k(pc.id, 5) >= 0.04 {
-            let sh = explicit(pl, &d, &pc, &px, q, cluster);
+        if mask < cult {
+            // (a few parcels lie idle: rough grass; left to the canopy they became dark squares
+            // of forest in the paddies)
+            let sh = if u01k(pc.id, 5) >= 0.04 { explicit(pl, &d, &pc, &px, q, cluster) } else { (pasture_col(&px) * 0.92, 0.2, CLS_PASTURE) };
             col = sh.0;
             dh = sh.1;
             cls = sh.2;
@@ -734,7 +737,7 @@ fn draw(s: &mut Stack, pl: &Plan) {
     // of soil and growth across the fields (as the core's)
     let fv = 1.0 + 0.09 * s.sm.pf_lazy(s.pf, crate::surface::PF_FIELD_VAR);
     // (and soil and moisture patches of tens of metres within every parcel)
-    let mottle = if cov > 0.0 { 0.11 * perlin3(pc.id ^ 0x3077, p / 24.0) * band(24.0, gsd) } else { 0.0 };
+    let mottle = if cov > 0.0 { 0.16 * perlin3(pc.id ^ 0x3077, p / 24.0) * band(24.0, gsd) } else { 0.0 };
     let col = field_tone(col) * (fv + mottle);
     let a = cov_m * keep;
     s.m.field_cov = a;
@@ -751,6 +754,9 @@ fn draw(s: &mut Stack, pl: &Plan) {
     let inst = if cov > 0.0 && crate::landcover::group(cls) == crate::landcover::Group::Agriculture { crate::stack::instance_id(pc.id) } else { 0 };
     s.composite(Layer { cov: a, albedo: col, dh: dh * k - 0.6 * m.micro, hmode: hmode::ADD, cls, inst, emit: GH_GLOW * glow, ..Default::default() });
 }
+
+/// v0.2.0's ploughed soil (linear).
+const PLOUGH: DVec3 = DVec3::new(0.2016, 0.15, 0.0976);
 
 /// Tilled soil: 30 % towards its luminance.
 fn field_soil(c: DVec3) -> DVec3 {
@@ -992,9 +998,11 @@ fn part_section(seed: u64, q: DVec2, fw: f64, pivot_p: f64) -> Parcel {
         };
     }
     let mode = u01k(hq, 1);
-    let n = if mode < 0.45 {
+    // (most quarters cut into halves or forties: whole quarters made the land a quilt of
+    // 800 m squares)
+    let n = if mode < 0.25 {
         1.0
-    } else if mode < 0.8 {
+    } else if mode < 0.6 {
         2.0
     } else {
         4.0
@@ -1094,7 +1102,8 @@ fn kind_mean(pl: &Plan, k: u32, px: &Px) -> DVec3 {
 }
 
 fn pasture_col(px: &Px) -> DVec3 {
-    mixc(px.grass_dry, px.grass, smoothstep(0.25, 0.65, px.moist))
+    // (managed grass stays green longer than the wild: v0.2.0's green pastures)
+    mixc(px.grass_dry, px.grass, smoothstep(0.15, 0.5, px.moist))
 }
 
 fn vine_col(season: f64, u: f64) -> DVec3 {
@@ -1111,7 +1120,7 @@ fn paddy_col(st: u32) -> DVec3 {
     match st {
         0 => srgb(64.0, 84.0, 94.0),
         1 => srgb(76.0, 100.0, 86.0),
-        2 => srgb(80.0, 116.0, 50.0),
+        2 => srgb(88.0, 114.0, 62.0),
         3 => srgb(188.0, 172.0, 92.0),
         _ => srgb(150.0, 128.0, 88.0),
     }
@@ -1133,10 +1142,10 @@ fn paddy_state(ph: f64) -> u32 {
 }
 
 fn paddy_mean(season: f64) -> DVec3 {
-    // phases spread ±0.15 around the season: the mean of five draws
+    // phases spread ±0.225 around the season: the mean of five draws
     let mut acc = DVec3::ZERO;
     for i in 0..5 {
-        acc += paddy_col(paddy_state((season + 0.075 * (i as f64 - 2.0)).clamp(0.0, 1.0)));
+        acc += paddy_col(paddy_state((season + 0.1125 * (i as f64 - 2.0)).clamp(0.0, 1.0)));
     }
     acc / 5.0
 }
@@ -1179,14 +1188,14 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
     let (ru, rv) = if rot { (pc.fy, pc.fx) } else { (pc.fx, pc.fy) };
     match k {
         kind::CROP | kind::HAY => {
-            let u_crop = if u01k(id, 16) < 0.5 { u01k(cluster, 6) } else { u01k(id, 6) };
+            let u_crop = if u01k(id, 16) < 0.7 { u01k(cluster, 6) } else { u01k(id, 6) };
             let c = if k == kind::HAY { 6 } else { pick_crop(pl.mix, u_crop) };
             let (cc, row) = CROPS[c as usize];
             let ph = (px.season + 0.3 * (u01k(id, 20) - 0.5)).clamp(0.0, 1.0);
-            col = stage(&cc, ph) * (0.92 + 0.16 * u01k(id, 8));
+            col = stage(&cc, ph) * (0.95 + 0.10 * u01k(id, 8));
             col *= 1.0 + 0.2 * perlin3(id, p / 35.0) * band(35.0, gsd) + 0.11 * perlin3(id ^ 1, p / 120.0) * band(120.0, gsd);
             // soil and growth texture (band-limited)
-            col *= 1.0 + 0.15 * perlin3(id ^ 0x7E1, p / 7.0) * band(7.0, gsd) + 0.10 * perlin3(id ^ 0x7E2, p / 2.5) * band(2.5, gsd);
+            col *= 1.0 + 0.22 * perlin3(id ^ 0x7E1, p / 7.0) * band(7.0, gsd) + 0.14 * perlin3(id ^ 0x7E2, p / 2.5) * band(2.5, gsd);
             let gz = perlin3(id ^ 0x6A0, p / 55.0) * band(55.0, gsd);
             // growth zones (soil, moisture): yellower and greener patches of tens of metres
             col = mixc(col, col * DVec3::new(1.12, 1.04, 0.82), 0.55 * smoothstep(0.0, 0.6, gz));
@@ -1326,7 +1335,8 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
             dh = 1.0 * cv;
         }
         kind::PADDY => {
-            let ph = (px.season + 0.3 * (u01k(id, 31) - 0.5)).clamp(0.0, 1.0);
+            // (paddies of different stages side by side: one vivid green over whole valleys read as paint)
+            let ph = (px.season + 0.45 * (u01k(id, 31) - 0.5)).clamp(0.0, 1.0);
             let st = paddy_state(ph);
             col = paddy_col(st) * (0.94 + 0.12 * u01k(id, 32));
             let fine = perlin3(id ^ 0x9AD, p / 7.0) * band(7.0, gsd);
@@ -1378,7 +1388,7 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
             let rp = 18.0 + 30.0 * u01k(id, 12);
             let dc = (q - pc.fc).abs() - DVec2::splat(rp);
             let w = ((pc.edge - m_in) / fw + 0.5).clamp(0.0, 1.0) * ((-dc.x.max(dc.y)) / fw + 0.5).clamp(0.0, 1.0);
-            let water = if pl.sys == sys::PADDY || pl.sys == sys::GREENH { srgb(62.0, 90.0, 72.0) } else { srgb(48.0, 70.0, 74.0) };
+            let water = if pl.sys == sys::PADDY || pl.sys == sys::GREENH { srgb(76.0, 100.0, 84.0) } else { srgb(48.0, 70.0, 74.0) };
             col = mixc(srgb(140.0, 128.0, 100.0), water * (0.9 + 0.2 * u01k(id, 11)), w);
             dh = -0.6 * w;
             cls = if w > 0.5 {
@@ -1470,7 +1480,7 @@ fn scatter_tree(seed: u64, q: DVec2, cell: f64, dens: f64, gsd: f64, fw: f64) ->
 fn pasture(pl: &Plan, pc: &Parcel, px: &Px, id: u64, q: DVec2) -> (DVec3, f64, u8) {
     let (p, gsd, fw) = (px.p, px.gsd, px.fw);
     let mut col = pasture_col(px) * (0.86 + 0.28 * u01k(id, 8));
-    col *= 1.0 + 0.08 * perlin3(id ^ 0x9A5, p / 14.0) * band(14.0, gsd) + 0.05 * perlin3(id ^ 0x9A6, p / 4.0) * band(4.0, gsd);
+    col *= 1.0 + 0.15 * perlin3(id ^ 0x9A5, p / 14.0) * band(14.0, gsd) + 0.10 * perlin3(id ^ 0x9A6, p / 4.0) * band(4.0, gsd);
     // tussocks and grazed patches
     let tus = perlin3(id ^ 0x9A7, p / 1.7) * band(1.7, gsd);
     col *= 1.0 + 0.10 * tus + 0.12 * perlin3(id ^ 0x9A8, p / 40.0) * band(40.0, gsd);

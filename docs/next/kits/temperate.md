@@ -16,7 +16,7 @@ world* on this page is seed 1 of the next generator.
 |---|---|---|---|
 | `broadleaf_deciduous` | Cfa Cfb Dfa Dfb Dwa Cwa | oak / beech / hornbeam crowns (three crown layers of different size and green), few conifers | broadleaf forest |
 | `mixed_forest` | Dfb Dwb Dsb Cfb | stands of spruce, pine, birch and oak side by side (needleleaf, broadleaf and mixed stands) | needleleaf / broadleaf / mixed forest |
-| `taiga` | Dfc Dfd Dwc Dwd Dsc | dark narrow spruce spires, lighter pines, birch, a pale moss and lichen floor; open spire taiga where it is too dry for closed forest | needleleaf forest |
+| `taiga` | Dfc Dfd Dwc Dwd Dsc | dark narrow spruce spires, lighter pines, birch, a pale moss and lichen floor; open spire taiga where it is too dry for closed forest (the canopy's moisture window shifts down to 0.10–0.32 below 8 °C, also on part-mountain terrain: v0.2.0's closed taiga) | needleleaf forest |
 | `lichen_woodland` | Dfc Dfd Dwc Dwd, < 560 mm | widely spaced spires on cream reindeer lichen | woodland, needleleaf forest |
 | `maquis` | Csa Csb | dense mottled olive-grey and dark green scrub, stone pines and holm oaks, terracotta soils, limestone outcrops | maquis |
 | `garrigue` | Csa Csb on carbonate | low grey-green cushions on white limestone | maquis, rock |

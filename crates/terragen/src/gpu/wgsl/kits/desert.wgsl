@@ -15,7 +15,7 @@ const DS_BRAID2: u64 = 0xDE5E0042lu;
 const DS_LC_SAND: u32 = 5u;
 
 const DS_BAR_CELL: f32 = 380.0;
-const DS_BAR_DENS: f32 = 0.8;
+const DS_BAR_DENS: f32 = 0.5;
 const DS_BAR_R0: f32 = 35.0;
 const DS_BAR_R1: f32 = 95.0;
 const DS_BAR_CA: f32 = 1.4777;
@@ -267,7 +267,7 @@ fn desert_slot_disturbance(s: ptr<function, Stack>) {
         if ((*s).bio.st.litho == 3u) {
             cls = LC_VOLCANIC_ASH;
         }
-        var ly = layer_paint(b.x, desert_sand_colour(s) * 0.98, cls);
+        var ly = layer_paint(b.x, mixc(desert_sand_colour(s), spal(s, BP_SOIL + 1u), 0.5) * 0.98, cls);
         ly.dh = b.y;
         ly.hmode = HM_ADD;
         ly.clear = 1.0;

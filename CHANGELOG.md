@@ -28,6 +28,8 @@
   landscape kits (agriculture, coast, cold, desert, mountains, settlements, temperate,
   transport, tropical, volcanic). Its settings: `world.atlas`, `world.ecoregions`,
   `world.biomes`, `world.relief.tectonic_mountains` / `belt_mountains`.
+- `next` closer to v0.2.0's look: larger, softer fields with more woodlots; one street pattern
+  per town; irregular dune fields; deltas that open from the river; mixed paddies; denser taiga.
 - **Optional tile layers** (tile store format 2; `next` only): `tiles.layers: [dtm, instance]`
   adds the bare ground and instance ids (building lots, fields, forest stands) to a new store;
   the viewer's map shadings *Height above ground* and *Instances* show them. Format-1 stores

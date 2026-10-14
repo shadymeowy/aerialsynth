@@ -90,8 +90,8 @@ fn temperate_forest_est(s: ptr<function, Stack>) -> f32 {
     let t = (*s).t;
     let td = cfg.tree_density;
     let trees_mult = sveg(s, VEG_TREES) * (*s).bio.st.veg.x;
-    let cold = (1.0 - smoothstep1(0.0, 8.0, t.temp)) * (1.0 - smoothstep1(0.15, 0.4, t.mountain));
-    let base_cover = smoothstep1(0.3 - 0.14 * cold, 0.68 - 0.24 * cold, t.moist) * smoothstep1(-6.0, 2.0, t.temp) * td * trees_mult;
+    let cold = (1.0 - smoothstep1(0.0, 8.0, t.temp)) * (1.0 - smoothstep1(0.35, 0.7, t.mountain));
+    let base_cover = smoothstep1(0.3 - 0.2 * cold, 0.68 - 0.36 * cold, t.moist) * smoothstep1(-6.0, 2.0, t.temp) * td * trees_mult;
     let fpu = 0.5 + 0.5 * (*s).pf.f[PF_FOREST];
     let forest = smoothstep1(-0.03, 0.03, base_cover - fpu);
     let clear = 1.0 - 0.85 * smoothstep1(0.05, 0.4, s_agri(s)) * (1.0 - smoothstep1(0.45, 0.7, (*s).l.slope));
@@ -262,7 +262,7 @@ fn temperate_marsh(s: ptr<function, Stack>) {
     let fw = (*s).l.fw;
     let near = (1.0 - smoothstep1(30.0, 120.0, rd)) * 0.6;
     let flat = 1.0 - smoothstep1(0.02, 0.06, (*s).l.slope);
-    let amount = 0.5 * max(smoothstep1(0.25, 0.6, t.floodplain), near) * smoothstep1(0.45, 0.7, t.moist) * smoothstep1(3.0, 7.0, t.temp) * (1.0 - smoothstep1(16.0, 21.0, t.temp)) * flat;
+    let amount = 0.5 * max(smoothstep1(0.25, 0.6, t.floodplain), near) * smoothstep1(0.45, 0.7, t.moist) * smoothstep1(3.0, 7.0, t.temp) * (1.0 - smoothstep1(16.0, 21.0, t.temp)) * flat * (1.0 - 0.8 * smoothstep1(0.3, 0.6, s_agri(s)));
     if (amount <= 0.01) {
         return;
     }

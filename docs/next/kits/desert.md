@@ -30,7 +30,10 @@ the wind:
   wavelength, sinuous crests); 0.36–0.68 **linear (seif)** ridges along the wind (λ 1.7 km, up to
   65 m, sharp crests, flat corridors, Y-junctions and terminations); ρ > 0.68 **star dunes**
   (3–5 sinuous arms, 750–1150 m radius, 100–300 m high) on a network of transverse ridges;
-  **small dunes** (λ 240 m) on the linear and star dunes.
+  **small dunes** over all of them: the core's (v0.2.0's) dune network of ridged noise in three
+  rotated frames (λ 520, 172, 69, 27 m) at half its height (the kit's own small transverse
+  ridges, λ 240 m, drew a regular comb in the corridors). Barchans (density 0.5) take half the
+  pavement's tone in their sand.
 
 The ridge fields (`desert::ridges`) are oriented plane waves carried by the points of a jittered
 3D lattice with anisotropic kernels and per-point phases (no direction or wavelength is
