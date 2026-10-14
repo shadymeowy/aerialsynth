@@ -1241,9 +1241,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         );
                         let frac = match t {
                             typ::HOUSE => 0.3,
-                            // (a town's box: its footprint's share of the lot, the mean height
-                            // of the lot where it is below the pixel)
-                            _ if town_box => (4.0 * half.x.max(0.0) * half.y.max(0.0) / (lw * ld).max(1.0)).min(1.0),
+                            _ if town_box => 0.3,
                             typ::TOWER => 0.75,
                             typ::WAREHOUSE => 0.6,
                             _ => 0.55,
@@ -1535,16 +1533,25 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
 }
 
 /// Shares of green and paved ground of a zone (the rest is roofs).
-pub fn zone_fracs(z: u32) -> (f64, f64) {
-    let zi = z as usize;
+pub fn zone_fracs(pl: &Pl, d: &Dist) -> (f64, f64) {
+    if town_centre(pl, d) {
+        // (a town's centre: boxes on lawns)
+        return (0.38, 0.32);
+    }
+    let zi = d.zone as usize;
     ([0.05, 0.12, 0.25, 0.42, 0.5][zi], [0.5, 0.4, 0.32, 0.25, 0.18][zi])
+}
+
+/// Is the district a town's centre (detached boxes on lawns, not perimeter blocks)?
+fn town_centre(pl: &Pl, d: &Dist) -> bool {
+    d.zone == zone::INNER && pl.level <= 2 && pl.form == form::CITY as u32 && d.pattern != pat::INDUSTRIAL
 }
 
 /// The land-cover class of a sample where the district's lots are below the pixel: drawn from
 /// the zone's shares of roofs, streets and lots by a hash of a 6 m cell (classes are
 /// categorical: the parent's histogram matches its children's).
 pub fn mean_class(pl: &Pl, d: &Dist, q: DVec2) -> u8 {
-    let (green, paved) = zone_fracs(d.zone);
+    let (green, paved) = zone_fracs(pl, d);
     let roofs = 1.0 - green - paved;
     let u = u01k(hash2(pl.seed ^ 0xC1A55, (q.x / 6.0).floor() as i64, (q.y / 6.0).floor() as i64), 1);
     if u < roofs {
@@ -1568,7 +1575,7 @@ pub fn mean_class(pl: &Pl, d: &Dist, q: DVec2) -> u8 {
 pub fn zone_mean(pl: &Pl, d: &Dist, moist: f64) -> (DVec3, f64) {
     let z = d.zone;
     let zi = z as usize;
-    let (green, paved) = zone_fracs(z);
+    let (green, paved) = zone_fracs(pl, d);
     let roofs = 1.0 - green - paved;
     let flat = z <= zone::OUTER && pl.form == form::CITY as u32;
     let rc = roof_col(pl.arch, 0.35, flat);
@@ -1577,7 +1584,8 @@ pub fn zone_mean(pl: &Pl, d: &Dist, moist: f64) -> (DVec3, f64) {
         pat::INFORMAL => srgb(124.0, 104.0, 86.0),
         _ => rc,
     } * (0.85 + 0.3 * u01k(d.did, 14));
-    let col = (rc * roofs + c_asphalt() * paved + c_yard(moist, 0.5) * green) * 0.88;
+    let lawn = if town_centre(pl, d) { mixc(c_yard(moist, 0.5), srgb(86.0, 112.0, 54.0), 0.6) } else { c_yard(moist, 0.5) };
+    let col = (rc * roofs + c_asphalt() * paved + lawn * green) * 0.88;
     let hm = [30.0 * smoothstep(1e5, 1.5e7, pl.pop) + 12.0, 12.0, 8.0, 4.0, 2.5][zi] * if pl.level >= 2 { 1.0 } else { 0.5 };
     (col, hm)
 }

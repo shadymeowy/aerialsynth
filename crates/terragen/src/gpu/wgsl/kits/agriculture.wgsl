@@ -224,7 +224,7 @@ fn agri_weights(e: EcoV) -> array<f32, 15> {
         }
     }
     let dev = e.dev;
-    m[11] *= (0.3 + 1.4 * dev) * smoothstep1(13.0, 18.0, e.temp);
+    m[11] *= 0.3 + 1.4 * dev;
     m[5] *= 1.6 - 1.0 * dev;
     m[1] *= (0.4 + 1.0 * dev) * (1.0 - 0.8 * smoothstep1(900.0, 1400.0, e.precip));
     m[13] *= (0.4 + 1.0 * dev) * (0.1 + 0.9 * (1.0 - smoothstep1(700.0, 1200.0, e.precip)));
@@ -257,6 +257,9 @@ fn agri_pick_system(e: EcoV, rid: u64) -> u32 {
     for (var i = 0u; i < AG_N; i++) {
         acc += w[i];
         if (v < acc) {
+            if (i == AG_GREENH && u01k(mix64(rid ^ rotl64(e.id, 29u)), 0xA62lu) >= smoothstep1(13.0, 18.0, e.temp)) {
+                return AG_CORE;
+            }
             return i;
         }
     }

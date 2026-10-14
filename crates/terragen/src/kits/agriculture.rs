@@ -334,9 +334,7 @@ pub fn weights(e: &EcoV) -> [f64; sys::N] {
         }
     }
     let dev = e.dev;
-    // (greenhouse seas in warm climates: a white quilt of plastic over a temperate lake shore read
-    // as a salt crust)
-    m[GREENH as usize] *= (0.3 + 1.4 * dev) * smoothstep(13.0, 18.0, e.temp);
+    m[GREENH as usize] *= 0.3 + 1.4 * dev;
     m[SMALL as usize] *= 1.6 - 1.0 * dev;
     // (sections are the drier plains' grid: in wet lowlands mixed farms and pastures)
     m[SECTION as usize] *= (0.4 + 1.0 * dev) * (1.0 - 0.8 * smoothstep(900.0, 1400.0, e.precip));
@@ -368,6 +366,12 @@ pub fn pick_system(e: &EcoV, rid: u64) -> u32 {
     for (i, wi) in w.iter().enumerate() {
         acc += wi;
         if v < acc {
+            // (greenhouse seas in warm climates: a white quilt of plastic over a temperate lake
+            // shore read as a salt crust; the core's fields instead, the other regions' picks
+            // unchanged)
+            if i as u32 == sys::GREENH && u01k(mix64(rid ^ e.id.rotate_left(29)), 0xA62) >= smoothstep(13.0, 18.0, e.temp) {
+                return sys::CORE;
+            }
             return i as u32;
         }
     }

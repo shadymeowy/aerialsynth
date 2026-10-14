@@ -1310,9 +1310,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                 rf_flat = flat;
                 rf_mul = 0.84 + 0.32 * u01k(lh, 11lu);
                 var frac = 0.55;
-                if (town_box) {
-                    frac = min(4.0 * max(half.x, 0.0) * max(half.y, 0.0) / max(lw * ld, 1.0), 1.0);
-                } else if (t == STY_HOUSE) {
+                if (t == STY_HOUSE || town_box) {
                     frac = 0.3;
                 } else if (t == STY_TOWER) {
                     frac = 0.75;
@@ -1626,7 +1624,15 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
 }
 
 /// `town::zone_fracs`: (green, paved).
-fn st_zone_fracs(z: u32) -> vec2<f32> {
+fn st_town_centre(pl: StPl, d: StDist) -> bool {
+    return d.zone == SZ_INNER && pl.level <= 2u && pl.form == SF_CITY && d.pattern != SP_INDUSTRIAL;
+}
+
+fn st_zone_fracs(pl: StPl, d: StDist) -> vec2<f32> {
+    let z = d.zone;
+    if (st_town_centre(pl, d)) {
+        return vec2<f32>(0.38, 0.32);
+    }
     if (z == SZ_INNER) {
         return vec2<f32>(0.12, 0.4);
     } else if (z == SZ_OUTER) {
@@ -1641,7 +1647,7 @@ fn st_zone_fracs(z: u32) -> vec2<f32> {
 
 /// `town::mean_class`.
 fn st_mean_class(pl: StPl, d: StDist, q: vec2<f32>) -> u32 {
-    let gp = st_zone_fracs(d.zone);
+    let gp = st_zone_fracs(pl, d);
     let roofs = 1.0 - gp.x - gp.y;
     let u = u01k(hash2(pl.seed ^ 0xC1A55lu, i64(floor(q.x / 6.0)), i64(floor(q.y / 6.0))), 1lu);
     if (u < roofs) {
@@ -1659,7 +1665,7 @@ fn st_mean_class(pl: StPl, d: StDist, q: vec2<f32>) -> u32 {
 /// `town::zone_mean`: (colour, building height).
 fn st_zone_mean(pl: StPl, d: StDist, moist: f32) -> vec4<f32> {
     let z = d.zone;
-    let gp = st_zone_fracs(z);
+    let gp = st_zone_fracs(pl, d);
     let green = gp.x;
     let paved = gp.y;
     var hm = 30.0 * smoothstep1(1e5, 1.5e7, pl.pop) + 12.0;
@@ -1681,7 +1687,11 @@ fn st_zone_mean(pl: StPl, d: StDist, moist: f32) -> vec4<f32> {
         rc = srgb(124.0, 104.0, 86.0);
     }
     rc *= 0.85 + 0.3 * u01k(d.did, 14lu);
-    let col = (rc * roofs + st_asphalt() * paved + st_yard(moist, 0.5) * green) * 0.88;
+    var lawn = st_yard(moist, 0.5);
+    if (st_town_centre(pl, d)) {
+        lawn = mixc(lawn, srgb(86.0, 112.0, 54.0), 0.6);
+    }
+    let col = (rc * roofs + st_asphalt() * paved + lawn * green) * 0.88;
     return vec4<f32>(col, hm * select(0.5, 1.0, pl.level >= 2u));
 }
 
