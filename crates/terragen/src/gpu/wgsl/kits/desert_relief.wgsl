@@ -8,7 +8,6 @@ const DS_REG1: u64 = 0xDE5E0003lu;
 const DS_REG2: u64 = 0xDE5E0004lu;
 const DS_TRANS: u64 = 0xDE5E0010lu;
 const DS_SEIF: u64 = 0xDE5E0011lu;
-const DS_SMALL: u64 = 0xDE5E0012lu;
 const DS_YARD: u64 = 0xDE5E0013lu;
 const DS_YZONE: u64 = 0xDE5E0014lu;
 const DS_STAR: u64 = 0xDE5E0020lu;
@@ -16,7 +15,6 @@ const DS_BAR: u64 = 0xDE5E0023lu;
 
 const DS_TRANS_LAM: f32 = 600.0;
 const DS_SEIF_LAM: f32 = 1700.0;
-const DS_SMALL_LAM: f32 = 240.0;
 const DS_YARD_LAM: f32 = 180.0;
 const DS_TRANS_EXT: vec3<f32> = vec3<f32>(1.3, 0.9, 0.9);
 const DS_SEIF_EXT: vec3<f32> = vec3<f32>(1.5, 0.8, 0.8);
@@ -440,21 +438,12 @@ fn desert_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
                 }
                 sum += wr.y * 1.9 * v;
             }
-            if (wr.y + wr.z > 0.0) {
-                let b = band(DS_SMALL_LAM, gsd);
-                var v = DS_TRANS_MEAN;
-                if (b > 0.0) {
-                    let lee = clamp(2.5 * gsd / DS_SMALL_LAM, 0.14, 0.5);
-                    v += (desert_ridges(cfg.seed ^ DS_SMALL, c.p / f64(2.0 * DS_SMALL_LAM), ew, ec, c.up, 2.0, DS_TRANS_EXT, 0u, lee, 0.15) - DS_TRANS_MEAN) * b;
-                }
-                sum += (wr.y + wr.z) * 0.14 * v;
-            }
         }
         var star = 0.0;
         if (wr.z * env > 0.0) {
             star = desert_stars(c, wr.z * env) * (dh / 35.0);
         }
-        *h += dh * r.sand * env * sum + star - core;
+        *h += dh * r.sand * env * sum + star - 0.5 * core;
     }
     let ins = inst_list(FAM_DESERT_INSELBERGS, r.blk, c.p);
     if (ins.n > 0u) {
