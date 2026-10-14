@@ -263,7 +263,7 @@ fractions and thresholds scale with it); masks enter as `amount`.
 | `radial` | radial profiles: cones, craters, star arms | `cell, density, radius, height, exponent, arms, arm_amp, crater, crater_depth, jitter, colour, colour2` | radius |
 | `crescent` | crescents (barchans) along a direction | `cell, density, radius, height_ratio, horns, direction, angle, jitter, colour` | radius |
 | `lobes` | fan sectors with lobate margins and channels | `cell, density, radius, span, margin, channels, height, direction, jitter, colour, colour2` | radius |
-| `patches` | crisp multi-scale noise threshold | `scale, fraction, octaves, roughness, height, colour_var, colour, colour2` | scale |
+| `patches` | crisp multi-scale noise threshold (`soft` > 0: a gradual blend) | `scale, fraction, octaves, roughness, height, colour_var, soft, colour, colour2` | scale |
 | `linear` | cross-section over a segment (`aux` = signed distance, along, half width) | `profile (flat/crowned/ridge/ditch), dash, duty, shoulder, height, marking, colour, shoulder_colour, marking_colour` | 2 × half width |
 | `stamp` | templates in an oriented box (`aux` = u, v, half sizes): pad, strip, blocks, panels | `template, a, b, height, lights, colour, colour2, light_colour` | a |
 | `canopy` | closed canopy: clumped crowns, per-clump hue, emergents | `cell, emergent, height, emergent_height, clump, colour_var, flowering, colour, colour2, flower_colour` | clump |

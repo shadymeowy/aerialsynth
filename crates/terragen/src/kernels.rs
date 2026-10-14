@@ -254,6 +254,7 @@ const PATCHES_P: &[P] = &[
     P::Num("roughness", 3, 0.0, 1.0, 0.45),
     P::Num("height", 4, -100.0, 100.0, 0.0),
     P::Num("colour_var", 5, 0.0, 1.0, 0.15),
+    P::Num("soft", 6, 0.0, 0.5, 0.0),
     P::Col("colour", 0, C::N("soil")),
     P::Col("colour2", 1, C::N("grass_dry")),
 ];
@@ -992,14 +993,16 @@ fn patch_u(seed: u64, p: DVec3, scale: f64, oct: f64, rough: f64, gsd: f64) -> f
     1.0 / (1.0 + (-1.7 * s).exp())
 }
 
-/// `patches`: crisp multi-scale noise threshold (forest / clearing, pools, bare patches).
-/// v: scale, fraction, octaves, roughness, height, colour_var.
+/// `patches`: crisp multi-scale noise threshold (forest / clearing, pools, bare patches);
+/// `soft` > 0 widens the threshold (in units of the ~uniform noise) into a gradual blend: a
+/// mottling of the ground without edges (v0.2.0's even desert floors), the mean cover unchanged.
+/// v: scale, fraction, octaves, roughness, height, colour_var, soft.
 fn patches(k: &KParams, i: &KIn) -> KOut {
     let v = &k.v;
     let u = patch_u(k.seed, i.p, v[0], v[2], v[3], i.gsd);
     let frac = v[1] * i.amount;
     // antialiased threshold: the noise changes by ~1/scale per metre
-    let w = (2.0 * i.fw / v[0]).clamp(1e-3, 0.5);
+    let w = (2.0 * i.fw / v[0]).clamp(1e-3, 0.5).max(v[6]);
     let cov = smoothstep(-w, w, frac - u);
     if cov <= 0.0 {
         return KOut::default();
