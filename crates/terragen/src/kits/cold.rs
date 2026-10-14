@@ -776,8 +776,8 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
         // the mean of unresolved crevasses: their area share
         cr += (1.0 - e) * on * (2.4 / spacing).min(1.0);
         let cr = cr * cs;
-        col = mixc(col, srgb(62.0, 72.0, 80.0), cr);
-        dh -= 4.0 * cr;
+        col = mixc(col, srgb(62.0, 72.0, 80.0), 0.6 * cr);
+        dh -= 2.5 * cr;
     }
     // medial moraines along the valley's axis (the drainage line under the ice) and beside it
     if abl > 0.2 && l.river_hw > 0.0 {
@@ -842,7 +842,7 @@ fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
         if b18 > 0.0 {
             let wc = worley3(SEED_SNOW + 6, p, 18.0, 0.9);
             let ed = worley_edge_dist(&wc, p);
-            x += 1.2 * (u01k(wc.id, 1) - 0.5) * b18 - 0.7 * (1.0 - smoothstep(0.0, 3.0, ed)) * b18;
+            x += 1.2 * (u01k(wc.id, 1) - 0.5) * b18 - 0.4 * (1.0 - smoothstep(0.0, 3.0, ed)) * b18;
         }
     }
     let mut cov = smoothstep(-0.55, -1.25, x) * (1.0 - smoothstep(0.75, 1.3, s.l.slope));

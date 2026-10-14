@@ -589,8 +589,8 @@ fn cold_glacier(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
         }
         cr += (1.0 - e) * on * min(2.4 / spacing, 1.0);
         cr = cr * cs;
-        col = mixc(col, srgb(62.0, 72.0, 80.0), cr);
-        dh -= 4.0 * cr;
+        col = mixc(col, srgb(62.0, 72.0, 80.0), 0.6 * cr);
+        dh -= 2.5 * cr;
     }
     if (abl > 0.2 && l.river_hw > 0.0) {
         let ad = abs(l.river_d);
@@ -655,7 +655,7 @@ fn cold_snow(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
         if (b18 > 0.0) {
             let wc = worley3(COLD_SEED_SNOW + 6lu, p, 18.0lf, 0.9);
             let ed = worley_edge_dist(wc, p);
-            x += 1.2 * (u01k(wc.id, 1lu) - 0.5) * b18 - 0.7 * (1.0 - smoothstep1(0.0, 3.0, ed)) * b18;
+            x += 1.2 * (u01k(wc.id, 1lu) - 0.5) * b18 - 0.4 * (1.0 - smoothstep1(0.0, 3.0, ed)) * b18;
         }
     }
     var cov = smoothstep1(-0.55, -1.25, x) * (1.0 - smoothstep1(0.75, 1.3, (*s).l.slope));
