@@ -503,7 +503,7 @@ fn ponds(s: &mut Stack, zone: f64) {
     // (pond fields on part of the flats, their colours muted: a quilt of pink, white and teal
     // ponds covered half of every arid delta; salt pans on fewer flats still, muted more)
     let salt = t.moist < 0.45;
-    let area = if salt { smoothstep(0.3, 0.55, perlin3(SEED + 60, p / 2400.0)) } else { smoothstep(0.05, 0.3, perlin3(SEED + 60, p / 2400.0)) };
+    let area = if salt { smoothstep(0.4, 0.62, perlin3(SEED + 60, p / 2400.0)) } else { smoothstep(0.05, 0.3, perlin3(SEED + 60, p / 2400.0)) };
     if area <= 0.0 {
         return;
     }
@@ -512,7 +512,7 @@ fn ponds(s: &mut Stack, zone: f64) {
     let (ix, iy) = ((q.x / ca).floor(), (q.y / cb).floor());
     let (fx, fy) = (q.x - (ix + 0.5) * ca, q.y - (iy + 0.5) * cb);
     let h = hash2(SEED + 61, ix as i64, iy as i64);
-    let mean_col = if salt { srgb(184.0, 150.0, 140.0) } else { srgb(88.0, 130.0, 116.0) };
+    let mean_col = if salt { srgb(176.0, 160.0, 148.0) } else { srgb(88.0, 130.0, 116.0) };
     // (ponds smaller than the pixel show their mean cover and colour)
     let e = smoothstep(1.2 * gsd, 3.0 * gsd, cb);
     let (mut exact, mut col) = (0.0, mean_col);
@@ -523,13 +523,13 @@ fn ponds(s: &mut Stack, zone: f64) {
         let pick = u01k(h, 2);
         col = if salt {
             if pick < 0.3 {
-                srgb(206.0, 120.0, 132.0)
+                srgb(184.0, 148.0, 144.0)
             } else if pick < 0.5 {
-                srgb(232.0, 214.0, 208.0)
+                srgb(214.0, 206.0, 196.0)
             } else if pick < 0.75 {
-                srgb(78.0, 166.0, 168.0)
+                srgb(128.0, 150.0, 146.0)
             } else {
-                srgb(96.0, 150.0, 98.0)
+                srgb(150.0, 146.0, 122.0)
             }
         } else if pick < 0.4 {
             srgb(70.0, 140.0, 130.0)
