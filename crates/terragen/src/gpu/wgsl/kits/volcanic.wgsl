@@ -69,21 +69,25 @@ fn vc_ash(s: ptr<function, Stack>, v: VcVol, k: VcCone) {
     let p = (*s).c.p;
     let gsd = (*s).c.gsd;
     let upper = (0.45 + 0.55 * v.act) * (1.0 - smoothstep1(0.1, 0.45, k.u));
-    let apron = 0.9 * v.act * v.act * (1.0 - smoothstep1(0.2, 1.0, k.u));
+    let apron = 0.75 * v.act * v.act * (1.0 - smoothstep1(0.15, 0.8, k.u));
     let m = max(upper, apron);
     if (m < 0.02) {
         return;
     }
-    let n = 0.5 * sin(7.0 * k.th + TAU * u01k(v.id, 31lu)) * band(TAU * k.rr / 7.0, gsd)
-        + 0.3 * sin(17.0 * k.th + TAU * u01k(v.id, 32lu)) * band(TAU * k.rr / 17.0, gsd)
-        + 0.2 * sin(41.0 * k.th + TAU * u01k(v.id, 33lu)) * band(TAU * k.rr / 41.0, gsd)
-        + 0.15 * vc_nz(VC_SEED_ASH + 1lu, p, 90.0, gsd);
-    let wd = 0.07 + 0.3 * (1.0 - band(260.0, gsd));
+    let hi = 1.0 - smoothstep1(0.06, 0.22, k.u);
+    var n = 0.3 * vc_nz(VC_SEED_ASH + 1lu, p, 90.0, gsd) + 0.3 * vc_nz(VC_SEED_ASH + 4lu, p, 320.0, gsd) + 0.25 * vc_nz(VC_SEED_ASH + 2lu, p, 900.0, gsd);
+    if (hi > 0.0) {
+        let th = k.th + 100.0 * vc_nz(VC_SEED_ASH + 3lu, p, 500.0, gsd) / max(k.rr, 300.0);
+        n += hi * (0.15 * sin(7.0 * th + TAU * u01k(v.id, 31lu)) * band(TAU * k.rr / 7.0, gsd)
+            + 0.2 * sin(17.0 * th + TAU * u01k(v.id, 32lu)) * band(TAU * k.rr / 17.0, gsd)
+            + 0.2 * sin(41.0 * th + TAU * u01k(v.id, 33lu)) * band(TAU * k.rr / 41.0, gsd));
+    }
+    let wd = max(0.07 + 0.3 * (1.0 - band(260.0, gsd)), 0.3 * (1.0 - hi));
     let cov = smoothstep1(-wd, wd, m - 0.35 + 0.5 * n);
     if (cov <= 0.0) {
         return;
     }
-    var col = vc_ash_col(clamp(0.5 + 0.6 * n, 0.0, 1.0));
+    var col = mixc(vc_ash_col(clamp(0.5 + 0.6 * n, 0.0, 1.0)), srgb(112.0, 104.0, 94.0) * (1.0 + 0.3 * n), smoothstep1(0.08, 0.35, k.u));
     col = mixc(col, srgb(104.0, 58.0, 42.0), 0.35 * smoothstep1(0.22, 0.06, k.u) * (0.3 + 0.7 * v.act));
     var ly = layer_paint(cov, col, LC_VOLCANIC_ASH);
     ly.clear = 0.95;
