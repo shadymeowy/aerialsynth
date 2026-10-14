@@ -1082,7 +1082,7 @@ fn agri_kind_mean(pl: Plan, k: u32, px: AgPx) -> vec3<f32> {
             return acc;
         }
         case 1u: { return mixc(px.soil * 0.8, mixc(px.soil, px.grass_dry, 0.5), 0.5 - 0.4 * px.season); }
-        case 2u: { return agri_pasture_col(px) * 0.97; }
+        case 2u: { return agri_pasture_col(px) * vec3<f32>(1.0, 0.985, 0.91); }
         case 3u: { return agri_pasture_col(px) * 1.05; }
         case 4u: { return mixc(mixc(px.grass, px.soil, 0.3), px.crown * 1.1, 0.4); }
         case 5u: { return mixc(px.soil * 1.15, srgb(104.0, 112.0, 84.0), 0.3); }
@@ -1447,9 +1447,11 @@ fn agri_pasture(pl: Plan, pc: Parcel, px: AgPx, id: u64, q: vec2<f32>) -> Shade 
     let gsd = px.gsd;
     let fw = px.fw;
     var col = agri_pasture_col(px) * (0.86 + 0.28 * u01k(id, 8lu));
-    col *= 1.0 + 0.15 * perlin3(id ^ 0x9A5lu, p * (1.0lf / 14.0lf)) * band(14.0, gsd) + 0.10 * perlin3(id ^ 0x9A6lu, p * (1.0lf / 4.0lf)) * band(4.0, gsd);
+    col *= 1.0 + 0.18 * perlin3(id ^ 0x9A5lu, p * (1.0lf / 14.0lf)) * band(14.0, gsd) + 0.16 * perlin3(id ^ 0x9A6lu, p * (1.0lf / 4.0lf)) * band(4.0, gsd);
     let tus = perlin3(id ^ 0x9A7lu, p * (1.0lf / 1.7lf)) * band(1.7, gsd);
-    col *= 1.0 + 0.10 * tus + 0.12 * perlin3(id ^ 0x9A8lu, p * (1.0lf / 40.0lf)) * band(40.0, gsd);
+    col *= 1.0 + 0.2 * tus + 0.12 * perlin3(id ^ 0x9A8lu, p * (1.0lf / 40.0lf)) * band(40.0, gsd);
+    let yel = 0.5 + 0.5 * perlin3(id ^ 0x9A9lu, p * (1.0lf / 7.0lf)) * band(7.0, gsd);
+    col = mixc(col, col * vec3<f32>(1.1, 1.05, 0.8), 0.6 * yel);
     var cls = LC_PASTURE;
     var dh = 0.1;
     if (pl.sys == AG_PASTURE || pl.sys == AG_SHELTER || pl.sys == AG_SECTION || pl.sys == AG_RANCH) {

@@ -1097,7 +1097,7 @@ fn kind_mean(pl: &Plan, k: u32, px: &Px) -> DVec3 {
             acc
         }
         kind::FALLOW => mixc(px.soil * 0.8, mixc(px.soil, px.grass_dry, 0.5), 0.5 - 0.4 * px.season),
-        kind::PASTURE => pasture_col(px) * 0.97,
+        kind::PASTURE => pasture_col(px) * DVec3::new(1.0, 0.985, 0.91), // (0.97, with the mean of the yellow patches)
         kind::HAY => pasture_col(px) * 1.05,
         kind::ORCHARD => mixc(mixc(px.grass, px.soil, 0.3), px.crown * 1.1, 0.4),
         kind::OLIVE => mixc(px.soil * 1.15, srgb(104.0, 112.0, 84.0), 0.3),
@@ -1491,10 +1491,13 @@ fn scatter_tree(seed: u64, q: DVec2, cell: f64, dens: f64, gsd: f64, fw: f64) ->
 fn pasture(pl: &Plan, pc: &Parcel, px: &Px, id: u64, q: DVec2) -> (DVec3, f64, u8) {
     let (p, gsd, fw) = (px.p, px.gsd, px.fw);
     let mut col = pasture_col(px) * (0.86 + 0.28 * u01k(id, 8));
-    col *= 1.0 + 0.15 * perlin3(id ^ 0x9A5, p / 14.0) * band(14.0, gsd) + 0.10 * perlin3(id ^ 0x9A6, p / 4.0) * band(4.0, gsd);
-    // tussocks and grazed patches
+    col *= 1.0 + 0.18 * perlin3(id ^ 0x9A5, p / 14.0) * band(14.0, gsd) + 0.16 * perlin3(id ^ 0x9A6, p / 4.0) * band(4.0, gsd);
+    // tussocks and grazed patches; patches of yellower (flowering, drier) grass
+    // (a field seen from 100 m was a flat green fill)
     let tus = perlin3(id ^ 0x9A7, p / 1.7) * band(1.7, gsd);
-    col *= 1.0 + 0.10 * tus + 0.12 * perlin3(id ^ 0x9A8, p / 40.0) * band(40.0, gsd);
+    col *= 1.0 + 0.2 * tus + 0.12 * perlin3(id ^ 0x9A8, p / 40.0) * band(40.0, gsd);
+    let yel = 0.5 + 0.5 * perlin3(id ^ 0x9A9, p / 7.0) * band(7.0, gsd);
+    col = mixc(col, col * DVec3::new(1.1, 1.05, 0.8), 0.6 * yel);
     let mut cls = CLS_PASTURE;
     let mut dh = 0.1;
     // only paddocks big enough for trails (the big systems)
