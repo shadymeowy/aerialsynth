@@ -1235,7 +1235,8 @@ impl Renderer {
         let ng = DVec3::new(n_geo.dot(east), n_geo.dot(north), n_geo.dot(up));
         let hz = DVec2::new(ng.x, -ng.y);
         let wt = walls::weight(ng.z);
-        if wt > 0.0 && hz.length_squared() > 1e-6 {
+        let wr = walls::weight_rock(ng.z);
+        if wr > 0.0 && hz.length_squared() > 1e-6 {
             let out = hz.normalize();
             // (the DSM texels at the top and at the foot of the wall; the sample's own height
             // where a tile is missing)
@@ -1248,15 +1249,31 @@ impl Renderer {
             let base = if w.kind == walls::BUILT || w.kind == walls::GLASS || w.kind == walls::VEG {
                 view.texel(z, tx.floor() as i64, ty.floor() as i64, which)
             } else {
-                let k = z.min(2);
+                // (the bilinear mean of the colour texels three levels up: a nearest texel draws
+                // the texel grid's skewed tooth edges on a terraced face; shade.wgsl `wall_rock_col`)
+                let k = z.min(3);
                 let s = 0.5f64.powi(k as i32);
-                view.texel(z - k, (gx * s).floor() as i64, (gy * s).floor() as i64, which)
+                let (u, v) = (gx * s - 0.5, gy * s - 0.5);
+                let (i0, j0) = (u.floor(), v.floor());
+                let (tu, tv) = (u - i0, v - j0);
+                let (mut acc, mut wsum) = (DVec3::ZERO, 0.0);
+                for (di, dj) in [(0i64, 0i64), (1, 0), (0, 1), (1, 1)] {
+                    let w = (if di == 1 { tu } else { 1.0 - tu }) * (if dj == 1 { tv } else { 1.0 - tv });
+                    if let Some(c) = view.texel(z - k, i0 as i64 + di, j0 as i64 + dj, which) {
+                        acc += c * w;
+                        wsum += w;
+                    }
+                }
+                (wsum > 0.0).then(|| acc / wsum)
             };
             w.base = base.unwrap_or(DVec3::splat(0.2));
             w.top = e(-2.5);
             w.ground = e(2.5);
             w.tan = DVec2::new(-out.y, out.x);
-            w.weight = wt;
+            w.weight = if w.kind == walls::ROCK { wr } else { wt };
+            if w.weight <= 0.0 {
+                w.kind = walls::NONE;
+            }
         }
         // the class's material (landcover::Material; the same table as `lc_material` in
         // shade.wgsl): self-emission with the lights, the snow BRDF, and the glint of water (sky

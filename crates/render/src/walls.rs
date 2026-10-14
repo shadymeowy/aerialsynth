@@ -11,7 +11,8 @@
 //!   glass (the top's material glints: towers, greenhouses) is a curtain wall of dark glass,
 //!   mullions and spandrels, reflecting the sky with the wall's normal;
 //! * **rock** (bare ground or cliff at or above the wall): the local mean colour with strata
-//!   (beds of hashed brightness, shaded towards their base, wavy) and vertical joints;
+//!   (soft beds and bands of hashed tone and saturation, keyed on the elevation only, wavy),
+//!   rare faint fractures, and scree at the foot of a high wall;
 //! * **vegetation**: the colour at the top (the crown's own), darker (the side of the canopy),
 //!   in clumps;
 //! * **snow and ice**: the local mean colour, slightly blue.
@@ -42,6 +43,14 @@ pub(crate) const WRAP: f64 = 4096.0;
 /// (0 below ~52° of slope, 1 above ~66°).
 pub(crate) fn weight(nz: f64) -> f64 {
     let t = ((0.62 - nz) / 0.22).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// The weight of a **rock** wall: the same ramp, from ~40° of slope (full at ~57°): the
+/// top-down texture stretched down a terraced canyon face is a comb of vertical stripes
+/// (the renderers evaluate it for every face steeper than ~40° and take the larger).
+pub(crate) fn weight_rock(nz: f64) -> f64 {
+    let t = ((0.76 - nz) / 0.22).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
 
@@ -90,6 +99,11 @@ fn mix(a: DVec3, b: DVec3, t: f64) -> DVec3 {
 
 fn lum(c: DVec3) -> f64 {
     c.dot(DVec3::new(0.2126, 0.7152, 0.0722))
+}
+
+fn smooth(a: f64, b: f64, x: f64) -> f64 {
+    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 fn inside(f: f64, a: f64, b: f64) -> f64 {
@@ -147,17 +161,27 @@ pub(crate) fn texel(kind: u32, base: DVec3, s: f64, h: f64, ground: f64, top: f6
             (mix(mean, col, k), e)
         }
         ROCK => {
-            let b = h / 2.6 + 0.35 * (s / 23.0).sin();
+            // strata follow the elevation (never the position along the wall): beds of hashed
+            // tone, soft at their top, gently warped along the wall; broad bands; rare faint
+            // fractures; scree at the foot of a high wall
+            let b = h / 2.6 + 0.35 * (s / 23.0).sin() + 0.15 * (s / 7.3 + 1.3).sin();
             let bi = b.floor();
             let fb = b - bi;
-            let layer = 0.8 + 0.4 * hash(bi as i32, 7);
-            let bed = 1.08 - 0.16 * fb;
-            let j = s / 3.5 + hash(bi as i32, 3);
-            let joint = if j - j.floor() < 0.08 { 0.7 } else { 1.0 };
-            let k = ((4.0 - foot) / 2.5).clamp(0.0, 1.0);
-            let f = 1.0 + (layer * bed * joint / 0.976 - 1.0) * k;
-            let rock = mix(base, DVec3::splat(lum(base)), 0.3);
-            (rock * f, DVec3::ZERO)
+            let (l0, l1) = (hash(bi as i32, 7), hash(bi as i32 + 1, 7));
+            let layer = 0.88 + 0.24 * (l0 + (l1 - l0) * smooth(0.75, 1.0, fb));
+            let band = 0.95 + 0.10 * hash((h / 19.0).floor() as i32, 11);
+            let bed = 1.0 + 0.04 * (std::f64::consts::TAU * fb).cos();
+            let jw = ((0.9 - foot) / 0.5).clamp(0.0, 1.0);
+            let j = s / (6.0 + 8.0 * hash(bi as i32, 5)) + hash(bi as i32, 3);
+            let joint = if j - j.floor() < 0.03 && hash(bi as i32, 9) < 0.3 { 1.0 - 0.15 * jw } else { 1.0 };
+            let k = ((3.2 - foot) / 2.0).clamp(0.0, 1.0);
+            let k2 = ((12.0 - foot) / 8.0).clamp(0.0, 1.0);
+            let f = 1.0 + (layer * bed * joint - 1.0) * k + (band - 1.0) * k2;
+            let sat = 0.3 + 0.3 * (hash(bi as i32, 13) - 0.5) * k;
+            let rock = mix(base, DVec3::splat(lum(base)), sat);
+            let tl = (1.0 - smooth(1.0, 9.0, h - ground)) * ((top - ground - 6.0) / 6.0).clamp(0.0, 1.0);
+            let scree = mix(rock, DVec3::splat(lum(rock) * 1.12), 0.5);
+            (mix(rock * f, scree, 0.6 * tl), DVec3::ZERO)
         }
         VEG => {
             let c = hash((s / 3.0).floor() as i32, (h / 3.0).floor() as i32);
