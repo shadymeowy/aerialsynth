@@ -20,7 +20,7 @@
   layers:
     - slot: zonal
       kernel: patches
-      params: { scale: 28, fraction: 0.35, octaves: 2, colour: [146, 142, 106], colour2: [124, 128, 86] }
+      params: { scale: 28, fraction: 0.35, octaves: 2, colour: [146, 142, 106], colour2: [124, 128, 86], soft: 0.3 }
       height: none
     - slot: azonal
       kernel: cold_polygons
@@ -79,7 +79,7 @@
       class: bare
     - slot: zonal
       kernel: patches
-      params: { scale: 12, fraction: 0.2, octaves: 2, colour: [150, 146, 120], colour2: [128, 132, 104] }
+      params: { scale: 12, fraction: 0.2, octaves: 2, colour: [150, 146, 120], colour2: [128, 132, 104], soft: 0.3 }
       height: none
   landuse: { agriculture: 0.0, towns: 0.1 }
 
@@ -98,7 +98,7 @@
   layers:
     - slot: zonal
       kernel: patches
-      params: { scale: 15, fraction: 0.45, octaves: 2, colour: [182, 178, 146], colour2: [160, 160, 126] }
+      params: { scale: 15, fraction: 0.45, octaves: 2, colour: [182, 178, 146], colour2: [160, 160, 126], soft: 0.3 }
       height: none
     - slot: azonal
       kernel: patches
