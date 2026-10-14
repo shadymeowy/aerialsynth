@@ -38,6 +38,10 @@
   with side canyons, spurs and thick strata; houses of v0.2.0's size; delta silt in the land's
   hue; mixed farms and mown hay in pasture regions; softer desert varnish; A/B places of the
   same landscape for every v0.2.0 scene.
+- `next` polish round 6: even desert floors (soft varnish and mottling) and calm arid deltas;
+  town centres of detached boxes on lawns, fewer street trees; smaller, more varied parcels
+  in wet climates, hedged mixed farms; no fishbone clearings over farmland; greenhouse seas
+  only in warm climates; snow on steep high-mountain slopes.
 - **Optional tile layers** (tile store format 2; `next` only): `tiles.layers: [dtm, instance]`
   adds the bare ground and instance ids (building lots, fields, forest stands) to a new store;
   the viewer's map shadings *Height above ground* and *Instances* show them. Format-1 stores
