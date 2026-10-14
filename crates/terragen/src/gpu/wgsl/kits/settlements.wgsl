@@ -306,7 +306,7 @@ fn st_roof_col(arch: u32, u: f32, flat: bool) -> vec3<f32> {
         c3 = srgb(226.0, 220.0, 208.0);
     } else if (arch == 6u || arch == 4u) {
         c0 = srgb(88.0, 88.0, 94.0);
-        c1 = srgb(152.0, 74.0, 58.0);
+        c1 = srgb(146.0, 84.0, 66.0);
         c2 = srgb(118.0, 86.0, 72.0);
         c3 = srgb(70.0, 72.0, 80.0);
     } else if (arch == 9u || arch == 10u) {

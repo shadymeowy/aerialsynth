@@ -321,7 +321,7 @@ pub fn roof_col(arch: u32, u: f64, flat: bool) -> DVec3 {
         // slate, red tile, brown
         6 | 4 => match k {
             0 => srgb(88.0, 88.0, 94.0),
-            1 => srgb(152.0, 74.0, 58.0),
+            1 => srgb(146.0, 84.0, 66.0),
             2 => srgb(118.0, 86.0, 72.0),
             _ => srgb(70.0, 72.0, 80.0),
         },
