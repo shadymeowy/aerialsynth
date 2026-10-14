@@ -7,6 +7,7 @@
 //!     cargo run --release -p terragen --example probe_px -- bands
 //!     cargo run --release -p terragen --example probe_px -- towns LAT LON R_KM [MIN_LEVEL]
 //!     cargo run --release -p terragen --example probe_px -- audit N SEED
+//!     cargo run --release -p terragen --example probe_px -- slopes LAT LON KM STEP_M [classic]
 //!
 //! The first prints the world fields at one point (default 5 m pixels); `scan` prints one line of
 //! features per grid point (200 m pixels) to look for places; `sinks` lists the rivers ending in
@@ -95,6 +96,50 @@ fn main() {
             }
             lat += a[4];
         }
+        return;
+    }
+    if args[0] == "slopes" {
+        // slopes LAT LON KM STEP_M [classic]: the slope distribution of the bare ground over a
+        // KM x KM box (central differences of pass A's ground STEP_M apart)
+        let a: Vec<f64> = args[1..5].iter().map(|s| s.parse().unwrap()).collect();
+        let classic = args.get(5).is_some_and(|s| s == "classic");
+        let cg = classic.then(|| {
+            let mut cfg = terragen::Config::default();
+            cfg.generator = terragen::GeneratorKind::Classic;
+            terragen::classic::Generator::with_backend(cfg, terragen::Backend::Cpu)
+        });
+        let n = (a[2] * 1000.0 / a[3]) as i64;
+        let (dlat, dlon) = (a[3] / 111_200.0, a[3] / (111_200.0 * a[0].to_radians().cos()));
+        let h = |i: i64, j: i64| {
+            let (la, lo) = ((a[0] + (i - n / 2) as f64 * dlat).to_radians(), (a[1] + (j - n / 2) as f64 * dlon).to_radians());
+            match &cg {
+                Some(c) => c.probe(la, lo, a[3]).0.ground,
+                None => g.probe(la, lo, a[3]).0.ground,
+            }
+        };
+        let grid: Vec<Vec<f64>> = (0..n).map(|i| (0..n).map(|j| h(i, j)).collect()).collect();
+        let mut sl = vec![];
+        for i in 1..n as usize - 1 {
+            for j in 1..n as usize - 1 {
+                let gx = (grid[i][j + 1] - grid[i][j - 1]) / (2.0 * a[3]);
+                let gy = (grid[i + 1][j] - grid[i - 1][j]) / (2.0 * a[3]);
+                sl.push(gx.hypot(gy).atan().to_degrees());
+            }
+        }
+        sl.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        let q = |f: f64| sl[((sl.len() - 1) as f64 * f) as usize];
+        let mean = sl.iter().sum::<f64>() / sl.len() as f64;
+        let share = |d: f64| sl.iter().filter(|&&x| x > d).count() as f64 / sl.len() as f64;
+        let (mn, mx) = grid.iter().flatten().fold((f64::MAX, f64::MIN), |(a, b), &x| (a.min(x), b.max(x)));
+        println!(
+            "slope mean {mean:.1} p50 {:.1} p90 {:.1} p99 {:.1}; >30 {:.2} >40 {:.2} >50 {:.2}; ground {mn:.0}..{mx:.0} m",
+            q(0.5),
+            q(0.9),
+            q(0.99),
+            share(30.0),
+            share(40.0),
+            share(50.0)
+        );
         return;
     }
     if args[0] == "audit" {
