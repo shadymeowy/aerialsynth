@@ -32,6 +32,7 @@
 //!   with the tiles).
 
 pub mod atlas;
+pub(crate) mod cachedir;
 pub mod classic;
 pub mod config;
 pub mod eco;

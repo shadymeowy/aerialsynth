@@ -58,6 +58,10 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --release -- -D warnings
 
+      # the GPU-less terragen build (feature `gpu` off) stays warning-free
+      - name: Clippy (terragen, no default features)
+        run: cargo clippy -p terragen --no-default-features --release -- -D warnings
+
       - name: Build
         run: cargo build --release --workspace --all-targets
 

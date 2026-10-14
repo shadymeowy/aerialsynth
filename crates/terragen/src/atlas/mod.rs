@@ -664,7 +664,8 @@ impl Atlas {
 const FILE_MAGIC: &[u8; 8] = b"TGATLAS1";
 
 /// The directory of the disk cache: `TERRAGEN_ATLAS_CACHE` (a directory; `off`, `0` or empty
-/// disable the cache), else `$XDG_CACHE_HOME/terrain`, else `~/.cache/terrain`.
+/// disable the cache), else `$XDG_CACHE_HOME/terrain`, else `~/.cache/terrain`, else
+/// `%LOCALAPPDATA%\terrain` (see [`crate::cachedir`]).
 pub fn cache_dir() -> Option<PathBuf> {
     if let Some(v) = std::env::var_os("TERRAGEN_ATLAS_CACHE") {
         let s = v.to_string_lossy();
@@ -673,5 +674,5 @@ pub fn cache_dir() -> Option<PathBuf> {
         }
         return Some(PathBuf::from(v));
     }
-    std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".cache"))).map(|d| d.join("terrain"))
+    crate::cachedir::cache_dir()
 }

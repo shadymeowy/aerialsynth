@@ -365,6 +365,12 @@ impl Scenario {
         let s = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let scn: Scenario =
             if s.trim().is_empty() { Scenario::default() } else { serde_yaml::from_str(&s).with_context(|| format!("parsing {}", path.display()))? };
+        // (classic ignores the next-only settings: say so for those the file sets, once)
+        if let Some(world) = serde_yaml::from_str::<serde_yaml::Value>(&s).ok().and_then(|v| v.get("world").cloned()) {
+            for note in terragen::config::next_only_notes(&world) {
+                eprintln!("{note}");
+            }
+        }
         scn.validate().with_context(|| format!("checking {}", path.display()))?;
         Ok(scn)
     }

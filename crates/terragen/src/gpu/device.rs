@@ -352,13 +352,19 @@ impl Gpu {
 
 static SHARED: std::sync::OnceLock<Result<std::sync::Arc<Gpu>, String>> = std::sync::OnceLock::new();
 
+/// `AERIALSYNTH_GPU_STRICT=1` (development, CI): a GPU failure is an error, never a silent
+/// switch to the (much slower) CPU.
+pub fn strict() -> bool {
+    std::env::var("AERIALSYNTH_GPU_STRICT").is_ok_and(|v| !v.is_empty() && v != "0")
+}
+
 /// The process-wide device (generator, renderer and event sensor share it).
 pub fn shared() -> Result<std::sync::Arc<Gpu>> {
     SHARED
         .get_or_init(|| {
             let r = Gpu::new().map(std::sync::Arc::new).map_err(|e| e.to_string());
             if let Err(e) = &r {
-                let strict = std::env::var("AERIALSYNTH_GPU_STRICT").is_ok_and(|v| !v.is_empty() && v != "0");
+                let strict = strict();
                 if let Some(w) = no_gpu_warning(std::env::var(GPU_ENV).ok().as_deref(), strict, e) {
                     eprintln!("{w}");
                 }

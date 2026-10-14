@@ -17,6 +17,7 @@ pub use tilestore::TileData;
 pub struct NextGenerator {
     pub world: World,
     pub surface: SurfaceModel,
+    #[cfg(feature = "gpu")]
     backend: Backend,
     /// the GPU generator, compiled on first use (Err: unavailable)
     #[cfg(feature = "gpu")]
@@ -160,11 +161,14 @@ impl NextGenerator {
         let mut cfg = Config { generator: crate::config::GeneratorKind::Next, ..cfg };
         // the resolved biome registry is part of the world (stores record it)
         cfg.biomes.resolved = crate::registry::Registry::for_config(&cfg).ok().map(|r| r.resolved.clone());
+        #[cfg(not(feature = "gpu"))]
+        let _ = backend; // (only the GPU path reads it)
         let world = World::new(cfg);
         let surface = SurfaceModel::new(&world);
         NextGenerator {
             world,
             surface,
+            #[cfg(feature = "gpu")]
             backend,
             #[cfg(feature = "gpu")]
             gpu: std::sync::OnceLock::new(),
@@ -209,7 +213,7 @@ impl NextGenerator {
             let g = self.clone();
             let spawned = std::thread::Builder::new().name("gpu-generator-setup".into()).spawn(move || {
                 let t0 = std::time::Instant::now();
-                if g.gpu_blocking().is_some() && std::env::var_os("TERRAGEN_PROFILE").is_some() {
+                if matches!(g.gpu_blocking(), Ok(Some(_))) && std::env::var_os("TERRAGEN_PROFILE").is_some() {
                     eprintln!("GPU generator ready after {:.1} s (in the background)", t0.elapsed().as_secs_f64());
                 }
                 g.gpu_preparing.store(false, Ordering::Release);
@@ -231,27 +235,46 @@ impl NextGenerator {
                 _ => None,
             };
         }
+        self.gpu_blocking().unwrap_or(None)
+    }
+
+    /// [`Self::gpu`] for the generating calls: with `Backend::Gpu`, or `AERIALSYNTH_GPU_STRICT=1`,
+    /// a GPU generator that fails to set up (device or pipeline compile) is an error, not a CPU
+    /// fallback.
+    #[cfg(feature = "gpu")]
+    fn gpu_checked(&self) -> anyhow::Result<Option<&crate::gpu::GpuGenerator>> {
+        if self.backend == Backend::Auto && self.gpu_preparing.load(std::sync::atomic::Ordering::Acquire) {
+            return Ok(self.gpu());
+        }
         self.gpu_blocking()
     }
 
-    /// The GPU generator, set up on first use (blocking).
+    /// The GPU generator, set up on first use (blocking). A failed setup is `None` (with a
+    /// warning, once) with `Backend::Auto`, an error with `Backend::Gpu` or in strict mode.
     #[cfg(feature = "gpu")]
-    fn gpu_blocking(&self) -> Option<&crate::gpu::GpuGenerator> {
+    fn gpu_blocking(&self) -> anyhow::Result<Option<&crate::gpu::GpuGenerator>> {
         if self.backend == Backend::Cpu {
-            return None;
+            return Ok(None);
         }
-        if self.backend == Backend::Auto
-            && (self.gpu_failed.load(std::sync::atomic::Ordering::Relaxed) || !crate::gpu::shared().is_ok_and(|g| g.check_generator().is_ok()))
-        {
-            return None;
+        let strict = crate::gpu::strict();
+        let lenient = self.backend == Backend::Auto && !strict;
+        if self.backend == Backend::Auto && self.gpu_failed.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(None);
+        }
+        if self.gpu.get().is_none() {
+            let dev = crate::gpu::shared().and_then(|g| g.check_generator());
+            if let Err(e) = dev {
+                return if lenient { Ok(None) } else { Err(e) };
+            }
         }
         match self.gpu.get_or_init(|| crate::gpu::GpuGenerator::new(self.world.cfg.clone()).map_err(|e| format!("{e:#}"))) {
-            Ok(g) => Some(g),
-            Err(e) => {
+            Ok(g) => Ok(Some(g)),
+            Err(e) if lenient => {
                 static WARNED: std::sync::Once = std::sync::Once::new();
                 WARNED.call_once(|| eprintln!("warning: GPU tile generator unavailable ({e}); generating on the CPU"));
-                None
+                Ok(None)
             }
+            Err(e) => Err(anyhow::anyhow!("GPU tile generator unavailable: {e}")),
         }
     }
 
@@ -270,7 +293,7 @@ impl NextGenerator {
     fn on_gpu_failure(&self, e: anyhow::Error) -> anyhow::Result<()> {
         // `AERIALSYNTH_GPU_STRICT=1` (development, CI): a GPU failure is an error, never a
         // silent switch to the (much slower) CPU
-        if self.backend != Backend::Auto || std::env::var("AERIALSYNTH_GPU_STRICT").is_ok_and(|v| !v.is_empty() && v != "0") {
+        if self.backend != Backend::Auto || crate::gpu::strict() {
             return Err(e);
         }
         if !self.gpu_failed.swap(true, std::sync::atomic::Ordering::Relaxed) {
@@ -284,7 +307,7 @@ impl NextGenerator {
     pub fn tiles(&self, ids: &[TileId]) -> anyhow::Result<Vec<TileData>> {
         let mut out = Vec::with_capacity(ids.len());
         #[cfg(feature = "gpu")]
-        if let Some(g) = self.gpu() {
+        if let Some(g) = self.gpu_checked()? {
             for chunk in ids.chunks(GPU_BATCH) {
                 match g.tiles(chunk) {
                     Ok(t) => out.extend(t),
@@ -309,7 +332,7 @@ impl NextGenerator {
     /// standing water (on the GPU when tiles are generated there).
     pub fn terrain_points(&self, pts: &[(f64, f64, f64)]) -> anyhow::Result<Vec<PointTerrain>> {
         #[cfg(feature = "gpu")]
-        if let Some(g) = self.gpu() {
+        if let Some(g) = self.gpu_checked()? {
             match g.terrain_points(pts) {
                 Ok(v) => {
                     return Ok(v
@@ -984,5 +1007,31 @@ impl NextGenerator {
             }
         }
         TileData { id, rgb, albedo, elevation, normal, landcover, emission, dtm, instance, elev_min: emin, elev_max: emax }
+    }
+}
+
+#[cfg(all(test, feature = "gpu"))]
+mod setup_failure_tests {
+    use super::*;
+
+    /// A GPU generator that failed to set up: an error with `Backend::Gpu` (and in strict
+    /// mode), the CPU with `Backend::Auto` otherwise.
+    #[test]
+    fn failed_gpu_setup_is_an_error_when_strict() {
+        let cfg = Config::default();
+        let mk = |b| {
+            let g = NextGenerator::with_backend(cfg.clone(), b);
+            let _ = g.gpu.set(Err("injected setup failure".into()));
+            g
+        };
+        let id = TileId { z: 8, x: 100, y: 100 };
+        let e = mk(Backend::Gpu).tiles(&[id]).err().expect("Backend::Gpu must fail");
+        assert!(format!("{e:#}").contains("injected setup failure"), "{e:#}");
+        let auto = mk(Backend::Auto);
+        if crate::gpu::strict() {
+            assert!(auto.tiles(&[id]).is_err());
+        } else {
+            assert!(auto.gpu_blocking().unwrap().is_none());
+        }
     }
 }
