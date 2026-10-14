@@ -161,6 +161,9 @@ struct Bio {
     a: u32,
     b: u32,
     w: f32,
+    /// the other ecoregion's biome where the mosaic picked one (its palette blends in by `wst`;
+    /// `a` elsewhere)
+    c: u32,
     edge_km: f32,
     st: EcoStyle,
     /// site temperature, precipitation, temperature range, dry months
@@ -253,6 +256,7 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
         o.a = 0u;
         o.b = 0u;
         o.w = 0.0;
+        o.c = 0u;
         o.edge_km = edge / 1000.0;
         o.st.grass = vec4<f32>(1.0);
         o.st.crown = vec4<f32>(1.0);
@@ -302,10 +306,15 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
         o.a = z1.z;
         o.b = z2.z;
         o.w = w;
+        o.c = z1.z;
     } else {
         o.a = z1.z;
         o.b = z1.partner;
         o.w = z1.w;
+        o.c = z1.z;
+        if (ws > 0.0) {
+            o.c = zone_of(e2.biome, tz, c.p, c.gsd).z;
+        }
     }
     if (ws > 0.0) {
         o.st = style_mix(eco_style(e1), eco_style(e2), ws);
@@ -324,10 +333,11 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
 
 /// The `Bio` that `bio_at` made, from its zones (`a`, `b`, `w`), its style's ecoregions and blend
 /// (`k1`, `k2`, `wst`) and the border distance `edge` (m).
-fn bio_from(a: u32, b: u32, w: f32, k1: i32, k2: i32, wst: f32, edge: f32) -> Bio {
+fn bio_from(a: u32, bc: u32, w: f32, k1: i32, k2: i32, wst: f32, edge: f32) -> Bio {
     var o: Bio;
     o.a = a;
-    o.b = b;
+    o.b = bc & 0xffffu;
+    o.c = bc >> 16u;
     o.w = w;
     o.k1 = k1;
     o.k2 = k2;
@@ -352,11 +362,14 @@ fn bio_from(a: u32, b: u32, w: f32, k1: i32, k2: i32, wst: f32, edge: f32) -> Bi
 
 /// A palette colour of the sample's biome(s).
 fn bio_pal(b: Bio, i: u32) -> vec3<f32> {
-    let a = biomes[b.a].pal[i].xyz;
-    if (b.w <= 0.0) {
-        return a;
+    var a = biomes[b.a].pal[i].xyz;
+    if (b.w > 0.0) {
+        a += (biomes[b.b].pal[i].xyz - a) * b.w;
     }
-    return a + (biomes[b.b].pal[i].xyz - a) * b.w;
+    if (b.c != b.a && b.wst > 0.0) {
+        a += (biomes[b.c].pal[i].xyz - a) * b.wst;
+    }
+    return a;
 }
 
 /// Vegetation parameter `k` (0..11: trees, conifer, shrubs, savanna, groves, woodlots, tall,
