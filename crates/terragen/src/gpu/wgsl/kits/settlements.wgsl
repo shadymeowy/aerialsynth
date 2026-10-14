@@ -1232,7 +1232,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                 } else if (t == STY_TOWER || t == STY_MIDRISE) {
                     col = mixc(st_paving(), yard, 0.25);
                     if (town_box) {
-                        col = mixc(mixc(yard, srgb(86.0, 112.0, 54.0), 0.45), st_paving(), 0.2);
+                        col = mixc(mixc(yard, srgb(86.0, 112.0, 54.0), 0.7), st_paving(), 0.15);
                     }
                     cls = select(LC_RESIDENTIAL, LC_COMMERCIAL, t == STY_TOWER || z == SZ_CBD);
                 } else if (t == STY_PERIM) {

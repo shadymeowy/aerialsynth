@@ -1153,7 +1153,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         col = match t {
                             typ::WAREHOUSE => mixc(c_concrete(), c_asphalt(), 0.4 * u01k(lh, 10)),
                             // (a town's blocks of flats stand on watered lawns: v0.2.0's green lots)
-                            typ::MIDRISE if town_box => mixc(mixc(yard, srgb(86.0, 112.0, 54.0), 0.45), c_paving(), 0.2),
+                            typ::MIDRISE if town_box => mixc(mixc(yard, srgb(86.0, 112.0, 54.0), 0.7), c_paving(), 0.15),
                             typ::TOWER | typ::MIDRISE => mixc(c_paving(), yard, 0.25),
                             // (courtyards: gardens and trees, not a bare paved square)
                             typ::PERIM => mixc(mixc(yard, c_paving(), 0.35), srgb(84.0, 112.0, 60.0), 0.25 + 0.35 * e.moist.clamp(0.0, 1.0)),
