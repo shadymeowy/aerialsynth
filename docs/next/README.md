@@ -177,7 +177,10 @@ hand picking) with the nearest land point of the classic world (the same point a
 `scripts/ab_v020.py audit` renders them with the `farmland` still's camera (700 m above the
 ground, 42° down, 640 × 360, the still's local solar time 10:41, June; December south of the
 equator) with either generator, and `sheet --audit` puts classic | next side by side
-([`ab/next_quality/audit*.jpg`](ab/next_quality/)).
+([`ab/next_quality/audit*.jpg`](ab/next_quality/): classic, round 6, round 7; `audit_stats.md`).
+In round 7, 6 of the 30 places looked clearly worse than classic's typical quality (13 in
+round 6), 5 of them cold (frozen lakes in snow-free forest, glacier stripes, snow nets over
+tundra), 6 more borderline (ecotone patchworks, autumn and burn colours, paddy terraces).
 
 ```sh
 scripts/ab_v020.py audit --terrain target/release/terrain --generator classic --out /tmp/audit_c
