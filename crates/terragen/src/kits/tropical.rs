@@ -73,7 +73,9 @@ fn fishbone_plane(p: DVec3) -> (DVec2, u64) {
 pub fn fishbone(s: &mut crate::stack::Stack) {
     let t = s.t;
     let l = s.l;
-    if s.is_water || t.temp < 21.0 || t.moist < 0.5 || l.ground > 700.0 || l.slope > 0.3 || t.development > 0.65 {
+    // (a frontier in the forest, not over farmland: projects drew km-long pale strips of pasture
+    // over the plantation lowlands, v0.2.0's tropics scene)
+    if s.is_water || t.temp < 21.0 || t.moist < 0.5 || l.ground > 700.0 || l.slope > 0.3 || t.development > 0.65 || t.agri > 0.55 {
         return;
     }
     let (q, ah) = fishbone_plane(s.ctx.p);
