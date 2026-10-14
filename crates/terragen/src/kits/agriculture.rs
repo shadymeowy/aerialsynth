@@ -158,13 +158,13 @@ const SYS: [SysDef; sys::N] = {
         D,
         SysDef { part: SECTION, size: [402.336, 402.336], kinds: [CROP, PASTURE, FALLOW, POND], kw: [0.84, 0.07, 0.07, 0.02], borders: [BELT, DITCH], bp: [0.06, 0.08], ..D },
         SysDef { part: GRID, size: [1300.0, 900.0], kinds: [CROP, FALLOW, PASTURE, HAY], kw: [0.68, 0.22, 0.06, 0.04], borders: [BELT, TRACK], bp: [0.82, 0.1], ..D },
-        SysDef { part: STRIP, size: [520.0, 24.0], kinds: [CROP, FALLOW, HAY, PASTURE], kw: [0.72, 0.12, 0.12, 0.04], borders: [MARGIN, MARGIN], bp: [1.0, 0.0], ..D },
-        SysDef { part: VOR, size: [170.0, 1.5], kinds: [PASTURE, CROP, HAY, FALLOW], kw: [0.5, 0.3, 0.14, 0.06], borders: [HEDGE, WALL], bp: [0.55, 0.06], slope: [0.3, 0.42], ..D },
-        SysDef { part: VOR, size: [48.0, 1.8], kinds: [CROP, FALLOW, PASTURE, YARD], kw: [0.6, 0.24, 0.1, 0.06], borders: [MARGIN, HEDGE], bp: [0.6, 0.08], slope: [0.3, 0.42], trees: 0.3, ..D },
+        SysDef { part: STRIP, size: [600.0, 34.0], kinds: [CROP, FALLOW, HAY, PASTURE], kw: [0.72, 0.12, 0.12, 0.04], borders: [MARGIN, MARGIN], bp: [1.0, 0.0], ..D },
+        SysDef { part: VOR, size: [260.0, 1.5], kinds: [PASTURE, CROP, HAY, FALLOW], kw: [0.5, 0.3, 0.14, 0.06], borders: [HEDGE, WALL], bp: [0.55, 0.06], slope: [0.3, 0.42], ..D },
+        SysDef { part: VOR, size: [64.0, 1.8], kinds: [CROP, FALLOW, PASTURE, YARD], kw: [0.6, 0.24, 0.1, 0.06], borders: [MARGIN, HEDGE], bp: [0.6, 0.08], slope: [0.3, 0.42], trees: 0.3, ..D },
         SysDef { part: GRID, size: [130.0, 90.0], kinds: [PADDY, POND, CROP, YARD], kw: [0.9, 0.025, 0.065, 0.01], borders: [NONE, CANAL], bp: [0.75, 0.25], slope: [0.7, 0.9], terraces: 1.0, ..D },
-        SysDef { part: VOR, size: [110.0, 1.3], kinds: [CROP, OLIVE, FALLOW, ORCHARD], kw: [0.42, 0.28, 0.2, 0.1], borders: [WALL, MARGIN], bp: [0.75, 0.25], slope: [0.7, 0.9], terraces: 1.0, ..D },
+        SysDef { part: VOR, size: [130.0, 1.3], kinds: [CROP, OLIVE, FALLOW, ORCHARD], kw: [0.42, 0.28, 0.2, 0.1], borders: [WALL, MARGIN], bp: [0.75, 0.25], slope: [0.7, 0.9], terraces: 1.0, ..D },
         SysDef { part: GRID, size: [140.0, 70.0], kinds: [VINE, OLIVE, ORCHARD, FALLOW], kw: [0.7, 0.1, 0.1, 0.1], borders: [TRACK, MARGIN], bp: [0.15, 0.85], slope: [0.6, 0.8], ..D },
-        SysDef { part: VOR, size: [190.0, 1.4], kinds: [OLIVE, ORCHARD, CROP, FALLOW], kw: [0.55, 0.2, 0.15, 0.1], borders: [WALL, MARGIN], bp: [0.5, 0.5], slope: [0.6, 0.8], ..D },
+        SysDef { part: VOR, size: [240.0, 1.4], kinds: [OLIVE, ORCHARD, CROP, FALLOW], kw: [0.55, 0.2, 0.15, 0.1], borders: [WALL, MARGIN], bp: [0.5, 0.5], slope: [0.6, 0.8], ..D },
         SysDef { part: GRID, size: [480.0, 360.0], kinds: [PALM, RUBBER, TEA, CROP], kw: [0.45, 0.22, 0.15, 0.18], borders: [TRACK, MARGIN], bp: [0.9, 0.1], slope: [0.6, 0.8], ..D },
         SysDef { part: GRID, size: [95.0, 60.0], kinds: [GREENH, CROP, FALLOW, POND], kw: [0.76, 0.13, 0.09, 0.02], borders: [TRACK, MARGIN], bp: [0.25, 0.75], ..D },
         SysDef { part: GRID, size: [420.0, 300.0], kinds: [PASTURE, HAY, CROP, POND], kw: [0.6, 0.22, 0.16, 0.02], borders: [MARGIN, HEDGE], bp: [0.8, 0.2], slope: [0.38, 0.5], ..D },
@@ -194,12 +194,12 @@ const ARCH_W: [[f64; sys::N]; 12] = [
 /// Crops: colour (sRGB) in spring, summer, autumn; row spacing (m), row contrast, height (m).
 #[rustfmt::skip]
 const CROPS: [([[f64; 3]; 3], [f64; 3]); 12] = [
-    ([[98.0, 122.0, 60.0], [196.0, 172.0, 104.0], [186.0, 170.0, 132.0]], [0.17, 0.06, 0.8]),   // wheat
-    ([[112.0, 102.0, 76.0], [72.0, 108.0, 48.0], [178.0, 160.0, 110.0]], [0.76, 0.14, 2.2]),    // maize
-    ([[112.0, 102.0, 80.0], [84.0, 118.0, 52.0], [172.0, 140.0, 78.0]], [0.5, 0.1, 0.8]),       // soy
-    ([[214.0, 198.0, 72.0], [108.0, 110.0, 66.0], [140.0, 120.0, 90.0]], [0.2, 0.05, 1.2]),     // rapeseed
+    ([[98.0, 122.0, 60.0], [196.0, 172.0, 104.0], [186.0, 170.0, 132.0]], [1.1, 0.1, 0.8]),   // wheat
+    ([[112.0, 102.0, 76.0], [88.0, 112.0, 62.0], [178.0, 160.0, 110.0]], [0.76, 0.14, 2.2]),    // maize
+    ([[112.0, 102.0, 80.0], [94.0, 118.0, 64.0], [172.0, 140.0, 78.0]], [0.5, 0.1, 0.8]),       // soy
+    ([[214.0, 198.0, 72.0], [108.0, 110.0, 66.0], [140.0, 120.0, 90.0]], [0.9, 0.08, 1.2]),     // rapeseed
     ([[100.0, 116.0, 64.0], [214.0, 180.0, 48.0], [84.0, 70.0, 52.0]], [0.7, 0.1, 1.8]),        // sunflower
-    ([[126.0, 104.0, 82.0], [60.0, 96.0, 48.0], [128.0, 106.0, 84.0]], [0.75, 0.2, 0.6]),       // potato / vegetables
+    ([[126.0, 104.0, 82.0], [84.0, 106.0, 62.0], [128.0, 106.0, 84.0]], [0.75, 0.2, 0.6]),       // potato / vegetables
     ([[86.0, 122.0, 56.0], [112.0, 136.0, 66.0], [98.0, 122.0, 62.0]], [6.5, 0.1, 0.5]),        // alfalfa / hay (windrows)
     ([[140.0, 112.0, 86.0], [90.0, 116.0, 62.0], [182.0, 170.0, 138.0]], [1.0, 0.12, 1.0]),     // cotton (open bolls: not white)
     ([[98.0, 132.0, 62.0], [86.0, 128.0, 58.0], [124.0, 136.0, 72.0]], [1.5, 0.08, 3.0]),       // sugarcane
@@ -679,7 +679,8 @@ fn draw(s: &mut Stack, pl: &Plan) {
         ground: s.l.ground,
         // (a brown of the biome's soils: its second one alone, a red, drew maroon ploughland)
         // (and 30 % towards its grey: tilled soil is a dull brown)
-        soil: field_soil(mixc(mixc(s.pal(pal::SOIL), s.pal(pal::SOIL + 2), 0.5), s.pal(pal::SOIL + 1), 0.3)),
+        // (and 40 % towards v0.2.0's ploughland brown: the biome's soils alone drew mauve parcels)
+        soil: mixc(field_soil(mixc(mixc(s.pal(pal::SOIL), s.pal(pal::SOIL + 2), 0.5), s.pal(pal::SOIL + 1), 0.3)), PLOUGH, 0.4),
         grass: s.pal(pal::GRASS_WET),
         grass_dry: s.pal(pal::GRASS_DRY),
         crown: s.pal(pal::CROWN_DECID),
@@ -751,6 +752,9 @@ fn draw(s: &mut Stack, pl: &Plan) {
     let inst = if cov > 0.0 && crate::landcover::group(cls) == crate::landcover::Group::Agriculture { crate::stack::instance_id(pc.id) } else { 0 };
     s.composite(Layer { cov: a, albedo: col, dh: dh * k - 0.6 * m.micro, hmode: hmode::ADD, cls, inst, emit: GH_GLOW * glow, ..Default::default() });
 }
+
+/// v0.2.0's ploughed soil (linear).
+const PLOUGH: DVec3 = DVec3::new(0.2016, 0.15, 0.0976);
 
 /// Tilled soil: 30 % towards its luminance.
 fn field_soil(c: DVec3) -> DVec3 {
@@ -992,9 +996,11 @@ fn part_section(seed: u64, q: DVec2, fw: f64, pivot_p: f64) -> Parcel {
         };
     }
     let mode = u01k(hq, 1);
-    let n = if mode < 0.45 {
+    // (most quarters cut into halves or forties: whole quarters made the land a quilt of
+    // 800 m squares)
+    let n = if mode < 0.25 {
         1.0
-    } else if mode < 0.8 {
+    } else if mode < 0.6 {
         2.0
     } else {
         4.0
@@ -1094,7 +1100,8 @@ fn kind_mean(pl: &Plan, k: u32, px: &Px) -> DVec3 {
 }
 
 fn pasture_col(px: &Px) -> DVec3 {
-    mixc(px.grass_dry, px.grass, smoothstep(0.25, 0.65, px.moist))
+    // (managed grass stays green longer than the wild: v0.2.0's green pastures)
+    mixc(px.grass_dry, px.grass, smoothstep(0.15, 0.5, px.moist))
 }
 
 fn vine_col(season: f64, u: f64) -> DVec3 {
@@ -1179,11 +1186,11 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
     let (ru, rv) = if rot { (pc.fy, pc.fx) } else { (pc.fx, pc.fy) };
     match k {
         kind::CROP | kind::HAY => {
-            let u_crop = if u01k(id, 16) < 0.5 { u01k(cluster, 6) } else { u01k(id, 6) };
+            let u_crop = if u01k(id, 16) < 0.7 { u01k(cluster, 6) } else { u01k(id, 6) };
             let c = if k == kind::HAY { 6 } else { pick_crop(pl.mix, u_crop) };
             let (cc, row) = CROPS[c as usize];
             let ph = (px.season + 0.3 * (u01k(id, 20) - 0.5)).clamp(0.0, 1.0);
-            col = stage(&cc, ph) * (0.92 + 0.16 * u01k(id, 8));
+            col = stage(&cc, ph) * (0.95 + 0.10 * u01k(id, 8));
             col *= 1.0 + 0.2 * perlin3(id, p / 35.0) * band(35.0, gsd) + 0.11 * perlin3(id ^ 1, p / 120.0) * band(120.0, gsd);
             // soil and growth texture (band-limited)
             col *= 1.0 + 0.15 * perlin3(id ^ 0x7E1, p / 7.0) * band(7.0, gsd) + 0.10 * perlin3(id ^ 0x7E2, p / 2.5) * band(2.5, gsd);

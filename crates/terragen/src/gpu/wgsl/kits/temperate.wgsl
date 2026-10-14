@@ -262,7 +262,7 @@ fn temperate_marsh(s: ptr<function, Stack>) {
     let fw = (*s).l.fw;
     let near = (1.0 - smoothstep1(30.0, 120.0, rd)) * 0.6;
     let flat = 1.0 - smoothstep1(0.02, 0.06, (*s).l.slope);
-    let amount = 0.5 * max(smoothstep1(0.25, 0.6, t.floodplain), near) * smoothstep1(0.45, 0.7, t.moist) * smoothstep1(3.0, 7.0, t.temp) * (1.0 - smoothstep1(16.0, 21.0, t.temp)) * flat;
+    let amount = 0.5 * max(smoothstep1(0.25, 0.6, t.floodplain), near) * smoothstep1(0.45, 0.7, t.moist) * smoothstep1(3.0, 7.0, t.temp) * (1.0 - smoothstep1(16.0, 21.0, t.temp)) * flat * (1.0 - 0.8 * smoothstep1(0.3, 0.6, s_agri(s)));
     if (amount <= 0.01) {
         return;
     }

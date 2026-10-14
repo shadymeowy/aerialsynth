@@ -409,7 +409,10 @@ fn marsh(s: &mut Stack) {
         * smoothstep(0.45, 0.7, t.moist)
         * smoothstep(3.0, 7.0, t.temp)
         * (1.0 - smoothstep(16.0, 21.0, t.temp))
-        * flat;
+        * flat
+        // (farmed floodplains are drained: reed patches with dark open water all over the
+        // fields read as holes)
+        * (1.0 - 0.8 * smoothstep(0.3, 0.6, s.agri()));
     if amount <= 0.01 {
         return;
     }

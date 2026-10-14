@@ -291,7 +291,7 @@ impl SurfaceModel {
 }
 
 /// Slot 5: the fields of the sample's land-use region. Farmland keeps forest on its most
-/// forest-prone patches (woodlots, up to ~1/7 of the land by default, the biome's and culture's
+/// forest-prone patches (woodlots, up to ~1/5 of the land by default, the biome's and culture's
 /// share), fields stay on gentle slopes, off riparian belts and back from the shore.
 pub fn layer(s: &mut crate::stack::Stack) {
     use crate::stack::{hmode, Layer};
@@ -299,7 +299,7 @@ pub fn layer(s: &mut crate::stack::Stack) {
     let t = s.t;
     let fpu = 0.5 + 0.5 * s.pf.forest;
     let cover = smoothstep(0.12, 0.45, t.moist.max(0.0)) * smoothstep(-6.0, 2.0, t.temp) * world.cfg.vegetation.tree_density;
-    let share = (0.34 * s.veg(|v| v.woodlots) * s.bio.style.woodlots).min(0.95);
+    let share = (0.5 * s.veg(|v| v.woodlots) * s.bio.style.woodlots).min(0.95);
     s.m.woodlot = smoothstep(-0.02, 0.02, share * cover - fpu) * s.m.natural_ok;
     let agri = s.agri();
     let m = s.m;
