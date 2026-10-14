@@ -160,3 +160,6 @@ mangroves with their creeks. Distributaries hold sea water.
   raised (a shallow mound under water); the plain is flat (no levee relief or abandoned lobes);
   the distributaries wander with the warp but do not meander; two mouths close together overlap.
 * A straight scarp inside a tidal-flat view is the core's arid mesa terrace, not a seam.
+
+Polish round 6: arid deltas and tidal flats are calmer: salt crusts soft and faint, dry creeks only a little darker
+than the mud, salt pans on fewer flats (perlin 0.3–0.55) and muted towards their mean.

@@ -36,6 +36,7 @@ pub static KIT: Kit = Kit {
     prepare: None,
     replaces_towns: false,
     replaces_roads: false,
+    shared_exists: false,
 };
 
 /// A track from every cone's summit 2 km east (heights from point evaluations of the terrain),

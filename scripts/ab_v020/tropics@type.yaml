@@ -1,4 +1,6 @@
-# tropics at a place of the same type in the next generator's world: tropical forest and paddies (survey) (the same local solar time)  (southern summer: December)
+# tropics at a place of the same type in the next generator's world: a town of 10 000 in the plantation lowland
+# (3.63 N, 18 km from v0.2.0's place; the camera ~2.3 km before it, as v0.2.0's town; round 5 used paddy hills)
+# (the same local solar time and date)
 world:
   seed: 1
   generator: next
@@ -12,8 +14,8 @@ trajectory:
     rate_hz: 400
     speed_mps: 60
     kind: line
-    lat: -14.1839
-    lon: 167.5346
+    lat: 3.6504
+    lon: -103.2551
     heading_deg: 215
     altitude_m: 1000
     duration_s: 9.1
@@ -22,8 +24,8 @@ render:
   shading: relit
   lighting:
     mode: clock
-    date: '2026-12-21'
-    time_utc: '22:16:07'
+    date: '2026-06-21'
+    time_utc: '16:19:17'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:

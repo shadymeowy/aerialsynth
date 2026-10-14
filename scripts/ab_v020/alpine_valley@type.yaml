@@ -1,4 +1,5 @@
-# alpine_valley at a place of the same type in the next generator's world: deep mountain valley (survey) (the same local solar time)  (southern summer: December)
+# alpine_valley at a place of the same type in the next generator's world: a valley in snow-covered high mountains
+# (48.8 N, the range of alpine_south@type; round 5 used a forested valley) (the same local solar time and date)
 world:
   seed: 1
   generator: next
@@ -14,16 +15,16 @@ trajectory:
     altitude_m: 1300
     heading_deg: 200
     kind: line
-    lat: -22.2492
-    lon: -34.7654
+    lat: 48.8
+    lon: -170.5
     duration_s: 7.6
 render:
   supersample: 2
   shading: relit
   lighting:
     mode: clock
-    date: '2026-12-21'
-    time_utc: '12:19:04'
+    date: '2026-06-21'
+    time_utc: '21:22:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:

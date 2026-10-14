@@ -1117,9 +1117,13 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                                 }
                             }
                             zone::INNER => {
-                                if euro && pattern != pat::RADIAL && ut < 0.8 || pattern == pat::ORGANIC {
+                                // (towns: mostly detached blocks of flats on lawns, v0.2.0's
+                                // boxes; perimeter blocks are the cities' (they filled every
+                                // block of a town centre))
+                                let (perim, mid) = if pl.level >= 3 { (0.8, 0.6) } else { (0.25, 0.75) };
+                                if euro && pattern != pat::RADIAL && ut < perim || pattern == pat::ORGANIC {
                                     typ::PERIM
-                                } else if ut < 0.6 {
+                                } else if ut < mid {
                                     typ::MIDRISE
                                 } else {
                                     typ::ROW
@@ -1143,10 +1147,13 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                             }
                         }
                     };
+                    let town_box = t == typ::MIDRISE && pl.level <= 2 && z == zone::INNER;
                     if built || dl > 0.65 {
                         cov_lot = 1.0;
                         col = match t {
                             typ::WAREHOUSE => mixc(c_concrete(), c_asphalt(), 0.4 * u01k(lh, 10)),
+                            // (a town's blocks of flats stand on watered lawns: v0.2.0's green lots)
+                            typ::MIDRISE if town_box => mixc(mixc(yard, srgb(86.0, 112.0, 54.0), 0.7), c_paving(), 0.15),
                             typ::TOWER | typ::MIDRISE => mixc(c_paving(), yard, 0.25),
                             // (courtyards: gardens and trees, not a bare paved square)
                             typ::PERIM => mixc(mixc(yard, c_paving(), 0.35), srgb(84.0, 112.0, 60.0), 0.25 + 0.35 * e.moist.clamp(0.0, 1.0)),
@@ -1171,10 +1178,18 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                                 (DVec2::splat(s), 40.0 + 360.0 * ps * u01k(lh, 4).powi(3) + 40.0 * u01k(lh, 5), true)
                             }
                             typ::MIDRISE => {
-                                let fill = if z <= zone::INNER { DVec2::new(60.0, 60.0) } else { DVec2::new(40.0, 14.0 + 10.0 * u01k(lh, 6)) };
+                                // (a town's: a box of 3-7 floors in its lot, lawn around)
+                                let fill = if town_box {
+                                    DVec2::new(9.0 + 7.0 * u01k(lh, 6), 7.0 + 6.0 * u01k(lh, 7))
+                                } else if z <= zone::INNER {
+                                    DVec2::new(60.0, 60.0)
+                                } else {
+                                    DVec2::new(40.0, 14.0 + 10.0 * u01k(lh, 6))
+                                };
+                                let fl = if town_box { 3.0 } else { 4.0 };
                                 (
                                     DVec2::new(0.5 * lw - 2.5, 0.5 * ld - 2.5).min(fill),
-                                    3.0 * (4.0 + 4.0 * u01k(lh, 4)) + if z == zone::CBD { 12.0 } else { 0.0 },
+                                    3.0 * (fl + 4.0 * u01k(lh, 4)) + if z == zone::CBD { 12.0 } else { 0.0 },
                                     true,
                                 )
                             }
@@ -1226,6 +1241,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         );
                         let frac = match t {
                             typ::HOUSE => 0.3,
+                            _ if town_box => 0.3,
                             typ::TOWER => 0.75,
                             typ::WAREHOUSE => 0.6,
                             _ => 0.55,
@@ -1273,7 +1289,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                                 let pool = aa(dp.min_element(), fw);
                                 col = mixc(col, srgb(70.0, 170.0, 190.0), pool);
                             }
-                            if u01k(lh, 14) < 0.35 {
+                            if u01k(lh, 14) < 0.2 {
                                 let tp = DVec2::new(0.6 * (0.5 * lw) * (u01k(lh, 15) - 0.5) * 2.0, -(half.y + 0.5 * (0.5 * ld - half.y)));
                                 tree = aa(3.0 + 1.5 * u01k(lh, 16) - (rl - tp).length(), fw);
                                 tree_h = 8.0 + 5.0 * u01k(lh, 17);
@@ -1285,7 +1301,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                             // courtyard trees
                             let tc = (ublk / 11.0).floor();
                             let th = hash2(blk.id ^ 0xC07, tc.x as i64, tc.y as i64);
-                            if u01k(th, 1) < 0.45 {
+                            if u01k(th, 1) < 0.25 {
                                 let tp = (tc + 0.5 + 0.4 * (DVec2::new(u01k(th, 2), u01k(th, 3)) - 0.5)) * 11.0;
                                 tree = aa(2.8 + 1.5 * u01k(th, 4) - (ublk - tp).length(), fw);
                                 tree_h = 9.0 + 6.0 * u01k(th, 5);
@@ -1452,8 +1468,10 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
             rim *= el;
         }
     }
-    // ---- street trees (residential streets of tree-lined cultures)
-    let treed = matches!(pl.arch, 5 | 6 | 7 | 9 | 4) && (z == zone::INNER || z == zone::OUTER || z == zone::SUBURB);
+    // ---- street trees (residential streets of tree-lined cultures; some of the streets: a
+    // crown every 11 m along every street drew a busy sawtooth around every block, v0.2.0's towns
+    // have none)
+    let treed = matches!(pl.arch, 5 | 6 | 7 | 9 | 4) && (z == zone::INNER || z == zone::OUTER || z == zone::SUBURB) && u01k(blk.sid, 31) < 0.4;
     if treed && has_streets && street_ok && pattern != pat::INFORMAL && pattern != pat::LINEAR {
         let off = blk.sw + 1.6;
         let dt = (blk.ds - off).abs();
@@ -1515,16 +1533,25 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
 }
 
 /// Shares of green and paved ground of a zone (the rest is roofs).
-pub fn zone_fracs(z: u32) -> (f64, f64) {
-    let zi = z as usize;
+pub fn zone_fracs(pl: &Pl, d: &Dist) -> (f64, f64) {
+    if town_centre(pl, d) {
+        // (a town's centre: boxes on lawns)
+        return (0.38, 0.32);
+    }
+    let zi = d.zone as usize;
     ([0.05, 0.12, 0.25, 0.42, 0.5][zi], [0.5, 0.4, 0.32, 0.25, 0.18][zi])
+}
+
+/// Is the district a town's centre (detached boxes on lawns, not perimeter blocks)?
+fn town_centre(pl: &Pl, d: &Dist) -> bool {
+    d.zone == zone::INNER && pl.level <= 2 && pl.form == form::CITY as u32 && d.pattern != pat::INDUSTRIAL
 }
 
 /// The land-cover class of a sample where the district's lots are below the pixel: drawn from
 /// the zone's shares of roofs, streets and lots by a hash of a 6 m cell (classes are
 /// categorical: the parent's histogram matches its children's).
 pub fn mean_class(pl: &Pl, d: &Dist, q: DVec2) -> u8 {
-    let (green, paved) = zone_fracs(d.zone);
+    let (green, paved) = zone_fracs(pl, d);
     let roofs = 1.0 - green - paved;
     let u = u01k(hash2(pl.seed ^ 0xC1A55, (q.x / 6.0).floor() as i64, (q.y / 6.0).floor() as i64), 1);
     if u < roofs {
@@ -1548,7 +1575,7 @@ pub fn mean_class(pl: &Pl, d: &Dist, q: DVec2) -> u8 {
 pub fn zone_mean(pl: &Pl, d: &Dist, moist: f64) -> (DVec3, f64) {
     let z = d.zone;
     let zi = z as usize;
-    let (green, paved) = zone_fracs(z);
+    let (green, paved) = zone_fracs(pl, d);
     let roofs = 1.0 - green - paved;
     let flat = z <= zone::OUTER && pl.form == form::CITY as u32;
     let rc = roof_col(pl.arch, 0.35, flat);
@@ -1557,7 +1584,8 @@ pub fn zone_mean(pl: &Pl, d: &Dist, moist: f64) -> (DVec3, f64) {
         pat::INFORMAL => srgb(124.0, 104.0, 86.0),
         _ => rc,
     } * (0.85 + 0.3 * u01k(d.did, 14));
-    let col = (rc * roofs + c_asphalt() * paved + c_yard(moist, 0.5) * green) * 0.88;
+    let lawn = if town_centre(pl, d) { mixc(c_yard(moist, 0.5), srgb(86.0, 112.0, 54.0), 0.6) } else { c_yard(moist, 0.5) };
+    let col = (rc * roofs + c_asphalt() * paved + lawn * green) * 0.88;
     let hm = [30.0 * smoothstep(1e5, 1.5e7, pl.pop) + 12.0, 12.0, 8.0, 4.0, 2.5][zi] * if pl.level >= 2 { 1.0 } else { 0.5 };
     (col, hm)
 }

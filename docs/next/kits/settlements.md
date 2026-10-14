@@ -38,9 +38,9 @@ culture, development, population, downwind direction) drives:
 | districts | W2 cells in the place frame (400 m villages … 1.4 km metropolises); their edges are arterials (3.5–7.5 m half width) where the layouts differ (industrial estates, informal fringes); one street pattern, layout and orientation per town (v0.2.0's one grid per town), the zones differ by their buildings; streets and city lots end where the density falls below ~0.42; density multiplier 0.8–1 per district |
 | patterns | grid / rotated grid (jittered lines, main streets every fourth), radial-concentric (rings, spokes doubling per band), organic (warped W2 at 40–90 m; medinas narrow), superblocks (280–390 m, slab and point towers in rows, green and parking), informal (W2 at 7.5 m: tiny corrugated roofs, alleys, thinning with the footprint), industrial (230–340 m blocks). By culture: organic medinas (desert oasis), radial-concentric (30 % of Mediterranean, temperate and highland towns), superblocks (half the steppe and boreal towns), else grids; the peri-urban ring of 65 % of poor towns is informal |
 | lots | hashed BSP of the block, depth 1 (CBD) … 4 (suburbs); a lot exists by the density at its centre (lots stay whole); within the streets 80-90 % of the lots are built, beyond them few |
-| buildings | by zone × culture × lot: detached houses with setbacks (pools in rich suburbs, yard trees, porch lights), row houses, perimeter blocks with courtyards of gardens and trees (European, Mediterranean, monsoon cultures), mid-rises, towers on podiums (40–440 m, by population), warehouses with tanks; gable or flat roofs, roof palettes by culture (terracotta, slate, metal, shingles, thatch, corrugated, whitewashed) |
+| buildings | by zone × culture × lot: detached houses with setbacks (pools in rich suburbs, yard trees, porch lights), row houses, perimeter blocks with courtyards of gardens and trees (European, Mediterranean, monsoon cultures; in towns a quarter of the centre, the rest detached blocks of flats of 3–7 floors on lawns), mid-rises, towers on podiums (40–440 m, by population), warehouses with tanks; gable or flat roofs, roof palettes by culture (terracotta, slate, metal, shingles, thatch, corrugated, whitewashed) |
 | parcels | parks (paths, tree clumps, ponds), plazas, parking (stall lines; cars belong to the transport kit), sports fields with athletics tracks, cemeteries, stadiums (stands, pitch, floodlights; cities), construction sites |
-| trees | yard and park trees, street trees every 11 m in tree-lined cultures |
+| trees | yard and park trees, street trees every 11 m along 40 % of the streets of tree-lined cultures |
 | shadows | a 3-step march toward the sun through the same pixel model (one copy in WGSL) |
 | lights | lamps along the nearest street (sodium / warm / white LED by zone, culture and development), thinned with their energy kept where they would merge, their mean where blocks are unresolved; lit window rims (white in CBDs); floods in industry and stadiums |
 
@@ -253,3 +253,6 @@ villages and farmsteads as points.
 Leftovers round B: districts are looked up at a position warped by two sines (16 % and 4.5 % of the cell), so their borders
 wander, and 60 % of the edges are arterials (the others are ordinary streets); the metro is still the same pattern mix to
 the horizon (the far districts are still at their mean).
+Polish round 6: town centres (towns, levels ≤ 2) are mostly detached boxes of 3–7 floors on lawns (v0.2.0's
+town centres; perimeter blocks fill a quarter of them, all of a city's); street trees along 40 % of the streets, yard
+trees at a fifth of the houses, courtyard trees in a quarter of the cells.

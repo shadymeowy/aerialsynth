@@ -143,8 +143,8 @@ so they cost little outside deserts.
 
 ## Known limits
 
-* Desert varnish and gravel mottling are noise patches (`patches` kernel layers): from 1.5 km up
-  they read as blotches of uniform size rather than varnish streaks following the slope.
+* Desert varnish and gravel mottling are soft noise patches (`patches` kernel layers with
+  `soft`): an even mottling, not varnish streaks following the slope.
 * The core's drainage still runs through the sand seas: where the sand mask is high the kit
   takes the dunes over but not the channels, so a regular grid of straight washes can cross an
   erg (the core does not yet skip drainage carving where `sand` > 0.5).
@@ -163,3 +163,5 @@ so they cost little outside deserts.
 
 Leftovers round B: desert varnish patches are 240 m (was 520 m), 3 octaves, lighter (140, 112, 86): less blotchy.
 Polish round 5: varnish on a fifth of the pavement (was 0.3; red deserts 0.18), lighter (164, 136, 104).
+Polish round 6: varnish and gravel mottling fade in and out (`soft: 0.3` / `0.35`), the core desert's pale mottling
+(184, 160, 126) is closer to the ground: v0.2.0's even desert floor instead of crisp blots.

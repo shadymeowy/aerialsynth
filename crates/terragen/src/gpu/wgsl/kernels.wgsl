@@ -440,7 +440,7 @@ fn patch_u(seed: u64, p: vec3<f64>, scale: f32, oct: f32, rough: f32, gsd: f32) 
 fn k_patches(k: KP, i: KIn) -> KOut {
     let u = patch_u(k.seed, i.p, k.v[0], k.v[2], k.v[3], i.gsd);
     let frac = k.v[1] * i.amount;
-    let w = clamp(2.0 * i.fw / k.v[0], 1e-3, 0.5);
+    let w = max(clamp(2.0 * i.fw / k.v[0], 1e-3, 0.5), k.v[6]);
     let cov = smoothstep1(-w, w, frac - u);
     if (cov <= 0.0) {
         return kout_none();

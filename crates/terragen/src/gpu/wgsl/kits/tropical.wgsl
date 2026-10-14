@@ -564,7 +564,7 @@ fn tropical_slot_water(s: ptr<function, Stack>) {
 fn tropical_slot_canopy(s: ptr<function, Stack>) {
     let t = (*s).t;
     let l = (*s).l;
-    if ((*s).is_water || t.temp < 21.0 || t.moist < 0.5 || l.ground > 700.0 || l.slope > 0.3 || t.development > 0.65) {
+    if ((*s).is_water || t.temp < 21.0 || t.moist < 0.5 || l.ground > 700.0 || l.slope > 0.3 || t.development > 0.65 || t.agri > 0.55) {
         return;
     }
     let p = (*s).c.p;

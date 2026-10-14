@@ -117,3 +117,6 @@ ponds.
 * Pingos and polygons ignore the drainage: polygons continue across small streams.
 * The snow line uses the warmest-month temperature and aspect, not avalanche paths or wind
   redistribution: snow fields have smooth edges on steep ground.
+
+Polish round 6: perennial snow holds on slopes to ~45° and 40 % of it on walls steeper than ~60° (the cut was
+35°–50° to 15 %).

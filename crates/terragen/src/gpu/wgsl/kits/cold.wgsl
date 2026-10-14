@@ -86,7 +86,7 @@ fn cold_ice(s: ptr<function, Stack>, c: ColdClimate) -> ColdIce {
     let g = pi - 2.6 * valley;
     let steep = 1.0 - smoothstep1(0.45, 0.75, l.slope + 0.1 * n + 0.15 * spur);
     let ice = smoothstep1(0.15, -0.15, g + 0.4) * steep;
-    let snow = smoothstep1(0.15, -0.15, pi) * (1.0 - 0.85 * smoothstep1(0.7, 1.2, l.slope));
+    let snow = smoothstep1(0.15, -0.15, pi) * (1.0 - 0.6 * smoothstep1(1.0, 1.8, l.slope));
     o.p = pi;
     o.g = g;
     o.ice = ice;

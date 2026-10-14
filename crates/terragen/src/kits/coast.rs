@@ -415,12 +415,14 @@ fn flats(s: &mut Stack, ty: &Types) {
     let col = mixc(mud, marsh, high);
     s.composite(Layer { cov: zone, albedo: col, cls: if high > 0.5 { cls::MARSH } else { cls::TIDAL_FLAT }, clear: 1.0, ..Default::default() });
     s.m.natural_ok *= 1.0 - zone;
-    // creeks: dark wet channels (the pixel's own carving shows as shallow water)
+    // creeks: dark wet channels (the pixel's own carving shows as shallow water); dry and only a
+    // little darker on the arid flats (a net of black lines over the desert coasts)
     let win = 1.0 - smoothstep(1.6, 3.2, ground);
     if win > 0.0 {
         let c = creek(p, gsd, fw.max(0.3 * gsd)) * zone * win;
         if c > 0.0 {
-            let cc = mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high);
+            let arid = 1.0 - smoothstep(0.2, 0.34, s.t.moist);
+            let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, 0.7 * arid);
             s.composite(Layer { cov: c, albedo: cc, cls: cls::TIDAL_FLAT, clear: 1.0, ..Default::default() });
         }
     }
@@ -466,8 +468,10 @@ pub fn agriculture(s: &mut Stack) {
     let soil = mixc(s.pal(crate::registry::pal::SOIL), s.pal(crate::registry::pal::SOIL + 3), 0.5);
     let hue = mixc(DVec3::ONE, soil / soil.dot(DVec3::new(0.2126, 0.7152, 0.0722)).max(0.01), 0.6);
     let silt = srgb(144.0, 134.0, 114.0) * hue * (1.0 + 0.1 * nz(SEED + 65, p, 38.0, gsd));
-    let salt = smoothstep(0.2, 0.45, nz(SEED + 66, p, 120.0, gsd) + 0.5 * nz(SEED + 67, p, 33.0, gsd)) * (1.0 - low);
-    let dry = mixc(silt, srgb(192.0, 186.0, 170.0), 0.7 * salt);
+    // (soft and faint: crisp white crusts of 100 m over the plain read as blotches next to
+    // v0.2.0's even desert)
+    let salt = smoothstep(0.0, 0.9, nz(SEED + 66, p, 120.0, gsd) + 0.5 * nz(SEED + 67, p, 33.0, gsd)) * (1.0 - low);
+    let dry = mixc(silt, srgb(192.0, 186.0, 170.0), 0.45 * salt);
     let mud = mixc(mixc(srgb(118.0, 106.0, 88.0), srgb(84.0, 76.0, 66.0), low) * hue, mixc(dry, srgb(96.0, 90.0, 78.0) * hue, low), arid);
     let reed = mixc(srgb(96.0, 106.0, 62.0), srgb(134.0, 112.0, 70.0), smoothstep(0.0, 0.7, nz(SEED + 61, p, 260.0, gsd)));
     let m = (1.0 - arid) * (1.0 - low);
@@ -479,10 +483,12 @@ pub fn agriculture(s: &mut Stack) {
     col = mixc(col, s.col, 0.3 + 0.45 * (1.0 - plain));
     s.composite(Layer { cov: zone, albedo: col, cls: if m > 0.5 { cls::MARSH } else { cls::TIDAL_FLAT }, clear: 1.0, ..Default::default() });
     s.m.natural_ok *= 1.0 - zone;
-    // tidal creeks in the low mud
+    // tidal creeks in the low mud (dry, only a little darker, in the arid deltas: dark wet
+    // creeks drew a net of black lines over the desert)
     let c = creek(p, gsd, s.l.fw.max(0.3 * gsd)) * zone * (0.3 + 0.7 * low) * (1.0 - scrub);
     if c > 0.0 {
-        s.composite(Layer { cov: c, albedo: srgb(70.0, 66.0, 56.0), cls: cls::TIDAL_FLAT, clear: 1.0, ..Default::default() });
+        let cc = mixc(col, srgb(70.0, 66.0, 56.0), 1.0 - 0.8 * arid);
+        s.composite(Layer { cov: c, albedo: cc, cls: cls::TIDAL_FLAT, clear: 1.0, ..Default::default() });
     }
 }
 
@@ -495,8 +501,9 @@ fn ponds(s: &mut Stack, zone: f64) {
     }
     let (p, gsd, fw) = (s.ctx.p, s.ctx.gsd, s.l.fw);
     // (pond fields on part of the flats, their colours muted: a quilt of pink, white and teal
-    // ponds covered half of every arid delta)
-    let area = smoothstep(0.05, 0.3, perlin3(SEED + 60, p / 2400.0));
+    // ponds covered half of every arid delta; salt pans on fewer flats still, muted more)
+    let salt = t.moist < 0.45;
+    let area = if salt { smoothstep(0.3, 0.55, perlin3(SEED + 60, p / 2400.0)) } else { smoothstep(0.05, 0.3, perlin3(SEED + 60, p / 2400.0)) };
     if area <= 0.0 {
         return;
     }
@@ -505,7 +512,6 @@ fn ponds(s: &mut Stack, zone: f64) {
     let (ix, iy) = ((q.x / ca).floor(), (q.y / cb).floor());
     let (fx, fy) = (q.x - (ix + 0.5) * ca, q.y - (iy + 0.5) * cb);
     let h = hash2(SEED + 61, ix as i64, iy as i64);
-    let salt = t.moist < 0.45;
     let mean_col = if salt { srgb(184.0, 150.0, 140.0) } else { srgb(88.0, 130.0, 116.0) };
     // (ponds smaller than the pixel show their mean cover and colour)
     let e = smoothstep(1.2 * gsd, 3.0 * gsd, cb);
@@ -535,7 +541,14 @@ fn ponds(s: &mut Stack, zone: f64) {
     }
     let c = area * zone * (e * exact + (1.0 - e) * 0.7 * 0.62);
     if c > 0.0 {
-        s.composite(Layer { cov: c, albedo: mixc(mean_col, col, 0.7 * e), cls: cls::AQUACULTURE, clear: 1.0, relit: 0.6, ..Default::default() });
+        s.composite(Layer {
+            cov: c,
+            albedo: mixc(mean_col, col, if salt { 0.4 } else { 0.7 } * e),
+            cls: cls::AQUACULTURE,
+            clear: 1.0,
+            relit: 0.6,
+            ..Default::default()
+        });
         s.m.natural_ok *= 1.0 - c;
     }
 }

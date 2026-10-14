@@ -39,6 +39,7 @@ pub static KIT: Kit = Kit {
     host: Some(qanat_host),
     relief: Some(relief),
     relief_wgsl: include_str!("../gpu/wgsl/kits/desert_relief.wgsl"),
+    shared_exists: true,
     families: &[
         Family { name: "desert_playas", cell: PLAYA_CELL, jitter: 0.8, reach: PLAYA_REACH, relief: true, exists: playa_exists },
         Family { name: "desert_inselbergs", cell: INS_CELL, jitter: 0.8, reach: INS_REACH, relief: true, exists: inselberg_exists },

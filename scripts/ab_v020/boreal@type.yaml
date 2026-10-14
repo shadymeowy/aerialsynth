@@ -1,4 +1,5 @@
-# boreal at a place of the same type in the next generator's world: forested boreal hills (survey) (the same local solar time)  (southern summer: December)
+# boreal at a place of the same type in the next generator's world: needleleaf forest hills with open patches and a
+# river (57.9 N; round 5 used a uniform mixed forest at 55.8 S) (the same local solar time and date)
 world:
   seed: 1
   generator: next
@@ -12,8 +13,8 @@ trajectory:
     rate_hz: 400
     speed_mps: 50
     kind: line
-    lat: -55.7898
-    lon: 109.2733
+    lat: 57.896
+    lon: -117.876
     heading_deg: 60
     altitude_m: 900
     duration_s: 8.6
@@ -22,8 +23,8 @@ render:
   shading: relit
   lighting:
     mode: clock
-    date: '2026-12-21'
-    time_utc: '03:37:15'
+    date: '2026-06-21'
+    time_utc: '18:45:51'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:

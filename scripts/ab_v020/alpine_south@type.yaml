@@ -1,4 +1,5 @@
-# alpine_south at a place of the same type in the next generator's world: high mountains with glaciers (survey) (the same local solar time)  (southern summer: December)
+# alpine_south at a place of the same type in the next generator's world: snow-covered high mountains (48.5 N, ridges
+# 4-6 km; round 5 used an equatorial range with glaciers only on the peaks) (the same local solar time and date)
 world:
   seed: 1
   generator: next
@@ -14,16 +15,16 @@ trajectory:
     altitude_m: 1200
     heading_deg: 60
     kind: line
-    lat: -1.7162
-    lon: -129.9757
+    lat: 48.5
+    lon: -171.0
     duration_s: 7.6
 render:
   supersample: 2
   shading: relit
   lighting:
     mode: clock
-    date: '2026-12-21'
-    time_utc: '00:09:54'
+    date: '2026-06-21'
+    time_utc: '02:54:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:

@@ -262,7 +262,7 @@ fractions and thresholds scale with it); masks enter as `amount`.
 | `radial` | radial profiles: cones, craters, star arms | `cell, density, radius, height, exponent, arms, arm_amp, crater, crater_depth, jitter, colour, colour2` | radius |
 | `crescent` | crescents (barchans) along a direction | `cell, density, radius, height_ratio, horns, direction, angle, jitter, colour` | radius |
 | `lobes` | fan sectors with lobate margins and channels | `cell, density, radius, span, margin, channels, height, direction, jitter, colour, colour2` | radius |
-| `patches` | crisp multi-scale noise threshold | `scale, fraction, octaves, roughness, height, colour_var, colour, colour2` | scale |
+| `patches` | crisp multi-scale noise threshold (`soft` > 0: a gradual blend) | `scale, fraction, octaves, roughness, height, colour_var, soft, colour, colour2` | scale |
 | `linear` | cross-section over a segment (`aux` = signed distance, along, half width) | `profile (flat/crowned/ridge/ditch), dash, duty, shoulder, height, marking, colour, shoulder_colour, marking_colour` | 2 × half width |
 | `stamp` | templates in an oriented box (`aux` = u, v, half sizes): pad, strip, blocks, panels | `template, a, b, height, lights, colour, colour2, light_colour` | a |
 | `canopy` | closed canopy: clumped crowns, per-clump hue, emergents | `cell, emergent, height, emergent_height, clump, colour_var, flowering, colour, colour2, flower_colour` | clump |
@@ -407,7 +407,9 @@ instance's id, centre (surface point below its site) and the analytic fields the
 fields, and the atlas (`w.atlas().sample(site.center.normalize())`; WGSL
 `atlas_sample(vec3<f32>(normalize(site.center)))`: `boundary`, `volcanism`, `hotspot`,
 `litho`, `glaciation` …). Its WGSL `<name>_exists` goes into the kit's relief WGSL (every
-module), with the family constants `FAM_<NAME>`. A layer reads a family with
+module), with the family constants `FAM_<NAME>`. Families whose tests share expensive fields
+(a `macro_at` at the site) set `Kit::shared_exists` and write one `<kit>_exists(f, site)` for
+all of them: the dispatch calls it once, so the shared part is inlined once (compile time). A layer reads a family with
 `inst_count(FAM_X, (*s).l.blk)` and `inst_get(FAM_X, (*s).l.blk, k)` (an `Inst { id, center,
 v }`; CPU `s.instances(i)`), or `inst_list_bin(FAM_X, (*s).l.blk)` where a helper shared with
 the relief takes an `InstList { n, items }`; a relief operator with `inst_list(FAM_X, r.blk,
