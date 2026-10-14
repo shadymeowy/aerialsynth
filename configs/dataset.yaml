@@ -2,7 +2,7 @@
 # wind / turbulence / vibration from the flight simulator, late-afternoon sun, full sensor model,
 # IMU.   terrain run -c configs/dataset.yaml
 world:
-  generator: classic   # classic (the default, v0.2.0's terrain) | next (the modular generator, a preview)
+  generator: classic   # classic (the default, v0.2.0's terrain) | next (experimental, docs/next/)
   seed: 7
   tile_supersample: 2
 tiles:

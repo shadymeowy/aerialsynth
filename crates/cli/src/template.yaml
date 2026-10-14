@@ -4,7 +4,7 @@
 # `terrain config --all` lists every setting, docs/scenario.md explains them.
 
 world:                         # the planet: a pure function of these settings
-  generator: classic           # classic (v0.2.0's terrain) | next (modular biome kits, a preview)
+  generator: classic           # classic | next (experimental, docs/next/)
   seed: 1
   home: { lat: 39.9, lon: 32.8, radius_km: 600.0, strength: 0.6 }   # kept as land
 

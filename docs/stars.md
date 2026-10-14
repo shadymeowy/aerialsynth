@@ -149,13 +149,6 @@ Below the limb (hidden) the refraction fades out.
   * with 2–5 px vibration trails: trail centroids match xm, ym to a median of 0.06–0.13 px,
     limited by 8-bit quantisation of the dim trail pixels.
 
-**Error budget of the inputs:**
-* `dut1_s`: leaving it at 0 rotates the sky by up to 15″/s × |UT1 − UTC| (≤ 13.5″). Set it from
-  IERS Bulletin A for arcsecond work.
-* Polar motion: ≤ 0.5″ if left at zero.
-* Vehicle velocity is not included in the aberration: about 0.17″ at 250 m/s, 5″ at orbital
-  speed.
-
 ## Brightness
 
 * A star's irradiance relative to the Sun's is 10^(−0.4 (V + 26.74)).
@@ -209,8 +202,9 @@ of over 5,000.
 * V and B−V of Tycho-only stars come from the BT/VT conversion (≈ 0.05 mag).
 
 **Astrometry**
-* UT1 − UTC (`dut1_s`) and polar motion are constants given per scenario (default 0: up to 13.5″
-  and 0.5″), not interpolated from IERS tables.
+* UT1 − UTC (`dut1_s`) and polar motion are constants given per scenario, not interpolated from
+  IERS tables. Left at 0, `dut1_s` rotates the sky by up to 15″/s × |UT1 − UTC| (≤ 13.5″; set it
+  from IERS Bulletin A for arcsecond work), polar motion by ≤ 0.5″.
 * Aberration uses the Earth's orbital velocity and the observer's diurnal velocity, but not the
   vehicle's: ≈ 0.17″ at 250 m/s, 5″ at orbital speed.
 * Light deflection is by the Sun only. Jupiter's limb would add up to 16 mas.
