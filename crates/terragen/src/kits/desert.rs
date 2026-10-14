@@ -1,4 +1,4 @@
-//! The desert kit (`docs/design/terrain-next.md` §5.1, `docs/kits/desert.md`): sand seas whose
+//! The desert kit (`docs/design/terrain-next.md` §5.1, `docs/next/kits/desert.md`): sand seas whose
 //! dunes follow the wind regime, the stony deserts and fringes between them, playas, wadis,
 //! yardangs and inselbergs. The WGSL twins are `gpu/wgsl/kits/desert_relief.wgsl` (pass A and
 //! the shared helpers) and `gpu/wgsl/kits/desert.wgsl` (pass B), in the same order.

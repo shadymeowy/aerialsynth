@@ -1,10 +1,10 @@
-# Tropical and savanna kit (kits/tropical.rs, docs/kits/tropical.md): rainforest with emergent
+# Tropical and savanna kit (kits/tropical.rs, docs/next/kits/tropical.md): rainforest with emergent
 # and flowering crowns, treefall gaps, river-edge forest, meander scars and a slash-and-burn
 # frontier; flooded, monsoon and dry deciduous forest; acacia, baobab and palm savannas and
 # miombo woodland with dry-season grass, burn scars, termite mounds, waterholes and gallery
 # forests; cloud forest and páramo as altitudinal zones; mangroves on low tropical coasts.
 #
-# Schema: docs/design/kit-guide.md ("Biomes"). The kernels `tropical_*` are the kit's.
+# Schema: docs/next/kit-guide.md ("Biomes"). The kernels `tropical_*` are the kit's.
 # Mangroves grow on the sea where it is shallower than ~5 m (water slot; the bed below sea
 # level: no lakes inland) and on the coastal and delta flats below ~3 m, not on arid coasts. The
 # atlas' coast distance (~20 km texels) misses the pixel coast by up to hundreds of km, so it is

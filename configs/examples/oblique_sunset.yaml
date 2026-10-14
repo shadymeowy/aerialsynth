@@ -1,5 +1,5 @@
 # Forward-looking camera tilted 35° down at ~2500 m AGL, clock-driven sun near sunset.
-world: { generator: classic, seed: 1 }   # generator: classic (default) | next (preview)
+world: { generator: classic, seed: 1 }   # generator: classic (default) | next (experimental, docs/next/)
 tiles: { file: out/oblique/world.h5, max_zoom: 17, lazy: true }
 trajectory:
   file: out/oblique/traj.csv

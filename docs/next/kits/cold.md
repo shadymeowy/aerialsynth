@@ -1,14 +1,12 @@
 # Cold kit: glacial, periglacial and ice
 
-> [!NOTE]
-> This kit belongs to the **next** generator (`world.generator: next`, a preview; see
-> [`docs/simulation.md`](../simulation.md)). The default generator, `classic` (v0.2.0's), has no
-> kits: worlds made with it do not show what this page describes.
+A kit of the experimental [next generator](../README.md) (`world.generator: next`). *The default
+world* on this page is seed 1 of the next generator.
 
 `crates/terragen/src/kits/cold.rs` (layer functions, kernel, drumlin family, tests), its WGSL
 twin `src/gpu/wgsl/kits/cold.wgsl` (+ `cold_relief.wgsl`), and its biomes
-`crates/terragen/biomes/cold.yaml` (design: [terrain-next.md §5.4](../design/terrain-next.md),
-contract: [kit-guide.md](../design/kit-guide.md)). Taiga, lichen woodland, krummholz and alpine
+`crates/terragen/biomes/cold.yaml` (design: [terrain-next.md §5.4](https://github.com/shadymeowy/aerialsynth/blob/terrain-design/docs/design/terrain-next.md),
+contract: [kit-guide.md](../kit-guide.md)). Taiga, lichen woodland, krummholz and alpine
 meadow belong to the temperate kit.
 
 ## What it draws

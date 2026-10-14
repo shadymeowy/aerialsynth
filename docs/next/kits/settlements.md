@@ -1,16 +1,14 @@
 # Settlements kit: hamlets to megacities, airports, ports, dams, mines, energy
 
-> [!NOTE]
-> This kit belongs to the **next** generator (`world.generator: next`, a preview; see
-> [`docs/simulation.md`](../simulation.md)). The default generator, `classic` (v0.2.0's), has no
-> kits: worlds made with it do not show what this page describes.
+A kit of the experimental [next generator](../README.md) (`world.generator: next`). *The default
+world* on this page is seed 1 of the next generator.
 
 `crates/terragen/src/kits/settlements.rs` (the kit, host function, slots 7 and 8, tests),
 `settlements/places.rs` (the central-place hierarchy), `settlements/town.rs` (the settlement
 pixel model), `settlements/sites.rs` (infrastructure placement and looks), and the WGSL twin
 `src/gpu/wgsl/kits/settlements.wgsl` (`st_*`, same names and order of operations). No biomes.
-Design: [terrain-next.md §5.9, §6.1, §6.2, §6.4](../design/terrain-next.md); contract:
-[kit-guide.md](../design/kit-guide.md).
+Design: [terrain-next.md §5.9, §6.1, §6.2, §6.4](https://github.com/shadymeowy/aerialsynth/blob/terrain-design/docs/design/terrain-next.md); contract:
+[kit-guide.md](../kit-guide.md).
 
 ## What it draws
 

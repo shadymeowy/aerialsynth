@@ -1,4 +1,4 @@
-//! The agriculture kit (`docs/design/terrain-next.md` §5.8, `docs/kits/agriculture.md`): field
+//! The agriculture kit (`docs/design/terrain-next.md` §5.8, `docs/next/kits/agriculture.md`): field
 //! systems by culture × climate × terrain.
 //!
 //! The core draws one field look everywhere (grid, irregular, pivot or strip fields of one crop

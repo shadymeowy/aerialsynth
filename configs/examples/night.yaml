@@ -1,6 +1,6 @@
 # Night flight over towns: low-light camera, horizon in view (sky, stars, town glow).
 # Moonless: new moon on 2026-03-19; see night_moon.yaml for a full-moon night.
-world: { generator: classic, seed: 1 }   # generator: classic (default) | next (preview)
+world: { generator: classic, seed: 1 }   # generator: classic (default) | next (experimental, docs/next/)
 tiles: { file: out/night/world.h5, max_zoom: 17, lazy: true }
 trajectory:
   file: out/night/traj.csv

@@ -1,8 +1,8 @@
-# Cold kit biomes (docs/kits/cold.md): tundra variants, polar desert, the forest–tundra
+# Cold kit biomes (docs/next/kits/cold.md): tundra variants, polar desert, the forest–tundra
 # transition. Glaciers, snow, lakes, sea ice and frozen water are drawn by the kit's code
 # (kits/cold.rs) wherever the climate makes them, in any biome.
 #
-# Schema: docs/design/kit-guide.md ("Biomes").
+# Schema: docs/next/kit-guide.md ("Biomes").
 
 # Wet lowland tundra on permafrost: ice-wedge polygons (troughs, rims, ponds), moss and lichen
 # mottling.

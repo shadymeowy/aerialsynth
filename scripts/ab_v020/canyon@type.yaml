@@ -1,4 +1,4 @@
-# canyon at a place of the same type in the next generator's world: canyon (docs/kits/mountains_places.csv) (the same local solar time)
+# canyon at a place of the same type in the next generator's world: canyon (docs/next/kits/mountains_places.csv) (the same local solar time)
 world:
   seed: 1
   generator: next
