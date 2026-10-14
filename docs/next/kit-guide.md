@@ -407,7 +407,9 @@ instance's id, centre (surface point below its site) and the analytic fields the
 fields, and the atlas (`w.atlas().sample(site.center.normalize())`; WGSL
 `atlas_sample(vec3<f32>(normalize(site.center)))`: `boundary`, `volcanism`, `hotspot`,
 `litho`, `glaciation` …). Its WGSL `<name>_exists` goes into the kit's relief WGSL (every
-module), with the family constants `FAM_<NAME>`. A layer reads a family with
+module), with the family constants `FAM_<NAME>`. Families whose tests share expensive fields
+(a `macro_at` at the site) set `Kit::shared_exists` and write one `<kit>_exists(f, site)` for
+all of them: the dispatch calls it once, so the shared part is inlined once (compile time). A layer reads a family with
 `inst_count(FAM_X, (*s).l.blk)` and `inst_get(FAM_X, (*s).l.blk, k)` (an `Inst { id, center,
 v }`; CPU `s.instances(i)`), or `inst_list_bin(FAM_X, (*s).l.blk)` where a helper shared with
 the relief takes an `InstList { n, items }`; a relief operator with `inst_list(FAM_X, r.blk,

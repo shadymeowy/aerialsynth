@@ -255,8 +255,19 @@ pub fn wgsl() -> String {
     s += &sw("fam_key", "u64", "0lu", &|f| format!("{:#x}lu", key(f)));
     s += &sw("fam_relief", "bool", "false", &|f| format!("{}", f.relief));
     s.push_str("fn family_exists(f: u32, site: InstSite) -> InstOut {\n    switch f {\n");
-    for (i, f) in fams.iter().enumerate() {
-        s.push_str(&format!("        case {i}u: {{ return {}_exists(site); }}\n", f.name));
+    let mut i = 0;
+    for k in crate::kits::KITS.iter() {
+        let n = k.families.len();
+        if k.shared_exists && n > 0 {
+            // (one case, one call: the kit's test is inlined once)
+            let cases: Vec<String> = (i..i + n).map(|j| format!("{j}u")).collect();
+            s.push_str(&format!("        case {}: {{ return {}_exists(f, site); }}\n", cases.join(", "), k.name));
+        } else {
+            for (j, f) in k.families.iter().enumerate() {
+                s.push_str(&format!("        case {}u: {{ return {}_exists(site); }}\n", i + j, f.name));
+            }
+        }
+        i += n;
     }
     s.push_str("        default: { var o: InstOut; o.ok = false; return o; }\n    }\n}\n");
     s

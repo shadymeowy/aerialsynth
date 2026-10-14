@@ -266,39 +266,36 @@ fn desert_site_fields(c: vec3<f64>) -> DesertSite {
     return f;
 }
 
-/// `desert::playa_exists`.
-fn desert_playas_exists(s: InstSite) -> InstOut {
+/// `desert::playa_exists` (`f` = `FAM_DESERT_PLAYAS`) and `desert::inselberg_exists`: one test
+/// with one call of the site fields (`Kit::shared_exists`: a full `macro_at` inlined once).
+fn desert_exists(fam: u32, s: InstSite) -> InstOut {
     var o: InstOut;
     o.ok = false;
-    if (u01k(s.id, 5lu) >= DS_PLAYA_DENS) {
+    let playa = fam == FAM_DESERT_PLAYAS;
+    if (u01k(s.id, 5lu) >= select(DS_INS_DENS, DS_PLAYA_DENS, playa)) {
         return o;
     }
     let a = atlas_sample(vec3<f32>(normalize(s.center)));
-    if (moisture_index(a.precip_mm, a.temp_c) > 0.33 || a.temp_c < 2.0 || a.coast_km < 0.0) {
+    let mi = moisture_index(a.precip_mm, a.temp_c);
+    if (a.coast_km < 0.0) {
+        return o;
+    }
+    if (playa) {
+        if (mi > 0.33 || a.temp_c < 2.0) {
+            return o;
+        }
+    } else if ((atlas_litho(a) != 2u && u01k(s.id, 13lu) >= 0.3) || mi > 0.52) {
         return o;
     }
     let f = desert_site_fields(s.center);
-    if (desert_aridity(f.moist) < 0.5 || f.temp < 4.0 || f.cont < 0.05 || f.mountain > 0.1 || f.hills > 130.0 || f.sand > 0.4 || f.mesa > 0.3) {
+    if (f.cont < 0.05 || f.mesa > 0.3) {
         return o;
     }
-    o.ok = true;
-    o.v = array<f32, 8>(1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-    return o;
-}
-
-/// `desert::inselberg_exists`.
-fn desert_inselbergs_exists(s: InstSite) -> InstOut {
-    var o: InstOut;
-    o.ok = false;
-    if (u01k(s.id, 5lu) >= DS_INS_DENS) {
-        return o;
-    }
-    let a = atlas_sample(vec3<f32>(normalize(s.center)));
-    if ((atlas_litho(a) != 2u && u01k(s.id, 13lu) >= 0.3) || moisture_index(a.precip_mm, a.temp_c) > 0.52 || a.coast_km < 0.0) {
-        return o;
-    }
-    let f = desert_site_fields(s.center);
-    if (f.moist > 0.42 || f.cont < 0.05 || f.mountain > 0.15 || f.sand > 0.6 || f.mesa > 0.3) {
+    if (playa) {
+        if (desert_aridity(f.moist) < 0.5 || f.temp < 4.0 || f.mountain > 0.1 || f.hills > 130.0 || f.sand > 0.4) {
+            return o;
+        }
+    } else if (f.moist > 0.42 || f.mountain > 0.15 || f.sand > 0.6) {
         return o;
     }
     o.ok = true;

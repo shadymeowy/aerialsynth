@@ -279,6 +279,10 @@ pub struct Kit {
     /// the kit draws the road network: the core's noise-network roads are off ([`legacy_roads`];
     /// the farm tracks along land-use region borders stay)
     pub replaces_roads: bool,
+    /// the kit's families share one WGSL existence test, `fn <kit>_exists(f: u32, site:
+    /// InstSite) -> InstOut` (one call site in the dispatch: one inlined copy of what the tests
+    /// share, e.g. the macro fields at the site), instead of `<family>_exists(site)` each
+    pub shared_exists: bool,
 }
 
 impl Kit {
@@ -298,6 +302,7 @@ impl Kit {
         prepare: None,
         replaces_towns: false,
         replaces_roads: false,
+        shared_exists: false,
     };
 }
 
