@@ -54,7 +54,7 @@ lists and costs ~5 cell hashes per sample after the bound test.
 | `savanna_baobab` | Aw, BSh, 350–1000 mm | baobab savanna: wide leafless crowns, a few in leaf |
 | `palm_savanna` | Aw, Am, 900–2400 mm | llanos: palm groves, gallery forests, meander scars with grassy scroll bars |
 | `miombo_woodland` | Aw, Cwa, 650–1500 mm | open woodland with bronze new leaves, large wooded termitaria, dambos (treeless grassy drainage lines), fires, swidden |
-| `tropical_cloud_forest` | zone below 17.5 °C | dense low mossy canopy, tree ferns, landslide scars on steep slopes |
+| `tropical_cloud_forest` | zone below 17.5 °C | dense low mossy canopy (dark green), tree ferns, a few taller crowns, clearings of green montane grass, landslide scars on steep slopes |
 | `tropical_paramo` | zone below 10 °C | tussock grass, silvery frailejón rosettes, tarns |
 
 **River water** (slot 8, `rivers`; design P0): tropical lowland rivers take the colour of their

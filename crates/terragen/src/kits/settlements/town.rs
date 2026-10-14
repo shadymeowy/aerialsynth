@@ -1090,7 +1090,10 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     // (a town's lots end where its streets do (above their density 0.42): houses strewn over the fields
                     // beyond read as a broken town)
                     let edge = if fm == form::CITY as u32 { smoothstep(0.42, 0.47, dl) } else { 1.0 };
-                    let built = u01k(lh, 3) < dl.powf(0.7) * 1.05 * edge;
+                    // (within the streets most lots are built: suburbs at the old 55-75 % read
+                    // as sparse next to v0.2.0's dense blocks; beyond them houses stay few)
+                    let occ = lerp(dl.powf(0.7) * 1.05, dl.powf(0.35) * 1.1, smoothstep(0.35, 0.5, dl));
+                    let built = u01k(lh, 3) < occ * edge;
                     // typology
                     let a = pl.arch;
                     let ut = u01k(lh, 12);
@@ -1146,7 +1149,8 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         col = match t {
                             typ::WAREHOUSE => mixc(c_concrete(), c_asphalt(), 0.4 * u01k(lh, 10)),
                             typ::TOWER | typ::MIDRISE => mixc(c_paving(), yard, 0.25),
-                            typ::PERIM => mixc(yard, c_paving(), 0.5),
+                            // (courtyards: gardens and trees, not a bare paved square)
+                            typ::PERIM => mixc(mixc(yard, c_paving(), 0.35), srgb(84.0, 112.0, 60.0), 0.25 + 0.35 * e.moist.clamp(0.0, 1.0)),
                             _ => yard,
                         };
                         cls = match t {
@@ -1276,6 +1280,15 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                             em += DVec3::new(1.0, 0.72, 0.42)
                                 * point_light((rl - DVec2::new(0.0, half.y + 1.0)).length_squared(), 2.0, 0.4, fw)
                                 * (u01k(lh, 18) < 0.6) as u32 as f64;
+                        } else if t == typ::PERIM {
+                            // courtyard trees
+                            let tc = (ublk / 11.0).floor();
+                            let th = hash2(blk.id ^ 0xC07, tc.x as i64, tc.y as i64);
+                            if u01k(th, 1) < 0.45 {
+                                let tp = (tc + 0.5 + 0.4 * (DVec2::new(u01k(th, 2), u01k(th, 3)) - 0.5)) * 11.0;
+                                tree = aa(2.8 + 1.5 * u01k(th, 4) - (ublk - tp).length(), fw);
+                                tree_h = 9.0 + 6.0 * u01k(th, 5);
+                            }
                         } else if t == typ::WAREHOUSE {
                             // tanks and trucks in the yards
                             if u01k(lh, 13) < 0.3 {

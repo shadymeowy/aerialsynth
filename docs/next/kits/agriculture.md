@@ -17,7 +17,7 @@ share for the core's fields. Systems change at region and ecoregion borders, nev
 
 | system | look |
 |---|---|
-| section grid | 1-mile sections, quarter sections (most cut into halves or forties), centre pivots where dry, farmsteads, section-line roads |
+| section grid | 1-mile sections, quarter sections (90 % cut into halves or forties: square 40-acre fields or strips), centre pivots where dry, farmsteads, section-line roads; rarer in wet (> 900-1400 mm) and oceanic climates |
 | shelterbelt steppe | huge fields bordered by tree belts, strip-fallow stripes |
 | open-field strips | furlongs of long narrow strips, each its own crop, reverse-S curves |
 | bocage | irregular pastures and fields (cadastral blocks of ~260 m parcels) inside hedgerows on about half their borders, trees in the hedges |

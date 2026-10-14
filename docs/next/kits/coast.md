@@ -42,17 +42,22 @@ the atlas coast distance (−100..30 km) and on a window of `h0` before any nois
   world, cached per node, the same for both backends; listed for areas with pixels ≤ 3 km.
 * *Pass A, after the drainage carve* (a new core hook: `Kit::astamps` / `Kit::astamp`, pass-A
   stamps that reach the GPU in the sink-lake list as entries with a negative radius): in a frame
-  at the mouth with the apex a quarter radius inland, the margin is a ±72° fan with lobes (three
-  angular harmonics) that opens downstream (±27° at the apex, ±72° from half a radius on, its
-  sides wavy) or four fingers (the longest ahead along the river); inside, low ground is
-  raised and slightly higher ground flattened to 2 m at the apex falling to 0.5 m at the radius;
-  a shallow front (−2 m) around the lobes; distributaries leave the river's line and spread to
-  their angles over half a radius, wiggling (fan: five, forking halfway; bird's-foot: along the
-  fingers), carved to −1.5 m (sea water), box-filtered
-  by the pixel; the river's own channel upstream of the mouth stays. Lobes fade out over a shelf
-  deeper than 35–60 m.
+  at the mouth, warped by three octaves of noise (wavelengths 0.32 / 0.11 / 0.035 radii, none at
+  the mouth itself) so that no margin or channel is straight at any zoom, with the apex a quarter
+  radius inland: the margin is a ±75° fan with lobes (three angular harmonics, its sides wavy)
+  or four fingers (the longest ahead along the river); inland it ends in a rounded margin behind
+  the mouth (round 4: the fan's V towards the apex was a pale geometric wedge over the land);
+  inside, low ground is raised and slightly higher ground flattened to 2 m at the apex falling
+  to 0.5 m at the radius; a shallow front (−2 m) around the lobes; distributaries leave the
+  river at the mouth and spread to their angles over half a radius, wiggling (fan: five,
+  forking halfway; bird's-foot: along the fingers), carved to −1.5 m (sea water), box-filtered
+  by the pixel; the river's own channel stays as the main pass to the sea (deeper sea floor in it
+  filled to −2.5 m). Lobes fade out over a shelf deeper than 35–60 m.
 * *Pass B (slot 5)* from a stamp (`delta::TEMPLATE` 128): reed marsh on the plain, mud where it
-  is lowest or arid, over the core's beach; fields stay where the land use draws them; tropical
+  is lowest or arid (grey silt with salt crusts on the higher flats, darker where wet), tidal
+  creeks in the low mud, scrub on the distributaries' levees (four channel widths), mottled and
+  pulled towards the land's own colour (30 %, more where the plain thins out; its margin breaks
+  into patches), over the core's beach; fields stay where the land use draws them; tropical
   deltas get the tropical biomes' mangroves (their land layer: below 1.5–3.5 m, flat).
 
 Creek, ring and rim widths below a pixel are widened or show their mean (creeks fade to a mean
@@ -152,7 +157,6 @@ mangroves with their creeks. Distributaries hold sea water.
 * Mangroves and ports belong to other kits and are not drawn here.
 * Deltas: only at the major rivers' mouths (drainage level 0), 2–12 km, not drawn in tiles with
   pixels above 3 km (they appear at ~z6); a lobe over a shelf deeper than 35 m is only partly
-  raised (a shallow mound under water); the plain is flat (no levees or abandoned lobes); the
-  distributaries are smooth curves (a wiggle, no meanders) and read geometric from a few
-  kilometres; two mouths close together overlap.
+  raised (a shallow mound under water); the plain is flat (no levee relief or abandoned lobes);
+  the distributaries wander with the warp but do not meander; two mouths close together overlap.
 * A straight scarp inside a tidal-flat view is the core's arid mesa terrace, not a seam.

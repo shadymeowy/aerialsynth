@@ -1191,7 +1191,8 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             if (fm == SF_CITY) {
                 edge = smoothstep1(0.42, 0.47, dl);
             }
-            let built = u01k(lh, 3lu) < pow(dl, 0.7) * 1.05 * edge;
+            let occ = mix(pow(dl, 0.7) * 1.05, pow(dl, 0.35) * 1.1, smoothstep1(0.35, 0.5, dl));
+            let built = u01k(lh, 3lu) < occ * edge;
             let a = pl.arch;
             let ut = u01k(lh, 12lu);
             let euro = a == 3u || a == 5u || a == 6u || a == 8u || a == 9u || a == 11u || a == 4u;
@@ -1232,7 +1233,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     col = mixc(st_paving(), yard, 0.25);
                     cls = select(LC_RESIDENTIAL, LC_COMMERCIAL, t == STY_TOWER || z == SZ_CBD);
                 } else if (t == STY_PERIM) {
-                    col = mixc(yard, st_paving(), 0.5);
+                    col = mixc(mixc(yard, st_paving(), 0.35), srgb(84.0, 112.0, 60.0), 0.25 + 0.35 * clamp(e.moist, 0.0, 1.0));
                     cls = LC_RESIDENTIAL;
                 } else {
                     col = yard;
@@ -1365,6 +1366,14 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     }
                     let lp = rl - vec2<f32>(0.0, half.y + 1.0);
                     em += vec3<f32>(1.0, 0.72, 0.42) * point_light(dot(lp, lp), 2.0, 0.4, fw) * select(0.0, 1.0, u01k(lh, 18lu) < 0.6);
+                } else if (t == STY_PERIM) {
+                    let tc = floor(ublk / 11.0);
+                    let th = hash2(blk.id ^ 0xC07lu, i64(tc.x), i64(tc.y));
+                    if (u01k(th, 1lu) < 0.45) {
+                        let tp = (tc + 0.5 + 0.4 * (vec2<f32>(u01k(th, 2lu), u01k(th, 3lu)) - 0.5)) * 11.0;
+                        tree = st_aa(2.8 + 1.5 * u01k(th, 4lu) - length(ublk - tp), fw);
+                        tree_h = 9.0 + 6.0 * u01k(th, 5lu);
+                    }
                 } else if (t == STY_WAREHOUSE) {
                     if (u01k(lh, 13lu) < 0.3) {
                         let tr = 6.0 + 9.0 * u01k(lh, 14lu);

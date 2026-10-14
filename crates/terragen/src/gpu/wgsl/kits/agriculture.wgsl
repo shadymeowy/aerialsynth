@@ -178,6 +178,8 @@ fn agri_weights(e: EcoV) -> array<f32, 15> {
         m[6] = 0.1;
         m[13] = 0.0;
         m[14] = 0.0;
+        m[1] = 0.3;
+        m[2] = 0.3;
     } else if (k == 10u || k == 13u) {
         m[6] = 1.8;
         m[10] = 1.2;
@@ -224,7 +226,7 @@ fn agri_weights(e: EcoV) -> array<f32, 15> {
     let dev = e.dev;
     m[11] *= 0.3 + 1.4 * dev;
     m[5] *= 1.6 - 1.0 * dev;
-    m[1] *= 0.4 + 1.0 * dev;
+    m[1] *= (0.4 + 1.0 * dev) * (1.0 - 0.8 * smoothstep1(900.0, 1400.0, e.precip));
     m[13] *= (0.4 + 1.0 * dev) * (0.1 + 0.9 * (1.0 - smoothstep1(700.0, 1200.0, e.precip)));
     var total = 0.0;
     for (var i = 0u; i < AG_N; i++) {
@@ -926,10 +928,24 @@ fn agri_part_section(seed: u64, q: vec2<f32>, fw: f32, pivot_p: f32) -> Parcel {
     }
     let mode = u01k(hq, 1lu);
     var n = 4.0;
-    if (mode < 0.25) {
+    if (mode < 0.1) {
         n = 1.0;
-    } else if (mode < 0.6) {
+    } else if (mode < 0.4) {
         n = 2.0;
+    }
+    o.bedge = min(min(lq.x, half - lq.x), min(lq.y, half - lq.y));
+    o.circ = 0.0;
+    if (n == 4.0 && u01k(hq, 3lu) < 0.5) {
+        let f = 0.5 * half;
+        let fi = clamp(floor(lq / f), vec2<f32>(0.0), vec2<f32>(1.0));
+        let r = lq - fi * f;
+        o.id = mix64(hq ^ (16lu + 2lu * u64(fi.x) + u64(fi.y)));
+        o.fx = r.x;
+        o.fy = r.y;
+        o.edge = min(min(r.x, f - r.x), min(r.y, f - r.y));
+        o.fc = o0 + (fi + 0.5) * f;
+        o.size = f;
+        return o;
     }
     let along_x = u01k(hq, 2lu) < 0.5;
     var a = lq.y;
@@ -952,8 +968,6 @@ fn agri_part_section(seed: u64, q: vec2<f32>, fw: f32, pivot_p: f32) -> Parcel {
     o.edge = min(min(a, half - a), min(fy, sw - fy));
     o.fc = o0 + fco;
     o.size = sw;
-    o.bedge = min(min(lq.x, half - lq.x), min(lq.y, half - lq.y));
-    o.circ = 0.0;
     return o;
 }
 
@@ -1068,7 +1082,7 @@ fn agri_kind_mean(pl: Plan, k: u32, px: AgPx) -> vec3<f32> {
             return acc;
         }
         case 1u: { return mixc(px.soil * 0.8, mixc(px.soil, px.grass_dry, 0.5), 0.5 - 0.4 * px.season); }
-        case 2u: { return agri_pasture_col(px) * 0.97; }
+        case 2u: { return agri_pasture_col(px) * vec3<f32>(1.0, 0.985, 0.91); }
         case 3u: { return agri_pasture_col(px) * 1.05; }
         case 4u: { return mixc(mixc(px.grass, px.soil, 0.3), px.crown * 1.1, 0.4); }
         case 5u: { return mixc(px.soil * 1.15, srgb(104.0, 112.0, 84.0), 0.3); }
@@ -1433,9 +1447,11 @@ fn agri_pasture(pl: Plan, pc: Parcel, px: AgPx, id: u64, q: vec2<f32>) -> Shade 
     let gsd = px.gsd;
     let fw = px.fw;
     var col = agri_pasture_col(px) * (0.86 + 0.28 * u01k(id, 8lu));
-    col *= 1.0 + 0.15 * perlin3(id ^ 0x9A5lu, p * (1.0lf / 14.0lf)) * band(14.0, gsd) + 0.10 * perlin3(id ^ 0x9A6lu, p * (1.0lf / 4.0lf)) * band(4.0, gsd);
+    col *= 1.0 + 0.18 * perlin3(id ^ 0x9A5lu, p * (1.0lf / 14.0lf)) * band(14.0, gsd) + 0.16 * perlin3(id ^ 0x9A6lu, p * (1.0lf / 4.0lf)) * band(4.0, gsd);
     let tus = perlin3(id ^ 0x9A7lu, p * (1.0lf / 1.7lf)) * band(1.7, gsd);
-    col *= 1.0 + 0.10 * tus + 0.12 * perlin3(id ^ 0x9A8lu, p * (1.0lf / 40.0lf)) * band(40.0, gsd);
+    col *= 1.0 + 0.2 * tus + 0.12 * perlin3(id ^ 0x9A8lu, p * (1.0lf / 40.0lf)) * band(40.0, gsd);
+    let yel = 0.5 + 0.5 * perlin3(id ^ 0x9A9lu, p * (1.0lf / 7.0lf)) * band(7.0, gsd);
+    col = mixc(col, col * vec3<f32>(1.1, 1.05, 0.8), 0.6 * yel);
     var cls = LC_PASTURE;
     var dh = 0.1;
     if (pl.sys == AG_PASTURE || pl.sys == AG_SHELTER || pl.sys == AG_SECTION || pl.sys == AG_RANCH) {

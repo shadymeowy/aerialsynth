@@ -489,9 +489,11 @@
   group: forest
   weight: 0.0
   palette:
-    crown_tropic: [36, 70, 50]
-    crown_decid: [44, 76, 50]
-    grass_wet: [70, 100, 56]
+    # (mossy dark green, not teal; clearings of green montane grass, not straw)
+    crown_tropic: [36, 66, 38]
+    crown_decid: [46, 72, 40]
+    grass_wet: [68, 98, 48]
+    grass_dry: [104, 112, 62]
     soil: [[96, 80, 62], [104, 86, 66], [90, 84, 74], [120, 98, 74]]
     floor: [36, 48, 36]
   vegetation: { trees: 1.4, tropic: 0.8, laterite: 0.3, tall: -0.3, crown_scale: 0.85 }
@@ -499,8 +501,9 @@
     # dense, low, mossy crowns
     - { share: tropical, shape: dome, cell: 8, height: [15, 6], colour: crown_tropic }
     # tree ferns
-    - { share: tropical, shape: star, cell: 7, height: [7, 2], colour: [80, 112, 62], density: 0.3, closure: false, stand: false, seed: 0x7E81 }
-    - { share: tropical, shape: dome, cell: 30, height: [22, 6], colour: [62, 90, 64], density: 0.2, closure: false, stand: false, seed: 0x7E82 }
+    - { share: tropical, shape: star, cell: 7, height: [7, 2], colour: [72, 100, 52], density: 0.3, closure: false, stand: false, seed: 0x7E81 }
+    # a few taller crowns over the canopy (big pale domes read as blobs)
+    - { share: tropical, shape: dome, cell: 19, height: [22, 6], colour: [50, 76, 44], density: 0.14, closure: false, stand: false, seed: 0x7E82 }
     - { share: broadleaf, shape: dome, cell: 7, height: [10, 6], colour: crown_decid }
     - { share: shrub, shape: dome, cell: 3, height: [1.4, 0], colour: [62, 84, 54], closure: false, stand: false }
   layers:

@@ -211,7 +211,9 @@ fn forestry(s: &Stack) -> f64 {
     };
     // (no managed forest where the biome's trees are sparse: forest tundra, tundra, polar desert)
     let productive = smoothstep(0.6, 0.75, s.veg(|v| v.trees));
-    a * (0.35 + 0.9 * eco_u1(s)) * (0.6 + 0.6 * st.development) * (1.0 - smoothstep(14.0, 19.0, s.bio.site.temp_c)) * productive
+    // (and only within reach of people: clear-cuts in the empty taiga read as fields)
+    let reach = smoothstep(0.02, 0.25, s.t.habit);
+    a * (0.35 + 0.9 * eco_u1(s)) * (0.6 + 0.6 * st.development) * (1.0 - smoothstep(14.0, 19.0, s.bio.site.temp_c)) * productive * reach
 }
 
 /// The natural forest at the sample as the canopy draws it (0..1, crisp at its edges): the
@@ -222,7 +224,7 @@ fn forest_est(s: &Stack) -> f64 {
     let td = s.world.cfg.vegetation.tree_density;
     let trees_mult = s.veg(|v| v.trees) * s.bio.style.trees;
     let cold = (1.0 - smoothstep(0.0, 8.0, t.temp)) * (1.0 - smoothstep(0.35, 0.7, t.mountain));
-    let base_cover = smoothstep(0.3 - 0.2 * cold, 0.68 - 0.36 * cold, t.moist) * smoothstep(-6.0, 2.0, t.temp) * td * trees_mult;
+    let base_cover = smoothstep(0.3 - 0.2 * cold, 0.68 - 0.36 * cold, t.moist) * smoothstep(-6.0 - 3.0 * cold, 2.0 - 2.0 * cold, t.temp) * td * trees_mult;
     let fpu = 0.5 + 0.5 * s.pf.forest;
     let forest = smoothstep(-0.03, 0.03, base_cover - fpu);
     let clear = 1.0 - 0.85 * smoothstep(0.05, 0.4, s.agri()) * (1.0 - smoothstep(0.45, 0.7, s.l.slope));

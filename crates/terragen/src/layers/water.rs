@@ -68,8 +68,9 @@ pub fn rivers(s: &mut Stack) {
     // snowfields read as a crack)
     let ice = smoothstep(-1.5, -4.0, temp + 1.5 * s.pf.snow);
     wcol = mixc(wcol, mixc(pal.snow * 0.9, srgb(170.0, 190.0, 200.0), 0.35 * (0.5 + 0.5 * detail)), ice);
-    // dry beds are only a subtle pale line (gravel / sand with some vegetation)
-    let dry_col = mixc(s.col, mixc(pal.gravel, pal.sand[2], 0.5) * (1.0 + 0.1 * detail), 0.55);
+    // dry beds are only a subtle pale line (gravel / sand with some vegetation), fainter under
+    // the riparian trees
+    let dry_col = mixc(s.col, mixc(pal.gravel, pal.sand[2], 0.5) * (1.0 + 0.1 * detail), 0.55 * (1.0 - 0.7 * s.m.riparian));
     let rc = mixc(dry_col, wcol, wet_r);
     let frozen = ice > 0.5 && wet_r > 0.5;
     let cls = if frozen {

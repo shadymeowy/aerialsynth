@@ -198,7 +198,6 @@ fn co_ponds(s: ptr<function, Stack>, zone: f32) {
     }
 }
 
-/// `coast::water`.
 /// `coast::agriculture`: the cover of the deltas' plains.
 fn coast_slot_agriculture(s: ptr<function, Stack>) {
     let ground = (*s).l.ground;
@@ -213,23 +212,33 @@ fn coast_slot_agriculture(s: ptr<function, Stack>) {
     let gsd = (*s).c.gsd;
     let blk = (*s).l.blk;
     var plain = 0.0;
+    var lev = 0.0;
     for (var k = 0u; k < feat_stamp_n(blk); k++) {
         let st = feat_stamp(blk, k);
         if (st.tmpl == 128u) {
             let id = u64(u32(st.v0.z)) | (u64(u32(st.v0.w)) << 24u) | (u64(u32(st.v1.x)) << 48u);
-            plain = max(plain, coast_delta_shape(st.center.xyz, f64(st.v0.x), st.v0.y, id, st.h, p, gsd).plain);
+            let sh = coast_delta_shape(st.center.xyz, f64(st.v0.x), st.v0.y, id, st.h, p, gsd);
+            plain = max(plain, sh.plain);
+            lev = max(lev, sh.lev);
         }
     }
-    let zone = plain * (1.0 - smoothstep1(2.4, 3.0, ground)) * (1.0 - (*s).m.field_cov);
+    let ragged = 0.6 * co_nz(CO_SEED + 63lu, p, 170.0, gsd) + 0.4 * co_nz(CO_SEED + 64lu, p, 52.0, gsd);
+    let zone = plain * smoothstep1(-0.2, 0.2, plain - 0.5 + 0.5 * ragged) * (1.0 - smoothstep1(2.4, 3.0, ground)) * (1.0 - (*s).m.field_cov);
     if (zone <= 0.0) {
         return;
     }
     let arid = 1.0 - smoothstep1(0.2, 0.34, t.moist);
     let low = 1.0 - smoothstep1(0.6, 1.1, ground + 0.3 * co_nz(CO_SEED + 60lu, p, 90.0, gsd));
-    let mud = mixc(mixc(srgb(118.0, 106.0, 88.0), srgb(84.0, 76.0, 66.0), low), srgb(176.0, 160.0, 134.0), arid);
+    let silt = srgb(144.0, 134.0, 114.0) * (1.0 + 0.1 * co_nz(CO_SEED + 65lu, p, 38.0, gsd));
+    let salt = smoothstep1(0.2, 0.45, co_nz(CO_SEED + 66lu, p, 120.0, gsd) + 0.5 * co_nz(CO_SEED + 67lu, p, 33.0, gsd)) * (1.0 - low);
+    let dry = mixc(silt, srgb(192.0, 186.0, 170.0), 0.7 * salt);
+    let mud = mixc(mixc(srgb(118.0, 106.0, 88.0), srgb(84.0, 76.0, 66.0), low), mixc(dry, srgb(96.0, 90.0, 78.0), low), arid);
     let reed = mixc(srgb(96.0, 106.0, 62.0), srgb(134.0, 112.0, 70.0), smoothstep1(0.0, 0.7, co_nz(CO_SEED + 61lu, p, 260.0, gsd)));
     let m = (1.0 - arid) * (1.0 - low);
-    let col = mixc(mud, reed, m) * (1.0 + 0.08 * co_nz(CO_SEED + 62lu, p, 9.0, gsd));
+    var col = mixc(mud, reed, m) * (1.0 + 0.08 * co_nz(CO_SEED + 62lu, p, 9.0, gsd));
+    let scrub = lev * (0.45 + 0.4 * smoothstep1(-0.2, 0.3, co_nz(CO_SEED + 68lu, p, 24.0, gsd)));
+    col = mixc(col, mixc(srgb(70.0, 84.0, 48.0), srgb(84.0, 88.0, 58.0), arid), scrub);
+    col = mixc(col, (*s).col, 0.3 + 0.45 * (1.0 - plain));
     var k = LC_TIDAL_FLAT;
     if (m > 0.5) {
         k = LC_MARSH;
@@ -238,8 +247,15 @@ fn coast_slot_agriculture(s: ptr<function, Stack>) {
     ly.clear = 1.0;
     composite(s, ly);
     (*s).m.natural_ok *= 1.0 - zone;
+    let c = co_creek(p, gsd, max((*s).l.fw, 0.3 * gsd)) * zone * (0.3 + 0.7 * low) * (1.0 - scrub);
+    if (c > 0.0) {
+        var lc = layer_paint(c, srgb(70.0, 66.0, 56.0), LC_TIDAL_FLAT);
+        lc.clear = 1.0;
+        composite(s, lc);
+    }
 }
 
+/// `coast::water`.
 fn coast_slot_water(s: ptr<function, Stack>) {
     let l = (*s).l;
     if (!(l.water > l.ground) || l.water_kind != W_OCEAN) {

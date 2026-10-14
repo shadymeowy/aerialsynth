@@ -616,26 +616,34 @@ fn volcano_look(s: &mut Stack, v: &Vol) {
 fn ash(s: &mut Stack, v: &Vol, k: &Cone) {
     let (p, gsd) = (s.ctx.p, s.ctx.gsd);
     let upper = (0.45 + 0.55 * v.act) * (1.0 - smoothstep(0.1, 0.45, k.u));
-    let apron = 0.9 * v.act * v.act * (1.0 - smoothstep(0.2, 1.0, k.u));
+    let apron = 0.75 * v.act * v.act * (1.0 - smoothstep(0.15, 0.8, k.u));
     let m = upper.max(apron);
     if m < 0.02 {
         return;
     }
-    // the ash edge follows the cone's radial structure (ash lies in the ravines and streaks down the
-    // flanks): harmonics of the azimuth, each only where its wavelength at this radius is resolved,
-    // and a little raggedness
+    // the ash edge follows the cone's radial structure up high (ash lies in the ravines and
+    // streaks down the summit cone: harmonics of a wandering azimuth, each only where its
+    // wavelength at this radius is resolved); lower down the apron thins out in soft blotches
+    // (rays reaching across the apron drew a dark star from above and spikes in oblique views)
     let tau = std::f64::consts::TAU;
     let wl = |n: f64| band(tau * k.rr / n, gsd);
-    let n = 0.5 * (7.0 * k.th + tau * u01k(v.id, 31)).sin() * wl(7.0)
-        + 0.3 * (17.0 * k.th + tau * u01k(v.id, 32)).sin() * wl(17.0)
-        + 0.2 * (41.0 * k.th + tau * u01k(v.id, 33)).sin() * wl(41.0)
-        + 0.15 * nz(SEED_ASH + 1, p, 90.0, gsd);
-    let wd = 0.07 + 0.3 * (1.0 - band(260.0, gsd));
+    let hi = 1.0 - smoothstep(0.06, 0.22, k.u);
+    let mut n = 0.3 * nz(SEED_ASH + 1, p, 90.0, gsd) + 0.3 * nz(SEED_ASH + 4, p, 320.0, gsd) + 0.25 * nz(SEED_ASH + 2, p, 900.0, gsd);
+    if hi > 0.0 {
+        // (a sideways shift of up to ~100 m, not an angle: that folded the flanks into swirls)
+        let th = k.th + 100.0 * nz(SEED_ASH + 3, p, 500.0, gsd) / k.rr.max(300.0);
+        n += hi
+            * (0.15 * (7.0 * th + tau * u01k(v.id, 31)).sin() * wl(7.0)
+                + 0.2 * (17.0 * th + tau * u01k(v.id, 32)).sin() * wl(17.0)
+                + 0.2 * (41.0 * th + tau * u01k(v.id, 33)).sin() * wl(41.0));
+    }
+    let wd = (0.07 + 0.3 * (1.0 - band(260.0, gsd))).max(0.3 * (1.0 - hi));
     let cov = smoothstep(-wd, wd, m - 0.35 + 0.5 * n);
     if cov <= 0.0 {
         return;
     }
-    let mut col = ash_col((0.5 + 0.6 * n).clamp(0.0, 1.0));
+    // (dark scoria up the cone, paler weathered ash lower down)
+    let mut col = mixc(ash_col((0.5 + 0.6 * n).clamp(0.0, 1.0)), srgb(112.0, 104.0, 94.0) * (1.0 + 0.3 * n), smoothstep(0.08, 0.35, k.u));
     // red scoria on the summit cone
     col = mixc(col, srgb(104.0, 58.0, 42.0), 0.35 * smoothstep(0.22, 0.06, k.u) * (0.3 + 0.7 * v.act));
     s.composite(Layer { cov, albedo: col, cls: cls::VOLCANIC_ASH, clear: 0.95, ..Default::default() });

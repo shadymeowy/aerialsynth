@@ -287,7 +287,7 @@ fn desert_slot_water(s: ptr<function, Stack>) {
     if (hw <= 0.0 || t.river_wet >= 0.5 || t.sand > 0.45) {
         return;
     }
-    let ar = (1.0 - smoothstep1(0.25, 0.42, t.moist)) * smoothstep1(-4.0, 0.0, t.temp) * (1.0 - smoothstep1(0.3, 0.45, t.sand));
+    let ar = (1.0 - smoothstep1(0.2, 0.34, t.moist)) * smoothstep1(-4.0, 0.0, t.temp) * (1.0 - smoothstep1(0.3, 0.45, t.sand));
     if (ar <= 0.0) {
         return;
     }

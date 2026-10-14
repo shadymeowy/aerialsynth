@@ -83,7 +83,8 @@ fn temperate_forestry(s: ptr<function, Stack>) -> f32 {
         default: {}
     }
     let productive = smoothstep1(0.6, 0.75, sveg(s, VEG_TREES));
-    return a * (0.35 + 0.9 * temperate_eco_u1(s)) * (0.6 + 0.6 * st.misc.y) * (1.0 - smoothstep1(14.0, 19.0, (*s).bio.site.x)) * productive;
+    let reach = smoothstep1(0.02, 0.25, (*s).t.habit);
+    return a * (0.35 + 0.9 * temperate_eco_u1(s)) * (0.6 + 0.6 * st.misc.y) * (1.0 - smoothstep1(14.0, 19.0, (*s).bio.site.x)) * productive * reach;
 }
 
 fn temperate_forest_est(s: ptr<function, Stack>) -> f32 {
@@ -91,7 +92,7 @@ fn temperate_forest_est(s: ptr<function, Stack>) -> f32 {
     let td = cfg.tree_density;
     let trees_mult = sveg(s, VEG_TREES) * (*s).bio.st.veg.x;
     let cold = (1.0 - smoothstep1(0.0, 8.0, t.temp)) * (1.0 - smoothstep1(0.35, 0.7, t.mountain));
-    let base_cover = smoothstep1(0.3 - 0.2 * cold, 0.68 - 0.36 * cold, t.moist) * smoothstep1(-6.0, 2.0, t.temp) * td * trees_mult;
+    let base_cover = smoothstep1(0.3 - 0.2 * cold, 0.68 - 0.36 * cold, t.moist) * smoothstep1(-6.0 - 3.0 * cold, 2.0 - 2.0 * cold, t.temp) * td * trees_mult;
     let fpu = 0.5 + 0.5 * (*s).pf.f[PF_FOREST];
     let forest = smoothstep1(-0.03, 0.03, base_cover - fpu);
     let clear = 1.0 - 0.85 * smoothstep1(0.05, 0.4, s_agri(s)) * (1.0 - smoothstep1(0.45, 0.7, (*s).l.slope));

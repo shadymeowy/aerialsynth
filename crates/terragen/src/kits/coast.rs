@@ -428,7 +428,9 @@ fn flats(s: &mut Stack, ty: &Types) {
 }
 
 /// Slot 5: the cover of the deltas' plains (`delta`): reed marsh, mud where it is arid or
-/// lowest; fields stay where the land use draws them (before this layer), towns too, and the
+/// lowest, with salt crusts, tidal creeks and scrub on the distributaries' levees, mottled and
+/// pulled towards the land's own colour where the plain thins out (its margin breaks into
+/// patches); fields stay where the land use draws them (before this layer), towns too, and the
 /// tropical biomes' mangroves cover theirs (canopy slot).
 pub fn agriculture(s: &mut Stack) {
     let ground = s.l.ground;
@@ -440,26 +442,45 @@ pub fn agriculture(s: &mut Stack) {
         return;
     }
     let (p, gsd) = (s.ctx.p, s.ctx.gsd);
-    let mut plain = 0.0f32;
+    let (mut plain, mut lev) = (0.0f32, 0.0f32);
     for st in s.stamps() {
         if st.template == delta::TEMPLATE {
             let id = st.v[2] as u64 | (st.v[3] as u64) << 24 | (st.v[4] as u64) << 48;
-            plain = plain.max(delta::shape(st.center, st.v[0] as f64, st.v[1], id, st.h, p, gsd as f32).plain);
+            let sh = delta::shape(st.center, st.v[0] as f64, st.v[1], id, st.h, p, gsd as f32);
+            plain = plain.max(sh.plain);
+            lev = lev.max(sh.lev);
         }
     }
+    let plain = plain as f64;
+    // (a ragged margin: patches of the plain's cover, not a line)
+    let ragged = 0.6 * nz(SEED + 63, p, 170.0, gsd) + 0.4 * nz(SEED + 64, p, 52.0, gsd);
     // (over the core's beach, which the low land near the sea gets; not over fields)
-    let zone = plain as f64 * (1.0 - smoothstep(2.4, 3.0, ground)) * (1.0 - s.m.field_cov);
+    let zone = plain * smoothstep(-0.2, 0.2, plain - 0.5 + 0.5 * ragged) * (1.0 - smoothstep(2.4, 3.0, ground)) * (1.0 - s.m.field_cov);
     if zone <= 0.0 {
         return;
     }
     let arid = 1.0 - smoothstep(0.2, 0.34, t.moist);
     let low = 1.0 - smoothstep(0.6, 1.1, ground + 0.3 * nz(SEED + 60, p, 90.0, gsd));
-    let mud = mixc(mixc(srgb(118.0, 106.0, 88.0), srgb(84.0, 76.0, 66.0), low), srgb(176.0, 160.0, 134.0), arid);
+    // grey silt drying out to salt crusts on the higher flats, darker where wet
+    let silt = srgb(144.0, 134.0, 114.0) * (1.0 + 0.1 * nz(SEED + 65, p, 38.0, gsd));
+    let salt = smoothstep(0.2, 0.45, nz(SEED + 66, p, 120.0, gsd) + 0.5 * nz(SEED + 67, p, 33.0, gsd)) * (1.0 - low);
+    let dry = mixc(silt, srgb(192.0, 186.0, 170.0), 0.7 * salt);
+    let mud = mixc(mixc(srgb(118.0, 106.0, 88.0), srgb(84.0, 76.0, 66.0), low), mixc(dry, srgb(96.0, 90.0, 78.0), low), arid);
     let reed = mixc(srgb(96.0, 106.0, 62.0), srgb(134.0, 112.0, 70.0), smoothstep(0.0, 0.7, nz(SEED + 61, p, 260.0, gsd)));
     let m = (1.0 - arid) * (1.0 - low);
-    let col = mixc(mud, reed, m) * (1.0 + 0.08 * nz(SEED + 62, p, 9.0, gsd));
+    let mut col = mixc(mud, reed, m) * (1.0 + 0.08 * nz(SEED + 62, p, 9.0, gsd));
+    // scrub and reeds on the levees (tamarisk in the arid deltas)
+    let scrub = lev as f64 * (0.45 + 0.4 * smoothstep(-0.2, 0.3, nz(SEED + 68, p, 24.0, gsd)));
+    col = mixc(col, mixc(srgb(70.0, 84.0, 48.0), srgb(84.0, 88.0, 58.0), arid), scrub);
+    // the land's own colour where the plain thins out
+    col = mixc(col, s.col, 0.3 + 0.45 * (1.0 - plain));
     s.composite(Layer { cov: zone, albedo: col, cls: if m > 0.5 { cls::MARSH } else { cls::TIDAL_FLAT }, clear: 1.0, ..Default::default() });
     s.m.natural_ok *= 1.0 - zone;
+    // tidal creeks in the low mud
+    let c = creek(p, gsd, s.l.fw.max(0.3 * gsd)) * zone * (0.3 + 0.7 * low) * (1.0 - scrub);
+    if c > 0.0 {
+        s.composite(Layer { cov: c, albedo: srgb(70.0, 66.0, 56.0), cls: cls::TIDAL_FLAT, clear: 1.0, ..Default::default() });
+    }
 }
 
 /// Salt (arid) and aquaculture (humid) ponds in the field frame of the land-use region.
