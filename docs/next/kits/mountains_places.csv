@@ -1,4 +1,4 @@
-# places of the default world where the mountains kit draws (lat, lon in degrees): `terrain survey --places docs/kits/mountains_places.csv`
+# places of the next generator's world 1 where the mountains kit draws (lat, lon in degrees): `terrain survey --generator next --places docs/next/kits/mountains_places.csv`
 # (the folds and the fault blocks show best under a low sun: --local-time 8.0 / 16.5, and at 10 km: --views oblique,high)
 index,lat,lon,theme
 0,-0.714,-96.231,tower_karst

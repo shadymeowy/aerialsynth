@@ -1,6 +1,6 @@
 //! The transport kit: roads (motorways, trunk, secondary and local roads, tracks), railways and
 //! power lines between the settlements kit's places and sites (`docs/design/terrain-next.md`
-//! §6.3, §6.4, P2/P3; `docs/kits/transport.md`).
+//! §6.3, §6.4, P2/P3; `docs/next/kits/transport.md`).
 //!
 //! * [`net`]: the graph (relative-neighbourhood graphs of places per network, track ends).
 //! * [`route`]: routing an edge through its scene (the relief with the valleys carved in, lakes,

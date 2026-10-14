@@ -1,14 +1,12 @@
 # Agriculture kit
 
-> [!NOTE]
-> This kit belongs to the **next** generator (`world.generator: next`, a preview; see
-> [`docs/simulation.md`](../simulation.md)). The default generator, `classic` (v0.2.0's), has no
-> kits: worlds made with it do not show what this page describes.
+A kit of the experimental [next generator](../README.md) (`world.generator: next`). *The default
+world* on this page is seed 1 of the next generator.
 
 `crates/terragen/src/kits/agriculture.rs` (catalogue, shading, tests), its WGSL twin
 `src/gpu/wgsl/kits/agriculture.wgsl` (the tables are generated from the Rust file) and
 `biomes/agriculture.yaml` (empty: the systems are code). Design:
-[terrain-next.md §5.8](../design/terrain-next.md), contract: [kit-guide.md](../design/kit-guide.md).
+[terrain-next.md §5.8](https://github.com/shadymeowy/aerialsynth/blob/terrain-design/docs/design/terrain-next.md), contract: [kit-guide.md](../kit-guide.md).
 
 ## What it draws
 

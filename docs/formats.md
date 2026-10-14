@@ -16,34 +16,21 @@ Both files are HDF5 and open in h5py or any HDF5 reader. `terrain info FILE` sum
 /levels/<z>/normal       i8  [N,256,256,3]  ENU unit normal * 127
 /levels/<z>/landcover    u8  [N,256,256]    class id (land-cover classes below)
 /levels/<z>/emission     u8  [N,256,256,3]  night lights, linear = 16 (v/255)^3
-  optional (tiles.layers):
+  optional (tiles.layers; next generator only):
 /levels/<z>/dtm          f32 [N,256,256]    bare ground (DTM), m above ellipsoid
 /levels/<z>/instance     u32 [N,256,256]    instance id (building lot, field, forest stand; 0 none)
 ```
 
 - **Format version 2** (root attribute `format_version`): version 1 plus the optional layers.
-  The root attribute `layers` lists the layers a store holds; readers take it from there, so
-  version-1 stores open as before and report the optional layers as absent (the Rust
-  `StoreMeta::has`, the bindings' `World.layers` / `as_has_layer`). A store of a newer version
-  is refused with a message.
-- **Optional layers:** `tiles.layers: [dtm, instance]` (scenario or bindings config) adds them
-  to a **new** store; an existing store keeps its layers (a note names the ones it lacks).
-  Off by default: they add about half to a store (2911 tiles of six survey views, z2–z18:
-  the base layers 390 KB per tile compressed, `dtm` 155 KB, `instance` 52 KB; the DTM's f32
-  heights compress like the DSM's). Both backends of the generator (`next`, the composite
-  stack) make them identically (the GPU / CPU parity tests compare them like the other
-  layers); a generator that does not make them (the frozen `classic` one) is for stores
-  without them. The renderers read only the base layers.
-  - `dtm`: the bare ground under buildings and vegetation (the bed under water; pits and ponds
-    below the ground: their surface), so `elevation - dtm` is the height of buildings, trees and
-    water depth (nDSM ground truth).
-  - `instance`: one id per building lot (settlements kit: the lot of a building; one block where
-    no finer lot exists), field (core fields and the agriculture kit's parcels; not their hedges
-    and tracks) and forest stand (the canopy's ~240 m stands; not shrubs). Ids are hashes in
-    [2^23, 2^30), stable across tiles and zooms; 0 = no instance. A pixel takes the instance
-    of its land-cover class's first sub-sample. `terrain view` shows both (map shading
-    *Height above ground*, *Instances*) when the store has them.
-
+  The root attribute `layers` lists the layers a store holds (the Rust `StoreMeta::has`, the
+  bindings' `World.layers` / `as_has_layer`); version-1 stores open as before, without them. A
+  store of a newer version is refused with a message.
+- **Optional layers** (`dtm`, `instance`) are made only by the experimental next generator,
+  in new stores created with `tiles.layers: [dtm, instance]` ([`next/`](next/README.md#enabling-it)).
+  `dtm` is the bare ground under buildings and vegetation (the bed under water), so
+  `elevation - dtm` is the height of buildings, trees and water depth. `instance` is one id per
+  building lot, field or forest stand (hashes in [2^23, 2^30), stable across tiles and zooms;
+  0 = none). The renderers read only the base layers.
 - **Chunks:** one tile per chunk, compressed with shuffle + deflate. Compression runs in parallel
   and is written with HDF5 direct chunk I/O. The bundled HDF5 is 2.2.0 (via `hdf5-metno-sys`).
 - **Growth:** rows can be appended in any order, so a store grows lazily. A new store is
@@ -52,18 +39,13 @@ Both files are HDF5 and open in h5py or any HDF5 reader. `terrain info FILE` sum
 - **Locking:** HDF5 locks the file: a store open for writing in one process (`terrain view`,
   `terrain tiles`) cannot be opened by another, and one open for reading cannot be written;
   such an open fails with an error saying so.
-- **One world per store:** a store records the world config (with `generator: classic` or
-  `next`) and generator version of its tiles: 3 for the classic generator, 4 for the next one.
-  Every command refuses a store of another generator (the error names it and the
-  `world.generator` that opens it) or of another world, naming the settings that differ; a
-  classic world is the settings v0.2.0 had (the next generator's `ecoregions`, `biomes`, `atlas`
-  and `relief.tectonic_mountains` / `belt_mountains` are not part of it, nor recorded). Stores
-  written before the generator switch have no `generator` key: version 3 or lower (v0.2.0's)
-  is classic, so v0.2.0 stores open with the default config, and version 4 is next.
-  It also refuses to add tiles to a store of another generator version; reading such a store
-  only warns (`run` and `tiles` open a store for writing only when tiles are missing, or with
-  `--lazy`; `terrain view` unless `--no-generate`). `terrain info` shows the generator and
-  version.
+- **One world per store:** a store records the world config (root attribute
+  `generator_config`, with its `generator`) and the generator version of its tiles (3 for the
+  default generator, as in v0.2.0, whose stores open and grow unchanged). Every command refuses
+  a store of another world or generator, naming the settings that differ, and refuses to add
+  tiles to a store of another generator version; reading such a store only warns (`run` and
+  `tiles` open a store for writing only when tiles are missing, or with `--lazy`; `terrain
+  view` unless `--no-generate`). `terrain info` shows the generator and version.
 - **Making tiles:** `terrain tiles` plans and generates the flight's tiles. `--bbox` covers a
   region, `--list` a tile list. Existing tiles are skipped, so the store grows lazily.
   `tiles.lazy` (or `terrain run --lazy`) generates what the renderer misses while rendering.
@@ -140,7 +122,8 @@ display colour and material of every class. The shaders get it as generated WGSL
 
 - **Ids are stable:** 0–17 are the classes of the first release and keep their meaning; new
   classes are appended in per-group ranges and never renumbered. Ids are below 128; 255 is the
-  sky in sequence outputs. The kits emit most of the v2 classes.
+  sky in sequence outputs. The default generator emits classes 0–17 only; the others (20–110)
+  are drawn by the experimental [next generator](next/README.md).
 - **Groups** (stable ids): 0 unknown, 1 water, 2 wetland, 3 bare, 4 snow-ice, 5 vegetation,
   6 forest, 7 agriculture, 8 disturbed, 9 built, 10 transport.
 - **Legacy class:** every class names the class among 0–17 that stands for it, so readers of

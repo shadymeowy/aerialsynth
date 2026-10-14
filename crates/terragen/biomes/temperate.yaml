@@ -1,10 +1,10 @@
-# Temperate, boreal and wetland kit (`src/kits/temperate.rs`, `docs/kits/temperate.md`):
+# Temperate, boreal and wetland kit (`src/kits/temperate.rs`, `docs/next/kits/temperate.md`):
 # forest types, Mediterranean scrub, steppe, heath and moor, and the altitudinal zones above
 # the tree line. Wetlands, forestry (clear-cuts, windthrow, firebreaks, logging roads) and
 # autumn colours are drawn by the kit's layer functions (climate- and terrain-driven, in every
 # biome where they fit).
 #
-# Schema: docs/design/kit-guide.md ("Biomes").
+# Schema: docs/next/kit-guide.md ("Biomes").
 
 # ------------------------------------------------------------------ forests
 

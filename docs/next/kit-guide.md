@@ -1,15 +1,13 @@
 # Writing a kit
 
-> [!NOTE]
-> Kits are part of the **next** generator (`world.generator: next`, a preview); the default
-> generator, `classic`, is v0.2.0's and frozen (`crates/terragen/src/classic`: no kits, no
-> changes that alter its tiles). Tests of a kit build their worlds with `NextGenerator` (or a
-> config with `generator: next`): the default config is the classic generator.
+Kits belong to the experimental [next generator](README.md). The default generator, `classic`, is
+v0.2.0's and frozen: tests of a kit build their worlds with `NextGenerator` (or a config with
+`generator: next`); *the default world* below is seed 1 of the next generator.
 
 A **kit** adds landscapes to the generator: biomes (data), and where data is not enough,
 kernels, layer functions, relief operators, instance families and host-built features (code).
 This guide is the contract between the generator core (`crates/terragen`, design:
-[terrain-next.md](terrain-next.md)) and a kit: which files to write, how to register them, which
+[terrain-next.md](https://github.com/shadymeowy/aerialsynth/blob/terrain-design/docs/design/terrain-next.md)) and a kit: which files to write, how to register them, which
 APIs to use, and what a kit must prove before it is merged.
 
 Everything a kit adds lives in **its own files**; the only shared line is its entry in
@@ -33,7 +31,7 @@ For a kit named `desert` (lower_snake_case; it prefixes everything it defines):
 | `crates/terragen/src/gpu/wgsl/kits/desert.wgsl` | the WGSL twins (`desert_slot_<slot>`, kernels, family existence) |
 | `crates/terragen/src/gpu/wgsl/kits/desert_relief.wgsl` | (only with a relief operator or a relief family) WGSL included in every module with pass A |
 | `crates/terragen/biomes/desert.yaml` | its biomes and patches of core biomes |
-| `docs/kits/desert.md` (optional) | what it draws, where, and stills |
+| `docs/next/kits/desert.md` (optional) | what it draws, where, and stills |
 
 **Registration** (the only shared file): in `src/kits/mod.rs`, replace your two placeholder
 lines, `// mod desert;` → `mod desert;` and `// &desert::KIT,` → `&desert::KIT,`. Keep the
@@ -131,7 +129,7 @@ pub struct Layer {
 `Layer::paint(cov, albedo)`, `Layer::paint_cls(cov, albedo, cls)` and `..Default::default()`
 for the rest; in WGSL `layer_none()`, `layer_paint(cov, albedo, cls)`, `layer_emit(e)`. Composite
 with `s.composite(layer)` / `composite(s, ly)`. Class ids are the v2 ids of
-`docs/design/terrain-next.md` §7.2 (`registry::classes::id("tidal_flat")`; WGSL `LC_TIDAL_FLAT`).
+the design (`terrain-next.md`) §7.2 (`registry::classes::id("tidal_flat")`; WGSL `LC_TIDAL_FLAT`).
 
 ### What a layer function can read (`Stack`)
 
@@ -505,7 +503,7 @@ deltas.
 
 ## Rules (invariants)
 
-The generator's invariants (`docs/design/terrain-next.md` §1) apply to every kit:
+The generator's invariants (the design (`terrain-next.md`) §1) apply to every kit:
 
 * **Pure function of (config, position).** No tile-local state; caches are memoization only.
 * **Same world on both backends.** Discrete decisions (existence, class, topology) from integer
@@ -561,7 +559,7 @@ Run on the farm (`rrun --gpu …`): the GPU tests skip themselves without a GPU.
 
 ## Performance budget
 
-Per-zoom budgets (`docs/design/terrain-next.md` §9; measured with `zoom_bench`, GPU and CPU):
+Per-zoom budgets (the design (`terrain-next.md`) §9; measured with `zoom_bench`, GPU and CPU):
 a kit may add at most **5 %** to the tiles/s of any zoom of the default bench places, and
 **15 %** at places where it draws. Guidance:
 

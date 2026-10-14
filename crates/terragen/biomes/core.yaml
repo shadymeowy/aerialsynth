@@ -2,7 +2,7 @@
 # and forest, boreal, tropical, savanna, steppe, desert, mediterranean, polar) as explicit
 # entries, plus a few variants, so neighbouring ecoregions differ categorically.
 #
-# Schema: docs/design/kit-guide.md ("Biomes"). Kits add their biomes in their own file
+# Schema: docs/next/kit-guide.md ("Biomes"). Kits add their biomes in their own file
 # (biomes/<kit>.yaml) and may change these with `patch: true`.
 #
 # Every key is optional; a biome without `palette`, `vegetation` or `canopy` keeps the default

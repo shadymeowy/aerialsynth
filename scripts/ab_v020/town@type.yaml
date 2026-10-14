@@ -1,4 +1,4 @@
-# town at a place of the same type in the next generator's world: metropolis outer districts (docs/kits/settlements.md) (the same local solar time)
+# town at a place of the same type in the next generator's world: metropolis outer districts (docs/next/kits/settlements.md) (the same local solar time)
 world:
   seed: 1
   generator: next

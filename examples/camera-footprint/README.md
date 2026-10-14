@@ -16,7 +16,7 @@ Every step prints what it computes.
 ```sh
 cargo run --release -p camera-footprint            # images in out/camera-footprint/
 cargo run --release -p camera-footprint -- DIR     # ... or in DIR
-cargo run --release -p camera-footprint -- DIR next 1529.4   # the next generator (preview), its own camera height
+cargo run --release -p camera-footprint -- DIR next 1529.4   # the experimental next generator (docs/next/)
 cargo test --release -p camera-footprint           # conversions and homography
 ```
 
@@ -108,15 +108,6 @@ h) did not settle on (the earlier version of this example: the top-left corner o
 is still only an approximation here: the plane through the 4 corners stands in for terrain of
 1300–2010 m, so the warp is off by a median 33 px (over the level lowland of an earlier
 scene: 1.4–18 px).
-
-**The next generator** (`world.generator: next`, a preview) builds another world from the same
-seed: here a lowland at 629 m, rendered from 900 m above it (`... DIR next 1529.4`). It shows
-dry olive grassland with scattered trees and a few fields at 53° N, and a hard, circular biome
-border in the oblique view: one of its known limits.
-
-| | |
-|---|---|
-| ![](images/next_1_oblique_camera.jpg) next: oblique camera | ![](images/next_2_nadir_camera.jpg) next: nadir camera |
 
 What it prints (excerpt):
 

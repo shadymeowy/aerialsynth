@@ -1,4 +1,4 @@
-//! The tropical and savanna kit (`docs/design/terrain-next.md` §5.6, `docs/kits/tropical.md`).
+//! The tropical and savanna kit (`docs/design/terrain-next.md` §5.6, `docs/next/kits/tropical.md`).
 //!
 //! Biomes (`biomes/tropical.yaml`): lowland rainforest (a patch of the core `tropical_moist`)
 //! with emergent and flowering crowns, treefall gaps, river-edge forest, meander scars and a

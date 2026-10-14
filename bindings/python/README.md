@@ -24,8 +24,8 @@ aerialsynth.LAYERS["normal"]   # LayerInfo(name='normal', dtype=dtype('int8'), c
   scenario YAML (its `world:` section is the world and its `tiles.max_zoom` the zoom limit,
   default 18; the other sections are ignored) or a bare world config; `None` is the default
   world. `seed` overrides the config's seed. `generator` overrides its terrain generator:
-  `"classic"` (the default: the generator of v0.2.0) or `"next"` (the modular generator with the
-  biome kits, a preview); `World.generator` says which, `aerialsynth.GENERATORS` lists them.
+  `"classic"` (the default) or the experimental `"next"`
+  ([`docs/next/`](../../docs/next/README.md)); `World.generator` says which.
 - **One world per store:** opening a store made by another world, generator or generator version
   raises `RuntimeError`, naming what differs. Give each world its own tiles file.
 - **Tiles:** `z` at most `World.max_zoom`, `x, y < 2**z`; row 0 is the north edge. The arrays are
@@ -63,20 +63,14 @@ aerialsynth.LAYERS["normal"]   # LayerInfo(name='normal', dtype=dtype('int8'), c
 | `albedo` | uint8 | 256 × 256 × 3 | unlit surface colour, sRGB encoded |
 | `elevation` | float32 | 256 × 256 | DSM (ground, canopy, buildings, water), m above the WGS84 ellipsoid, at pixel centres |
 | `normal` | int8 | 256 × 256 × 3 | unit normal (east, north, up) × 127 |
-| `landcover` | uint8 | 256 × 256 | class id: 0 unknown, 1 ocean, 2 lake, 3 river, 4 beach, 5 sand, 6 rock, 7 snow, 8 grass, 9 shrub, 10 forest, 11 crop, 12 building, 13 road, 14 wetland, 15 tundra, 16 bare, 17 urban; classes v2 add 20–110 (`docs/formats.md`) |
+| `landcover` | uint8 | 256 × 256 | class id: 0 unknown, 1 ocean, 2 lake, 3 river, 4 beach, 5 sand, 6 rock, 7 snow, 8 grass, 9 shrub, 10 forest, 11 crop, 12 building, 13 road, 14 wetland, 15 tundra, 16 bare, 17 urban; the experimental next generator also 20–110 |
 | `emission` | uint8 | 256 × 256 × 3 | night lights, linear radiance = 16 (v/255)³ |
 | `dtm` | float32 | 256 × 256 | *optional:* bare ground, m above the WGS84 ellipsoid (the bed under water) |
 | `instance` | uint32 | 256 × 256 | *optional:* instance id (building lot, field, forest stand); 0 = none |
 
-The optional layers are in a store created with `tiles.layers: [dtm, instance]` in its config
-(off by default); `w.layers` lists what a store holds, and a layer it lacks raises `ValueError`:
-
-```python
-# world.yaml:  tiles: { layers: [dtm, instance] }
-w = aerialsynth.World("world.h5", config="world.yaml")
-ndsm = w.tile(16, 39117, 25113, "elevation") - w.tile(16, 39117, 25113, "dtm")   # building / tree heights
-ids = w.tile(16, 39117, 25113, "instance")                                       # 0: no instance
-```
+The optional layers exist only in stores of the experimental `next` generator created with
+`tiles.layers: [dtm, instance]` ([example](../../docs/next/README.md#enabling-it)); `w.layers`
+lists what a store holds, and a layer it lacks raises `ValueError`.
 
 ## Rendering
 
@@ -102,14 +96,11 @@ with aerialsynth.World("out/world.h5") as w:
 `Camera.render` uses the renderer of `terrain run`, so the images match the CLI's datasets; the
 tiles in view are generated into the store when missing (like `terrain run` with lazy tiles).
 
-**The first render at a new place takes a while on the CPU:** it generates the few hundred tiles
-the view needs (the coarse levels, then the view's own and their neighbours). Without a GPU that
-generates tiles, the example above takes ~4.6 min on 4 cores the first time and ~1 s afterwards
-(the tiles are then read from the store); with one, ~30 s. `World(...,
-verbose=True)` (or `w.verbose = True`) prints a line per batch of tiles generated on stderr;
-`w.prefetch(box, zooms)` makes an area's tiles ahead (in large batches), e.g. before many
-renders there. The image does not depend on whether the tiles were generated or read: the same
-call gives the same image.
+**The first render at a new place** generates the few hundred tiles the view needs: ~30 s with
+a GPU that generates tiles, ~4.6 min on 4 CPU cores without (the example above), ~1 s once they
+are stored ([details](../README.md#rendering)). `World(..., verbose=True)` prints a line per
+batch of tiles on stderr; `w.prefetch(box, zooms)` makes an area's tiles ahead. The image does
+not depend on whether the tiles were generated or read.
 
 - **Cameras:** `w.camera(width, height, hfov, cx=None, cy=None, mount="forward")` is a
   distortion-free pinhole camera (principal point default the image centre); `mount="forward"`
@@ -172,7 +163,7 @@ source (below).
 
 One wheel (`cp310-abi3`, the stable ABI) serves CPython 3.10 and newer. It needs the Rust
 toolchain of the workspace, a C compiler and CMake (HDF5 is built from source; per platform see
-the [main README](../../README.md#requirements)), and
+the [main README](../../README.md#install)), and
 [maturin](https://www.maturin.rs):
 
 ```sh
@@ -183,4 +174,11 @@ python3 -m venv .venv                  # PEP 668 distributions refuse a system-w
 .venv/bin/pytest tests
 ```
 
-The only Python dependency is numpy.
+The only Python dependency is numpy: the extension uses the stable ABI (PyO3 `abi3-py310`) and
+returns tiles and images as `bytearray`s that the Python layer views with `np.frombuffer`
+(writable, no copy), so it needs no numpy C API.
+
+Release wheels are built by `.github/workflows/wheels.yml` for each `v*` tag, checked to link
+only system libraries (`auditwheel`, `delocate` / `otool -L`, the PE imports) and tested on
+CPython 3.10 and 3.13. The Linux build runs locally in `quay.io/pypa/manylinux_2_28_x86_64` with
+`maturin build --release --manylinux 2_28`.

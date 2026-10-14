@@ -1,14 +1,12 @@
 # Temperate, boreal and wetland kit
 
-> [!NOTE]
-> This kit belongs to the **next** generator (`world.generator: next`, a preview; see
-> [`docs/simulation.md`](../simulation.md)). The default generator, `classic` (v0.2.0's), has no
-> kits: worlds made with it do not show what this page describes.
+A kit of the experimental [next generator](../README.md) (`world.generator: next`). *The default
+world* on this page is seed 1 of the next generator.
 
 `crates/terragen/src/kits/temperate.rs` (layer functions, tests), its WGSL twin
 `src/gpu/wgsl/kits/temperate.wgsl`, and its biomes `crates/terragen/biomes/temperate.yaml`
-(design: [terrain-next.md §5.7](../design/terrain-next.md), contract:
-[kit-guide.md](../design/kit-guide.md)).
+(design: [terrain-next.md §5.7](https://github.com/shadymeowy/aerialsynth/blob/terrain-design/docs/design/terrain-next.md), contract:
+[kit-guide.md](../kit-guide.md)).
 
 ## What it draws
 

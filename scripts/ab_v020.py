@@ -2,7 +2,7 @@
 """A/B of the generator against v0.2.0 at the v0.2.0 showcase poses.
 
 The v0.2.0 showcase stills (`showcase/stills.yaml` of v0.2.0, one frame per scene, 640 x 360)
-are kept as small JPEGs in `docs/ab/v020/<scene>.jpg`; `scripts/ab_v020/<scene>.yaml` are the
+are kept as small JPEGs in `docs/next/ab/v020/<scene>.jpg`; `scripts/ab_v020/<scene>.yaml` are the
 same scenes with today's config keys. A scene `<scene>@<tag>.yaml` is the same camera at another
 place: a place of the same landscape type in today's world (its world differs from v0.2.0's,
 so the identical pose often shows another landscape). The scenes set `world.generator: next`
@@ -31,7 +31,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CFG = ROOT / "scripts" / "ab_v020"
-REF = ROOT / "docs" / "ab" / "v020"
+REF = ROOT / "docs" / "next" / "ab" / "v020"
 FRAME = 1  # the frame of each sequence shown (of 4)
 
 

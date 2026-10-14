@@ -19,7 +19,7 @@ therefore exact for any camera model, and the trajectory's vibration costs nothi
 the image does not move: renders are dense only where it does. The cost grows with image motion
 (about 0.2 s per internal render on the CPU).
 
-With a GPU (`render.backend: gpu`, or the default `auto` when one is present; `docs/gpu.md`)
+With a GPU (`render.backend: gpu`, or the default `auto` when one is present; [`gpu.md`](gpu.md#event-cameras))
 the renders and the pixel model run on the GPU, 11–15× faster than on the CPU. The events are
 statistically the same; the random numbers of the noise model differ from the CPU's.
 
@@ -102,7 +102,7 @@ Performance of the CPU backend on the author's machine (Xeon W-2125, 8 threads; 
 ~1000 m above-ground flight with engine vibration): about 100 s of compute per simulated second, for
 ~520 renders per simulated second; the sensor model runs in parallel (~3 ms per step) and is
 not the bottleneck. The GPU backend renders the keyframes ~15x and runs the sensor steps ~11x
-faster (`docs/gpu.md`). The events step prints renders, sensor steps and their times. Two
+faster. The events step prints renders, sensor steps and their times. Two
 knobs trade fidelity for speed:
 
 - **`max_px_per_step`:** step size limit; larger is faster and less exact.

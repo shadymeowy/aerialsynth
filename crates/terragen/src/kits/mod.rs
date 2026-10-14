@@ -1,4 +1,4 @@
-//! Kits: self-contained additions to the world (`docs/design/kit-guide.md`). A kit lives in its
+//! Kits: self-contained additions to the world (`docs/next/kit-guide.md`). A kit lives in its
 //! own files:
 //!
 //! * `src/kits/<kit>.rs`: its [`Kit`] (`pub static KIT`), layer functions, kernels, relief;

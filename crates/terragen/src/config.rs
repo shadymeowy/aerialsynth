@@ -75,7 +75,7 @@ pub enum GeneratorKind {
     #[default]
     Classic,
     /// The modular generator: planetary atlas, biome registry, ecoregions and the kits
-    /// (`docs/kits/`). A preview with known limits.
+    /// (`docs/next/kits/`). A preview with known limits.
     Next,
 }
 

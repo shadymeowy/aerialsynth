@@ -1,9 +1,9 @@
-# Desert kit (docs/kits/desert.md): hot and cold deserts by palette and lithology. The landforms
+# Desert kit (docs/next/kits/desert.md): hot and cold deserts by palette and lithology. The landforms
 # (dunes by wind regime, barchans, playas, washes, yardangs, inselbergs) are the kit's code and
 # follow the climate; these biomes give each desert ecoregion its colours and ground textures:
 # desert varnish, gravel mottling, rock pavement, scrub along the washes, oasis groves.
 #
-# Schema: docs/design/kit-guide.md ("Biomes"). Colours are sRGB 0..255.
+# Schema: docs/next/kit-guide.md ("Biomes"). Colours are sRGB 0..255.
 #
 # Masks used below: sand (the sand-sea mask), slope (tan), moist (0..1), river_dist (m from the
 # bank of a channel, negative inside), patch (pixel noise ~[-1, 1]), temp (°C).
