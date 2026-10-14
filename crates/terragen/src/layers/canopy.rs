@@ -154,10 +154,11 @@ pub fn layer(s: &mut crate::stack::Stack) {
         smoothstep(0.3 - 0.2 * cold, 0.68 - 0.36 * cold, wet) * smoothstep(-6.0 - 3.0 * cold, 2.0 - 2.0 * cold, temp) * veg.tree_density * trees_mult;
     // ~[0, 1]
     let fpu = 0.5 + 0.5 * pf.forest;
-    // forests where the patch field is below the cover fraction (crisp but noisy edges), and the
-    // farmland's woodlots whatever the climate's cover (they were bare meadow with a few trees
-    // where the forest share is low)
-    let forest = smoothstep(-0.03, 0.03, base_cover - fpu).max(m.woodlot * smoothstep(0.05, 0.4, s.agri()));
+    // forests where the patch field is below the cover fraction (noisy edges, feathered over
+    // ~100 m: the trees thin out into the open land; a crisp edge drew dark forest blobs cut out
+    // of the grass), and the farmland's woodlots whatever the climate's cover (they were bare
+    // meadow with a few trees where the forest share is low)
+    let forest = smoothstep(-0.09, 0.09, base_cover - fpu).max(m.woodlot * smoothstep(0.05, 0.4, s.agri()));
     // savanna / steppe scattered trees, groves
     let savanna = smoothstep(0.18, 0.35, wet) * (1.0 - smoothstep(0.55, 0.7, wet)) * smoothstep(12.0, 20.0, temp) * 0.12 * s.veg(|v| v.savanna);
     let groves = 0.04 * smoothstep(0.15, 0.3, wet) * s.veg(|v| v.groves);

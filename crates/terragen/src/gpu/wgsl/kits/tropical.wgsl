@@ -505,7 +505,7 @@ fn tropical_grass(li: u32, i: KIn) -> KOut {
         return kout_none();
     }
     let t = 0.5 + 0.5 * perlin3(k.seed ^ 0x6A1lu, i.p * (1.0lf / sc));
-    let w = clamp(2.0 * i.fw / k.v[0], 1e-3, 0.5);
+    let w = clamp(2.0 * i.fw / k.v[0], 0.15, 0.5);
     let cov = smoothstep1(-w, w, i.amount - 0.05 - 0.9 * (1.0 - t));
     if (cov <= 0.0) {
         return kout_none();

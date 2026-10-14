@@ -278,8 +278,8 @@
     - &savanna_grass
       slot: zonal
       kernel: tropical_grass
-      mask: { moist: [null, null, 0.5, 0.68], temp: [16, 20, null, null] }
-      params: { scale: 70, bare: 0.08, tussock: 0.6, colour: [214, 186, 116], colour2: [190, 174, 122], bare_colour: [176, 126, 88] }
+      mask: { moist: [null, null, 0.45, 0.62], temp: [16, 20, null, null] }
+      params: { scale: 70, bare: 0.08, tussock: 0.6, colour: [196, 176, 120], colour2: [176, 166, 122], bare_colour: [168, 124, 90] }
       class: savanna
     - &savanna_fire
       slot: disturbance
