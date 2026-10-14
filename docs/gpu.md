@@ -32,7 +32,8 @@ for <GPU> ...`, then `GPU shaders ready in N s`), the viewer in its status bar, 
 `verbose` on. The viewer generates on the CPU meanwhile.
 
 The compiled pipelines are cached per GPU, driver and aerialsynth version in
-`$XDG_CACHE_HOME/terrain/` (default `~/.cache/terrain/`): later runs start in about a second, and
+`$XDG_CACHE_HOME/terrain/` (default `~/.cache/terrain/`; on Windows without `HOME`,
+`%LOCALAPPDATA%\terrain\`): later runs start in about a second, and
 files of older versions are deleted automatically. Delete the directory to clear the cache. On
 Metal and DX12, which keep their own driver caches, a marker file there records that this GPU
 compiled these shaders, and later runs say nothing unless the compile takes more than 5 s.
