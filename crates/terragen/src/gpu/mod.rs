@@ -286,7 +286,7 @@ const _: () = {
 const PB_PFW: usize = 20;
 const PB_ACCW: usize = 21;
 // (the state and the pixel fields are vec4s: `st_save`, `pf_save`)
-const _: () = assert!(PBW_HDR == 4 && PB_ST_F % 4 == 0 && PB_PFW == 20);
+const _: () = assert!(PBW_HDR == 4 && PB_ST_F.is_multiple_of(4) && PB_PFW == 20);
 
 /// The slot of each stack step.
 const STEP_SLOTS: [usize; 11] = {
