@@ -449,7 +449,7 @@
   canopy:
     # Brachystegia: new leaves red-bronze, mature olive, some leafless
     - { share: broadleaf, shape: dome, cell: 10, height: [10, 6], open_height: 0.7, colour: [82, 96, 50], colour_dry: [136, 112, 80] }
-    - { share: broadleaf, shape: dome, cell: 13, height: [11, 5], colour: [150, 96, 66], density: 0.18, closure: false, seed: 0x7E71 }
+    - { share: broadleaf, shape: dome, cell: 13, height: [11, 5], colour: [128, 98, 70], density: 0.18, closure: false, seed: 0x7E71 }
     - { share: savanna, shape: umbrella, cell: 12, height: [7, 3], colour: [82, 92, 50], closure: false, stand: false }
     - { share: shrub, shape: dome, cell: 4, height: [1.5, 0], colour: [98, 96, 62], closure: false, stand: false }
   layers:
