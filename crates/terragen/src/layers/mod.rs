@@ -97,9 +97,9 @@ pub fn kin(s: &Stack, kind: u32, amount: f64) -> KIn {
 /// evaluated (explicit or its calibrated mean by the pixel size) and composited. Where two
 /// biomes blend (coarse pixels at ecotones, zone borders), each contributes by its weight; where
 /// the ecotone's mosaic picked one of two, the other's flat layers (no height: grass, soil,
-/// mottling) blend in by the ecotone's probability like its palette (`BioSample::c`, `wc`:
-/// steppe grass and forest floor drew a patchwork of the mosaic's patches; layers with a height,
-/// crowns and landforms, stay the mosaic's: blended, they broke the DSM's LOD).
+/// mottling) and canopy layers blend in by the ecotone's probability like its palette
+/// (`BioSample::c`, `wc`: steppe grass, forest floor and spruce stands drew a patchwork of the
+/// mosaic's patches); landforms with a height stay the mosaic's.
 pub fn biome_layers(s: &mut Stack, slot: usize) {
     let reg = &s.sm.registry;
     let band = crate::registry::band_of(s.ctx.gsd);
@@ -118,7 +118,7 @@ pub fn biome_layers(s: &mut Stack, slot: usize) {
             if l.slot != slot || s.done {
                 continue;
             }
-            let flat = l.hmode == crate::stack::hmode::NONE;
+            let flat = l.hmode == crate::stack::hmode::NONE || slot == crate::stack::slot::CANOPY;
             let wt = match (k, flat) {
                 (2, false) => continue,
                 (2, true) => wc,

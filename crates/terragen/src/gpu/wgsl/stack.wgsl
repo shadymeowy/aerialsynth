@@ -455,7 +455,7 @@ fn bl_next(s: ptr<function, Stack>, slot: u32, it: ptr<function, BLIter>) -> boo
         }
         // (`layers::biome_layers`: the other ecoregion's flat layers blend in by `wc`; layers
         // with a height stay the mosaic's)
-        let flat = (l.head.w & 0xffu) == HM_NONE;
+        let flat = (l.head.w & 0xffu) == HM_NONE || slot == 10u;
         if (q >= nab) {
             if (!flat) {
                 continue;
