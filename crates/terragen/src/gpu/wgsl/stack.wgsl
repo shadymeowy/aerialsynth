@@ -520,7 +520,7 @@ fn layer_zonal(s: ptr<function, Stack>) {
             col = mixc(col, col * vec3<f32>(1.16, 1.06, 0.80), 0.45 * dry_p * meadow);
         }
         let b12 = band(12.0, gsd);
-        if (b12 > 0.0 && cover > 0.0) {
+        if (b12 > 0.0) {
             var m = 0.10 * perlin3(0x3EB1lu, p * (1.0lf / 12.0lf)) * b12;
             let b4 = band(4.0, gsd);
             if (b4 > 0.0) {
@@ -530,7 +530,7 @@ fn layer_zonal(s: ptr<function, Stack>) {
                     m += 0.06 * perlin3(0x3EB3lu, p * (1.0lf / 1.3lf)) * b13;
                 }
             }
-            col *= 1.0 + m * cover * meadow;
+            col *= 1.0 + m * (cover * meadow + 0.6 * (1.0 - cover));
         }
     }
     if (t.gully != 0.0) {
@@ -856,7 +856,7 @@ fn layer_canopy(s: ptr<function, Stack>) {
     dens *= limit;
     dens_sav *= limit;
     let shrub_clim = smoothstep1(0.07, 0.3, wet) * (1.0 - smoothstep1(0.6, 0.8, wet)) * smoothstep1(2.0, 10.0, temp);
-    let shrub_patch = smoothstep1(-0.2, 0.5, (*s).pf.f[PF_PATCH] + 0.4 * (*s).pf.f[PF_LAND]);
+    let shrub_patch = max(smoothstep1(-0.2, 0.5, (*s).pf.f[PF_PATCH] + 0.4 * (*s).pf.f[PF_LAND]), 0.35 * (1.0 - smoothstep1(0.2, 0.35, wet)));
     let shrub = clamp((0.45 * shrub_clim * shrub_patch * (1.0 - forest) * max(m.natural_ok, 0.4 * m.rock) * (1.0 - m.field_cov) * sveg(s, VEG_SHRUBS) * style.veg.z + gully_scrub)
         * td * m.veg, 0.0, 0.7);
     var stand = (*s).pf.stand;
@@ -898,6 +898,9 @@ fn layer_canopy(s: ptr<function, Stack>) {
         var colour = cr.colour.xyz;
         if ((cr.flags & 4u) != 0u) {
             colour = mixc(cr.colour.xyz, cr.colour_dry.xyz, dry);
+        }
+        if (cr.share == 3u) {
+            colour = mixc(colour, (*s).col, 0.35);
         }
         let stand_ok = (cr.flags & 2u) != 0u;
         layers[k] = TreeLayer(
