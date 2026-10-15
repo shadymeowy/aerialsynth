@@ -178,7 +178,7 @@ fn lamps(f: &Frame, s0: f64, sp: f64, off: f64, median: bool, seed: u64, fw: f64
 
 /// The deck / carriageway surface of a road or railway across its width (also slot 8 over
 /// water): colour, markings, rails. `hs` is its height.
-fn surface(sg: &FSeg, f: &Frame, class: usize, fw: f64, o: &mut Px, hs: f64) {
+fn surface(sg: &FSeg, f: &Frame, class: usize, fw: f64, o: &mut Px, hs: f64, below: DVec3) {
     let hw = sg.v[0] as f64;
     let fl = sg.flags;
     let dd = f.d.abs();
@@ -212,10 +212,12 @@ fn surface(sg: &FSeg, f: &Frame, class: usize, fw: f64, o: &mut Px, hs: f64) {
         return;
     }
     let paved = fl & flag::PAVED != 0;
+    // (tracks and dirt roads in the ground's colour, paler: a fixed pale khaki drew white
+    // ribbons over red deserts and canyon walls)
     let mut c = if class == cls::TRACK {
-        srgb(146.0, 126.0, 100.0)
+        mixc(below, srgb(146.0, 126.0, 100.0), 0.6)
     } else if !paved {
-        srgb(160.0, 146.0, 122.0)
+        mixc(below, srgb(160.0, 146.0, 122.0), 0.6)
     } else if class <= cls::TRUNK || class == cls::RAMP {
         srgb(66.0, 66.0, 68.0)
     } else {
@@ -272,6 +274,8 @@ fn road_px(sg: &FSeg, f: &Frame, e: &Env, class: usize) -> Px {
     };
     let raised = hs - e.ground;
     let urban = fl & flag::URBAN != 0;
+    // grass on the verges and slopes where the ground is green (not over red deserts)
+    let gr = smoothstep(-0.02, 0.03, e.below.y - e.below.x);
     let edge = hw + if bridge { 0.6 } else { vg };
     // the shadow of a bridge deck on what lies below
     if bridge && raised > 1.0 {
@@ -291,7 +295,7 @@ fn road_px(sg: &FSeg, f: &Frame, e: &Env, class: usize) -> Px {
         let sl = (ddl - edge).max(0.0) * 0.5;
         if raised > 0.0 {
             let toe = edge + 2.0 * raised.min(15.0);
-            over(&mut o, aa(toe - ddl, fw), mixc(e.below, srgb(112.0, 124.0, 74.0), 0.2), hs - sl);
+            over(&mut o, aa(toe - ddl, fw), mixc(e.below, srgb(112.0, 124.0, 74.0), 0.2 * gr), hs - sl);
         } else {
             // (cuttings are steep rock faces (2:1), in the colour of the ground: 1:2 slopes in a
             // pale tint drew 30 m wide ribbons where roads climb canyon walls)
@@ -315,7 +319,9 @@ fn road_px(sg: &FSeg, f: &Frame, e: &Env, class: usize) -> Px {
         } else if class == cls::TRACK || class == cls::RAIL {
             mixc(e.below, srgb(150.0, 140.0, 120.0), 0.5)
         } else {
-            mixc(mixc(e.below, srgb(92.0, 108.0, 66.0), 0.55), srgb(140.0, 136.0, 126.0), boxcov(ddl - hw, 0.8, fw))
+            // (a gravel shoulder on paved roads)
+            let sh = if fl & flag::PAVED != 0 { boxcov(ddl - hw, 0.8, fw) } else { 0.0 };
+            mixc(mixc(e.below, srgb(92.0, 108.0, 66.0), 0.55 * gr), srgb(140.0, 136.0, 126.0), sh)
         };
         over(&mut o, av, c, hs + if bridge { 1.0 } else { 0.0 });
         o.z = hs;
@@ -324,7 +330,7 @@ fn road_px(sg: &FSeg, f: &Frame, e: &Env, class: usize) -> Px {
     // the carriageway
     let a = boxcov(f.d, hw, fw);
     if a > 0.0 {
-        surface(sg, f, class, fw, &mut o, hs);
+        surface(sg, f, class, fw, &mut o, hs, e.below);
         o.road = a;
         o.z = hs + 0.5 + 0.01 * class as f64 + if fl & flag::OVER != 0 { 20.0 } else { 0.0 };
         if class == cls::RAIL {
@@ -510,7 +516,7 @@ pub fn deck_px(sg: &FSeg, p: DVec3, ground: f64, wl: f64, fw: f64) -> Px {
     let base = ground.max(wl) + 2.5;
     let hs = if super::has_deck(sg.deck_a) && super::has_deck(sg.deck_b) { lerp(sg.deck_a as f64, sg.deck_b as f64, f.t).max(base) } else { base };
     over(&mut o, boxcov(f.d, hw + 0.6, fw), srgb(184.0, 182.0, 176.0), hs + 1.0);
-    surface(sg, &f, class, fw, &mut o, hs);
+    surface(sg, &f, class, fw, &mut o, hs, srgb(184.0, 182.0, 176.0));
     o.cls = crate::landcover::BRIDGE;
     o.road = boxcov(f.d, hw, fw);
     o.z = hs;
