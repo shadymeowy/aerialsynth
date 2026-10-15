@@ -482,7 +482,8 @@ pub(crate) fn field(it: &Instance, p: DVec3, gsd: f64, fw: f64, look: bool) -> F
                     }
                     zs += 0.3 * dp * (1.0 - ((rho - 1.0) / 0.45) * ((rho - 1.0) / 0.45)).max(0.0);
                     o.ring = o.ring.max(smoothstep(0.7, 0.95, rho) * smoothstep(1.45, 1.1, rho) * bnd);
-                    o.lake = o.lake.max(smoothstep(0.75, 0.62, rho) * bnd);
+                    // (a crisp shore: over 13 % of the radius it blurred into a pale halo)
+                    o.lake = o.lake.max(smoothstep(0.71, 0.66, rho) * bnd);
                 }
             } else {
                 let rc = cs * (0.16 + 0.2 * u01k(h, 4));
@@ -770,7 +771,8 @@ fn field_look(s: &mut Stack, it: &Instance) {
         s.m.natural_ok *= 1.0 - f.cinder;
     }
     if f.ring > 0.0 {
-        s.composite(Layer { cov: f.ring, albedo: srgb(138.0, 118.0, 98.0), cls: cls::VOLCANIC_ASH, clear: 1.0, ..Default::default() });
+        // (the tephra ring grown over: a bare pale ring drew a halo around every maar in the forest)
+        s.composite(Layer { cov: f.ring, albedo: mixc(s.col, srgb(138.0, 118.0, 98.0), 0.4), cls: cls::VOLCANIC_ASH, clear: 0.4, ..Default::default() });
     }
     if f.lake > 0.0 {
         s.composite(Layer {

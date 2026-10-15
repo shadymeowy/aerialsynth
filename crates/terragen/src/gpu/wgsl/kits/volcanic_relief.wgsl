@@ -476,7 +476,7 @@ fn vc_field(it: Inst, p: vec3<f64>, gsd: f32, fw: f32, look: bool) -> VcField {
                     }
                     zs += 0.3 * dp * max(1.0 - ((rho - 1.0) / 0.45) * ((rho - 1.0) / 0.45), 0.0);
                     o.ring = max(o.ring, smoothstep1(0.7, 0.95, rho) * smoothstep1(1.45, 1.1, rho) * bnd);
-                    o.lake = max(o.lake, smoothstep1(0.75, 0.62, rho) * bnd);
+                    o.lake = max(o.lake, smoothstep1(0.71, 0.66, rho) * bnd);
                 }
             } else {
                 let rc = cs * (0.16 + 0.2 * u01k(h, 4lu));

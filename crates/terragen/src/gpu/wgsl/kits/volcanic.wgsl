@@ -246,8 +246,8 @@ fn vc_field_look(s: ptr<function, Stack>, it: Inst) {
         (*s).m.natural_ok *= 1.0 - f.cinder;
     }
     if (f.ring > 0.0) {
-        var ly = layer_paint(f.ring, srgb(138.0, 118.0, 98.0), LC_VOLCANIC_ASH);
-        ly.clear = 1.0;
+        var ly = layer_paint(f.ring, mixc((*s).col, srgb(138.0, 118.0, 98.0), 0.4), LC_VOLCANIC_ASH);
+        ly.clear = 0.4;
         composite(s, ly);
     }
     if (f.lake > 0.0) {
