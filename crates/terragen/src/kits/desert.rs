@@ -1309,6 +1309,9 @@ mod tests {
     fn seamless_and_deterministic() {
         use rayon::prelude::*;
         let g = gen1();
+        // (one second generator for the determinism check, not one per place: nine generators
+        // at once on the GPU ran an 8 GB card out of memory under the parallel test load)
+        let g2 = gen1();
         let n = crate::TILE_SIZE;
         (0..PLACES.len()).into_par_iter().for_each(|i| {
             for z in [11u8, 15] {
@@ -1322,7 +1325,7 @@ mod tests {
                 }
                 assert!(across < 3.0 * inside + 1.0 * n as f64, "place {i} z{z}: across {across} inside {inside}");
                 if z == 15 {
-                    let a2 = gen1().tile(id);
+                    let a2 = g2.tile(id);
                     assert_eq!(a.elevation, a2.elevation, "place {i}");
                     assert_eq!(a.rgb, a2.rgb, "place {i}");
                 }
