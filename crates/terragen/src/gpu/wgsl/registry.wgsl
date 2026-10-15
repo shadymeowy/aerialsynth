@@ -384,11 +384,14 @@ fn veg_of(bi: u32, k: u32) -> f32 {
 }
 
 fn bio_veg(b: Bio, k: u32) -> f32 {
-    let a = veg_of(b.a, k);
-    if (b.w <= 0.0) {
-        return a;
+    var a = veg_of(b.a, k);
+    if (b.w > 0.0) {
+        a += (veg_of(b.b, k) - a) * b.w;
     }
-    return a + (veg_of(b.b, k) - a) * b.w;
+    if (b.c != b.a && b.wst > 0.0) {
+        a += (veg_of(b.c, k) - a) * b.wst;
+    }
+    return a;
 }
 
 const VEG_TREES: u32 = 0u;
