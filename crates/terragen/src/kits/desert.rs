@@ -854,7 +854,8 @@ pub fn washes(s: &mut Stack) {
     let ph = l.river_d / lam + 0.9 * perlin3(seed ^ S_BRAID, p / 90.0) + 0.4 * perlin3(seed ^ S_BRAID2, p / 31.0) * band(31.0, gsd);
     let th = 0.5 + 0.5 * (TAU * ph).cos();
     let bw = band(lam, gsd);
-    let bar = mixc(s.pal(pal::SAND + 2), s.pal(pal::SOIL + 1), 0.25) * 1.02;
+    // (a third of the way to the ground's colour: pale sand ribbons stood out like roads)
+    let bar = mixc(mixc(s.pal(pal::SAND + 2), s.pal(pal::SOIL + 1), 0.25) * 1.02, s.col, 0.3);
     let chan = mixc(bar, s.pal(pal::ROCK), 0.25) * 0.9;
     let col = mixc(bar, chan, smoothstep(0.7, 0.9, th) * bw + (1.0 - bw) * 0.15);
     s.composite(Layer { cov, albedo: col, cls: LC_DRY_RIVERBED, clear: 0.8, ..Default::default() });
