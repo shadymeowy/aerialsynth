@@ -155,7 +155,8 @@ const SYS: [SysDef; sys::N] = {
     use part::*;
     const D: SysDef = SysDef { part: GRID, size: [200.0, 200.0], kinds: [CROP, FALLOW, PASTURE, HAY], kw: [0.7, 0.15, 0.1, 0.05], borders: [MARGIN, MARGIN], bp: [0.0, 0.0], slope: [0.22, 0.32], terraces: 0.0, trees: 0.0 };
     [
-        D,
+        // (core: hedgerows on some parcels and a few field trees, as v0.2.0's tree-lined fields)
+        SysDef { borders: [HEDGE, MARGIN], bp: [0.2, 0.0], trees: 0.03, ..D },
         SysDef { part: SECTION, size: [402.336, 402.336], kinds: [CROP, PASTURE, FALLOW, POND], kw: [0.84, 0.07, 0.07, 0.02], borders: [BELT, DITCH], bp: [0.06, 0.08], ..D },
         SysDef { part: GRID, size: [1300.0, 900.0], kinds: [CROP, FALLOW, PASTURE, HAY], kw: [0.68, 0.22, 0.06, 0.04], borders: [BELT, TRACK], bp: [0.82, 0.1], ..D },
         SysDef { part: STRIP, size: [600.0, 34.0], kinds: [CROP, FALLOW, HAY, PASTURE], kw: [0.72, 0.12, 0.12, 0.04], borders: [MARGIN, MARGIN], bp: [1.0, 0.0], ..D },
@@ -1471,13 +1472,18 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
     let bsel = u01k(pc.id, 0xB0);
     let hedge_m = 0.3 + 0.7 * pl.e.hedges;
     let p0 = d.bp[0] * if d.borders[0] == border::HEDGE || d.borders[0] == border::BELT { hedge_m } else { 1.0 };
-    let b = if bsel < p0 {
+    let mut b = if bsel < p0 {
         d.borders[0]
     } else if bsel < p0 + d.bp[1] {
         d.borders[1]
     } else {
         border::MARGIN
     };
+    // (no straight canals down the terraced slopes: each bench's lip broke them into a dotted
+    // pale line across the contours)
+    if b == border::CANAL && lip < 1e8 {
+        b = border::NONE;
+    }
     // canals along the blocks of paddies, the border of the block
     let edge = if b == border::CANAL { pc.bedge } else { pc.edge };
     let (col, dh, cls) = draw_border(b, edge, col, dh, cls, pc, px);
@@ -1625,7 +1631,7 @@ fn draw_border(b: u32, edge: f64, col: DVec3, dh: f64, cls: u8, pc: &Parcel, px:
         }
         border::HEDGE | border::BELT => {
             let belt = b == border::BELT;
-            let hw0 = if belt { 4.0 + 3.0 * u01k(hb, 4) } else { 1.0 + 1.0 * u01k(hb, 4) };
+            let hw0 = if belt { 4.0 + 3.0 * u01k(hb, 4) } else { 1.4 + 1.2 * u01k(hb, 4) };
             if edge.abs() > 4.5 * hw0 + fwb {
                 return (col, dh, cls);
             }
