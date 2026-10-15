@@ -855,7 +855,7 @@ fn layer_canopy(s: ptr<function, Stack>) {
         * (1.0 - smoothstep1(-1.2, -2.4, temp + 1.0 * snow_n)) * m.veg;
     dens *= limit;
     dens_sav *= limit;
-    let shrub_clim = smoothstep1(0.15, 0.3, wet) * (1.0 - smoothstep1(0.6, 0.8, wet)) * smoothstep1(2.0, 10.0, temp);
+    let shrub_clim = smoothstep1(0.07, 0.3, wet) * (1.0 - smoothstep1(0.6, 0.8, wet)) * smoothstep1(2.0, 10.0, temp);
     let shrub_patch = smoothstep1(-0.2, 0.5, (*s).pf.f[PF_PATCH] + 0.4 * (*s).pf.f[PF_LAND]);
     let shrub = clamp((0.45 * shrub_clim * shrub_patch * (1.0 - forest) * max(m.natural_ok, 0.4 * m.rock) * (1.0 - m.field_cov) * sveg(s, VEG_SHRUBS) * style.veg.z + gully_scrub)
         * td * m.veg, 0.0, 0.7);
@@ -983,8 +983,8 @@ fn layer_standing(s: ptr<function, Stack>) {
     if (l.water_kind == W_OCEAN) {
         col = mixc(pal3(PAL_OCEAN_SHALLOW), pal3(PAL_OCEAN_DEEP), smoothstep1(0.0, 28.0, depth));
     } else {
-        let sh = 1.0 - smoothstep1(0.0, 3.5, depth * max(1.0 + 0.5 * wn, 0.2));
-        col = mixc(mixc(pal3(PAL_LAKE_DEEP), srgb(26.0, 32.0, 26.0), 0.35), mixc(pal3(PAL_RIVER), srgb(78.0, 76.0, 56.0), 0.6), 0.7 * sh);
+        let sh = 1.0 - smoothstep1(0.0, 1.8, depth * max(1.0 + 0.5 * wn, 0.2));
+        col = mixc(mixc(pal3(PAL_LAKE_DEEP), srgb(26.0, 32.0, 26.0), 0.35), mixc(pal3(PAL_RIVER), srgb(78.0, 76.0, 56.0), 0.6), 0.65 * sh * sh);
     }
     col *= 1.0 + 0.06 * wn;
     if (l.water_kind == W_OCEAN && depth < 3.0) {

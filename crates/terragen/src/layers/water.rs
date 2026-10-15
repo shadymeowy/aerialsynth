@@ -19,10 +19,11 @@ pub fn standing(s: &mut Stack) {
         water::OCEAN => mixc(pal.ocean_shallow, pal.ocean_deep, smoothstep(0.0, 28.0, depth)),
         // lakes: dark (humic) open water; the bottom shows only in the last metre or two, olive
         // and patchy (a turquoise ring of shallow water 5 m wide read as a plastic rim, and a
-        // channel carved through it as a dark band across the lake)
+        // channel carved through it as a dark band across the lake; over a lowland lake's gentle
+        // shore 3.5 m of shallows drew a pale halo tens of metres wide)
         _ => {
-            let sh = 1.0 - smoothstep(0.0, 3.5, depth * (1.0 + 0.5 * wn).max(0.2));
-            mixc(mixc(pal.lake_deep, srgb(26.0, 32.0, 26.0), 0.35), mixc(pal.river, srgb(78.0, 76.0, 56.0), 0.6), 0.7 * sh)
+            let sh = 1.0 - smoothstep(0.0, 1.8, depth * (1.0 + 0.5 * wn).max(0.2));
+            mixc(mixc(pal.lake_deep, srgb(26.0, 32.0, 26.0), 0.35), mixc(pal.river, srgb(78.0, 76.0, 56.0), 0.6), 0.65 * sh * sh)
         }
     };
     // sediment / plankton variation
