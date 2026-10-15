@@ -418,19 +418,15 @@ fn bl_begin(s: ptr<function, Stack>) -> BLIter {
     let ba = (*s).bio.a;
     let bb = (*s).bio.b;
     let bc = (*s).bio.c;
-    let wc = select(0.0, (*s).bio.wst, bc != ba);
-    it.wa = select(1.0 - (*s).bio.w, 1.0, bb == ba) * (1.0 - wc);
-    it.wb = select((*s).bio.w, 0.0, bb == ba) * (1.0 - wc) + select(0.0, wc, bc == bb && bb != ba);
-    it.wc = select(wc, 0.0, bc == bb);
+    it.wc = select(0.0, (*s).bio.wst, bc != ba);
+    it.wa = select(1.0 - (*s).bio.w, 1.0, bb == ba);
+    it.wb = (*s).bio.w;
     it.ra = biome_band_range(ba, it.wa, band);
     it.rb = vec2<u32>(0u);
     if (bb != ba) {
         it.rb = biome_band_range(bb, it.wb, band);
     }
-    it.rc = vec2<u32>(0u);
-    if (bc != ba && bc != bb) {
-        it.rc = biome_band_range(bc, it.wc, band);
-    }
+    it.rc = biome_band_range(bc, it.wc, band);
     it.q = 0u;
     return it;
 }
@@ -456,6 +452,16 @@ fn bl_next(s: ptr<function, Stack>, slot: u32, it: ptr<function, BLIter>) -> boo
         let l = klayers[li];
         if (l.head.x != slot || (*s).done) {
             continue;
+        }
+        // (`layers::biome_layers`: the other ecoregion's flat layers blend in by `wc`; layers
+        // with a height stay the mosaic's)
+        let flat = (l.head.w & 0xffu) == HM_NONE;
+        if (q >= nab) {
+            if (!flat) {
+                continue;
+            }
+        } else if (flat) {
+            wt *= 1.0 - (*it).wc;
         }
         var m = 1.0;
         for (var w = 0u; w < l.head2.z; w++) {
