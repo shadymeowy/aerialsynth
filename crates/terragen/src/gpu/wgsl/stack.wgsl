@@ -868,8 +868,8 @@ fn layer_canopy(s: ptr<function, Stack>) {
         * (1.0 - smoothstep1(-1.2, -2.4, temp + 1.0 * snow_n)) * m.veg;
     dens *= limit;
     dens_sav *= limit;
-    let shrub_clim = smoothstep1(0.07, 0.3, wet) * (1.0 - smoothstep1(0.6, 0.8, wet)) * smoothstep1(2.0, 10.0, temp);
-    let shrub_patch = max(smoothstep1(-0.2, 0.5, (*s).pf.f[PF_PATCH] + 0.4 * (*s).pf.f[PF_LAND]), 0.35 * (1.0 - smoothstep1(0.2, 0.35, wet)));
+    let shrub_clim = smoothstep1(0.04, 0.26, wet) * (1.0 - smoothstep1(0.6, 0.8, wet)) * smoothstep1(2.0, 10.0, temp);
+    let shrub_patch = max(smoothstep1(-0.2, 0.5, (*s).pf.f[PF_PATCH] + 0.4 * (*s).pf.f[PF_LAND]), 0.6 * (1.0 - smoothstep1(0.2, 0.35, wet)));
     let shrub = clamp((0.45 * shrub_clim * shrub_patch * (1.0 - forest) * max(m.natural_ok, 0.4 * m.rock) * (1.0 - m.field_cov) * sveg(s, VEG_SHRUBS) * style.veg.z + gully_scrub)
         * td * m.veg, 0.0, 0.7);
     var stand = (*s).pf.stand;

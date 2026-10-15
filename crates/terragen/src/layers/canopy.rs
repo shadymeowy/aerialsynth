@@ -180,9 +180,9 @@ pub fn layer(s: &mut crate::stack::Stack) {
     dens_sav *= limit;
     // shrubs / bushes in steppe, maquis and rocky slopes, sparse down to the semi-desert (none
     // below a moisture of 0.15 left semi-arid shrubland a bare brown plain)
-    let shrub_clim = smoothstep(0.07, 0.3, wet) * (1.0 - smoothstep(0.6, 0.8, wet)) * smoothstep(2.0, 10.0, temp);
+    let shrub_clim = smoothstep(0.04, 0.26, wet) * (1.0 - smoothstep(0.6, 0.8, wet)) * smoothstep(2.0, 10.0, temp);
     // (in dry land a sparse scatter between the patches too)
-    let shrub_patch = smoothstep(-0.2, 0.5, pf.patch + 0.4 * pf.land).max(0.35 * (1.0 - smoothstep(0.2, 0.35, wet)));
+    let shrub_patch = smoothstep(-0.2, 0.5, pf.patch + 0.4 * pf.land).max(0.6 * (1.0 - smoothstep(0.2, 0.35, wet)));
     let shrub =
         ((0.45 * shrub_clim * shrub_patch * (1.0 - forest) * m.natural_ok.max(0.4 * m.rock) * (1.0 - m.field_cov) * s.veg(|v| v.shrubs) * style.shrubs
             + gully_scrub)

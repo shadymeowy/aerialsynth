@@ -75,10 +75,11 @@
     - { share: broadleaf, shape: dome, cell: 5.5, height: [11, 6], open_height: 0.8, colour: [74, 98, 46], colour_dry: crown_dry, density: 0.9 }
     - { share: shrub, shape: dome, cell: 2.8, height: [1.0, 0], colour: [70, 78, 52], closure: false, stand: false }
   layers:
-    # moss and reindeer lichen between the trees
+    # moss and reindeer lichen between the trees (closer in tone: pale lichen against moss at
+    # 14 m speckled the open taiga, audit a26 a17)
     - slot: zonal
       kernel: patches
-      params: { scale: 14, fraction: 0.45, octaves: 2, colour: [160, 160, 128], colour2: [118, 126, 88], colour_var: 0.15 }
+      params: { scale: 14, fraction: 0.45, octaves: 2, colour: [146, 148, 116], colour2: [122, 128, 92], colour_var: 0.1 }
       mask: { temp: [-12, 6] }
     # open spruce taiga where it is too dry for the canopy model's forest
     - slot: canopy
@@ -349,7 +350,9 @@
   layers:
     - slot: zonal
       kernel: patches
-      params: { scale: 40, fraction: 0.62, octaves: 3, roughness: 0.5, colour: grass_dry, colour2: [150, 146, 100], colour_var: 0.12, soft: 0.3 }
+      # (most of the ground: at 62 % the green grass between drew a camouflage of yellow and
+      # green blotches, audit a18)
+      params: { scale: 40, fraction: 0.85, octaves: 3, roughness: 0.5, colour: grass_dry, colour2: [150, 146, 100], colour_var: 0.12, soft: 0.3 }
       class: steppe
 
 # altitudinal zones of the core temperate and Mediterranean biomes
