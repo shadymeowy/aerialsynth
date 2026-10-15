@@ -534,7 +534,7 @@ fn temperate_slot_canopy(s: ptr<function, Stack>) {
     if (t.moist < 0.28 || t.temp < -6.0 || t.temp > 20.0) {
         return;
     }
-    let aut = smoothstep1(0.55, 0.85, (*s).bio.st.land.x);
+    let aut = smoothstep1(0.55, 0.85, (*s).bio.st.land.x) * smoothstep1(7.0, 1.0, t.temp - 0.5 * t.temp_range);
     let larch = 0.32 * (1.0 - smoothstep1(1.0, 7.0, t.temp)) * temperate_eco_u1(s) * max(temperate_site_boreal(s), 0.25);
     if (aut <= 0.0 && larch <= 0.01) {
         return;
