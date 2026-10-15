@@ -124,8 +124,8 @@ fn co_flats(s: ptr<function, Stack>, ty: CoTypes) {
         let c = co_creek(p, gsd, max(fw, 0.3 * gsd)) * zone * win;
         if (c > 0.0) {
             let arid = 1.0 - smoothstep1(0.2, 0.34, (*s).t.moist);
-            let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, 0.7 * arid);
-            var ly2 = layer_paint(c, cc, LC_TIDAL_FLAT);
+            let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, max(0.7 * arid, 0.5 * high));
+            var ly2 = layer_paint(c, cc, select(LC_TIDAL_FLAT, LC_MARSH, high > 0.5));
             ly2.clear = 1.0;
             composite(s, ly2);
         }

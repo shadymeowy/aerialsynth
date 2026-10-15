@@ -422,8 +422,10 @@ fn flats(s: &mut Stack, ty: &Types) {
         let c = creek(p, gsd, fw.max(0.3 * gsd)) * zone * win;
         if c > 0.0 {
             let arid = 1.0 - smoothstep(0.2, 0.34, s.t.moist);
-            let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, 0.7 * arid);
-            s.composite(Layer { cov: c, albedo: cc, cls: cls::TIDAL_FLAT, clear: 1.0, ..Default::default() });
+            // (fainter in the high marsh, and of the marsh's class there: a dense net of dark,
+            // glossy tidal-flat lines over the marsh, desert_coast@type)
+            let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, (0.7 * arid).max(0.5 * high));
+            s.composite(Layer { cov: c, albedo: cc, cls: if high > 0.5 { cls::MARSH } else { cls::TIDAL_FLAT }, clear: 1.0, ..Default::default() });
         }
     }
     ponds(s, zone);
