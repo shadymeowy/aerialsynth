@@ -529,7 +529,7 @@ fn layer_zonal(s: ptr<function, Stack>) {
     {
         let b30 = band(30.0, gsd);
         if (b30 > 0.0 && cover > 0.0) {
-            let dry_p = smoothstep1(0.05, 0.55, perlin3(0x3EADlu, p * (1.0lf / 60.0lf)) + 0.5 * perlin3(0x3EAElu, p * (1.0lf / 22.0lf))) * b30 * cover;
+            let dry_p = smoothstep1(0.05, 0.55, perlin3(0x3EADlu, p * (1.0lf / 60.0lf)) + 0.5 * perlin3(0x3EAElu, p * (1.0lf / 22.0lf))) * b30 * cover * (1.0 - smoothstep1(0.45, 0.65, wet));
             col = mixc(col, col * vec3<f32>(1.16, 1.06, 0.80), 0.45 * dry_p * meadow);
         }
         let b12 = band(12.0, gsd);

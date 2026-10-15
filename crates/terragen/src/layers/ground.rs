@@ -53,7 +53,11 @@ pub fn zonal(s: &mut Stack) {
     // soil of dry land mottled too (gravel, crusts, tufts: a smooth brown fill read as paint)
     let meadow = s.veg(|v| v.meadow);
     {
-        let dry_p = smoothstep(0.05, 0.55, perlin3(0x3EAD, p / 60.0) + 0.5 * perlin3(0x3EAE, p / 22.0)) * band(30.0, gsd) * cover;
+        // (dry straw patches fade out in wet climates: pale blotches over humid hills, volcano)
+        let dry_p = smoothstep(0.05, 0.55, perlin3(0x3EAD, p / 60.0) + 0.5 * perlin3(0x3EAE, p / 22.0))
+            * band(30.0, gsd)
+            * cover
+            * (1.0 - smoothstep(0.45, 0.65, wet));
         col = mixc(col, col * DVec3::new(1.16, 1.06, 0.80), 0.45 * dry_p * meadow);
         col *= 1.0
             + (0.10 * perlin3(0x3EB1, p / 12.0) * band(12.0, gsd)
