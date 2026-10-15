@@ -475,7 +475,7 @@
     - slot: disturbance
       kernel: tropical_swidden
       mask: { agri: [0.08, 0.22, 0.6, 0.85], field: [null, null, 0.03, 0.15], natural: [0.5, 0.8, null, null], patch: [0.15, 0.4, null, null] }
-      params: { cell: 150, fill: 0.45, margin: 0.1, roughness: 0.2, height: 2, colour: [70, 60, 52], colour2: [172, 122, 80], fallow_colour: [132, 136, 72] }
+      params: { cell: 150, fill: 0.45, margin: 0.1, roughness: 0.2, height: 2, colour: [70, 60, 52], colour2: [148, 116, 86], fallow_colour: [132, 136, 72] }
       class: clear_cut
       clear: 1.0
     # dambos: grassy drainage lines without trees
