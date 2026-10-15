@@ -322,7 +322,7 @@ pub(crate) fn lake_mask(s: &Stack, c: &ColdClimate) -> f64 {
     }
     // (a gentle slope limit: the lakes' size follows the mask pixel by pixel, and a steep cut
     // frayed the lakes on undulating ground into grey patches with islands of forest)
-    m * (1.0 - smoothstep(0.05, 0.16, l.slope))
+    m * (1.0 - smoothstep(0.03, 0.12, l.slope))
         * (1.0 - smoothstep(350.0, 700.0, l.ground))
         * (1.0 - smoothstep(0.2, 0.5, t.mountain))
         * smoothstep(0.02, 0.12, t.moist)

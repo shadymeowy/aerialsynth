@@ -246,7 +246,7 @@ fn cold_lake_mask(s: ptr<function, Stack>, c: ColdClimate) -> f32 {
     if (m <= 0.0) {
         return 0.0;
     }
-    return m * (1.0 - smoothstep1(0.05, 0.16, l.slope))
+    return m * (1.0 - smoothstep1(0.03, 0.12, l.slope))
         * (1.0 - smoothstep1(350.0, 700.0, l.ground))
         * (1.0 - smoothstep1(0.2, 0.5, t.mountain))
         * smoothstep1(0.02, 0.12, t.moist)
