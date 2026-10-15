@@ -844,7 +844,9 @@ pub fn washes(s: &mut Stack) {
     let hw = l.river_hw;
     let half = hw * (1.0 + 1.4 * ar) * (1.0 + 0.25 * perlin3(seed ^ S_WASH, p / 700.0));
     let fwr = l.fw.max(gsd * 0.35);
-    let cov = crate::kernels::band_cov(l.river_d, half, fwr);
+    // (washes on the floors, not down steep walls: their sand and gravel drew pale ribbons up
+    // the canyon walls, canyon@type)
+    let cov = crate::kernels::band_cov(l.river_d, half, fwr) * (1.0 - smoothstep(0.25, 0.55, l.slope));
     if cov <= 0.0 {
         return;
     }

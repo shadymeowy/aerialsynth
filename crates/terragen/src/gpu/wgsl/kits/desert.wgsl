@@ -295,7 +295,7 @@ fn desert_slot_water(s: ptr<function, Stack>) {
     let gsd = (*s).c.gsd;
     let half = hw * (1.0 + 1.4 * ar) * (1.0 + 0.25 * perlin3(cfg.seed ^ DS_WASH, p / 700.0lf));
     let fwr = max((*s).l.fw, gsd * 0.35);
-    let cov = band_cov(rd, half, fwr);
+    let cov = band_cov(rd, half, fwr) * (1.0 - smoothstep1(0.25, 0.55, (*s).l.slope));
     if (cov <= 0.0) {
         return;
     }
