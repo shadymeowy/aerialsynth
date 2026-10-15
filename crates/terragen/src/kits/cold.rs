@@ -99,9 +99,11 @@ pub(crate) fn climate(s: &Stack) -> ColdClimate {
     // (the atlas' warmest − coldest month, interpolated: continuous)
     let half = 0.5 * t.temp_range;
     let d = year_date(s.bio.style.season);
-    // (the date's effect fades to the ecoregion border over the ecotone, where both sides meet at
-    // the annual mean: no patches of a winter and a spring ecoregion in the border mosaic)
-    let date = ts - half * (std::f64::consts::TAU * (d - 0.04)).cos() * smoothstep(0.0, 10.0, s.bio.edge_km);
+    // (the date fades to midsummer (season ½) at the ecoregion border over the ecotone, where
+    // both sides meet: no patches of a winter and a spring ecoregion in the border mosaic; at the
+    // annual mean the 10 km borders of cold ecoregions were snowed in, a17)
+    let mid = (std::f64::consts::TAU * (year_date(0.5) - 0.04)).cos();
+    let date = ts - half * lerp(mid, (std::f64::consts::TAU * (d - 0.04)).cos(), smoothstep(0.0, 10.0, s.bio.edge_km));
     ColdClimate { t: ts, summer: ts + 0.95 * half, date }
 }
 
