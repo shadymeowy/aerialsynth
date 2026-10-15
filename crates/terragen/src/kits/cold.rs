@@ -753,9 +753,7 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     // firn: wind ripples (sastrugi) and drifts
     let n7 = perlin3(SEED_ICE + 3, p / 7.0);
     let b7 = band(7.0, gsd);
-    let tex = 0.025 * n7 * b7
-        + 0.02 * perlin3(SEED_ICE + 4, p / 2.5) * band(2.5, gsd)
-        + 0.03 * perlin3(SEED_ICE + 5, p / 120.0) * band(120.0, gsd);
+    let tex = 0.025 * n7 * b7 + 0.02 * perlin3(SEED_ICE + 4, p / 2.5) * band(2.5, gsd) + 0.03 * perlin3(SEED_ICE + 5, p / 120.0) * band(120.0, gsd);
     let firn = srgb(236.0, 241.0, 247.0) * (1.0 + tex);
     // bare ice: blue-grey, dirtier towards the margin and the snout
     let dirt = smoothstep(-0.2, 0.5, perlin3(SEED_ICE + 6, p / 150.0) * band(150.0, gsd) + 0.6 * smoothstep(-1.4, -0.4, g.g));
