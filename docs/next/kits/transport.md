@@ -324,3 +324,7 @@ road and a track through forest nearby (−7.619, −16.609) from 500 m.
 Leftovers round B: the verge of roads in forest is a darker green (92, 108, 66 at 55 %) instead of a pale yellow-green.
 Polish round 7: cuttings are steep rock faces (2:1, the toe at half the depth) tinted 20 % towards the cut colour, fills
 20 % towards the verge green (1:2 slopes in a pale tint drew 30 m wide white ribbons where roads climb canyon walls).
+
+Polish round 8: tracks and dirt roads 60 % of the way from the ground's colour to their own (fixed pale khaki drew white
+ribbons over red deserts and canyons); grass on verges and fill slopes only where the ground is green (G > R), gravel
+shoulders only on paved roads.

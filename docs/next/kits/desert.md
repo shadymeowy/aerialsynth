@@ -169,3 +169,7 @@ Polish round 7 (random-place audit): barchans only near the ergs of hyper-arid d
 below 0.1–0.2: crescents were strewn over semi-arid scrub, steppe and even paddy land), the stony pavement of the erg
 fringe only in arid land (`aridity`), its varnish a gradual mottling (smoothstep −0.15–0.45 of the noise, 50 %: a crisp
 threshold drew a camouflage of dark and pale patches).
+
+Polish round 8: the wind streaks on the stony pavement at 40 % of their contrast (crisp pale streaks read as scratches,
+a11 a13 a14). The flaky `seamless_and_deterministic` test made a generator per place in parallel (nine GPU generators at
+once on an 8 GB P4); it now shares one second generator.

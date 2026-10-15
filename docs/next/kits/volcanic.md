@@ -113,3 +113,7 @@ Round 4 (polish): the azimuth harmonics only on the summit cone (u < 0.06-0.22),
 shifted sideways by up to ~100 m; lower down three octaves of noise (90, 320, 900 m) and a soft
 edge, paler ash (112, 104, 94) from u 0.08-0.35: the rays across the whole apron drew a dark star
 from above and dark spikes in oblique views (volcano@type).
+
+Round 8 (polish): maar lakes have a crisp shore (rho 0.66–0.71) and their tephra rings are grown over (40 % of the ring
+colour over the ground, clearing 40 % of the trees): a bare pale ring and a shore blurred over 13 % of the radius drew a
+halo around the lakes (audit a26).

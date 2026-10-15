@@ -145,3 +145,6 @@ lake place's white rectangles are the boreal clear-cuts under snow (kept).
 Polish round 7: autumn colours muted (olive, ochre, rust instead of saturated yellow, orange and red) on two thirds of
 the deciduous crowns (were 85 %); steppe, feather-grass steppe, moor grass and alpine meadow patches soft (`soft: 0.3`:
 crisp dry patches over green read as camouflage); the core `boreal` biome's open ground grey-brown (lichen, heath).
+
+Polish round 8: autumn colours only where the coldest month is below ~7 °C (smoothstep 7–1 °C: a subtropical highland
+in December had rust crowns, audit a20).

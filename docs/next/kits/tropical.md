@@ -204,3 +204,7 @@ Polish round 7: gallery forests thin out up the valley sides (gully mask −0.75
 pale savanna blotches out of the dark forest, the volcano scene); savanna grass with a soft extent (threshold width
 ≥ 0.15), paler and less golden (196, 176, 120 / 176, 166, 122), fading out from moisture 0.45–0.62; tropical_dry's dry
 grass (178, 156, 104); the miombo's spring flush muted (128, 98, 70).
+
+Polish round 8: savanna burn scars dark grey-brown (54, 50, 45; miombo 56, 50, 44) instead of black, on a fifth of the
+land (audit a01: black scars of kilometres read as holes); the pale savanna grass fades out from moisture 0.42–0.56
+(volcano: bleached hilltops above the forested valleys).
