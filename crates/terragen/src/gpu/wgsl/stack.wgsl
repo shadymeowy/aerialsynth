@@ -403,8 +403,10 @@ fn biome_band_range(bi: u32, wt: f32, band: u32) -> vec2<u32> {
 struct BLIter {
     ra: vec2<u32>,
     rb: vec2<u32>,
+    rc: vec2<u32>,
     wa: f32,
     wb: f32,
+    wc: f32,
     q: u32,
     li: u32,
     kin: KIn,
@@ -415,12 +417,19 @@ fn bl_begin(s: ptr<function, Stack>) -> BLIter {
     let band = band_index((*s).c.gsd);
     let ba = (*s).bio.a;
     let bb = (*s).bio.b;
-    it.wa = select(1.0 - (*s).bio.w, 1.0, bb == ba);
-    it.wb = (*s).bio.w;
+    let bc = (*s).bio.c;
+    let wc = select(0.0, (*s).bio.wst, bc != ba);
+    it.wa = select(1.0 - (*s).bio.w, 1.0, bb == ba) * (1.0 - wc);
+    it.wb = select((*s).bio.w, 0.0, bb == ba) * (1.0 - wc) + select(0.0, wc, bc == bb && bb != ba);
+    it.wc = select(wc, 0.0, bc == bb);
     it.ra = biome_band_range(ba, it.wa, band);
     it.rb = vec2<u32>(0u);
     if (bb != ba) {
         it.rb = biome_band_range(bb, it.wb, band);
+    }
+    it.rc = vec2<u32>(0u);
+    if (bc != ba && bc != bb) {
+        it.rc = biome_band_range(bc, it.wc, band);
     }
     it.q = 0u;
     return it;
@@ -428,7 +437,8 @@ fn bl_begin(s: ptr<function, Stack>) -> BLIter {
 
 /// The next layer of the slot to evaluate (`it.li`, its inputs `it.kin`); false at the end.
 fn bl_next(s: ptr<function, Stack>, slot: u32, it: ptr<function, BLIter>) -> bool {
-    let n = (*it).ra.y + (*it).rb.y;
+    let nab = (*it).ra.y + (*it).rb.y;
+    let n = nab + (*it).rc.y;
     while ((*it).q < n) {
         let q = (*it).q;
         (*it).q = q + 1u;
@@ -436,9 +446,12 @@ fn bl_next(s: ptr<function, Stack>, slot: u32, it: ptr<function, BLIter>) -> boo
         var wt = (*it).wa;
         if (q < (*it).ra.y) {
             li = band_idx[(*it).ra.x + q];
-        } else {
+        } else if (q < nab) {
             li = band_idx[(*it).rb.x + q - (*it).ra.y];
             wt = (*it).wb;
+        } else {
+            li = band_idx[(*it).rc.x + q - nab];
+            wt = (*it).wc;
         }
         let l = klayers[li];
         if (l.head.x != slot || (*s).done) {

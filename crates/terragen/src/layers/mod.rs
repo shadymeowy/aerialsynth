@@ -95,18 +95,28 @@ pub fn kin(s: &Stack, kind: u32, amount: f64) -> KIn {
 
 /// The kernel layers of the sample's biome(s) at `slot` (registry `layers:`): each masked,
 /// evaluated (explicit or its calibrated mean by the pixel size) and composited. Where two
-/// biomes blend (coarse pixels at ecotones), each contributes by its weight.
+/// biomes blend (coarse pixels at ecotones, zone borders), each contributes by its weight; where
+/// the ecotone's mosaic picked one of two, the other's layers blend in by the ecotone's
+/// probability like its palette (`BioSample::c`, `wc`: steppe grass and forest floor drew a
+/// patchwork of the mosaic's patches).
 pub fn biome_layers(s: &mut Stack, slot: usize) {
     let reg = &s.sm.registry;
     let band = crate::registry::band_of(s.ctx.gsd);
-    let pairs = [(s.bio.a, 1.0 - s.bio.w), (s.bio.b, s.bio.w)];
+    let (a, b, c) = (s.bio.a, s.bio.b, s.bio.c);
+    // (the same biome on both sides: one pass at full weight)
+    let (wa, wb) = if b == a { (1.0, 0.0) } else { (1.0 - s.bio.w, s.bio.w) };
+    let wc = if c != a { s.bio.wc } else { 0.0 };
+    // (c may be a's zone partner b: its weight joins b's)
+    let pairs = [
+        (a, wa * (1.0 - wc)),
+        (b, wb * (1.0 - wc) + if c == b && b != a { wc } else { 0.0 }),
+        (c, if c == b { 0.0 } else { wc }),
+    ];
     for (k, &(bi, wt)) in pairs.iter().enumerate() {
-        if wt <= 0.0 || (k == 1 && bi == s.bio.a) {
+        if wt <= 0.0 || (k == 1 && bi == a) {
             continue;
         }
         let b = &reg.biomes[bi as usize];
-        // the same biome on both sides: one pass at full weight
-        let wt = if k == 0 && s.bio.b == bi { 1.0 } else { wt };
         for &li in &b.bands[band] {
             let l = &b.layers[li as usize];
             if l.slot != slot || s.done {
