@@ -76,13 +76,19 @@ pub(crate) struct ColdClimate {
     pub date: f64,
 }
 
+/// Lakes and rivers are frozen below this temperature at the ecoregion's date (°C). (At
+/// −1.5 °C frozen, pale lakes lay in snow-free spring forests; in the summer datasets the
+/// water is open unless the land is deep in snow.)
+pub(crate) const FREEZE: f64 = -3.0;
+
 /// The date of an ecoregion (fraction of the year from 1 January, northern-hemisphere
-/// convention: the coldest day is at 0.04): its season (0 spring … 1 autumn) mapped to mid May …
-/// late September, the season of the world's crops and canopies. (A share of the ecoregions in
+/// convention: the coldest day is at 0.04): its season (0 spring … 1 autumn) mapped to late May
+/// … mid September, the season of the world's crops and canopies. (A share of the ecoregions in
 /// winter painted whole regions white in summer datasets — snowy taiga, frozen grey lakes —
-/// with hard borders to their summer neighbours.)
+/// with hard borders to their summer neighbours; from mid May the continental taiga's spring
+/// ecoregions were still snowed in: black spruce dots on grey snow.)
 pub(crate) fn year_date(season: f64) -> f64 {
-    0.37 + 0.37 * season
+    0.40 + 0.34 * season
 }
 
 /// The climate at a sample.
@@ -161,7 +167,9 @@ pub(crate) fn ice(s: &Stack, c: &ColdClimate) -> Ice {
     // (shady slopes keep their snow: cirques face the pole)
     let pi = base - 2.0 * hollow + 0.8 * spur + 1.2 * n + 1.5 * sunny(s).clamp(-1.0, 1.0);
     let rv = if l.river_hw > 0.0 { 1.0 - smoothstep(l.river_hw + 80.0, l.river_hw + 500.0, l.river_d.abs()) } else { 0.0 };
-    let valley = rv.max(0.6 * hollow);
+    // (valley glaciers flow down mountain valleys: in the lowlands the rivers and hollows drew
+    // ice tongues along every stream of a tundra plain)
+    let valley = rv.max(0.6 * hollow) * smoothstep(0.15, 0.4, t.mountain);
     let g = pi - 2.6 * valley;
     let steep = 1.0 - smoothstep(0.45, 0.75, l.slope + 0.1 * n + 0.15 * spur);
     let ice = smoothstep(0.15, -0.15, g + 0.4) * steep;
@@ -310,7 +318,9 @@ pub(crate) fn lake_mask(s: &Stack, c: &ColdClimate) -> f64 {
     if m <= 0.0 {
         return 0.0;
     }
-    m * (1.0 - smoothstep(0.03, 0.07, l.slope))
+    // (a gentle slope limit: the lakes' size follows the mask pixel by pixel, and a steep cut
+    // frayed the lakes on undulating ground into grey patches with islands of forest)
+    m * (1.0 - smoothstep(0.05, 0.16, l.slope))
         * (1.0 - smoothstep(350.0, 700.0, l.ground))
         * (1.0 - smoothstep(0.2, 0.5, t.mountain))
         * smoothstep(0.02, 0.12, t.moist)
@@ -327,10 +337,11 @@ fn lake_colour(h: u64, rn: f64) -> DVec3 {
     } else if u < 0.8 {
         srgb(36.0, 38.0, 28.0)
     } else {
-        srgb(58.0, 88.0, 94.0)
+        srgb(44.0, 62.0, 64.0)
     };
     let shallow = mixc(deep, srgb(98.0, 104.0, 86.0), 0.5);
-    mixc(deep, shallow, smoothstep(0.62, 0.97, rn))
+    // (a narrow shallow margin: over the outer third of a big lake it drew a pale halo)
+    mixc(deep, shallow, smoothstep(0.86, 1.0, rn))
 }
 
 /// The mean colour of open lakes and of the frozen ones, of basins (for coarse pixels).
@@ -338,10 +349,10 @@ fn lake_mean_albedo(lat: &LakeLat, frozen: bool) -> DVec3 {
     let lake = if frozen {
         mixc(srgb(150.0, 170.0, 184.0), srgb(228.0, 233.0, 239.0), 0.6)
     } else {
-        let w = |c: DVec3| mixc(c, mixc(c, srgb(98.0, 104.0, 86.0), 0.5), 0.3);
-        w(srgb(16.0, 28.0, 42.0)) * 0.55 + w(srgb(36.0, 38.0, 28.0)) * 0.25 + w(srgb(58.0, 88.0, 94.0)) * 0.2
+        let w = |c: DVec3| mixc(c, mixc(c, srgb(98.0, 104.0, 86.0), 0.5), 0.12);
+        w(srgb(16.0, 28.0, 42.0)) * 0.55 + w(srgb(36.0, 38.0, 28.0)) * 0.25 + w(srgb(44.0, 62.0, 64.0)) * 0.2
     };
-    let basin = mixc(srgb(112.0, 120.0, 74.0), srgb(92.0, 98.0, 66.0), 0.3);
+    let basin = mixc(srgb(104.0, 104.0, 78.0), srgb(88.0, 90.0, 68.0), 0.3);
     mixc(basin, lake, lat.p_lake)
 }
 
@@ -349,12 +360,13 @@ fn lake_mean_albedo(lat: &LakeLat, frozen: bool) -> DVec3 {
 pub fn azonal(s: &mut Stack) {
     drumlin_look(s);
     let c = climate(s);
-    let lm = lake_mask(s, &c);
+    // (not on the perennial snow and the glaciers: lakes ended the stack on the ice tongues)
+    let lm = lake_mask(s, &c) * (1.0 - s.m.snow);
     if lm < 0.03 {
         return;
     }
     let sc = lm.cbrt();
-    let frozen = c.date < -1.5;
+    let frozen = c.date < FREEZE;
     for lat in &LAKE_LATS {
         lakes(s, lat, sc, frozen);
         if s.done {
@@ -397,8 +409,9 @@ fn lakes(s: &mut Stack, lat: &LakeLat, sc: f64, frozen: bool) {
                 ly.water = true;
             }
         } else {
-            // drained basin: sedge meadow, wetter towards the centre
-            xa = mixc(srgb(112.0, 120.0, 74.0), srgb(92.0, 98.0, 66.0), smoothstep(0.55, 0.0, hit.rn))
+            // drained basin: sedge meadow, wetter towards the centre (olive-brown: a lime sedge
+            // drew bright blobs in the dark forest)
+            xa = mixc(srgb(104.0, 104.0, 78.0), srgb(88.0, 90.0, 68.0), smoothstep(0.55, 0.0, hit.rn))
                 * (1.0 + 0.08 * perlin3(hit.h ^ 0xBA5, p / 9.0) * band(9.0, gsd));
             ly.cls = cls::MARSH;
             ly.hmode = hmode::BLEND;
@@ -654,7 +667,7 @@ pub fn water(s: &mut Stack) {
             ly.solid = true;
         }
         s.composite(ly);
-    } else if c.date < -1.5 {
+    } else if c.date < FREEZE {
         // frozen lakes: snow on the ice, cracks, darker clear ice where the wind swept it
         let mut col = srgb(226.0, 231.0, 237.0);
         let sw = smoothstep(0.1, 0.5, perlin3(SEED_ICE, p / 90.0) * band(90.0, gsd) + 0.25 * perlin3(SEED_ICE + 1, p / 25.0) * band(25.0, gsd));
@@ -694,12 +707,12 @@ fn rivers(s: &mut Stack) {
     let c = climate(s);
     let detail = s.pf.detail;
     let core_ice = smoothstep(-1.5, -4.0, t.temp + 1.5 * s.pf.snow) > 0.5;
-    if c.date < -1.5 {
+    if c.date < FREEZE {
         // snow-covered river ice with darker, wind-swept clear ice
         let col = mixc(s.sm.pal.snow * 0.92, srgb(150.0, 172.0, 186.0), 0.3 + 0.25 * detail);
         s.m.river_cov = 0.4 * cov;
         s.composite(Layer { cov, albedo: col, dh: l.river_level, hmode: hmode::ABS, cls: cls::FROZEN_WATER, relit: 1.0, solid: true, ..Default::default() });
-    } else if core_ice && c.date > 0.5 && s.m.snow < 0.3 {
+    } else if core_ice && s.m.snow < 0.3 {
         // the summer thaw: open water (the core's colours without the ice)
         let pal = &s.sm.pal;
         let mut wcol = mixc(pal.river, pal.lake_deep, smoothstep(30.0, 200.0, l.river_hw * 2.0));
@@ -736,7 +749,9 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     let _ = c;
     let abl = smoothstep(-1.6, -0.4, g.p);
     // firn: wind ripples (sastrugi) and drifts
-    let tex = 0.025 * perlin3(SEED_ICE + 3, p / 7.0) * band(7.0, gsd)
+    let n7 = perlin3(SEED_ICE + 3, p / 7.0);
+    let b7 = band(7.0, gsd);
+    let tex = 0.025 * n7 * b7
         + 0.02 * perlin3(SEED_ICE + 4, p / 2.5) * band(2.5, gsd)
         + 0.03 * perlin3(SEED_ICE + 5, p / 120.0) * band(120.0, gsd);
     let firn = srgb(236.0, 241.0, 247.0) * (1.0 + tex);
@@ -760,8 +775,9 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
         col *= 1.0 - 0.08 * og * abl;
     }
     // crevasses: across the flow, i.e. along the contours of the ground, every 6 m of height,
-    // broken (en echelon), where the ice is steep
-    let cs = smoothstep(0.12, 0.35, slope) * (0.45 + 0.55 * abl);
+    // broken (en echelon) into short dashes, where the ice is steep (long dark lines along the
+    // contours over every tongue read as a contour map)
+    let cs = smoothstep(0.18, 0.4, slope) * (0.45 + 0.55 * abl);
     if cs > 0.0 {
         let spacing = 6.0 / sl;
         let e = smoothstep(1.2 * gsd, 3.0 * gsd, spacing);
@@ -771,22 +787,27 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
             let x = l.ground / 6.0 + 0.6 * perlin3(SEED_ICE + 10, p / 45.0);
             let f = x - x.floor();
             let d = f.min(1.0 - f) * spacing;
-            cr = band_cov(d, 1.2, fw) * on * e;
+            let dash = 0.4 + (smoothstep(-0.05, 0.25, n7) - 0.4) * b7;
+            cr = band_cov(d, 1.0, fw) * on * e * dash;
         }
         // the mean of unresolved crevasses: their area share
-        cr += (1.0 - e) * on * (2.4 / spacing).min(1.0);
+        cr += (1.0 - e) * on * (0.8 / spacing).min(1.0);
         let cr = cr * cs;
-        col = mixc(col, srgb(62.0, 72.0, 80.0), 0.6 * cr);
-        dh -= 2.5 * cr;
+        col = mixc(col, srgb(70.0, 82.0, 92.0), 0.4 * cr);
+        dh -= 1.0 * cr;
     }
     // medial moraines along the valley's axis (the drainage line under the ice) and beside it
     if abl > 0.2 && l.river_hw > 0.0 {
         let ad = l.river_d.abs();
         let w = 12.0 + 8.0 * perlin3(SEED_ICE + 11, p / 80.0) + 3.0 * perlin3(SEED_ICE + 14, p / 9.0) * band(9.0, gsd);
         let off = 110.0 + 0.6 * l.river_hw;
-        let mm = band_cov(ad, w, fw.max(0.6 * w)).max(0.7 * band_cov(ad - off, 0.7 * w, fw.max(0.4 * w))) * smoothstep(0.2, 0.6, abl);
-        col = mixc(col, srgb(104.0, 98.0, 92.0), 0.85 * mm);
-        dh += 1.5 * mm;
+        // (faint, and only on the valley glaciers of the mountains: three dark lines along every
+        // tongue read as a drawing, and along the streams under a lowland ice field as stripes)
+        let mm = band_cov(ad, w, fw.max(0.6 * w)).max(0.5 * band_cov(ad - off, 0.7 * w, fw.max(0.4 * w)))
+            * smoothstep(0.2, 0.6, abl)
+            * smoothstep(0.15, 0.4, s.t.mountain);
+        col = mixc(col, srgb(112.0, 106.0, 98.0), 0.5 * mm);
+        dh += 1.0 * mm;
     }
     let ly = Layer { cov: g.ice, albedo: col, dh: s.m.micro + dh, hmode: hmode::BLEND, cls: cls::GLACIER, relit: 1.0, clear: 1.0, ..Default::default() };
     s.composite(ly);
@@ -831,18 +852,13 @@ fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     }
     // (slopes facing the equator lose their snow first)
     let mut x = c.date + n + 2.5 * sunny(s).clamp(-1.0, 1.0);
-    // late melt: rims and centres of the frost polygons bare first, the troughs keep their snow
-    // (a net of snow), the edges ragged with fine noise
+    // late melt: the edges ragged with fine noise (a net of snow in the troughs of 18 m frost
+    // polygons, and polygons bare or white one by one, drew a white net and a crisp patchwork
+    // of cells over the land)
     if x > -3.2 && x < 1.0 {
         let b4 = band(4.0, gsd);
         if b4 > 0.0 {
             x += 0.8 * perlin3(SEED_SNOW + 4, p / 4.0) * b4 + 0.4 * perlin3(SEED_SNOW + 5, p / 1.3) * band(1.3, gsd);
-        }
-        let b18 = band(18.0, gsd);
-        if b18 > 0.0 {
-            let wc = worley3(SEED_SNOW + 6, p, 18.0, 0.9);
-            let ed = worley_edge_dist(&wc, p);
-            x += 1.2 * (u01k(wc.id, 1) - 0.5) * b18 - 0.4 * (1.0 - smoothstep(0.0, 3.0, ed)) * b18;
         }
     }
     let mut cov = smoothstep(-0.55, -1.25, x) * (1.0 - smoothstep(0.75, 1.3, s.l.slope));
