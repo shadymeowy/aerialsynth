@@ -454,10 +454,11 @@ pub fn agriculture(s: &mut Stack) {
         }
     }
     let plain = plain as f64;
-    // (a ragged margin: patches of the plain's cover, not a line)
-    let ragged = 0.6 * nz(SEED + 63, p, 170.0, gsd) + 0.4 * nz(SEED + 64, p, 52.0, gsd);
+    // (a ragged margin: patches of the plain's cover, not a line; soft, and with a weak 52 m
+    // octave: crisp small patches mottled the delta's edge)
+    let ragged = 0.75 * nz(SEED + 63, p, 170.0, gsd) + 0.25 * nz(SEED + 64, p, 52.0, gsd);
     // (over the core's beach, which the low land near the sea gets; not over fields)
-    let zone = plain * smoothstep(-0.2, 0.2, plain - 0.5 + 0.5 * ragged) * (1.0 - smoothstep(2.4, 3.0, ground)) * (1.0 - s.m.field_cov);
+    let zone = plain * smoothstep(-0.35, 0.35, plain - 0.5 + 0.5 * ragged) * (1.0 - smoothstep(2.4, 3.0, ground)) * (1.0 - s.m.field_cov);
     if zone <= 0.0 {
         return;
     }
@@ -487,7 +488,7 @@ pub fn agriculture(s: &mut Stack) {
     // creeks drew a net of black lines over the desert)
     let c = creek(p, gsd, s.l.fw.max(0.3 * gsd)) * zone * (0.3 + 0.7 * low) * (1.0 - scrub);
     if c > 0.0 {
-        let cc = mixc(col, srgb(70.0, 66.0, 56.0), 1.0 - 0.8 * arid);
+        let cc = mixc(col, srgb(70.0, 66.0, 56.0), 0.5 - 0.4 * arid);
         s.composite(Layer { cov: c, albedo: cc, cls: cls::TIDAL_FLAT, clear: 1.0, ..Default::default() });
     }
 }
