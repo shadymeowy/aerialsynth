@@ -165,3 +165,6 @@ Polish round 6: arid deltas and tidal flats are calmer: salt crusts soft and fai
 than the mud, salt pans on fewer flats (perlin 0.3–0.55) and muted towards their mean.
 Polish round 7: salt pans on fewer arid flats (perlin 0.4–0.62) in salt colours (grey-pink, white, grey-teal, khaki;
 desert_coast@type had a quilt of pink, white and teal ponds).
+
+Polish round 8: the delta plain's margin softer (smoothstep ±0.35, the 52 m octave 25 %) and its tidal creeks fainter
+(desert_coast@type: a mottled delta edge with a net of dark creeks).

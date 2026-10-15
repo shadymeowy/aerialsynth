@@ -155,7 +155,8 @@ const SYS: [SysDef; sys::N] = {
     use part::*;
     const D: SysDef = SysDef { part: GRID, size: [200.0, 200.0], kinds: [CROP, FALLOW, PASTURE, HAY], kw: [0.7, 0.15, 0.1, 0.05], borders: [MARGIN, MARGIN], bp: [0.0, 0.0], slope: [0.22, 0.32], terraces: 0.0, trees: 0.0 };
     [
-        D,
+        // (core: hedgerows on some parcels and a few field trees, as v0.2.0's tree-lined fields)
+        SysDef { borders: [HEDGE, MARGIN], bp: [0.2, 0.0], trees: 0.03, ..D },
         SysDef { part: SECTION, size: [402.336, 402.336], kinds: [CROP, PASTURE, FALLOW, POND], kw: [0.84, 0.07, 0.07, 0.02], borders: [BELT, DITCH], bp: [0.06, 0.08], ..D },
         SysDef { part: GRID, size: [1300.0, 900.0], kinds: [CROP, FALLOW, PASTURE, HAY], kw: [0.68, 0.22, 0.06, 0.04], borders: [BELT, TRACK], bp: [0.82, 0.1], ..D },
         SysDef { part: STRIP, size: [600.0, 34.0], kinds: [CROP, FALLOW, HAY, PASTURE], kw: [0.72, 0.12, 0.12, 0.04], borders: [MARGIN, MARGIN], bp: [1.0, 0.0], ..D },
@@ -1221,11 +1222,13 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
     let (ru, rv) = if rot { (pc.fy, pc.fx) } else { (pc.fx, pc.fy) };
     match k {
         kind::CROP | kind::HAY => {
-            let u_crop = if u01k(id, 16) < 0.7 { u01k(cluster, 6) } else { u01k(id, 6) };
+            // (crop and stage by the parcel, not by each terrace bench: single ripe benches drew
+            // yellow crescents over the green terraces, audit a12)
+            let u_crop = if u01k(pc.id, 16) < 0.7 { u01k(cluster, 6) } else { u01k(pc.id, 6) };
             let c = if k == kind::HAY { 6 } else { pick_crop(pl.mix, u_crop) };
             let (cc, row) = CROPS[c as usize];
             // (fields of a region in different stages: v0.2.0's patchwork of green, ripe and cut)
-            let ph = (px.season + 0.45 * (u01k(id, 20) - 0.5)).clamp(0.0, 1.0);
+            let ph = (px.season + 0.45 * (u01k(pc.id, 20) - 0.5)).clamp(0.0, 1.0);
             col = stage(&cc, ph) * (0.95 + 0.10 * u01k(id, 8));
             // (hay meadows mown from early summer: pale straw, not one more green parcel)
             if k == kind::HAY && u01k(id, 36) < hay_cut(ph) {
@@ -1471,13 +1474,18 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
     let bsel = u01k(pc.id, 0xB0);
     let hedge_m = 0.3 + 0.7 * pl.e.hedges;
     let p0 = d.bp[0] * if d.borders[0] == border::HEDGE || d.borders[0] == border::BELT { hedge_m } else { 1.0 };
-    let b = if bsel < p0 {
+    let mut b = if bsel < p0 {
         d.borders[0]
     } else if bsel < p0 + d.bp[1] {
         d.borders[1]
     } else {
         border::MARGIN
     };
+    // (no straight canals down the terraced slopes: each bench's lip broke them into a dotted
+    // pale line across the contours)
+    if b == border::CANAL && lip < 1e8 {
+        b = border::NONE;
+    }
     // canals along the blocks of paddies, the border of the block
     let edge = if b == border::CANAL { pc.bedge } else { pc.edge };
     let (col, dh, cls) = draw_border(b, edge, col, dh, cls, pc, px);
@@ -1625,7 +1633,7 @@ fn draw_border(b: u32, edge: f64, col: DVec3, dh: f64, cls: u8, pc: &Parcel, px:
         }
         border::HEDGE | border::BELT => {
             let belt = b == border::BELT;
-            let hw0 = if belt { 4.0 + 3.0 * u01k(hb, 4) } else { 1.0 + 1.0 * u01k(hb, 4) };
+            let hw0 = if belt { 4.0 + 3.0 * u01k(hb, 4) } else { 1.4 + 1.2 * u01k(hb, 4) };
             if edge.abs() > 4.5 * hw0 + fwb {
                 return (col, dh, cls);
             }

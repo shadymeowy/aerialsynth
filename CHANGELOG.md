@@ -48,6 +48,13 @@
   colours (glacier ice, crevasses, polar soils, snow nets) and autumn crowns; dense town centres
   of small lots with varied roofs; less steep 5–7 km ranges; irregular canyon benches, narrow
   road cuttings, muted salt pans, hedged pastures, grey-brown boreal heath.
+- `next` polish round 8, against the audit's worst places: glaciers without contour stripes and
+  only in mountain valleys, no snow nets, open (not frozen) lakes in summer datasets and no
+  snowed-in ecoregion borders, maars without pale halos; vegetation and kernel layers blend over
+  ecotones (no forest/steppe patchwork); shrubs and textured soil in semi-arid land; no canals
+  or ripe crescents on paddy terraces; dirt roads and desert washes in the ground's colour (no
+  pale ribbons up canyon walls); calmer deltas, burn scars, savanna grass and shrub speckle;
+  autumn colours only with frost; hedged core farmland; like-for-like volcano and boreal places.
 - **Optional tile layers** (tile store format 2; `next` only): `tiles.layers: [dtm, instance]`
   adds the bare ground and instance ids (building lots, fields, forest stands) to a new store;
   the viewer's map shadings *Height above ground* and *Instances* show them. Format-1 stores

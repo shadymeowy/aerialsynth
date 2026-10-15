@@ -201,7 +201,7 @@ fn tr_lamps(f: TrFrame, s0: f32, sp: f32, off: f32, median: bool, seed: u64, fw:
 }
 
 /// `px::surface`: the carriageway or deck across its width.
-fn tr_surface(sg: FSeg, f: TrFrame, kc: u32, fw: f32, o: ptr<function, TrPx>, hs: f32) {
+fn tr_surface(sg: FSeg, f: TrFrame, kc: u32, fw: f32, o: ptr<function, TrPx>, hs: f32, below: vec3<f32>) {
     let hw = sg.v.x;
     let fl = sg.flags;
     let dd = abs(f.d);
@@ -231,9 +231,9 @@ fn tr_surface(sg: FSeg, f: TrFrame, kc: u32, fw: f32, o: ptr<function, TrPx>, hs
     let paved = (fl & TRF_PAVED) != 0u;
     var c: vec3<f32>;
     if (kc == TR_TRACK) {
-        c = srgb(146.0, 126.0, 100.0);
+        c = mixc(below, srgb(146.0, 126.0, 100.0), 0.6);
     } else if (!paved) {
-        c = srgb(160.0, 146.0, 122.0);
+        c = mixc(below, srgb(160.0, 146.0, 122.0), 0.6);
     } else if (kc <= TR_TRUNK || kc == TR_RAMP) {
         c = srgb(66.0, 66.0, 68.0);
     } else {
@@ -293,6 +293,7 @@ fn tr_road_px(sg: FSeg, f: TrFrame, e: TrEnv, kc: u32) -> TrPx {
     }
     let raised = hs - e.ground;
     let urban = (fl & TRF_URBAN) != 0u;
+    let gr = smoothstep1(-0.02, 0.03, e.below.y - e.below.x);
     let edge = hw + select(vg, 0.6, bridge);
     if (bridge && raised > 1.0) {
         let l = raised / max(e.sun_tan, 0.1);
@@ -309,7 +310,7 @@ fn tr_road_px(sg: FSeg, f: TrFrame, e: TrEnv, kc: u32) -> TrPx {
         let sl = max(ddl - edge, 0.0) * 0.5;
         if (raised > 0.0) {
             let toe = edge + 2.0 * min(raised, 15.0);
-            tr_over(&o, tr_aa(toe - ddl, fw), mixc(e.below, srgb(112.0, 124.0, 74.0), 0.2), hs - sl);
+            tr_over(&o, tr_aa(toe - ddl, fw), mixc(e.below, srgb(112.0, 124.0, 74.0), 0.2 * gr), hs - sl);
         } else {
             let slc = max(ddl - edge, 0.0) * 2.0;
             let toe = edge + 0.5 * min(-raised, 15.0);
@@ -329,7 +330,8 @@ fn tr_road_px(sg: FSeg, f: TrFrame, e: TrEnv, kc: u32) -> TrPx {
         } else if (kc == TR_TRACK || kc == TR_RAIL) {
             c = mixc(e.below, srgb(150.0, 140.0, 120.0), 0.5);
         } else {
-            c = mixc(mixc(e.below, srgb(92.0, 108.0, 66.0), 0.55), srgb(140.0, 136.0, 126.0), tr_boxcov(ddl - hw, 0.8, fw));
+            let sh = select(0.0, tr_boxcov(ddl - hw, 0.8, fw), (fl & TRF_PAVED) != 0u);
+            c = mixc(mixc(e.below, srgb(92.0, 108.0, 66.0), 0.55 * gr), srgb(140.0, 136.0, 126.0), sh);
         }
         tr_over(&o, av, c, hs + select(0.0, 1.0, bridge));
         o.z = hs;
@@ -337,7 +339,7 @@ fn tr_road_px(sg: FSeg, f: TrFrame, e: TrEnv, kc: u32) -> TrPx {
     }
     let a = tr_boxcov(f.d, hw, fw);
     if (a > 0.0) {
-        tr_surface(sg, f, kc, fw, &o, hs);
+        tr_surface(sg, f, kc, fw, &o, hs, e.below);
         o.road = a;
         o.z = hs + 0.5 + 0.01 * f32(kc) + select(0.0, 20.0, (fl & TRF_OVER) != 0u);
         if (kc == TR_RAIL) {
@@ -520,7 +522,7 @@ fn tr_deck_px(sg: FSeg, p: vec3<f64>, ground: f32, wl: f32, fw: f32) -> TrPx {
         hs = max(lerp(sg.deck_a, sg.deck_b, f.t), base);
     }
     tr_over(&o, tr_boxcov(f.d, hw + 0.6, fw), srgb(184.0, 182.0, 176.0), hs + 1.0);
-    tr_surface(sg, f, kc, fw, &o, hs);
+    tr_surface(sg, f, kc, fw, &o, hs, srgb(184.0, 182.0, 176.0));
     o.cls = LC_BRIDGE;
     o.road = tr_boxcov(f.d, hw, fw);
     o.z = hs;

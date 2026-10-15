@@ -278,14 +278,17 @@
     - &savanna_grass
       slot: zonal
       kernel: tropical_grass
-      mask: { moist: [null, null, 0.45, 0.62], temp: [16, 20, null, null] }
+      # (out by a moisture of ~0.55: the pale tall grass on the humid hills read as bleached
+      # hilltops next to the forested valleys, volcano)
+      mask: { moist: [null, null, 0.42, 0.56], temp: [16, 20, null, null] }
       params: { scale: 70, bare: 0.08, tussock: 0.6, colour: [196, 176, 120], colour2: [176, 166, 122], bare_colour: [168, 124, 90] }
       class: savanna
     - &savanna_fire
       slot: disturbance
       kernel: tropical_fire
       mask: { natural: [0.5, 0.8, null, null], field: [null, null, 0.05, 0.2], moist: [null, null, 0.55, 0.7] }
-      params: { scale: 1500, fraction: 0.26, ages: 3, ash: 0.35, colour: [28, 26, 25], colour2: [94, 76, 58], regrowth_colour: [126, 128, 70] }
+      # (fresh char dark grey-brown, not black: black scars of several km read as holes in the land)
+      params: { scale: 1500, fraction: 0.2, ages: 3, ash: 0.35, colour: [54, 50, 45], colour2: [100, 86, 66], regrowth_colour: [126, 128, 70] }
       class: burn_scar
       clear: 0.3
     - &termite_mounds
@@ -461,7 +464,7 @@
     - slot: disturbance
       kernel: tropical_fire
       mask: { natural: [0.5, 0.8, null, null], field: [null, null, 0.05, 0.2] }
-      params: { scale: 1300, fraction: 0.22, ages: 3, ash: 0.5 }
+      params: { scale: 1300, fraction: 0.18, ages: 3, ash: 0.5, colour: [56, 50, 44] }
       class: burn_scar
       clear: 0.15
     # big termitaria, often wooded
@@ -472,7 +475,7 @@
     - slot: disturbance
       kernel: tropical_swidden
       mask: { agri: [0.08, 0.22, 0.6, 0.85], field: [null, null, 0.03, 0.15], natural: [0.5, 0.8, null, null], patch: [0.15, 0.4, null, null] }
-      params: { cell: 150, fill: 0.45, margin: 0.1, roughness: 0.2, height: 2, colour: [70, 60, 52], colour2: [172, 122, 80], fallow_colour: [132, 136, 72] }
+      params: { cell: 150, fill: 0.45, margin: 0.1, roughness: 0.2, height: 2, colour: [70, 60, 52], colour2: [148, 116, 86], fallow_colour: [132, 136, 72] }
       class: clear_cut
       clear: 1.0
     # dambos: grassy drainage lines without trees

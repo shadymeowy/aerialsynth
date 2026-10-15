@@ -690,7 +690,9 @@ fn canopy(s: &mut Stack) {
     if t.moist < 0.28 || t.temp < -6.0 || t.temp > 20.0 {
         return;
     }
-    let aut = smoothstep(0.55, 0.85, s.bio.style.season);
+    // (autumn colours where the winter brings frost: the subtropical highlands' evergreen
+    // forests turned rust in December)
+    let aut = smoothstep(0.55, 0.85, s.bio.style.season) * smoothstep(7.0, 1.0, t.temp - 0.5 * t.temp_range);
     let larch = 0.32 * (1.0 - smoothstep(1.0, 7.0, t.temp)) * eco_u1(s) * site_boreal(s).max(0.25);
     if aut <= 0.0 && larch <= 0.01 {
         return;

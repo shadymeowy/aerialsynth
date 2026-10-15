@@ -37,7 +37,7 @@ fn agri_arch_w(a: u32) -> array<f32, 15> {
 }
 fn agri_sys(i: u32) -> AgSys {
     switch i {
-        case 0u: { return AgSys(0u, vec2<f32>(200.0, 200.0), vec4<u32>(0u, 1u, 2u, 3u), vec4<f32>(0.7, 0.15, 0.1, 0.05), vec2<u32>(0u, 0u), vec2<f32>(0.0, 0.0), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
+        case 0u: { return AgSys(0u, vec2<f32>(200.0, 200.0), vec4<u32>(0u, 1u, 2u, 3u), vec4<f32>(0.7, 0.15, 0.1, 0.05), vec2<u32>(1u, 0u), vec2<f32>(0.2, 0.0), vec2<f32>(0.22, 0.32), 0.0, 0.03); }
         case 1u: { return AgSys(4u, vec2<f32>(402.336, 402.336), vec4<u32>(0u, 2u, 1u, 11u), vec4<f32>(0.84, 0.07, 0.07, 0.02), vec2<u32>(2u, 4u), vec2<f32>(0.06, 0.08), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
         case 2u: { return AgSys(0u, vec2<f32>(1300.0, 900.0), vec4<u32>(0u, 1u, 2u, 3u), vec4<f32>(0.68, 0.22, 0.06, 0.04), vec2<u32>(2u, 5u), vec2<f32>(0.82, 0.1), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
         case 3u: { return AgSys(2u, vec2<f32>(600.0, 34.0), vec4<u32>(0u, 1u, 3u, 2u), vec4<f32>(0.72, 0.12, 0.12, 0.04), vec2<u32>(0u, 0u), vec2<f32>(1.0, 0.0), vec2<f32>(0.22, 0.32), 0.0, 0.0); }
@@ -121,6 +121,7 @@ const AB_BELT: u32 = 2u;
 const AB_WALL: u32 = 3u;
 const AB_DITCH: u32 = 4u;
 const AB_TRACK: u32 = 5u;
+const AB_NONE: u32 = 6u;
 const AB_CANAL: u32 = 7u;
 
 const AG_MILE: f32 = 1609.344;
@@ -1173,8 +1174,8 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
     }
     switch k {
         case 0u, 3u: {
-            var u_crop = u01k(id, 6lu);
-            if (u01k(id, 16lu) < 0.7) {
+            var u_crop = u01k(pc.id, 6lu);
+            if (u01k(pc.id, 16lu) < 0.7) {
                 u_crop = u01k(cluster, 6lu);
             }
             var c = 6u;
@@ -1183,7 +1184,7 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
             }
             let cc = agri_crop(c);
             let row = cc[3];
-            let ph = clamp(px.season + 0.45 * (u01k(id, 20lu) - 0.5), 0.0, 1.0);
+            let ph = clamp(px.season + 0.45 * (u01k(pc.id, 20lu) - 0.5), 0.0, 1.0);
             col = agri_stage(cc, ph) * (0.95 + 0.10 * u01k(id, 8lu));
             if (k == AK_HAY && u01k(id, 36lu) < agri_hay_cut(ph)) {
                 col = mixc(col, srgb(166.0, 156.0, 96.0) * (0.92 + 0.16 * u01k(id, 37lu)), 0.75);
@@ -1442,6 +1443,9 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
     } else if (bsel < p0 + d.bp.y) {
         b = d.borders.y;
     }
+    if (b == AB_CANAL && lip < 1e8) {
+        b = AB_NONE;
+    }
     var edge = pc.edge;
     if (b == AB_CANAL) {
         edge = pc.bedge;
@@ -1570,7 +1574,7 @@ fn agri_border(b: u32, edge: f32, i: Shade, pc: Parcel, px: AgPx) -> Shade {
         }
         case 1u, 2u: {
             let belt = b == AB_BELT;
-            var hw0 = 1.0 + 1.0 * u01k(hb, 4lu);
+            var hw0 = 1.4 + 1.2 * u01k(hb, 4lu);
             var lam = 5.0;
             var dark = 0.95;
             var h = 3.0 + 4.0 * u01k(hb, 2lu);

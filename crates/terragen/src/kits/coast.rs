@@ -422,8 +422,10 @@ fn flats(s: &mut Stack, ty: &Types) {
         let c = creek(p, gsd, fw.max(0.3 * gsd)) * zone * win;
         if c > 0.0 {
             let arid = 1.0 - smoothstep(0.2, 0.34, s.t.moist);
-            let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, 0.7 * arid);
-            s.composite(Layer { cov: c, albedo: cc, cls: cls::TIDAL_FLAT, clear: 1.0, ..Default::default() });
+            // (fainter in the high marsh, and of the marsh's class there: a dense net of dark,
+            // glossy tidal-flat lines over the marsh, desert_coast@type)
+            let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, (0.7 * arid).max(0.5 * high));
+            s.composite(Layer { cov: c, albedo: cc, cls: if high > 0.5 { cls::MARSH } else { cls::TIDAL_FLAT }, clear: 1.0, ..Default::default() });
         }
     }
     ponds(s, zone);
@@ -454,10 +456,11 @@ pub fn agriculture(s: &mut Stack) {
         }
     }
     let plain = plain as f64;
-    // (a ragged margin: patches of the plain's cover, not a line)
-    let ragged = 0.6 * nz(SEED + 63, p, 170.0, gsd) + 0.4 * nz(SEED + 64, p, 52.0, gsd);
+    // (a ragged margin: patches of the plain's cover, not a line; soft, and with a weak 52 m
+    // octave: crisp small patches mottled the delta's edge)
+    let ragged = 0.75 * nz(SEED + 63, p, 170.0, gsd) + 0.25 * nz(SEED + 64, p, 52.0, gsd);
     // (over the core's beach, which the low land near the sea gets; not over fields)
-    let zone = plain * smoothstep(-0.2, 0.2, plain - 0.5 + 0.5 * ragged) * (1.0 - smoothstep(2.4, 3.0, ground)) * (1.0 - s.m.field_cov);
+    let zone = plain * smoothstep(-0.35, 0.35, plain - 0.5 + 0.5 * ragged) * (1.0 - smoothstep(2.4, 3.0, ground)) * (1.0 - s.m.field_cov);
     if zone <= 0.0 {
         return;
     }
@@ -487,7 +490,7 @@ pub fn agriculture(s: &mut Stack) {
     // creeks drew a net of black lines over the desert)
     let c = creek(p, gsd, s.l.fw.max(0.3 * gsd)) * zone * (0.3 + 0.7 * low) * (1.0 - scrub);
     if c > 0.0 {
-        let cc = mixc(col, srgb(70.0, 66.0, 56.0), 1.0 - 0.8 * arid);
+        let cc = mixc(col, srgb(70.0, 66.0, 56.0), 0.5 - 0.4 * arid);
         s.composite(Layer { cov: c, albedo: cc, cls: cls::TIDAL_FLAT, clear: 1.0, ..Default::default() });
     }
 }

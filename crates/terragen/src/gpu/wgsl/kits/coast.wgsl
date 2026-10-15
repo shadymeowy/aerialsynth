@@ -124,8 +124,8 @@ fn co_flats(s: ptr<function, Stack>, ty: CoTypes) {
         let c = co_creek(p, gsd, max(fw, 0.3 * gsd)) * zone * win;
         if (c > 0.0) {
             let arid = 1.0 - smoothstep1(0.2, 0.34, (*s).t.moist);
-            let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, 0.7 * arid);
-            var ly2 = layer_paint(c, cc, LC_TIDAL_FLAT);
+            let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, max(0.7 * arid, 0.5 * high));
+            var ly2 = layer_paint(c, cc, select(LC_TIDAL_FLAT, LC_MARSH, high > 0.5));
             ly2.clear = 1.0;
             composite(s, ly2);
         }
@@ -224,8 +224,8 @@ fn coast_slot_agriculture(s: ptr<function, Stack>) {
             lev = max(lev, sh.lev);
         }
     }
-    let ragged = 0.6 * co_nz(CO_SEED + 63lu, p, 170.0, gsd) + 0.4 * co_nz(CO_SEED + 64lu, p, 52.0, gsd);
-    let zone = plain * smoothstep1(-0.2, 0.2, plain - 0.5 + 0.5 * ragged) * (1.0 - smoothstep1(2.4, 3.0, ground)) * (1.0 - (*s).m.field_cov);
+    let ragged = 0.75 * co_nz(CO_SEED + 63lu, p, 170.0, gsd) + 0.25 * co_nz(CO_SEED + 64lu, p, 52.0, gsd);
+    let zone = plain * smoothstep1(-0.35, 0.35, plain - 0.5 + 0.5 * ragged) * (1.0 - smoothstep1(2.4, 3.0, ground)) * (1.0 - (*s).m.field_cov);
     if (zone <= 0.0) {
         return;
     }
@@ -253,7 +253,7 @@ fn coast_slot_agriculture(s: ptr<function, Stack>) {
     (*s).m.natural_ok *= 1.0 - zone;
     let c = co_creek(p, gsd, max((*s).l.fw, 0.3 * gsd)) * zone * (0.3 + 0.7 * low) * (1.0 - scrub);
     if (c > 0.0) {
-        var lc = layer_paint(c, mixc(col, srgb(70.0, 66.0, 56.0), 1.0 - 0.8 * arid), LC_TIDAL_FLAT);
+        var lc = layer_paint(c, mixc(col, srgb(70.0, 66.0, 56.0), 0.5 - 0.4 * arid), LC_TIDAL_FLAT);
         lc.clear = 1.0;
         composite(s, lc);
     }

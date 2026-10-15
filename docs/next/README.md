@@ -66,9 +66,13 @@ landscapes but looks worse in places, which is why it is not the default:
   (round 6), barchans only near the ergs of hyper-arid deserts (round 7); temperate forests have
   v0.2.0's crowns but render darker; the highest ranges (5–7 km) are as steep as the Himalaya
   (mean slope ~31° at 30 m, round 7), still steeper and greyer than v0.2.0's smooth snowfields.
-- **Ecotones:** the 10 km borders of ecoregions are a crisp mosaic of the two biomes' layers;
-  their palettes and styles blend smoothly (round 7), but layers of very different biomes (steppe
-  grass and forest floor) still draw a fine patchwork there.
+- **Ecotones:** the 10 km borders of ecoregions are a mosaic of the two biomes' crowns and
+  landforms; their palettes, styles, vegetation densities and flat layers blend smoothly
+  (rounds 7–8), so steppe and forest no longer draw a patchwork of patches there.
+- **Cold lands** (round 8): glaciers only in mountain valleys and without contour stripes, open
+  lakes in the summer datasets (frozen only below −3 °C at the ecoregion's date), no snowed-in
+  ecoregion borders. Small lakes still read pale from oblique views (the renderer's sky
+  reflection on dark water).
 - **Speed:** tiles cost about 2–3× classic's on a GPU (Tesla P4, 64 cold tiles at z12 / z14 /
   z16: 11.2 / 6.5 / 5.6 s against 3.8 / 3.4 / 2.9 s), mostly the kits' pass B and the host-built
   routes of a new area.
@@ -103,7 +107,9 @@ river network, lakes filled to their spill level, tree crowns, towns, night ligh
   archetypes) sets field systems, hedges, roofs, building heights, lamps and town density.
   Borders blend in a 10 km mosaic: each sample picks one of the two biomes (~220 m patches,
   their probability falling from ½ at the border to 0 at 10 km), while the two styles and
-  palettes blend by that probability (round 7), so colours change smoothly across it.
+  palettes blend by that probability (round 7), and so do the vegetation densities and the
+  other biome's flat kernel layers (grass, soil, mottling; round 8): only crowns and landforms
+  stay the mosaic's.
 - **Composite stack:** pass B is a fixed stack of layers (zonal ground, altitudinal zone,
   azonal overrides, disturbance, agriculture, canopy, linear infrastructure, built, water,
   seasonal). **Biomes are data** (`crates/terragen/biomes/*.yaml`) over a **kernel library**
@@ -165,7 +171,7 @@ fields at 53° N, and a hard, circular biome border in the oblique view (one of 
 `scripts/ab_v020/<scene>.yaml` are the same scenes with `generator: next`, and
 `<scene>@type.yaml` the same camera at a place of the same landscape type in next's world.
 [`ab/next_quality/`](ab/next_quality/) has the sheets of the latest comparison (columns:
-v0.2.0, round 6, round 7) and their image statistics (`stats.md`). Scenes whose pose shows
+v0.2.0, round 7, round 8) and their image statistics (`stats.md`). Scenes whose pose shows
 another landscape in next's world (sea at `bank` and `coast`, farmland at `night` and `dusk`)
 have an `@type` twin at a place of v0.2.0's landscape; `probe_px towns LAT LON R_KM` lists the
 settlements near a point to find one.
@@ -177,10 +183,15 @@ hand picking) with the nearest land point of the classic world (the same point a
 `scripts/ab_v020.py audit` renders them with the `farmland` still's camera (700 m above the
 ground, 42° down, 640 × 360, the still's local solar time 10:41, June; December south of the
 equator) with either generator, and `sheet --audit` puts classic | next side by side
-([`ab/next_quality/audit*.jpg`](ab/next_quality/): classic, round 6, round 7; `audit_stats.md`).
+([`ab/next_quality/audit*.jpg`](ab/next_quality/): classic, round 7, round 8; `audit_stats.md`).
 In round 7, 6 of the 30 places looked clearly worse than classic's typical quality (13 in
 round 6), 5 of them cold (frozen lakes in snow-free forest, glacier stripes, snow nets over
-tundra), 6 more borderline (ecotone patchworks, autumn and burn colours, paddy terraces).
+tundra), 6 more borderline (ecotone patchworks, autumn and burn colours, paddy terraces). In
+round 8 none is clearly worse; 7 are borderline (plain brown tundra and polar plains, a rusty
+high-mountain snow melt, barchan crescents, a textured but bare semi-arid plain, a steppe
+mottle, a lowland ice field), the rest equal or better (fields, forests and towns where classic
+draws plain ground). `volcano@type` and `boreal@type` moved to like-for-like places in round 8
+(a forested volcanic upland, needleleaf forest hills).
 
 ```sh
 scripts/ab_v020.py audit --terrain target/release/terrain --generator classic --out /tmp/audit_c

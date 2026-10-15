@@ -220,7 +220,7 @@ fn desert_slot_azonal(s: ptr<function, Stack>) {
         if (sb > 0.0) {
             let ec = cross(c.up, c.east * wd.d.x + c.north * wd.d.y);
             let g = gully_octave(cfg.seed ^ DS_STREAK, p / 45.0lf, ec).x;
-            streak = 0.2 + (smoothstep1(0.2, 0.9, g) - 0.2) * sb;
+            streak = 0.2 + 0.4 * (smoothstep1(0.2, 0.9, g) - 0.2) * sb;
         }
         pav = mixc(pav, sc, 0.35 * streak * min(2.0 * t.sand, 1.0));
         var ly = layer_paint(fringe, pav, LC_GRAVEL);
@@ -295,7 +295,7 @@ fn desert_slot_water(s: ptr<function, Stack>) {
     let gsd = (*s).c.gsd;
     let half = hw * (1.0 + 1.4 * ar) * (1.0 + 0.25 * perlin3(cfg.seed ^ DS_WASH, p / 700.0lf));
     let fwr = max((*s).l.fw, gsd * 0.35);
-    let cov = band_cov(rd, half, fwr);
+    let cov = band_cov(rd, half, fwr) * (1.0 - smoothstep1(0.25, 0.55, (*s).l.slope));
     if (cov <= 0.0) {
         return;
     }
@@ -303,7 +303,7 @@ fn desert_slot_water(s: ptr<function, Stack>) {
     let ph = rd / lam + 0.9 * perlin3(cfg.seed ^ DS_BRAID, p / 90.0lf) + 0.4 * perlin3(cfg.seed ^ DS_BRAID2, p / 31.0lf) * band(31.0, gsd);
     let th = 0.5 + 0.5 * cos(TAU * ph);
     let bw = band(lam, gsd);
-    let bar = mixc(spal(s, BP_SAND + 2u), spal(s, BP_SOIL + 1u), 0.25) * 1.02;
+    let bar = mixc(mixc(spal(s, BP_SAND + 2u), spal(s, BP_SOIL + 1u), 0.25) * 1.02, (*s).col, 0.3);
     let chan = mixc(bar, spal(s, BP_ROCK), 0.25) * 0.9;
     let col = mixc(bar, chan, smoothstep1(0.7, 0.9, th) * bw + (1.0 - bw) * 0.15);
     var ly = layer_paint(cov, col, LC_DRY_RIVERBED);

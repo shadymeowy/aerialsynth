@@ -1116,14 +1116,19 @@ impl BioSample {
         a
     }
 
-    /// A vegetation parameter of the sample's biome(s).
+    /// A vegetation parameter of the sample's biome(s) (blended like the palette: where the
+    /// ecotone's mosaic picked one of two biomes, their tree, shrub and savanna densities drew a
+    /// patchwork of forest and steppe over the ecotone).
     #[inline]
     pub fn veg(&self, reg: &Registry, f: impl Fn(&Veg) -> f64) -> f64 {
-        let a = f(&reg.biomes[self.a as usize].veg);
-        if self.w <= 0.0 {
-            return a;
+        let mut a = f(&reg.biomes[self.a as usize].veg);
+        if self.w > 0.0 {
+            a += (f(&reg.biomes[self.b as usize].veg) - a) * self.w;
         }
-        a + (f(&reg.biomes[self.b as usize].veg) - a) * self.w
+        if self.wc > 0.0 {
+            a += (f(&reg.biomes[self.c as usize].veg) - a) * self.wc;
+        }
+        a
     }
 }
 

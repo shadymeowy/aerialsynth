@@ -769,7 +769,8 @@ pub fn azonal(s: &mut Stack) {
         if sb > 0.0 {
             let ec = c.up.cross(c.east * wd.x + c.north * wd.y);
             let (g, _) = World::gully_octave(seed ^ S_STREAK, p / 45.0, ec);
-            streak = 0.2 + (smoothstep(0.2, 0.9, g) - 0.2) * sb;
+            // (faint: crisp pale streaks read as scratches over the plain)
+            streak = 0.2 + 0.4 * (smoothstep(0.2, 0.9, g) - 0.2) * sb;
         }
         pav = mixc(pav, sc, 0.35 * streak * (2.0 * t.sand).min(1.0));
         s.composite(Layer { cov: fringe, albedo: pav, cls: LC_GRAVEL, clear: 0.6, ..Default::default() });
@@ -843,7 +844,9 @@ pub fn washes(s: &mut Stack) {
     let hw = l.river_hw;
     let half = hw * (1.0 + 1.4 * ar) * (1.0 + 0.25 * perlin3(seed ^ S_WASH, p / 700.0));
     let fwr = l.fw.max(gsd * 0.35);
-    let cov = crate::kernels::band_cov(l.river_d, half, fwr);
+    // (washes on the floors, not down steep walls: their sand and gravel drew pale ribbons up
+    // the canyon walls, canyon@type)
+    let cov = crate::kernels::band_cov(l.river_d, half, fwr) * (1.0 - smoothstep(0.25, 0.55, l.slope));
     if cov <= 0.0 {
         return;
     }
@@ -851,7 +854,8 @@ pub fn washes(s: &mut Stack) {
     let ph = l.river_d / lam + 0.9 * perlin3(seed ^ S_BRAID, p / 90.0) + 0.4 * perlin3(seed ^ S_BRAID2, p / 31.0) * band(31.0, gsd);
     let th = 0.5 + 0.5 * (TAU * ph).cos();
     let bw = band(lam, gsd);
-    let bar = mixc(s.pal(pal::SAND + 2), s.pal(pal::SOIL + 1), 0.25) * 1.02;
+    // (a third of the way to the ground's colour: pale sand ribbons stood out like roads)
+    let bar = mixc(mixc(s.pal(pal::SAND + 2), s.pal(pal::SOIL + 1), 0.25) * 1.02, s.col, 0.3);
     let chan = mixc(bar, s.pal(pal::ROCK), 0.25) * 0.9;
     let col = mixc(bar, chan, smoothstep(0.7, 0.9, th) * bw + (1.0 - bw) * 0.15);
     s.composite(Layer { cov, albedo: col, cls: LC_DRY_RIVERBED, clear: 0.8, ..Default::default() });
@@ -1309,6 +1313,9 @@ mod tests {
     fn seamless_and_deterministic() {
         use rayon::prelude::*;
         let g = gen1();
+        // (one second generator for the determinism check, not one per place: nine generators
+        // at once on the GPU ran an 8 GB card out of memory under the parallel test load)
+        let g2 = gen1();
         let n = crate::TILE_SIZE;
         (0..PLACES.len()).into_par_iter().for_each(|i| {
             for z in [11u8, 15] {
@@ -1322,7 +1329,7 @@ mod tests {
                 }
                 assert!(across < 3.0 * inside + 1.0 * n as f64, "place {i} z{z}: across {across} inside {inside}");
                 if z == 15 {
-                    let a2 = gen1().tile(id);
+                    let a2 = g2.tile(id);
                     assert_eq!(a.elevation, a2.elevation, "place {i}");
                     assert_eq!(a.rgb, a2.rgb, "place {i}");
                 }

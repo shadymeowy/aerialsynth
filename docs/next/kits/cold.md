@@ -124,3 +124,13 @@ Polish round 7 (random-place audit): grey-brown polar soils (the core `polar` bi
 soils: orange polar land), greyer bare ice (172, 184, 192) and blue ice (160, 180, 196), crevasses grey (62, 72, 80) at
 60 % and 2.5 m deep, muted sedge in drained basins (lime blobs), a faint snow net in the late melt (a white polygon net
 over brown tundra); tundra, lichen and polar-desert mottling soft (`soft: 0.3`).
+
+Polish round 8 (audit): valley glaciers only in the mountains (the valley term × smoothstep 0.15–0.4 of `mountain`:
+ice tongues lay along every stream of a tundra plain, a29); crevasses short dashes (the 7 m firn noise) at 40 % of
+(70, 82, 92) and 1 m deep, from slopes 0.18–0.4 (long dark lines along the contours read as a contour map, a07); medial
+moraines faint (50 %) and only in the mountains; no snow net or per-cell patchwork in the late melt (a02); lakes and rivers
+freeze below −3 °C at the ecoregion's date (`FREEZE`; was −1.5: frozen lakes in snow-free forest, a15 a26); ecoregion
+dates late May … mid September, and at an ecoregion's border the date fades to midsummer, not to the annual mean (the
+10 km borders of cold ecoregions were snowed in: a17 a02); no lakes on perennial snow and ice; silty lakes (44, 62, 64),
+sedge basins olive-brown (104, 104, 78), a narrow shallow margin (rn 0.86–1), and a gentle slope limit on the lake mask
+(0.03–0.12, was 0.03–0.07: the lakes' size follows the mask by pixel and frayed into grey patches with islands of forest).

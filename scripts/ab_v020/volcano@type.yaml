@@ -1,4 +1,6 @@
-# volcano at a place of the same type in the next generator's world: crater lake volcano (docs/next/kits/volcanic.md) (the same local solar time)
+# volcano at a place of the same type in the next generator's world: a forested volcanic upland with valleys near a
+# cinder-cone field (3.0 N 99.0 W, tropical moist forest, mean slope 15 deg like v0.2.0's 16; no town; round 7 showed a
+# 326k city by a crater-lake volcano at 11.85 N 106.32 W) (the same local solar time)
 world:
   seed: 1
   generator: next
@@ -14,8 +16,8 @@ trajectory:
     altitude_m: 1400
     heading_deg: 90
     kind: line
-    lat: 11.85
-    lon: -106.32
+    lat: 3.0
+    lon: -99.0
     duration_s: 7.6
 render:
   supersample: 2
@@ -23,7 +25,7 @@ render:
   lighting:
     mode: clock
     date: '2026-06-21'
-    time_utc: '17:05:17'
+    time_utc: '16:36:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:

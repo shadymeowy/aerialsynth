@@ -403,8 +403,10 @@ fn biome_band_range(bi: u32, wt: f32, band: u32) -> vec2<u32> {
 struct BLIter {
     ra: vec2<u32>,
     rb: vec2<u32>,
+    rc: vec2<u32>,
     wa: f32,
     wb: f32,
+    wc: f32,
     q: u32,
     li: u32,
     kin: KIn,
@@ -415,6 +417,8 @@ fn bl_begin(s: ptr<function, Stack>) -> BLIter {
     let band = band_index((*s).c.gsd);
     let ba = (*s).bio.a;
     let bb = (*s).bio.b;
+    let bc = (*s).bio.c;
+    it.wc = select(0.0, (*s).bio.wst, bc != ba);
     it.wa = select(1.0 - (*s).bio.w, 1.0, bb == ba);
     it.wb = (*s).bio.w;
     it.ra = biome_band_range(ba, it.wa, band);
@@ -422,13 +426,15 @@ fn bl_begin(s: ptr<function, Stack>) -> BLIter {
     if (bb != ba) {
         it.rb = biome_band_range(bb, it.wb, band);
     }
+    it.rc = biome_band_range(bc, it.wc, band);
     it.q = 0u;
     return it;
 }
 
 /// The next layer of the slot to evaluate (`it.li`, its inputs `it.kin`); false at the end.
 fn bl_next(s: ptr<function, Stack>, slot: u32, it: ptr<function, BLIter>) -> bool {
-    let n = (*it).ra.y + (*it).rb.y;
+    let nab = (*it).ra.y + (*it).rb.y;
+    let n = nab + (*it).rc.y;
     while ((*it).q < n) {
         let q = (*it).q;
         (*it).q = q + 1u;
@@ -436,13 +442,26 @@ fn bl_next(s: ptr<function, Stack>, slot: u32, it: ptr<function, BLIter>) -> boo
         var wt = (*it).wa;
         if (q < (*it).ra.y) {
             li = band_idx[(*it).ra.x + q];
-        } else {
+        } else if (q < nab) {
             li = band_idx[(*it).rb.x + q - (*it).ra.y];
             wt = (*it).wb;
+        } else {
+            li = band_idx[(*it).rc.x + q - nab];
+            wt = (*it).wc;
         }
         let l = klayers[li];
         if (l.head.x != slot || (*s).done) {
             continue;
+        }
+        // (`layers::biome_layers`: the other ecoregion's flat layers blend in by `wc`; layers
+        // with a height stay the mosaic's)
+        let flat = (l.head.w & 0xffu) == HM_NONE || slot == 10u;
+        if (q >= nab) {
+            if (!flat) {
+                continue;
+            }
+        } else if (flat) {
+            wt *= 1.0 - (*it).wc;
         }
         var m = 1.0;
         for (var w = 0u; w < l.head2.z; w++) {
@@ -516,11 +535,11 @@ fn layer_zonal(s: ptr<function, Stack>) {
     {
         let b30 = band(30.0, gsd);
         if (b30 > 0.0 && cover > 0.0) {
-            let dry_p = smoothstep1(0.05, 0.55, perlin3(0x3EADlu, p * (1.0lf / 60.0lf)) + 0.5 * perlin3(0x3EAElu, p * (1.0lf / 22.0lf))) * b30 * cover;
+            let dry_p = smoothstep1(0.05, 0.55, perlin3(0x3EADlu, p * (1.0lf / 60.0lf)) + 0.5 * perlin3(0x3EAElu, p * (1.0lf / 22.0lf))) * b30 * cover * (1.0 - smoothstep1(0.45, 0.65, wet));
             col = mixc(col, col * vec3<f32>(1.16, 1.06, 0.80), 0.45 * dry_p * meadow);
         }
         let b12 = band(12.0, gsd);
-        if (b12 > 0.0 && cover > 0.0) {
+        if (b12 > 0.0) {
             var m = 0.10 * perlin3(0x3EB1lu, p * (1.0lf / 12.0lf)) * b12;
             let b4 = band(4.0, gsd);
             if (b4 > 0.0) {
@@ -530,7 +549,7 @@ fn layer_zonal(s: ptr<function, Stack>) {
                     m += 0.06 * perlin3(0x3EB3lu, p * (1.0lf / 1.3lf)) * b13;
                 }
             }
-            col *= 1.0 + m * cover * meadow;
+            col *= 1.0 + m * (cover * meadow + 0.6 * (1.0 - cover));
         }
     }
     if (t.gully != 0.0) {
@@ -855,8 +874,8 @@ fn layer_canopy(s: ptr<function, Stack>) {
         * (1.0 - smoothstep1(-1.2, -2.4, temp + 1.0 * snow_n)) * m.veg;
     dens *= limit;
     dens_sav *= limit;
-    let shrub_clim = smoothstep1(0.15, 0.3, wet) * (1.0 - smoothstep1(0.6, 0.8, wet)) * smoothstep1(2.0, 10.0, temp);
-    let shrub_patch = smoothstep1(-0.2, 0.5, (*s).pf.f[PF_PATCH] + 0.4 * (*s).pf.f[PF_LAND]);
+    let shrub_clim = smoothstep1(0.04, 0.26, wet) * (1.0 - smoothstep1(0.6, 0.8, wet)) * smoothstep1(2.0, 10.0, temp);
+    let shrub_patch = max(smoothstep1(-0.2, 0.5, (*s).pf.f[PF_PATCH] + 0.4 * (*s).pf.f[PF_LAND]), 0.6 * (1.0 - smoothstep1(0.2, 0.35, wet)));
     let shrub = clamp((0.45 * shrub_clim * shrub_patch * (1.0 - forest) * max(m.natural_ok, 0.4 * m.rock) * (1.0 - m.field_cov) * sveg(s, VEG_SHRUBS) * style.veg.z + gully_scrub)
         * td * m.veg, 0.0, 0.7);
     var stand = (*s).pf.stand;
@@ -898,6 +917,9 @@ fn layer_canopy(s: ptr<function, Stack>) {
         var colour = cr.colour.xyz;
         if ((cr.flags & 4u) != 0u) {
             colour = mixc(cr.colour.xyz, cr.colour_dry.xyz, dry);
+        }
+        if (cr.share == 3u) {
+            colour = mixc(colour, (*s).col, 0.35);
         }
         let stand_ok = (cr.flags & 2u) != 0u;
         layers[k] = TreeLayer(
@@ -983,8 +1005,8 @@ fn layer_standing(s: ptr<function, Stack>) {
     if (l.water_kind == W_OCEAN) {
         col = mixc(pal3(PAL_OCEAN_SHALLOW), pal3(PAL_OCEAN_DEEP), smoothstep1(0.0, 28.0, depth));
     } else {
-        let sh = 1.0 - smoothstep1(0.0, 3.5, depth * max(1.0 + 0.5 * wn, 0.2));
-        col = mixc(mixc(pal3(PAL_LAKE_DEEP), srgb(26.0, 32.0, 26.0), 0.35), mixc(pal3(PAL_RIVER), srgb(78.0, 76.0, 56.0), 0.6), 0.7 * sh);
+        let sh = 1.0 - smoothstep1(0.0, 1.8, depth * max(1.0 + 0.5 * wn, 0.2));
+        col = mixc(mixc(pal3(PAL_LAKE_DEEP), srgb(26.0, 32.0, 26.0), 0.35), mixc(pal3(PAL_RIVER), srgb(78.0, 76.0, 56.0), 0.6), 0.65 * sh * sh);
     }
     col *= 1.0 + 0.06 * wn;
     if (l.water_kind == W_OCEAN && depth < 3.0) {
