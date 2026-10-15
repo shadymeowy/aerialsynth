@@ -220,7 +220,7 @@ fn desert_slot_azonal(s: ptr<function, Stack>) {
         if (sb > 0.0) {
             let ec = cross(c.up, c.east * wd.d.x + c.north * wd.d.y);
             let g = gully_octave(cfg.seed ^ DS_STREAK, p / 45.0lf, ec).x;
-            streak = 0.2 + (smoothstep1(0.2, 0.9, g) - 0.2) * sb;
+            streak = 0.2 + 0.4 * (smoothstep1(0.2, 0.9, g) - 0.2) * sb;
         }
         pav = mixc(pav, sc, 0.35 * streak * min(2.0 * t.sand, 1.0));
         var ly = layer_paint(fringe, pav, LC_GRAVEL);

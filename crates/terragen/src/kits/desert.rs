@@ -769,7 +769,8 @@ pub fn azonal(s: &mut Stack) {
         if sb > 0.0 {
             let ec = c.up.cross(c.east * wd.x + c.north * wd.y);
             let (g, _) = World::gully_octave(seed ^ S_STREAK, p / 45.0, ec);
-            streak = 0.2 + (smoothstep(0.2, 0.9, g) - 0.2) * sb;
+            // (faint: crisp pale streaks read as scratches over the plain)
+            streak = 0.2 + 0.4 * (smoothstep(0.2, 0.9, g) - 0.2) * sb;
         }
         pav = mixc(pav, sc, 0.35 * streak * (2.0 * t.sand).min(1.0));
         s.composite(Layer { cov: fringe, albedo: pav, cls: LC_GRAVEL, clear: 0.6, ..Default::default() });
