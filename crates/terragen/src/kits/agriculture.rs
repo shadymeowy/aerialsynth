@@ -1222,11 +1222,13 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
     let (ru, rv) = if rot { (pc.fy, pc.fx) } else { (pc.fx, pc.fy) };
     match k {
         kind::CROP | kind::HAY => {
-            let u_crop = if u01k(id, 16) < 0.7 { u01k(cluster, 6) } else { u01k(id, 6) };
+            // (crop and stage by the parcel, not by each terrace bench: single ripe benches drew
+            // yellow crescents over the green terraces, audit a12)
+            let u_crop = if u01k(pc.id, 16) < 0.7 { u01k(cluster, 6) } else { u01k(pc.id, 6) };
             let c = if k == kind::HAY { 6 } else { pick_crop(pl.mix, u_crop) };
             let (cc, row) = CROPS[c as usize];
             // (fields of a region in different stages: v0.2.0's patchwork of green, ripe and cut)
-            let ph = (px.season + 0.45 * (u01k(id, 20) - 0.5)).clamp(0.0, 1.0);
+            let ph = (px.season + 0.45 * (u01k(pc.id, 20) - 0.5)).clamp(0.0, 1.0);
             col = stage(&cc, ph) * (0.95 + 0.10 * u01k(id, 8));
             // (hay meadows mown from early summer: pale straw, not one more green parcel)
             if k == kind::HAY && u01k(id, 36) < hay_cut(ph) {

@@ -1174,8 +1174,8 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
     }
     switch k {
         case 0u, 3u: {
-            var u_crop = u01k(id, 6lu);
-            if (u01k(id, 16lu) < 0.7) {
+            var u_crop = u01k(pc.id, 6lu);
+            if (u01k(pc.id, 16lu) < 0.7) {
                 u_crop = u01k(cluster, 6lu);
             }
             var c = 6u;
@@ -1184,7 +1184,7 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
             }
             let cc = agri_crop(c);
             let row = cc[3];
-            let ph = clamp(px.season + 0.45 * (u01k(id, 20lu) - 0.5), 0.0, 1.0);
+            let ph = clamp(px.season + 0.45 * (u01k(pc.id, 20lu) - 0.5), 0.0, 1.0);
             col = agri_stage(cc, ph) * (0.95 + 0.10 * u01k(id, 8lu));
             if (k == AK_HAY && u01k(id, 36lu) < agri_hay_cut(ph)) {
                 col = mixc(col, srgb(166.0, 156.0, 96.0) * (0.92 + 0.16 * u01k(id, 37lu)), 0.75);
