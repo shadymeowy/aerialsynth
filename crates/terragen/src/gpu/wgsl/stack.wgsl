@@ -1048,11 +1048,12 @@ fn layer_rivers(s: ptr<function, Stack>) {
     let detail = (*s).pf.f[PF_DETAIL];
     let wet_r = t.river_wet;
     var wcol = mixc(pal3(PAL_RIVER), pal3(PAL_LAKE_DEEP), smoothstep1(30.0, 200.0, l.river_hw * 2.0));
-    wcol = mixc(wcol, srgb(74.0, 82.0, 62.0), 0.6 * (1.0 - smoothstep1(0.2, 0.4, t.moist)));
+    wcol = mixc(wcol, srgb(84.0, 84.0, 58.0), 0.85 * (1.0 - smoothstep1(0.2, 0.4, t.moist)));
     wcol = mixc(wcol, srgb(96.0, 138.0, 140.0), 0.7 * t.mountain * smoothstep1(8.0, 0.0, temp));
     let ice = smoothstep1(-1.5, -4.0, temp + 1.5 * (*s).pf.f[PF_SNOW]);
     wcol = mixc(wcol, mixc(pal3(PAL_SNOW) * 0.9, srgb(170.0, 190.0, 200.0), 0.35 * (0.5 + 0.5 * detail)), ice);
-    let dry_col = mixc((*s).col, mixc(pal3(PAL_GRAVEL), pal3(PAL_SAND + 2u), 0.5) * (1.0 + 0.1 * detail), 0.4 * (1.0 - 0.7 * (*s).m.riparian));
+    let dry_k = 0.4 * (1.0 - 0.7 * (*s).m.riparian) * (1.0 - 0.55 * (1.0 - smoothstep1(0.2, 0.4, t.moist))) * (1.0 - smoothstep1(0.2, 0.45, l.slope));
+    let dry_col = mixc((*s).col, mixc(pal3(PAL_GRAVEL), pal3(PAL_SAND + 2u), 0.5) * (1.0 + 0.1 * detail), dry_k);
     let tw = l.river_hw * smoothstep1(0.35, 1.0, wet_r) * (1.0 - 0.25 * (1.0 - smoothstep1(0.9, 1.0, wet_r)) * (1.0 - perlin3(0x51DE7E02lu, (*s).c.p / 260.0lf)));
     let off = (l.river_hw - tw) * clamp(1.8 * perlin3(0x51DE7E01lu, (*s).c.p / 420.0lf), -1.0, 1.0);
     let adt = abs(l.river_d - off);
@@ -1074,6 +1075,10 @@ fn layer_rivers(s: ptr<function, Stack>) {
     var ly = layer_paint(cov, rc, cls);
     ly.dh = l.river_level;
     ly.hmode = HM_ABS;
+    if (tw <= 0.0) {
+        ly.dh = -0.3;
+        ly.hmode = HM_BLEND;
+    }
     ly.relit = 1.0;
     ly.water = !frozen && wet;
     composite(s, ly);
