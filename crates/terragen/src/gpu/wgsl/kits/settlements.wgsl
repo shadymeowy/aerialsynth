@@ -156,13 +156,36 @@ fn st_pick_pattern(pl: StPl, z: u32, did: u64, industrial: bool) -> u32 {
     if (a == 3u) {
         return SP_ORGANIC;
     }
-    if ((a == 5u || a == 6u || a == 11u) && u < 0.3 && z == SZ_CBD) {
-        return SP_RADIAL;
+    if ((a == 5u || a == 6u || a == 8u || a == 11u) && z == SZ_CBD && pl.level >= 2u) {
+        return SP_ORGANIC;
+    }
+    if ((a == 5u || a == 6u || a == 7u || a == 9u) && (z == SZ_SUBURB || z == SZ_PERI) && pl.level >= 3u && u < 0.75) {
+        return SP_CURVI;
     }
     if ((a == 4u || a == 9u) && u < 0.5) {
         return SP_SUPER;
     }
     return SP_GRID;
+}
+
+/// `town::shared_industry`.
+fn st_shared_industry(pl: StPl) -> bool {
+    return st_pick_pattern(pl, SZ_OUTER, mix64(pl.seed ^ 0x2A7Elu), false) == SP_GRID;
+}
+
+/// `town::ring_dist`.
+fn st_ring_dist(pl: StPl, q: vec2<f32>) -> f32 {
+    let a = pl.arch;
+    if (pl.form != SF_CITY || pl.level < 3u || !(a == 5u || a == 6u || a == 8u || a == 11u)) {
+        return 1e9;
+    }
+    let se = sqrt(pl.elong);
+    let qe = vec2<f32>(q.x / se, q.y * se);
+    let phi = atan2(qe.y, qe.x);
+    let s = pl.seed ^ 0x219lu;
+    let cbd = 0.07 + 0.03 * (f32(pl.level) - 3.0) + 0.03 * u01k(pl.seed, 40lu);
+    let rr = pl.r * (1.25 * cbd + 0.015) * (1.0 + 0.12 * sin(2.0 * phi + TAU * u01k(s, 1lu)) + 0.07 * sin(3.0 * phi + TAU * u01k(s, 2lu)) + 0.04 * sin(5.0 * phi + TAU * u01k(s, 3lu)));
+    return abs(length(qe) - rr);
 }
 
 /// `town::Blk`.
@@ -428,6 +451,8 @@ struct StDist {
     jit: f32,
     warp: f32,
     w2cell: f32,
+    mg: i64,
+    buf: f32,
 }
 
 /// `town::district`.
@@ -475,6 +500,8 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
     var jit = 0.3;
     var warp = 0.0;
     var w2cell = 0.0;
+    var mg = 0li;
+    var buf = 1e9;
     if (fm == SF_CITY) {
         var dcell = 400.0;
         if (pl.level == 2u) {
@@ -493,10 +520,16 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
         let dp = st_district_pattern(pl, dc.point, dc.id);
         pattern = dp.x;
         let zd = dp.y;
+        let shr = st_shared_industry(pl);
+        let net1 = select(pattern, SP_GRID, shr && pattern == SP_INDUSTRIAL);
         if (pl.level >= 2u) {
             let pt2 = st_district_pattern(pl, dc.point2, dc.id2).x;
-            if (pt2 != pattern || pattern == SP_INDUSTRIAL) {
+            let net2 = select(pt2, SP_GRID, shr && pt2 == SP_INDUSTRIAL);
+            if (net2 != net1 || (pattern == SP_INDUSTRIAL && !shr)) {
                 art = worley2_edge_dist(dc, qd);
+            }
+            if (pattern == SP_INDUSTRIAL && pt2 != SP_INDUSTRIAL) {
+                buf = worley2_edge_dist(dc, qd);
             }
         }
         if (dp.z != 0u) {
@@ -504,8 +537,11 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
         } else {
             z = min(max(zd, min(z, SZ_INNER)), SZ_PERI);
         }
-        if (pattern != SP_INDUSTRIAL) {
-            did = mix64(pl.seed ^ 0x1A70lu ^ u64(pattern));
+        if (pattern != SP_INDUSTRIAL || shr) {
+            did = mix64(pl.seed ^ 0x1A70lu ^ u64(net1));
+        }
+        if (pattern == SP_INDUSTRIAL && shr) {
+            mg = select(2li, 3li, u01k(dc.id, 14lu) < 0.5);
         }
         let survey = pl.arch == 7u;
         if (survey) {
@@ -534,6 +570,12 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
         } else if (pattern == SP_RADIAL) {
             b = 80.0 + 40.0 * u2;
             sw = 5.0;
+        } else if (pattern == SP_CURVI) {
+            b = (80.0 + 40.0 * u2) * bf;
+            asp = 1.8 + 0.6 * u01k(did, 7lu);
+            sw = 4.5;
+            jit = 0.15;
+            warp = 34.0;
         } else if (pattern == SP_ORGANIC) {
             w2cell = select(55.0 + 35.0 * u2, 40.0, pl.arch == 3u);
             sw = select(2.8 + 1.4 * u01k(did, 8lu), 1.7, pl.arch == 3u);
@@ -547,6 +589,10 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
             jit = 0.45;
             warp = 9.0;
             w2cell = 7.5;
+        } else if (mg > 0li) {
+            b = (70.0 + 60.0 * u2) * bf;
+            asp = select(1.0 + 0.6 * u01k(did, 7lu), 2.2, survey);
+            sw = 1.3 * (4.5 + 2.5 * u01k(did, 8lu));
         } else {
             b = 230.0 + 110.0 * u2;
             asp = 0.7 + 0.4 * u01k(did, 7lu);
@@ -593,6 +639,8 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
     o.jit = jit;
     o.warp = warp;
     o.w2cell = w2cell;
+    o.mg = mg;
+    o.buf = buf;
     return o;
 }
 
@@ -608,15 +656,16 @@ struct StCell {
     size: f32,
 }
 
-fn st_cell(sd: u64, axis: i64, x: f32, bb: f32, jit: f32) -> StCell {
+fn st_cell(sd: u64, axis: i64, x: f32, bb: f32, jit: f32, m: i64) -> StCell {
     var i = i64(floor(x / bb));
     if (x < st_line(sd, axis, i, bb, jit)) {
         i -= 1li;
     } else if (x >= st_line(sd, axis, i + 1li, bb, jit)) {
         i += 1li;
     }
+    i = (i - st_rem(i, m));
     let a0 = st_line(sd, axis, i, bb, jit);
-    let a1 = st_line(sd, axis, i + 1li, bb, jit);
+    let a1 = st_line(sd, axis, i + m, bb, jit);
     var o: StCell;
     o.i = i;
     o.off = x - a0;
@@ -680,16 +729,17 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             let l = 230.0 * warp / 42.0;
             qr += vec2<f32>(sin(qr.y / l + 6.0 * u01k(did, 9lu)), sin(qr.x / (1.13 * l) + 6.0 * u01k(did, 10lu))) * warp;
         }
-        if (pattern == SP_GRID && pl.level >= 3u) {
+        if ((pattern == SP_GRID || d.mg > 0li) && pl.level >= 3u) {
             qr = st_big_grid_warp(qr, pl.seed);
         }
         let bx = b;
         let by = b * asp;
         let sd = did ^ 0x5EE7lu;
-        let cx = st_cell(sd, 0li, qr.x, bx, jit);
-        let cy = st_cell(sd, 1li, qr.y, by, jit);
-        let near_x = cx.i + select(0li, 1li, cx.off > cx.size - cx.off);
-        let near_y = cy.i + select(0li, 1li, cy.off > cy.size - cy.off);
+        let m = max(d.mg, 1li);
+        let cx = st_cell(sd, 0li, qr.x, bx, jit, m);
+        let cy = st_cell(sd, 1li, qr.y, by, jit, m);
+        let near_x = cx.i + select(0li, m, cx.off > cx.size - cx.off);
+        let near_y = cy.i + select(0li, m, cy.off > cy.size - cy.off);
         let dx = min(cx.off, cx.size - cx.off);
         let dy = min(cy.off, cy.size - cy.off);
         let main_x = st_rem(near_x, 4li) == 0li && pattern == SP_GRID;
@@ -745,7 +795,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         blk.bd = dr - 2.0 * sw;
     } else if (pattern == SP_LINEAR) {
         let sd = pl.seed ^ 0x11Elu;
-        let cl = st_cell(sd, 0li, q.x, b, jit);
+        let cl = st_cell(sd, 0li, q.x, b, jit, 1li);
         let side = select(1li, -1li, q.y < 0.0);
         blk.ds = abs(q.y);
         blk.along = q.x;
@@ -793,7 +843,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     o.major = blk.major;
     // ---- streets and arterials
     let edge_thr = 0.42 + 0.1 * (u01k(blk.id, 31lu) - 0.5);
-    let street_ok = dens_here > edge_thr;
+    let street_ok = dens_here > edge_thr - select(0.0, 0.1, blk.major);
     var art_hw = 3.5;
     if (pl.level == 2u) {
         art_hw = 5.0;
@@ -815,6 +865,18 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     }
     if (has_streets && street_ok) {
         o.street = max(o.street, band_cov(blk.ds, blk.sw, fw));
+    }
+    let rd = st_ring_dist(pl, q);
+    let ring_hw = art_hw + 2.0;
+    if (rd < ring_hw + 2.0 * fw && dens_here > 0.35) {
+        let c = band_cov(rd, ring_hw, fw);
+        if (c > o.street) {
+            o.ds = rd;
+            o.sw = ring_hw;
+            o.major = true;
+            o.sid = pl.seed ^ 0x219lu;
+            o.street = c;
+        }
     }
     o.lamp_sp = 0.0;
     if (has_streets) {
@@ -1219,7 +1281,8 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             let dl = st_dens_at(pl, q, lot_dq, e.n, dmul);
             var edge = 1.0;
             if (fm == SF_CITY) {
-                edge = smoothstep1(edge_thr, edge_thr + 0.1, dl);
+                let thr = edge_thr - 0.16 * u01k(lh, 33lu);
+                edge = smoothstep1(thr, thr + 0.1, dl);
             }
             let occ = mix(pow(dl, 0.7) * 1.05, pow(dl, 0.35) * 1.1, smoothstep1(0.35, 0.5, dl));
             let built = u01k(lh, 3lu) < occ * edge;
@@ -1604,6 +1667,29 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             rim *= el;
         }
     }
+    // ---- the green buffer along an estate's edge
+    if (pattern == SP_INDUSTRIAL && d.buf < 30.0 && inside) {
+        let k = smoothstep1(30.0, 22.0, d.buf);
+        cov_lot = max(cov_lot, k);
+        let g = mixc(yard, srgb(84.0, 112.0, 56.0), 0.5) * (0.95 + 0.1 * e.detail);
+        col = mixc(col, g, k);
+        h *= 1.0 - k;
+        roof *= 1.0 - k;
+        rim *= 1.0 - k;
+        if (k > 0.5) {
+            cls = LC_PARK;
+        }
+        let tcl = floor(ublk / 10.0);
+        let th = hash2(blk.id ^ 0xB0Flu, i64(tcl.x), i64(tcl.y));
+        let tp = (tcl + 0.5 + 0.5 * (vec2<f32>(u01k(th, 1lu), u01k(th, 2lu)) - 0.5)) * 10.0;
+        if (u01k(th, 3lu) < 0.6 * k) {
+            let tc = st_aa(3.0 + 1.5 * u01k(th, 4lu) - length(ublk - tp), fw);
+            if (tc > tree) {
+                tree = tc;
+                tree_h = 8.0 + 6.0 * u01k(th, 5lu);
+            }
+        }
+    }
     // ---- street trees
     let ar = pl.arch;
     let treed = (ar == 5u || ar == 6u || ar == 7u || ar == 9u || ar == 4u) && (z == SZ_INNER || z == SZ_OUTER || z == SZ_SUBURB) && u01k(blk.sid, 31lu) < 0.4;
@@ -1634,7 +1720,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         var asph = srgb(76.0, 76.0, 80.0) * (1.0 + 0.05 * e.detail);
         if (o.major) {
             asph = st_asphalt() * 0.92;
-        } else if (fm != SF_CITY || pattern == SP_ORGANIC || pattern == SP_INFORMAL) {
+        } else if (fm != SF_CITY || (pattern == SP_ORGANIC && pl.level < 3u) || pattern == SP_INFORMAL) {
             asph = mixc(srgb(150.0, 128.0, 100.0), st_paving() * 0.9, smoothstep1(0.35, 0.6, pl.dev));
         }
         col = mixc(col, asph, street / cov);
