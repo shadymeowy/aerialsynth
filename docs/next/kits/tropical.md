@@ -208,3 +208,6 @@ grass (178, 156, 104); the miombo's spring flush muted (128, 98, 70).
 Polish round 8: savanna burn scars dark grey-brown (54, 50, 45; miombo 56, 50, 44) instead of black, on a fifth of the
 land (audit a01: black scars of kilometres read as holes); the pale savanna grass fades out from moisture 0.42–0.56
 (volcano: bleached hilltops above the forested valleys).
+
+Polish round 9: the sediment-laden brown rivers only in humid climates (moisture 0.3–0.45 fading in): in hot deserts
+a uniform brown ribbon down a canyon floor read as a dirt road.

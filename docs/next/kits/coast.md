@@ -168,3 +168,6 @@ desert_coast@type had a quilt of pink, white and teal ponds).
 
 Polish round 8: the delta plain's margin softer (smoothstep ±0.35, the 52 m octave 25 %) and its tidal creeks fainter
 (desert_coast@type: a mottled delta edge with a net of dark creeks).
+
+Polish round 9: on arid coasts the high tidal flats are sabkha (salt-crusted silt in the hue of the land's soil, soft
+crusts, class `salt_flat`) instead of green and rust salt marsh (a mottled marsh over a desert coast).

@@ -261,3 +261,13 @@ town centres (BSP depth 4: lots of ~13–25 m): houses and low blocks fill the l
 up to 13 × 11 m), 3.5–8 m high with a few up to ~20 m, two thirds of them with pitched roofs in the culture's palette
 (the boxes of round 6 were 3–7 floors with flat grey roofs, four per block); their coarse mean follows (green 0.3, paved
 0.3, roofs a third flat). The slate cultures' red tile is less saturated (146, 84, 66).
+
+Polish round 9 (the "stitched" look): radial towns have ring boulevards and radial avenues in their CBD districts
+only, a grid beyond (a whole city of concentric rings read as artificial, dusk@type); a city's grid bends gently
+(±105 m at 2.7–7.9 km) and its blocks grow and shrink by ±12 % over 10 km (`big_grid_warp`: one straight grid to the
+horizon read as a pattern); the skyline thins and falls off from the centre and a few towers stand in the inner zone
+near it (a round cake of towers with a hard edge); warehouse roofs in weathered greys and darker yards (white estate
+patches); trees on car parks and around plazas (empty asphalt blocks); the town's edge frays (the street threshold
+varies by block, the last lots thin out over a wider band, unbuilt fringe lots are gardens and allotments). Still
+open: industrial estates keep their district outline and grid, and the metro is one grid family to the horizon
+(round 9 compared metro stills at 1.5 km, oblique and nadir).

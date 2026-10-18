@@ -61,8 +61,9 @@ landscapes but looks worse in places, which is why it is not the default:
   and towns can grow together into large built areas; **lakes** can look broken where rivers,
   basins and kits meet.
 - **Deltas** are lobate with wandering distributaries, their silt in the land's hue (round 5);
-  **canyons** have stepped walls that wander into side canyons and spurs (round 5) with benches
-  of varied ledges (round 7), but their floors are flat; desert floors and arid deltas are even
+  **canyons** have walls of strata at absolute elevations (cliff-forming beds and talus slopes of
+  varied thickness), warped by spurs and gullies, over a narrow floor with a low-water river between
+  bars (round 9), but the walls are smoother than real eroded sandstone; desert floors and arid deltas are even
   (round 6), barchans only near the ergs of hyper-arid deserts (round 7); temperate forests have
   v0.2.0's crowns but render darker; the highest ranges (5–7 km) are as steep as the Himalaya
   (mean slope ~31° at 30 m, round 7), still steeper and greyer than v0.2.0's smooth snowfields.
@@ -71,8 +72,12 @@ landscapes but looks worse in places, which is why it is not the default:
   (rounds 7–8), so steppe and forest no longer draw a patchwork of patches there.
 - **Cold lands** (round 8): glaciers only in mountain valleys and without contour stripes, open
   lakes in the summer datasets (frozen only below −3 °C at the ecoregion's date), no snowed-in
-  ecoregion borders. Small lakes still read pale from oblique views (the renderer's sky
-  reflection on dark water).
+  ecoregion borders. Lakes and ponds have flat water and crisp shores without islets or pale
+  halos (round 9), but on hillsides of the lowland ice fields a lake can lie tilted, and
+  thermokarst lakes read black from oblique views.
+- **Towns** (round 9): a city's grid bends and its block size drifts over kilometres, the skyline
+  fades out from the centre, radial streets only in the centre, estates in greys, trees on car
+  parks, frayed town edges with gardens; industrial estates still keep their district outlines.
 - **Speed:** tiles cost about 2–3× classic's on a GPU (Tesla P4, 64 cold tiles at z12 / z14 /
   z16: 11.2 / 6.5 / 5.6 s against 3.8 / 3.4 / 2.9 s), mostly the kits' pass B and the host-built
   routes of a new area.
@@ -171,7 +176,7 @@ fields at 53° N, and a hard, circular biome border in the oblique view (one of 
 `scripts/ab_v020/<scene>.yaml` are the same scenes with `generator: next`, and
 `<scene>@type.yaml` the same camera at a place of the same landscape type in next's world.
 [`ab/next_quality/`](ab/next_quality/) has the sheets of the latest comparison (columns:
-v0.2.0, round 7, round 8) and their image statistics (`stats.md`). Scenes whose pose shows
+v0.2.0, round 8, round 9) and their image statistics (`stats.md`). Scenes whose pose shows
 another landscape in next's world (sea at `bank` and `coast`, farmland at `night` and `dusk`)
 have an `@type` twin at a place of v0.2.0's landscape; `probe_px towns LAT LON R_KM` lists the
 settlements near a point to find one.
@@ -183,7 +188,7 @@ hand picking) with the nearest land point of the classic world (the same point a
 `scripts/ab_v020.py audit` renders them with the `farmland` still's camera (700 m above the
 ground, 42° down, 640 × 360, the still's local solar time 10:41, June; December south of the
 equator) with either generator, and `sheet --audit` puts classic | next side by side
-([`ab/next_quality/audit*.jpg`](ab/next_quality/): classic, round 7, round 8; `audit_stats.md`).
+([`ab/next_quality/audit*.jpg`](ab/next_quality/): classic, round 8, round 9; `audit_stats.md`).
 In round 7, 6 of the 30 places looked clearly worse than classic's typical quality (13 in
 round 6), 5 of them cold (frozen lakes in snow-free forest, glacier stripes, snow nets over
 tundra), 6 more borderline (ecotone patchworks, autumn and burn colours, paddy terraces). In
@@ -191,7 +196,12 @@ round 8 none is clearly worse; 7 are borderline (plain brown tundra and polar pl
 high-mountain snow melt, barchan crescents, a textured but bare semi-arid plain, a steppe
 mottle, a lowland ice field), the rest equal or better (fields, forests and towns where classic
 draws plain ground). `volcano@type` and `boreal@type` moved to like-for-like places in round 8
-(a forested volcanic upland, needleleaf forest hills).
+(a forested volcanic upland, needleleaf forest hills). In round 9 the lake with a pale halo (a26),
+the steppe camouflage (a18) and the pale lake rims (a15) are gone; a lowland ice field (a29) shows
+a lake lying tilted on a slope (cold lakes no longer shrink on the micro relief's slopes), and the
+plain tundra, snow melt, barchan and semi-arid places stay borderline (a02 a07 a11 a16 a30).
+`desert_coast@type` moved to a hot desert coast with the sea in view and `volcano@type` looks up its
+valley in round 9.
 
 ```sh
 scripts/ab_v020.py audit --terrain target/release/terrain --generator classic --out /tmp/audit_c
