@@ -185,7 +185,9 @@ pub fn pick_pattern(pl: &Pl, z: u32, did: u64, industrial: bool) -> u32 {
     }
     match pl.arch {
         3 => ORGANIC,
-        5 | 6 | 11 if u < 0.3 => RADIAL,
+        // (ring boulevards and radial avenues in the centre only: a whole city of concentric rings
+        // read as artificial, dusk@type)
+        5 | 6 | 11 if u < 0.3 && z == zone::CBD => RADIAL,
         4 | 9 if u < 0.5 => SUPER,
         _ => GRID,
     }

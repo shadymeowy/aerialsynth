@@ -156,7 +156,7 @@ fn st_pick_pattern(pl: StPl, z: u32, did: u64, industrial: bool) -> u32 {
     if (a == 3u) {
         return SP_ORGANIC;
     }
-    if ((a == 5u || a == 6u || a == 11u) && u < 0.3) {
+    if ((a == 5u || a == 6u || a == 11u) && u < 0.3 && z == SZ_CBD) {
         return SP_RADIAL;
     }
     if ((a == 4u || a == 9u) && u < 0.5) {
