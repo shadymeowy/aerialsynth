@@ -431,7 +431,7 @@ fn tr_power_px(sg: FSeg, f: TrFrame, e: TrEnv) -> TrPx {
     let sp = sg.v.y;
     let hgt = sg.v.z;
     let fw = e.fw;
-    o.clear = tr_boxcov(f.dl, hw, fw);
+    o.clear = 0.6 * tr_boxcov(f.dl, hw, fw);
     let k = round(f.ar / sp);
     let sk = k * sp;
     let s0 = sg.s0;

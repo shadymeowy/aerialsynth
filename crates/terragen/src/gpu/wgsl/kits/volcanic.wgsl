@@ -32,7 +32,7 @@ fn vc_lava_look(age: f32, p: vec3<f64>, gsd: f32) -> VcLava {
     let wo = t2;
     var c = vec3<f32>(0.0);
     if (wf > 0.0) {
-        c += wf * srgb(24.0, 22.0, 24.0) * (1.0 + 0.2 * vc_nz(VC_SEED_LAVA, p, 14.0, gsd));
+        c += wf * srgb(66.0, 62.0, 62.0) * (1.0 + 0.3 * vc_nz(VC_SEED_LAVA, p, 14.0, gsd));
     }
     if (wm > 0.0) {
         c += wm * mixc(srgb(66.0, 58.0, 54.0), srgb(106.0, 70.0, 50.0), 0.5 + 0.5 * vc_nz(VC_SEED_LAVA + 1lu, p, 40.0, gsd));
@@ -238,7 +238,7 @@ fn vc_field_look(s: ptr<function, Stack>, it: Inst) {
         var col = mixc(srgb(44.0, 38.0, 38.0), srgb(118.0, 62.0, 42.0), 0.65 * t * t);
         col *= mix(1.0, 0.72, smoothstep1(0.22, 0.12, rho)) * (1.0 + 0.15 * smoothstep1(0.15, 0.22, rho) * smoothstep1(0.4, 0.22, rho));
         col = mixc(col, vc_ash_col(u01k(f.chash, 17lu)) * 0.9, 0.5 * smoothstep1(0.55, 0.95, rho));
-        col = mixc(col, (*s).col, 0.5 * smoothstep1(0.55, 1.0, rho));
+        col = mixc(col, (*s).col, 0.5 * smoothstep1(0.55, 1.0, rho) + 0.4 * smoothstep1(0.95, 1.4, rho));
         col = col * (1.0 + 0.18 * vc_nz(VC_SEED_ASH + 6lu, p, 9.0, gsd));
         var ly = layer_paint(f.cinder, col, LC_VOLCANIC_ASH);
         ly.clear = 1.0;

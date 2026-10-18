@@ -428,7 +428,9 @@ fn power_px(sg: &FSeg, f: &Frame, e: &Env) -> Px {
     let sp = sg.v[1] as f64;
     let hgt = sg.v[2] as f64;
     let fw = e.fw;
-    o.clear = boxcov(f.dl, hw, fw);
+    // (the corridor kept clear of tall trees, not of all growth: shrubs and saplings grow back between
+    // the cuttings; a cleared lawn drew a bright straight line through the forest, volcano@type)
+    o.clear = 0.6 * boxcov(f.dl, hw, fw);
     let k = (f.ar / sp).round();
     let sk = k * sp;
     let s0 = sg.s0 as f64;

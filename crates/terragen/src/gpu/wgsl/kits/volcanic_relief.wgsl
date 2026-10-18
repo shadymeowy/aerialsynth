@@ -8,8 +8,8 @@ const VC_TWO_OVER_PI: f32 = 0.6366197723675814;
 const VC_GULLY_AMP: f32 = 0.04;
 const VC_K_CONE: f32 = 0.0085816;
 const VC_K_MAAR: f32 = -0.0012251;
-const VC_MEAN_CINDER: f32 = 0.1790;
-const VC_MEAN_LAVA: f32 = 135.0;
+const VC_MEAN_CINDER: f32 = 0.2190;
+const VC_MEAN_LAVA: f32 = 51.0;
 
 // ---------------------------------------------------------------- existence
 
@@ -368,7 +368,7 @@ fn vc_ragged(qx: f32, qy: f32, r: f32, h: u64) -> f32 {
 }
 
 fn vc_tongue_w(sg: f32, w0: f32) -> f32 {
-    return w0 * pow(max(sin(PI * sg), 0.0), 0.6);
+    return w0 * sqrt(max(sg, 0.0) * max(1.0 - sg * sg * sg * sg, 0.0));
 }
 
 /// `volcanic::margin_noise`.
@@ -434,7 +434,7 @@ fn vc_field(it: Inst, p: vec3<f64>, gsd: f32, fw: f32, look: bool) -> VcField {
     o.z = (1.0 - bnd) * mean_z;
     o.cinder = (1.0 - bnd) * dm * (1.0 - mshare) * VC_MEAN_CINDER;
     o.lava = (1.0 - bnd) * dm * (1.0 - mshare) * lshare * VC_MEAN_LAVA / cs;
-    o.age = lage;
+    o.age = min(lage + 0.35, 1.0);
     if (bnd <= 0.0) {
         return o;
     }
@@ -484,20 +484,21 @@ fn vc_field(it: Inst, p: vec3<f64>, gsd: f32, fw: f32, look: bool) -> VcField {
                 let rho = vc_ragged(qx, qy, rc, h);
                 if (rho < 1.0) {
                     zs += hc * vc_cone_profile(rho);
-                    if (smoothstep1(1.0, 0.8, rho) > cinder) {
-                        cinder = smoothstep1(1.0, 0.8, rho);
-                        o.chash = h;
-                        o.crho = rho;
-                    }
+                }
+                let cv = max(smoothstep1(1.0, 0.8, rho), 0.25 * smoothstep1(1.6, 0.95, rho));
+                if (cv > cinder) {
+                    cinder = cv;
+                    o.chash = h;
+                    o.crho = rho;
                 }
                 if (look && u01k(h, 8lu) < lshare) {
                     let dir = TAU * u01k(h, 9lu);
                     let len = cs * (0.55 + 0.45 * u01k(h, 10lu));
-                    let w0 = 110.0 + 120.0 * u01k(h, 11lu);
+                    let w0 = 55.0 + 60.0 * u01k(h, 11lu);
                     let tg = vc_tongue(qx, qy, dir, 0.8 * rc, len, w0, TAU * u01k(h, 12lu), nzv, fw);
                     if (tg.x > lava) {
                         lava = tg.x;
-                        age = clamp(lage + 0.5 * (u01k(h, 13lu) - 0.5), 0.0, 1.0);
+                        age = clamp(lage + 0.35 + 0.5 * (u01k(h, 13lu) - 0.5), 0.0, 1.0);
                     }
                 }
             }
