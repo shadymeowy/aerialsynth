@@ -81,6 +81,24 @@
       kernel: patches
       params: { scale: 14, fraction: 0.45, octaves: 2, colour: [146, 148, 116], colour2: [122, 128, 92], colour_var: 0.1 }
       mask: { temp: [-12, 6] }
+      height: none
+    # heath and reindeer-lichen openings where the soil is thin, on the steeper slopes and knolls,
+    # and bare granite on the steepest (a closed canopy over every hill read as a monotone dark
+    # forest sea, boreal@type)
+    - slot: disturbance
+      kernel: patches
+      mask: { slope: [0.08, 0.3, null, null], natural: [0.3, 0.6, 2, 3], field: [-1, -1, 0.2, 0.5] }
+      params: { scale: 260, fraction: 0.36, octaves: 3, roughness: 0.55, colour: [146, 136, 112], colour2: [118, 114, 92], colour_var: 0.18, soft: 0.25 }
+      class: shrub
+      clear: 0.6
+      height: none
+    - slot: disturbance
+      kernel: patches
+      mask: { slope: [0.25, 0.5, null, null], natural: [0.3, 0.6, 2, 3] }
+      params: { scale: 70, fraction: 0.25, octaves: 3, roughness: 0.6, colour: [132, 128, 120], colour2: [104, 102, 96], colour_var: 0.2 }
+      class: rock
+      clear: 1.0
+      height: none
     # open spruce taiga where it is too dry for the canopy model's forest
     - slot: canopy
       kernel: scatter
@@ -111,6 +129,7 @@
       kernel: patches
       params: { scale: 9, fraction: 0.8, octaves: 2, roughness: 0.55, colour: [204, 202, 176], colour2: [172, 172, 140], colour_var: 0.12 }
       class: woodland
+      height: none
     # the spruce spires stand on the lichen where it is too dry for the canopy model's forest
     - slot: canopy
       kernel: scatter
@@ -150,6 +169,7 @@
       mask: { slope: [0.12, 0.3, 9, 10] }
       params: { scale: 16, fraction: 0.14, colour: [196, 188, 170], colour2: [170, 160, 142] }
       class: rock
+      height: none
   zonation:
     - { below_c: 9.0, biome: mixed_forest }
     - { below_c: 1.0, biome: subalpine_krummholz }
@@ -178,6 +198,7 @@
       kernel: patches
       params: { scale: 11, fraction: 0.3, octaves: 2, roughness: 0.6, colour: [212, 206, 192], colour2: [186, 180, 166] }
       class: rock
+      height: none
 
 # Chaparral: dense dark brush (chamise, manzanita) with burn scars of different ages.
 - id: chaparral
@@ -198,6 +219,7 @@
       params: { scale: 700, fraction: 0.1, octaves: 3, roughness: 0.5, colour: [58, 50, 44], colour2: [126, 116, 82], colour_var: 0.2 }
       class: burn_scar
       clear: 1.0
+      height: none
     - slot: canopy
       kernel: scatter
       mask: { natural: [0.3, 0.6, 2, 3], veg: [0.3, 0.6, 2, 3], field: [-1, -1, 0.2, 0.5] }
@@ -223,9 +245,11 @@
       kernel: patches
       params: { scale: 32, fraction: 0.82, octaves: 3, roughness: 0.55, colour: [198, 192, 158], colour2: [170, 160, 116], colour_var: 0.14, soft: 0.3 }
       class: steppe
+      height: none
     - slot: zonal
       kernel: patches
       params: { scale: 3.5, fraction: 0.35, octaves: 2, colour: [146, 140, 100], colour2: [178, 170, 130], colour_var: 0.2 }
+      height: none
   landuse: { agriculture: 0.8 }
 
 # Heathland: purple-brown heather on sandy, acid soils, scattered birch and pine, blown sand.
@@ -246,14 +270,17 @@
       kernel: patches
       params: { scale: 22, fraction: 0.72, octaves: 3, roughness: 0.5, colour: [116, 80, 88], colour2: [98, 78, 58], colour_var: 0.25 }
       class: shrub
+      height: none
     - slot: zonal
       kernel: patches
       params: { scale: 3, fraction: 0.45, octaves: 2, colour: [130, 88, 104], colour2: [78, 64, 50], colour_var: 0.2 }
+      height: none
     - slot: azonal
       kernel: patches
       mask: { slope: [-1, -1, 0.2, 0.35] }
       params: { scale: 70, fraction: 0.06, octaves: 3, colour: [210, 198, 164], colour2: [188, 174, 140] }
       class: sand
+      height: none
   landuse: { agriculture: 0.6 }
   zonation:
     - { below_c: 5.0, biome: moorland }
@@ -280,11 +307,13 @@
       kernel: patches
       params: { scale: 260, fraction: 0.22, octaves: 3, colour: [142, 126, 82], colour2: [124, 112, 72], colour_var: 0.1, soft: 0.3 }
       class: grass
+      height: none
     - slot: azonal
       kernel: patches
       mask: { slope: [-1, -1, 0.08, 0.15] }
       params: { scale: 36, fraction: 0.16, octaves: 3, roughness: 0.6, colour: [56, 44, 36], colour2: [74, 60, 48] }
       class: bog
+      height: none
   landuse: { agriculture: 0.2, towns: 0.4 }
 
 # ------------------------------------------------------------------ above the tree line
@@ -330,9 +359,11 @@
       kernel: patches
       params: { scale: 26, fraction: 0.72, octaves: 3, roughness: 0.5, colour: [118, 142, 70], colour2: [150, 152, 92], colour_var: 0.15, soft: 0.3 }
       class: alpine_meadow
+      height: none
     - slot: altitudinal
       kernel: patches
       params: { scale: 5, fraction: 0.1, octaves: 2, colour: [196, 180, 80], colour2: [166, 120, 150], colour_var: 0.2 }
+      height: none
     - slot: altitudinal
       kernel: contours
       mask: { slope: [0.18, 0.3, 0.9, 1.1] }
@@ -351,9 +382,32 @@
     - slot: zonal
       kernel: patches
       # (most of the ground: at 62 % the green grass between drew a camouflage of yellow and
-      # green blotches, audit a18)
-      params: { scale: 40, fraction: 0.85, octaves: 3, roughness: 0.5, colour: grass_dry, colour2: [150, 146, 100], colour_var: 0.12, soft: 0.3 }
+      # green blotches, audit a18; a soft blend, not a threshold: crisp-edged blobs of the two
+      # colours a hundred metres across still read as camouflage)
+      params: { scale: 40, fraction: 0.85, octaves: 3, roughness: 0.5, colour: grass_dry, colour2: [150, 146, 100], colour_var: 0.12, soft: 0.5 }
       class: steppe
+      height: none
+
+# the core boreal forest: heath and reindeer-lichen openings where the soil is thin, on the
+# steeper slopes and knolls, and bare granite on the steepest (a closed canopy over every hill
+# read as a monotone dark forest sea, boreal@type)
+- id: boreal
+  patch: true
+  layers:
+    - slot: disturbance
+      kernel: patches
+      mask: { slope: [0.08, 0.3, null, null], natural: [0.3, 0.6, 2, 3], field: [-1, -1, 0.2, 0.5] }
+      params: { scale: 260, fraction: 0.36, octaves: 3, roughness: 0.55, colour: [146, 136, 112], colour2: [118, 114, 92], colour_var: 0.18, soft: 0.25 }
+      class: shrub
+      clear: 0.6
+      height: none
+    - slot: disturbance
+      kernel: patches
+      mask: { slope: [0.25, 0.5, null, null], natural: [0.3, 0.6, 2, 3] }
+      params: { scale: 70, fraction: 0.25, octaves: 3, roughness: 0.6, colour: [132, 128, 120], colour2: [104, 102, 96], colour_var: 0.2 }
+      class: rock
+      clear: 1.0
+      height: none
 
 # altitudinal zones of the core temperate and Mediterranean biomes
 - id: temperate
