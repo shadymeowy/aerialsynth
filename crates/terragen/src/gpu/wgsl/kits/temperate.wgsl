@@ -135,6 +135,14 @@ fn temperate_layer(cov: f32, albedo: vec3<f32>, cls: u32, clear: f32) -> Layer {
     return ly;
 }
 
+/// `temperate::pond_layer`.
+fn temperate_pond(s: ptr<function, Stack>, cov: f32, albedo: vec3<f32>) -> Layer {
+    var ly = temperate_layer(cov, albedo, LC_LAKE, 1.0);
+    ly.hmode = HM_ABS;
+    ly.dh = (*s).t.ground - (*s).t.micro - 0.3;
+    return ly;
+}
+
 // ---------------------------------------------------------------- slot 3: wetlands
 
 const T_SEED_MIRE: u64 = 0x7E3B0001lu;
@@ -245,7 +253,7 @@ fn temperate_mires(s: ptr<function, Stack>) {
     composite(s, temperate_layer(cov, col, LC_BOG, clear));
     if (pool > 0.0) {
         let water = srgb(34.0, 38.0, 36.0) * (1.0 + 0.15 * perlin3(T_SEED_MIRE ^ 0x61lu, p * (1.0lf / 7.0lf)) * band(7.0, gsd));
-        composite(s, temperate_layer(pool * cov, water, LC_LAKE, 1.0));
+        composite(s, temperate_pond(s, pool * cov, water));
     }
 }
 
@@ -288,7 +296,7 @@ fn temperate_marsh(s: ptr<function, Stack>) {
     let creek = (ec * band_cov(ch / 0.0107, 3.0, fw) + (1.0 - ec) * 0.05) * smoothstep1(0.1, 0.3, dm);
     let water = max(core, creek) * cov;
     if (water > 0.0) {
-        composite(s, temperate_layer(water, srgb(40.0, 54.0, 50.0), LC_LAKE, 1.0));
+        composite(s, temperate_pond(s, water, srgb(40.0, 54.0, 50.0)));
     }
 }
 
@@ -337,7 +345,7 @@ fn temperate_beaver_ponds(s: ptr<function, Stack>) {
     }
     let pond = clamp((wp - rd) / fw + 0.5, 0.0, 1.0);
     if (pond > 0.0) {
-        composite(s, temperate_layer(pond, srgb(38.0, 46.0, 38.0), LC_LAKE, 1.0));
+        composite(s, temperate_pond(s, pond, srgb(38.0, 46.0, 38.0)));
     }
 }
 

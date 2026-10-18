@@ -549,7 +549,7 @@ fn tropical_slot_water(s: ptr<function, Stack>) {
     if (cov <= 0.0) {
         return;
     }
-    let trop = smoothstep1(18.0, 21.0, t.temp) * (1.0 - smoothstep1(600.0, 900.0, l.ground));
+    let trop = smoothstep1(18.0, 21.0, t.temp) * (1.0 - smoothstep1(600.0, 900.0, l.ground)) * smoothstep1(0.3, 0.45, t.moist);
     let black = l.river_hw < 25.0 && t.moist > 0.62 && t.style.w > 0.55;
     var col = mixc(srgb(128.0, 100.0, 68.0), srgb(158.0, 128.0, 88.0), smoothstep1(10.0, 120.0, l.river_hw));
     if (black) {

@@ -320,10 +320,10 @@ pub(crate) fn lake_mask(s: &Stack, c: &ColdClimate) -> f64 {
     if m <= 0.0 {
         return 0.0;
     }
-    // (a gentle slope limit: the lakes' size follows the mask pixel by pixel, and a steep cut
-    // frayed the lakes on undulating ground into grey patches with islands of forest)
-    m * (1.0 - smoothstep(0.03, 0.12, l.slope))
-        * (1.0 - smoothstep(350.0, 700.0, l.ground))
+    // (no slope limit: the lakes' size follows the mask pixel by pixel, and the pixel's slope is
+    // mostly the micro relief's: it frayed the lakes into glittery patches with hundreds of
+    // wooded islets, taiga_river@type, and changed with the zoom)
+    m * (1.0 - smoothstep(350.0, 700.0, l.ground))
         * (1.0 - smoothstep(0.2, 0.5, t.mountain))
         * smoothstep(0.02, 0.12, t.moist)
         * (1.0 - smoothstep(0.1, 0.3, t.sand))
@@ -332,18 +332,19 @@ pub(crate) fn lake_mask(s: &Stack, c: &ColdClimate) -> f64 {
 
 /// Lake colours (linear): dark, tea-coloured, silty; the shallow margin; the drained basins;
 /// lake ice.
-fn lake_colour(h: u64, rn: f64) -> DVec3 {
+fn lake_colour(h: u64, shore_m: f64) -> DVec3 {
     let u = u01k(h, 9);
     let deep = if u < 0.55 {
         srgb(16.0, 28.0, 42.0)
     } else if u < 0.8 {
         srgb(36.0, 38.0, 28.0)
     } else {
-        srgb(44.0, 62.0, 64.0)
+        srgb(34.0, 48.0, 52.0)
     };
     let shallow = mixc(deep, srgb(98.0, 104.0, 86.0), 0.5);
-    // (a narrow shallow margin: over the outer third of a big lake it drew a pale halo)
-    mixc(deep, shallow, smoothstep(0.86, 1.0, rn))
+    // (a shallow margin a few metres wide: over the outer third of a big lake, and then over its
+    // outer seventh (20-50 m), it drew a pale halo, a26)
+    mixc(deep, shallow, 0.7 * smoothstep(4.0, 0.0, shore_m))
 }
 
 /// The mean colour of open lakes and of the frozen ones, of basins (for coarse pixels).
@@ -351,10 +352,10 @@ fn lake_mean_albedo(lat: &LakeLat, frozen: bool) -> DVec3 {
     let lake = if frozen {
         mixc(srgb(150.0, 170.0, 184.0), srgb(228.0, 233.0, 239.0), 0.6)
     } else {
-        let w = |c: DVec3| mixc(c, mixc(c, srgb(98.0, 104.0, 86.0), 0.5), 0.12);
-        w(srgb(16.0, 28.0, 42.0)) * 0.55 + w(srgb(36.0, 38.0, 28.0)) * 0.25 + w(srgb(44.0, 62.0, 64.0)) * 0.2
+        let w = |c: DVec3| mixc(c, mixc(c, srgb(98.0, 104.0, 86.0), 0.5), 0.04);
+        w(srgb(16.0, 28.0, 42.0)) * 0.55 + w(srgb(36.0, 38.0, 28.0)) * 0.25 + w(srgb(34.0, 48.0, 52.0)) * 0.2
     };
-    let basin = mixc(srgb(104.0, 104.0, 78.0), srgb(88.0, 90.0, 68.0), 0.3);
+    let basin = mixc(srgb(88.0, 92.0, 64.0), srgb(72.0, 80.0, 56.0), 0.3);
     mixc(basin, lake, lat.p_lake)
 }
 
@@ -403,18 +404,21 @@ fn lakes(s: &mut Stack, lat: &LakeLat, sc: f64, frozen: bool) {
                 ly.hmode = hmode::BLEND;
                 ly.dh = -0.3;
             } else {
-                xa = lake_colour(hit.h, hit.rn) * (1.0 + 0.05 * perlin3(hit.h ^ 0x5ED, p / 70.0) * band(70.0, gsd));
+                xa = lake_colour(hit.h, (1.0 - hit.rn) * hit.b) * (1.0 + 0.05 * perlin3(hit.h ^ 0x5ED, p / 70.0) * band(70.0, gsd));
                 ly.cls = cls::LAKE;
                 ly.hmode = hmode::ABS;
-                ly.dh = s.l.ground - 0.4;
+                // (a flat water surface: the pixel's ground less its micro relief; on the ground's
+                // bumps the water's reflections of the banks and the sky drew a glittery speckle,
+                // taiga_river@type)
+                ly.dh = s.t.ground - s.t.micro - 0.4;
                 ly.relit = 1.0;
                 ly.water = true;
             }
         } else {
             // drained basin: sedge meadow, wetter towards the centre (olive-brown: a lime sedge
             // drew bright blobs in the dark forest)
-            xa = mixc(srgb(104.0, 104.0, 78.0), srgb(88.0, 90.0, 68.0), smoothstep(0.55, 0.0, hit.rn))
-                * (1.0 + 0.08 * perlin3(hit.h ^ 0xBA5, p / 9.0) * band(9.0, gsd));
+            xa = mixc(srgb(88.0, 92.0, 64.0), srgb(72.0, 80.0, 56.0), smoothstep(0.55, 0.0, hit.rn))
+                * (1.0 + 0.08 * perlin3(hit.h ^ 0xBA5, p / 9.0) * band(9.0, gsd) + 0.12 * perlin3(hit.h ^ 0xBA6, p / 35.0) * band(35.0, gsd));
             ly.cls = cls::MARSH;
             ly.hmode = hmode::BLEND;
             ly.dh = -1.2;

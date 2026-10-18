@@ -1048,25 +1048,34 @@ fn layer_rivers(s: ptr<function, Stack>) {
     let detail = (*s).pf.f[PF_DETAIL];
     let wet_r = t.river_wet;
     var wcol = mixc(pal3(PAL_RIVER), pal3(PAL_LAKE_DEEP), smoothstep1(30.0, 200.0, l.river_hw * 2.0));
+    wcol = mixc(wcol, srgb(74.0, 82.0, 62.0), 0.6 * (1.0 - smoothstep1(0.2, 0.4, t.moist)));
     wcol = mixc(wcol, srgb(96.0, 138.0, 140.0), 0.7 * t.mountain * smoothstep1(8.0, 0.0, temp));
     let ice = smoothstep1(-1.5, -4.0, temp + 1.5 * (*s).pf.f[PF_SNOW]);
     wcol = mixc(wcol, mixc(pal3(PAL_SNOW) * 0.9, srgb(170.0, 190.0, 200.0), 0.35 * (0.5 + 0.5 * detail)), ice);
-    let dry_col = mixc((*s).col, mixc(pal3(PAL_GRAVEL), pal3(PAL_SAND + 2u), 0.5) * (1.0 + 0.1 * detail), 0.55 * (1.0 - 0.7 * (*s).m.riparian));
-    let rc = mixc(dry_col, wcol, wet_r);
-    let frozen = ice > 0.5 && wet_r > 0.5;
+    let dry_col = mixc((*s).col, mixc(pal3(PAL_GRAVEL), pal3(PAL_SAND + 2u), 0.5) * (1.0 + 0.1 * detail), 0.4 * (1.0 - 0.7 * (*s).m.riparian));
+    let tw = l.river_hw * smoothstep1(0.35, 1.0, wet_r) * (1.0 - 0.25 * (1.0 - smoothstep1(0.9, 1.0, wet_r)) * (1.0 - perlin3(0x51DE7E02lu, (*s).c.p / 260.0lf)));
+    let off = (l.river_hw - tw) * clamp(1.8 * perlin3(0x51DE7E01lu, (*s).c.p / 420.0lf), -1.0, 1.0);
+    let adt = abs(l.river_d - off);
+    let adb = abs(l.river_d);
+    let ovt = max(min(tw, adt + 0.5 * fwr) - max(-tw, adt - 0.5 * fwr), 0.0);
+    let ovb = max(min(l.river_hw, adb + 0.5 * fwr) - max(-l.river_hw, adb - 0.5 * fwr), 1e-9);
+    let wt = min(ovt / ovb, 1.0);
+    let rc = mixc(mixc(dry_col, wcol, 0.6 * wet_r), wcol, wt);
+    let wet = wt > 0.5;
+    let frozen = ice > 0.5 && wet;
     var cls = LC_SAND;
     if (frozen) {
         cls = LC_SNOW;
-    } else if (wet_r > 0.5) {
+    } else if (wet) {
         cls = LC_RIVER;
     }
     // (the snow cover leaves open water free, and frozen rivers a faint line)
-    (*s).m.river_cov = cov * select(select(0.0, 1.0, wet_r > 0.5), 0.4, frozen);
+    (*s).m.river_cov = cov * select(select(0.0, 1.0, wet), 0.4, frozen);
     var ly = layer_paint(cov, rc, cls);
     ly.dh = l.river_level;
     ly.hmode = HM_ABS;
     ly.relit = 1.0;
-    ly.water = !frozen && wet_r > 0.5;
+    ly.water = !frozen && wet;
     composite(s, ly);
 }
 

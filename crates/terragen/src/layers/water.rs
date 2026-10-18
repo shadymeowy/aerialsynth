@@ -63,6 +63,8 @@ pub fn rivers(s: &mut Stack) {
     let detail = s.pf.detail;
     let wet_r = t.river_wet;
     let mut wcol = mixc(pal.river, pal.lake_deep, smoothstep(30.0, 200.0, l.river_hw * 2.0));
+    // (the rivers of dry lands carry silt: olive-green, not the deep blue of humid lowland rivers)
+    wcol = mixc(wcol, srgb(74.0, 82.0, 62.0), 0.6 * (1.0 - smoothstep(0.2, 0.4, t.moist)));
     // mountain rivers carry glacial flour: milky turquoise, not deep dark water
     wcol = mixc(wcol, srgb(96.0, 138.0, 140.0), 0.7 * t.mountain * smoothstep(8.0, 0.0, temp));
     // in the cold the river freezes over and is snowed on (a dark channel through the
@@ -71,12 +73,25 @@ pub fn rivers(s: &mut Stack) {
     wcol = mixc(wcol, mixc(pal.snow * 0.9, srgb(170.0, 190.0, 200.0), 0.35 * (0.5 + 0.5 * detail)), ice);
     // dry beds are only a subtle pale line (gravel / sand with some vegetation), fainter under
     // the riparian trees
-    let dry_col = mixc(s.col, mixc(pal.gravel, pal.sand[2], 0.5) * (1.0 + 0.1 * detail), 0.55 * (1.0 - 0.7 * s.m.riparian));
-    let rc = mixc(dry_col, wcol, wet_r);
-    let frozen = ice > 0.5 && wet_r > 0.5;
+    let dry_col = mixc(s.col, mixc(pal.gravel, pal.sand[2], 0.5) * (1.0 + 0.1 * detail), 0.4 * (1.0 - 0.7 * s.m.riparian));
+    // (a river only partly wet runs in a low-water channel that wanders inside its bed of sand and
+    // gravel: the whole bed in a mix of water and sand read as a uniform brown ribbon, canyon@type)
+    // (it swings from bank to bank between bars, and narrows and widens: centred, it left two even
+    // strips of sand along the banks, a canal)
+    let tw = l.river_hw * smoothstep(0.35, 1.0, wet_r) * (1.0 - 0.25 * (1.0 - smoothstep(0.9, 1.0, wet_r)) * (1.0 - perlin3(0x51DE_7E02, s.ctx.p / 260.0)));
+    let off = (l.river_hw - tw) * (1.8 * perlin3(0x51DE_7E01, s.ctx.p / 420.0)).clamp(-1.0, 1.0);
+    // (the thread's share of the bed in the pixel, from the box filter's exact overlaps: `band_cov`
+    // draws a thread of no width as half a pixel)
+    let ov = |d: f64, w: f64| (w.min(d.abs() + 0.5 * fwr) - (-w).max(d.abs() - 0.5 * fwr)).max(0.0);
+    let wt = (ov(l.river_d - off, tw) / ov(l.river_d, l.river_hw).max(1e-9)).min(1.0);
+    // (the bed beside the thread damp in moister climates: pale dry beds drew dashed lines through
+    // the forest)
+    let rc = mixc(mixc(dry_col, wcol, 0.6 * wet_r), wcol, wt);
+    let wet = wt > 0.5;
+    let frozen = ice > 0.5 && wet;
     let cls = if frozen {
         lc::SNOW
-    } else if wet_r > 0.5 {
+    } else if wet {
         lc::RIVER
     } else {
         lc::SAND
@@ -85,10 +100,10 @@ pub fn rivers(s: &mut Stack) {
     s.m.river_cov = cov
         * if frozen {
             0.4
-        } else if wet_r > 0.5 {
+        } else if wet {
             1.0
         } else {
             0.0
         };
-    s.composite(Layer { cov, albedo: rc, dh: l.river_level, hmode: hmode::ABS, cls, relit: 1.0, water: !frozen && wet_r > 0.5, ..Default::default() });
+    s.composite(Layer { cov, albedo: rc, dh: l.river_level, hmode: hmode::ABS, cls, relit: 1.0, water: !frozen && wet, ..Default::default() });
 }

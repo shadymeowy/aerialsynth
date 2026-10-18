@@ -171,7 +171,9 @@ pub fn rivers(s: &mut crate::stack::Stack) {
     if cov <= 0.0 {
         return;
     }
-    let trop = smoothstep(18.0, 21.0, t.temp) * (1.0 - smoothstep(600.0, 900.0, l.ground));
+    // (the humid tropics' sediment-laden rivers; not in hot deserts: a uniform brown ribbon down a
+    // canyon floor read as a dirt road, canyon@type)
+    let trop = smoothstep(18.0, 21.0, t.temp) * (1.0 - smoothstep(600.0, 900.0, l.ground)) * smoothstep(0.3, 0.45, t.moist);
     let black = l.river_hw < BIG_RIVER_HW && t.moist > 0.62 && t.style[3] > 0.55;
     let col = if black {
         crate::surface::srgb(36.0, 28.0, 21.0)
