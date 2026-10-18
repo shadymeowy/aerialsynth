@@ -842,11 +842,13 @@ pub fn washes(s: &mut Stack) {
     let p = s.ctx.p;
     let gsd = s.ctx.gsd;
     let hw = l.river_hw;
-    let half = hw * (1.0 + 1.4 * ar) * (1.0 + 0.25 * perlin3(seed ^ S_WASH, p / 700.0));
+    let half = hw * (1.0 + 1.4 * ar) * (1.0 + 0.4 * perlin3(seed ^ S_WASH, p / 700.0));
     let fwr = l.fw.max(gsd * 0.35);
     // (washes on the floors, not down steep walls: their sand and gravel drew pale ribbons up
-    // the canyon walls, canyon@type)
-    let cov = crate::kernels::band_cov(l.river_d, half, fwr) * (1.0 - smoothstep(0.25, 0.55, l.slope));
+    // the canyon walls, canyon@type; and fresh sand only along some stretches, desert pavement
+    // between them: continuous pale ribbons of one width read as roads)
+    let fresh = 0.35 + 0.65 * smoothstep(-0.45, 0.35, perlin3(seed ^ S_WASH ^ 0x55, p / 380.0));
+    let cov = crate::kernels::band_cov(l.river_d, half, fwr) * (1.0 - smoothstep(0.25, 0.55, l.slope)) * fresh;
     if cov <= 0.0 {
         return;
     }
@@ -855,7 +857,7 @@ pub fn washes(s: &mut Stack) {
     let th = 0.5 + 0.5 * (TAU * ph).cos();
     let bw = band(lam, gsd);
     // (a third of the way to the ground's colour: pale sand ribbons stood out like roads)
-    let bar = mixc(mixc(s.pal(pal::SAND + 2), s.pal(pal::SOIL + 1), 0.25) * 1.02, s.col, 0.3);
+    let bar = mixc(mixc(s.pal(pal::SAND + 2), s.pal(pal::SOIL + 1), 0.25) * 1.02, s.col, 0.45);
     let chan = mixc(bar, s.pal(pal::ROCK), 0.25) * 0.9;
     let col = mixc(bar, chan, smoothstep(0.7, 0.9, th) * bw + (1.0 - bw) * 0.15);
     s.composite(Layer { cov, albedo: col, cls: LC_DRY_RIVERBED, clear: 0.8, ..Default::default() });
