@@ -745,9 +745,9 @@ pub fn seasonal(s: &mut Stack) {
     snow(s, &c, &g);
 }
 
-/// Glacier ice: firn above the equilibrium line, bare blue-grey ice below it with dirt bands
-/// (ogives), crevasses across the flow (along the contours) where the ice is steep, medial
-/// moraines along the valley's axis, blue ice on cold, wind-scoured ice caps.
+/// Glacier ice: firn above the equilibrium line, bare blue-grey ice below it, dirtier towards the
+/// margin, crevasses across the flow (along the contours) where the ice is steep, blue ice on
+/// cold, wind-scoured ice caps.
 fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     let p = s.ctx.p;
     let gsd = s.ctx.gsd;
@@ -773,13 +773,7 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
             * (1.0 - smoothstep(0.04, 0.08, slope));
         col = mixc(col, srgb(160.0, 180.0, 196.0), bi);
     }
-    // ogives: arcs of darker ice below icefalls (bands along the contours, 35 m in height)
     let sl = slope.max(0.03);
-    if abl > 0.0 {
-        let og_w = 35.0 / sl;
-        let og = (0.5 + 0.5 * (std::f64::consts::TAU * l.ground / 35.0).cos()) * band(og_w, gsd) * smoothstep(0.08, 0.2, slope);
-        col *= 1.0 - 0.08 * og * abl;
-    }
     // crevasses: across the flow, i.e. along the contours of the ground, every 6 m of height,
     // broken (en echelon) into short dashes, where the ice is steep (long dark lines along the
     // contours over every tongue read as a contour map)
@@ -802,19 +796,9 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
         col = mixc(col, srgb(70.0, 82.0, 92.0), 0.4 * cr);
         dh -= 1.0 * cr;
     }
-    // medial moraines along the valley's axis (the drainage line under the ice) and beside it
-    if abl > 0.2 && l.river_hw > 0.0 {
-        let ad = l.river_d.abs();
-        let w = 12.0 + 8.0 * perlin3(SEED_ICE + 11, p / 80.0) + 3.0 * perlin3(SEED_ICE + 14, p / 9.0) * band(9.0, gsd);
-        let off = 110.0 + 0.6 * l.river_hw;
-        // (faint, and only on the valley glaciers of the mountains: three dark lines along every
-        // tongue read as a drawing, and along the streams under a lowland ice field as stripes)
-        let mm = band_cov(ad, w, fw.max(0.6 * w)).max(0.5 * band_cov(ad - off, 0.7 * w, fw.max(0.4 * w)))
-            * smoothstep(0.2, 0.6, abl)
-            * smoothstep(0.15, 0.4, s.t.mountain);
-        col = mixc(col, srgb(112.0, 106.0, 98.0), 0.5 * mm);
-        dh += 1.0 * mm;
-    }
+    // (no ogives nor medial moraines: bands along the contours of the ground and dark lines along
+    // the drainage under the ice drew contour-like arcs over the tongues and ice fields,
+    // mountains@type, a29)
     let ly = Layer { cov: g.ice, albedo: col, dh: s.m.micro + dh, hmode: hmode::BLEND, cls: cls::GLACIER, relit: 1.0, clear: 1.0, ..Default::default() };
     s.composite(ly);
 }

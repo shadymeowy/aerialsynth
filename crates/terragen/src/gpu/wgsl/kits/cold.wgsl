@@ -574,11 +574,6 @@ fn cold_glacier(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
         col = mixc(col, srgb(160.0, 180.0, 196.0), bi);
     }
     let sl = max(slope, 0.03);
-    if (abl > 0.0) {
-        let og_w = 35.0 / sl;
-        let og = (0.5 + 0.5 * cos(TAU * l.ground / 35.0)) * band(og_w, gsd) * smoothstep1(0.08, 0.2, slope);
-        col *= 1.0 - 0.08 * og * abl;
-    }
     let cs = smoothstep1(0.18, 0.4, slope) * (0.45 + 0.55 * abl);
     if (cs > 0.0) {
         let spacing = 6.0 / sl;
@@ -596,14 +591,6 @@ fn cold_glacier(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
         cr = cr * cs;
         col = mixc(col, srgb(70.0, 82.0, 92.0), 0.4 * cr);
         dh -= 1.0 * cr;
-    }
-    if (abl > 0.2 && l.river_hw > 0.0) {
-        let ad = abs(l.river_d);
-        let w = 12.0 + 8.0 * perlin3(COLD_SEED_ICE + 11lu, p * (1.0lf / 80.0lf)) + 3.0 * perlin3(COLD_SEED_ICE + 14lu, p * (1.0lf / 9.0lf)) * band(9.0, gsd);
-        let off = 110.0 + 0.6 * l.river_hw;
-        let mm = max(kband_cov(ad, w, max(fw, 0.6 * w)), 0.5 * kband_cov(ad - off, 0.7 * w, max(fw, 0.4 * w))) * smoothstep1(0.2, 0.6, abl) * smoothstep1(0.15, 0.4, (*s).t.mountain);
-        col = mixc(col, srgb(112.0, 106.0, 98.0), 0.5 * mm);
-        dh += 1.0 * mm;
     }
     var ly = layer_paint(g.ice, col, LC_GLACIER);
     ly.dh = (*s).m.micro + dh;
