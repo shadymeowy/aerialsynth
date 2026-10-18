@@ -28,7 +28,7 @@ fn desert_barchans(p: vec3<f64>, east: vec3<f32>, north: vec3<f32>, wd: vec2<f32
     let er2 = (r0 * r0 + r0 * r1 + r1 * r1) / 3.0;
     let er3 = (r0 + r1) * (r0 * r0 + r1 * r1) / 4.0;
     let mc = amount * DS_BAR_DENS * DS_BAR_CA * er2 / (DS_BAR_CELL * DS_BAR_CELL);
-    let mh = DS_BAR_CV / DS_BAR_CA * 0.21 * er3 / er2;
+    let mh = DS_BAR_CV / DS_BAR_CA * 0.12 * er3 / er2;
     let e = smoothstep1(1.2 * gsd, 3.0 * gsd, r0);
     if (e <= 0.0) {
         return vec2<f32>(mc, mh);
@@ -42,7 +42,7 @@ fn desert_barchans(p: vec3<f64>, east: vec3<f32>, north: vec3<f32>, wd: vec2<f32
             continue;
         }
         let r = r0 + (r1 - r0) * u01k(h, 6lu);
-        let hh = r * (0.16 + 0.10 * u01k(h, 7lu));
+        let hh = r * (0.09 + 0.06 * u01k(h, 7lu));
         let a = 0.5 * (u01k(h, 8lu) - 0.5);
         let sa = sin(a);
         let ca = cos(a);

@@ -593,7 +593,7 @@ fn barchans(w: &World, seed: u64, p: DVec3, east: DVec3, north: DVec3, wd: DVec2
     let er2 = (r0 * r0 + r0 * r1 + r1 * r1) / 3.0;
     let er3 = (r0 + r1) * (r0 * r0 + r1 * r1) / 4.0;
     let mc = amount * BAR_DENS * BAR_CA * er2 / (BAR_CELL * BAR_CELL);
-    let mh = BAR_CV / BAR_CA * 0.21 * er3 / er2;
+    let mh = BAR_CV / BAR_CA * 0.12 * er3 / er2;
     let e = smoothstep(1.2 * gsd, 3.0 * gsd, r0);
     if e <= 0.0 {
         return (mc, mh);
@@ -606,7 +606,8 @@ fn barchans(w: &World, seed: u64, p: DVec3, east: DVec3, north: DVec3, wd: DVec2
             continue;
         }
         let r = r0 + (r1 - r0) * u01k(h, 6);
-        let hh = r * (0.16 + 0.10 * u01k(h, 7));
+        // (low crescents: 16-26 % of the radius drew bright lit crests and slip-face rims on the plain, a11)
+        let hh = r * (0.09 + 0.06 * u01k(h, 7));
         let a = 0.5 * (u01k(h, 8) - 0.5);
         let (sa, ca) = a.sin_cos();
         let dw = DVec2::new(wd.x * ca - wd.y * sa, wd.x * sa + wd.y * ca);
