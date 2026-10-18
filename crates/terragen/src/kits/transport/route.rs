@@ -211,6 +211,12 @@ pub struct Lake {
     pub sink: bool,
 }
 
+/// Routes keep off the high mountains where the mean annual temperature at the ground is below
+/// this (°C: glaciers and perennial snow): a high cost per metre, and no route with more than
+/// [`ICE_MAX`] m of it.
+const ICE_TEMP: f64 = -3.0;
+const ICE_MAX: f64 = 300.0;
+
 /// Water stands this much above a lake's level at its shore for routing (m).
 const SHORE: f64 = 0.5;
 
@@ -513,11 +519,13 @@ fn seg_dist(a: DVec3, b: DVec3, c: DVec3, d: DVec3) -> f64 {
 }
 
 /// What a grid node knows: the ground (the relief with the valleys carved in), the sea, standing
-/// water, a site footprint, a town; the meander-warped positions of drainage levels 0 and 1.
+/// water, a site footprint, a town, the ice of high mountains; the meander-warped positions of
+/// drainage levels 0 and 1.
 #[derive(Clone, Copy, Debug, Default)]
 struct Probe {
     h: f64,
     sea: bool,
+    ice: bool,
     stand: bool,
     res: bool,
     block: bool,
@@ -531,7 +539,10 @@ fn probe(w: &World, sc: &Scene, p: DVec3, gsd: f64) -> Probe {
     let ctx = Ctx::new(g.lat, g.lon, gsd, &w.ell);
     let t = w.relief_terrain(&ctx, &w.macro_at(ctx.p, gsd));
     let h0 = t.ground;
-    let mut o = Probe { h: h0, sea: h0 < 0.5, pw: [ctx.p; 2], ..Default::default() };
+    // (the glaciers and perennial snow of high mountains: roads went over 6 km summits in
+    // switchbacks, a comb of hairpins on the ice, alpine_south@type)
+    let ice = t.mountain > 0.25 && t.temp < ICE_TEMP;
+    let mut o = Probe { h: h0, sea: h0 < 0.5, ice, pw: [ctx.p; 2], ..Default::default() };
     o.block = sc.blocks.iter().any(|k| k.inside(p));
     o.town = sc.avoid.iter().any(|&(q, r)| (p - q).length() < r);
     if !sc.rivers.is_empty() {
@@ -647,9 +658,9 @@ fn crossings(sc: &Scene, pr: &Params, n0: &Probe, n1: &Probe) -> f64 {
 /// Grid DP between `a` and `b` over a corridor of `na` nodes along and `nc` across (half width
 /// `half`, tapered to the ends): the node polyline and the metres over the sea. Monotone along
 /// the edge; ties broken by node index (strict `<` in index order). None: no way through (site
-/// footprints).
+/// footprints). Also the metres over the ice of high mountains.
 #[allow(clippy::too_many_arguments)]
-fn corridor(w: &World, a: DVec3, b: DVec3, na: usize, nc: usize, half: f64, pr: &Params, sc: &Scene) -> Option<(Vec<DVec3>, f64)> {
+fn corridor(w: &World, a: DVec3, b: DVec3, na: usize, nc: usize, half: f64, pr: &Params, sc: &Scene) -> Option<(Vec<DVec3>, f64, f64)> {
     let c = nc / 2;
     // (a lateral step at most ~0.45 of the step along: a node-to-node bend of ≤ 24°)
     let step_a = (b - a).length() / (na - 1) as f64;
@@ -743,7 +754,7 @@ fn corridor_dp(
     pr: &Params,
     sc: &Scene,
     smooth_turns: bool,
-) -> Option<(Vec<DVec3>, f64)> {
+) -> Option<(Vec<DVec3>, f64, f64)> {
     let c = nc / 2;
     const DJ: i64 = 2;
     let nd = (2 * DJ + 1) as usize;
@@ -751,6 +762,7 @@ fn corridor_dp(
     let mut cost = vec![f64::INFINITY; na * nc * nd];
     let mut from = vec![u32::MAX; na * nc * nd];
     let mut water = vec![0.0f64; na * nc * nd];
+    let mut icem = vec![0.0f64; na * nc * nd];
     cost[idx(0, c, DJ as usize)] = 0.0;
     for i in 0..na - 1 {
         for j in 0..nc {
@@ -776,13 +788,14 @@ fn corridor_dp(
                 let g = (n1.h - n0.h).abs() / l;
                 let over = (g - pr.glim).max(0.0);
                 let wet = if n0.sea || n1.sea { l } else { 0.0 };
+                let ice = 0.5 * (n0.ice as u32 + n1.ice as u32) as f64 * l;
                 let geo: f64 = sc.lakes.iter().map(|lk| lk.chord(p0, p1)).sum();
                 let stand = (((n0.stand || n0.res) as u32 + (n1.stand || n1.res) as u32) as f64 * 0.5 * l)
                     .max(0.85 * geo)
                     .max(between[(i * nc + j) * nd + (dj + DJ) as usize])
                     .min(l);
                 let inside = 0.5 * (n0.town as u32 + n1.town as u32) as f64 * l;
-                let base = l * (1.0 + pr.k * g * g + pr.k2 * over * over) + pr.wet * wet + pr.lake * stand + pr.town * inside + crossings(sc, pr, &n0, &n1);
+                let base = l * (1.0 + pr.k * g * g + pr.k2 * over * over) + pr.wet * wet + pr.lake * stand + pr.town * inside + 2.0 * pr.lake * ice + crossings(sc, pr, &n0, &n1);
                 for k in 0..nd {
                     let c0 = cost[idx(i, j, k)];
                     if !c0.is_finite() {
@@ -802,6 +815,7 @@ fn corridor_dp(
                         cost[t] = c1;
                         from[t] = idx(i, j, k) as u32;
                         water[t] = water[idx(i, j, k)] + wet;
+                        icem[t] = icem[idx(i, j, k)] + ice;
                     }
                 }
             }
@@ -827,7 +841,7 @@ fn corridor_dp(
         t = from[t] as usize;
     }
     path.reverse();
-    Some((path, water[best.1]))
+    Some((path, water[best.1], icem[best.1]))
 }
 
 /// Route from `a` to `b` (surface points) for `class` through its scene. None: the edge would
@@ -896,8 +910,8 @@ fn route_once(w: &World, a: DVec3, b: DVec3, class: usize, sc: &Scene, extra: f6
     let na = ((d / pr.step).ceil() as usize).clamp(3, 40) + 1;
     let nc = if pr.width > 0.0 { 11 } else { 1 };
     let half = pr.width * d + 300.0 * (pr.width > 0.0) as u32 as f64 + extra;
-    let (coarse, wet) = corridor(w, a, b, na, nc, half, pr, sc)?;
-    if wet > (0.12 * d).clamp(400.0, 3_000.0) {
+    let (coarse, wet, ice) = corridor(w, a, b, na, nc, half, pr, sc)?;
+    if wet > (0.12 * d).clamp(400.0, 3_000.0) || ice > ICE_MAX {
         return None;
     }
     // refine the pieces of a coarse grid (lateral resolution: a third of the coarse spacing)
@@ -914,7 +928,7 @@ fn route_once(w: &World, a: DVec3, b: DVec3, class: usize, sc: &Scene, extra: f6
                 // (fine lateral steps of 0.45 of the fine step: the local adaptation of the
                 // coarse route)
                 let hf = 3.0 * 0.45 * l / (nf - 1) as f64;
-                corridor(w, p, q, nf, 7, hf, pr, sc).map(|(f, _)| f)
+                corridor(w, p, q, nf, 7, hf, pr, sc).map(|(f, _, _)| f)
             })
             .collect();
         let mut v: Vec<DVec3> = vec![coarse[0]];
