@@ -1213,9 +1213,7 @@ impl GpuGenerator {
                 if g_m <= 1000.0 {
                     flags |= TF_WARP_GRID;
                 }
-                if g_m <= 100.0 {
-                    flags |= TF_GULLY_GRID;
-                }
+                // (the gullies per pixel: `tile.rs`, `gully_on_grid`)
                 if g_m <= 400.0 && crate::kits::legacy_roads() {
                     flags |= TF_ROADS_GRID;
                 }

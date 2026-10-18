@@ -311,6 +311,8 @@ pub(crate) struct GSiteReq {
 
 pub(crate) const TF_GRID: u32 = 1;
 pub(crate) const TF_WARP_GRID: u32 = 2;
+/// (no longer set: the gullies are evaluated per pixel; `tile.rs`, `gully_on_grid`)
+#[allow(dead_code)]
 pub(crate) const TF_GULLY_GRID: u32 = 4;
 pub(crate) const TF_ROADS_GRID: u32 = 8;
 
