@@ -215,7 +215,9 @@ pub fn ring_dist(pl: &Pl, q: DVec2) -> f64 {
     let t = std::f64::consts::TAU;
     let s = pl.seed ^ 0x219;
     let cbd = 0.07 + 0.03 * (pl.level as f64 - 3.0) + 0.03 * u01k(pl.seed, 40);
-    let rr = pl.r * (1.25 * cbd + 0.015) * (1.0 + 0.12 * (2.0 * phi + t * u01k(s, 1)).sin() + 0.07 * (3.0 * phi + t * u01k(s, 2)).sin() + 0.04 * (5.0 * phi + t * u01k(s, 3)).sin());
+    let rr = pl.r
+        * (1.25 * cbd + 0.015)
+        * (1.0 + 0.12 * (2.0 * phi + t * u01k(s, 1)).sin() + 0.07 * (3.0 * phi + t * u01k(s, 2)).sin() + 0.04 * (5.0 * phi + t * u01k(s, 3)).sin());
     (qe.length() - rr).abs()
 }
 

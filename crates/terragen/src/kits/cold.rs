@@ -237,7 +237,8 @@ pub(crate) fn lake_site_of(lat: &LakeLat, cx: i64, cy: i64, cz: i64) -> Option<(
     if u01k(h, 4) >= lat.dens {
         return None;
     }
-    let c = DVec3::new(cx as f64 + 0.5 + 0.8 * (u01k(h, 1) - 0.5), cy as f64 + 0.5 + 0.8 * (u01k(h, 2) - 0.5), cz as f64 + 0.5 + 0.8 * (u01k(h, 3) - 0.5)) * lat.cell;
+    let c = DVec3::new(cx as f64 + 0.5 + 0.8 * (u01k(h, 1) - 0.5), cy as f64 + 0.5 + 0.8 * (u01k(h, 2) - 0.5), cz as f64 + 0.5 + 0.8 * (u01k(h, 3) - 0.5))
+        * lat.cell;
     Some((c, h))
 }
 

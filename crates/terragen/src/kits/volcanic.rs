@@ -427,7 +427,8 @@ fn margin_noise(id: u64, x: f64, y: f64, gsd: f64) -> f64 {
     let b = band(90.0, gsd);
     if b > 0.0 {
         let b3 = band(30.0, gsd);
-        (0.75 * perlin3(SEED_LAVA ^ id, DVec3::new(x / 90.0, y / 90.0, 0.37)) + 0.45 * perlin3(SEED_LAVA ^ id ^ 0x3, DVec3::new(x / 30.0, y / 30.0, 0.71)) * b3) * b
+        (0.75 * perlin3(SEED_LAVA ^ id, DVec3::new(x / 90.0, y / 90.0, 0.37)) + 0.45 * perlin3(SEED_LAVA ^ id ^ 0x3, DVec3::new(x / 30.0, y / 30.0, 0.71)) * b3)
+            * b
     } else {
         0.0
     }
@@ -806,7 +807,13 @@ fn field_look(s: &mut Stack, it: &Instance) {
     }
     if f.ring > 0.0 {
         // (the tephra ring grown over: a bare pale ring drew a halo around every maar in the forest)
-        s.composite(Layer { cov: f.ring * (1.0 - 0.8 * humid), albedo: mixc(s.col, srgb(138.0, 118.0, 98.0), 0.4), cls: cls::VOLCANIC_ASH, clear: 0.4, ..Default::default() });
+        s.composite(Layer {
+            cov: f.ring * (1.0 - 0.8 * humid),
+            albedo: mixc(s.col, srgb(138.0, 118.0, 98.0), 0.4),
+            cls: cls::VOLCANIC_ASH,
+            clear: 0.4,
+            ..Default::default()
+        });
     }
     if f.lake > 0.0 {
         s.composite(Layer {

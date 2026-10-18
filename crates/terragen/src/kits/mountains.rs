@@ -474,7 +474,11 @@ pub fn carve(_w: &World, ci: &CarveIn, cv: &mut Carve) {
         // swales, drew pale lines across the floor and up the walls, canyon@type); their dry beds and
         // washes are not drawn either (`layers::water`, `desert::washes`)
         let arid = 1.0 - smoothstep(0.15, 0.45, ci.moist);
-        let cz = arid * smoothstep(100.0, 700.0, ci.h0) * (1.0 - smoothstep(0.3, 0.6, ci.mountain)) * smoothstep(0.05, 0.3, ci.mesa) * smoothstep(0.0, 0.15, ci.m.cont);
+        let cz = arid
+            * smoothstep(100.0, 700.0, ci.h0)
+            * (1.0 - smoothstep(0.3, 0.6, ci.mountain))
+            * smoothstep(0.05, 0.3, ci.mesa)
+            * smoothstep(0.0, 0.15, ci.m.cont);
         if cz > 0.0 {
             cv.depth_cap = lerp(cv.depth_cap, 0.1, cz);
         }
@@ -649,7 +653,8 @@ pub fn linear(s: &mut Stack) {
             // them: walls of one smooth colour from the floor to the rim read as wax, canyon@type)
             let face = col * (1.0 - 0.2 * cliff) * (1.0 + 0.1 * perlin3(SEED + 41, p / 7.0) * band(7.0, s.ctx.gsd));
             let tal = smoothstep(0.3, 0.5, slope) * (1.0 - smoothstep(0.75, 1.05, slope));
-            let talus = srgb(176.0, 146.0, 118.0) * (1.0 + 0.16 * perlin3(SEED + 42, p / 3.5) * band(3.5, s.ctx.gsd) + 0.1 * perlin3(SEED + 43, p / 11.0) * band(11.0, s.ctx.gsd));
+            let talus = srgb(176.0, 146.0, 118.0)
+                * (1.0 + 0.16 * perlin3(SEED + 42, p / 3.5) * band(3.5, s.ctx.gsd) + 0.1 * perlin3(SEED + 43, p / 11.0) * band(11.0, s.ctx.gsd));
             mixc(mixc(floor_col, face, 0.85 * smoothstep(0.25, 0.6, slope)), talus, 0.7 * tal)
         };
         s.composite(Layer { cov: cb, albedo: col, cls: if z.badland > 0.2 { cls::BADLANDS } else { cls::CLIFF }, clear: 1.0, ..Default::default() });

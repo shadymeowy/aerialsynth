@@ -795,7 +795,12 @@ fn corridor_dp(
                     .max(between[(i * nc + j) * nd + (dj + DJ) as usize])
                     .min(l);
                 let inside = 0.5 * (n0.town as u32 + n1.town as u32) as f64 * l;
-                let base = l * (1.0 + pr.k * g * g + pr.k2 * over * over) + pr.wet * wet + pr.lake * stand + pr.town * inside + 2.0 * pr.lake * ice + crossings(sc, pr, &n0, &n1);
+                let base = l * (1.0 + pr.k * g * g + pr.k2 * over * over)
+                    + pr.wet * wet
+                    + pr.lake * stand
+                    + pr.town * inside
+                    + 2.0 * pr.lake * ice
+                    + crossings(sc, pr, &n0, &n1);
                 for k in 0..nd {
                     let c0 = cost[idx(i, j, k)];
                     if !c0.is_finite() {
