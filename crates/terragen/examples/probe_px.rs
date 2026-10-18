@@ -8,6 +8,7 @@
 //!     cargo run --release -p terragen --example probe_px -- towns LAT LON R_KM [MIN_LEVEL]
 //!     cargo run --release -p terragen --example probe_px -- audit N SEED
 //!     cargo run --release -p terragen --example probe_px -- slopes LAT LON KM STEP_M [classic]
+//!     cargo run --release -p terragen --example probe_px -- atlas LAT0 LAT1 LON0 LON1 STEP_DEG KEY<MAX|KEY>MIN ...
 //!
 //! The first prints the world fields at one point (default 5 m pixels); `scan` prints one line of
 //! features per grid point (200 m pixels) to look for places; `sinks` lists the rivers ending in
@@ -77,6 +78,50 @@ fn main() {
                 "{:.4} {:.4} level {} pop {:.0} R {:.0} arch {} dev {:.2} coastal {} temp {:.1} moist {:.2} agri {:.2} ground {:.0} class {c}",
                 s.lat_deg, s.lon_deg, s.level, s.population, s.radius_m, s.archetype, s.development, s.coastal, t.temp, t.moist, t.agri, t.ground
             );
+        }
+        return;
+    }
+    if args[0] == "atlas" {
+        // atlas LAT0 LAT1 LON0 LON1 STEP_DEG [FILTER ...]: the atlas at the grid points that pass every
+        // filter `key<v` / `key>v` (keys: coast precip temp volc uplift elev glac), to look for places fast
+        let a: Vec<f64> = args[1..6].iter().map(|s| s.parse().unwrap()).collect();
+        let w = &g.world;
+        let mut lat = a[0];
+        while lat <= a[1] {
+            let mut lon = a[2];
+            while lon <= a[3] {
+                let site = geodesy::geodetic2ecef(geodesy::Geodetic::new(lat.to_radians(), lon.to_radians(), 0.0), &w.ell);
+                let s = w.atlas().sample(site.normalize());
+                let val = |k: &str| match k {
+                    "coast" => s.coast_km,
+                    "precip" => s.precip_mm,
+                    "temp" => s.temp_c,
+                    "volc" => s.volcanism,
+                    "uplift" => s.uplift,
+                    "elev" => s.elevation_m,
+                    "glac" => s.glaciation,
+                    _ => panic!("unknown key {k}"),
+                };
+                let ok = args[6..].iter().all(|f| match f.find(['<', '>']) {
+                    Some(i) => {
+                        let (k, v) = (&f[..i], f[i + 1..].parse::<f64>().unwrap());
+                        if &f[i..i + 1] == "<" {
+                            val(k) < v
+                        } else {
+                            val(k) > v
+                        }
+                    }
+                    None => panic!("filter {f}"),
+                });
+                if ok {
+                    println!(
+                        "{lat:.2} {lon:.2} coast {:.0} precip {:.0} temp {:.1} volc {:.2} uplift {:.2} elev {:.0} glac {:.2}",
+                        s.coast_km, s.precip_mm, s.temp_c, s.volcanism, s.uplift, s.elevation_m, s.glaciation
+                    );
+                }
+                lon += a[4];
+            }
+            lat += a[4];
         }
         return;
     }
