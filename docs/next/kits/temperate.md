@@ -154,3 +154,9 @@ lichen, 36 % of patches of 260 m at slope ≥ 0.3, 60 % of the trees cleared; gr
 over every hill read as a monotone forest sea (boreal@type). Mire pools, marsh water and beaver ponds are flat (the
 pixel's ground less its micro relief). Patch layers of no height are flat (`height: none`), so they blend across an
 ecotone's mosaic (the steppe's straw patches drew crisp camouflage blobs, a18).
+
+Polish round 10: the boreal and taiga openings are masked by the mountain field and the erosion relief's gully
+signal (more on ridges and spurs than in valleys), in soft-edged patches 520 m across (masked by the pixel's slope,
+the micro relief broke them into a pale speckle on every slope, boreal@type, and into blotches over the flat lowland
+forests, fp_forest); the taiga's moss and lichen floor is darker and closer in tone (salt-and-pepper speckle between
+the crowns, a26 a17).

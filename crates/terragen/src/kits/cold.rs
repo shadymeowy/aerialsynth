@@ -6,9 +6,9 @@
 //! | slot | layer |
 //! |---|---|
 //! | 1 zonal | [`zonal`]: the perennial snow mask (`Masks::snow`) of the kit's snow model: snow line and glaciers by the summer temperature |
-//! | 3 azonal | [`azonal`]: thermokarst and kettle lakes, drained lake basins, pingos |
+//! | 3 azonal | [`azonal`]: thermokarst and kettle lakes (host-built stamps with a flat level, `lake_host`), drained lake basins, pingos |
 //! | 8 water | [`water`]: sea ice (floes, leads, pressure ridges, fast ice), frozen lakes |
-//! | 9 seasonal | [`seasonal`]: glaciers (firn, bare ice, crevasses, ogives, medial moraines), lateral and terminal moraines, seasonal snow |
+//! | 9 seasonal | [`seasonal`]: glaciers (firn, bare ice, crevasses), lateral and terminal moraines, seasonal snow |
 //!
 //! Kernel `cold_polygons` (YAML): ice-wedge polygons and sorted circles on a 3D Worley lattice
 //! (seamless, no local frame).
@@ -294,7 +294,8 @@ pub(crate) fn lake_site(lat: &LakeLat, c: DVec3, h: u64, p: DVec3, sc: f64, fw: 
     LakeHit { cov, rn: (rho / se.max(1e-6)).min(1.0), kind, h, b: b * se }
 }
 
-/// The lake of `lat` at `p` (lakes scaled by `sc`; `fw` the filter width).
+/// The lake of `lat` at `p` (lakes scaled by `sc`; `fw` the filter width) by a search of the
+/// lattice (the routes and the means test; pass B draws the host's stamps, with their levels).
 pub(crate) fn lake_at(lat: &LakeLat, p: DVec3, sc: f64, fw: f64) -> LakeHit {
     let q = p / lat.cell;
     let qf = q.floor();

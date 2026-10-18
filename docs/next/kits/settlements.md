@@ -271,3 +271,12 @@ patches); trees on car parks and around plazas (empty asphalt blocks); the town'
 varies by block, the last lots thin out over a wider band, unbuilt fringe lots are gardens and allotments). Still
 open: industrial estates keep their district outline and grid, and the metro is one grid family to the horizon
 (round 9 compared metro stills at 1.5 km, oblique and nadir).
+
+Polish round 10: the CBD of the towns and cities of old cultures (Mediterranean, temperate village, monsoon,
+highland) is an organic old core (asphalt lanes in the big cities) with one wobbling ring boulevard around it in the
+big cities (`ring_dist`) instead of concentric rings (dusk@type); the suburbs and fringe of the big cities of four
+cultures are curvilinear (a 190 m warp of long blocks); industrial estates of grid towns continue the town's grid
+(blocks of 2–3 of its blocks, no arterial outline) with a green buffer of grass and trees along their edge; each lot
+has its own density threshold and main streets run on beyond the edge (ribbons). Still open: estates still read as
+patches of large grey roofs, the organic core's border with the grid is crisp, districts do not bend to rivers or
+relief, and fp_town's edge still follows its grid in places (round 10's metro stills: `round10/metro_before_after.jpg`).

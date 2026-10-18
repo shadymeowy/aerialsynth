@@ -178,3 +178,6 @@ Polish round 9: desert washes carry fresh sand only along some stretches (a 380 
 width and sit 45 % of the way to the ground's colour (continuous pale ribbons read as roads, canyon@type); the hot erg
 desert's drift-sand and gravel patches are soft and near the pavement's tone (a camouflage mottle at a kilometre,
 desert_coast@type).
+
+Polish round 10: barchans are half as high (9–15 % of their radius: bright lit crests and slip-face rims, a11); washes
+are not drawn along the streams of the arid canyon plateaus (canyon@type).

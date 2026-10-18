@@ -63,7 +63,8 @@ landscapes but looks worse in places, which is why it is not the default:
 - **Deltas** are lobate with wandering distributaries, their silt in the land's hue (round 5);
   **canyons** have walls of strata at absolute elevations (cliff-forming beds and talus slopes of
   varied thickness), warped by spurs and gullies, over a narrow floor with a low-water river between
-  bars (round 9), but the walls are smoother than real eroded sandstone; desert floors and arid deltas are even
+  bars (round 9), rills, rough rock and talus aprons on the walls, and a river that meanders with its
+  canyon (round 10), but still read as a canyon, not v0.2.0's red badlands; desert floors and arid deltas are even
   (round 6), barchans only near the ergs of hyper-arid deserts (round 7); temperate forests have
   v0.2.0's crowns but render darker; the highest ranges (5–7 km) are as steep as the Himalaya
   (mean slope ~31° at 30 m, round 7), still steeper and greyer than v0.2.0's smooth snowfields.
@@ -73,11 +74,13 @@ landscapes but looks worse in places, which is why it is not the default:
 - **Cold lands** (round 8): glaciers only in mountain valleys and without contour stripes, open
   lakes in the summer datasets (frozen only below −3 °C at the ecoregion's date), no snowed-in
   ecoregion borders. Lakes and ponds have flat water and crisp shores without islets or pale
-  halos (round 9), but on hillsides of the lowland ice fields a lake can lie tilted, and
-  thermokarst lakes read black from oblique views.
+  halos (round 9); every thermokarst and kettle lake has one flat level, its spill point, and
+  water only below it (round 10: no tilted sheets on slopes, fewer lakes on undulating ground).
 - **Towns** (round 9): a city's grid bends and its block size drifts over kilometres, the skyline
-  fades out from the centre, radial streets only in the centre, estates in greys, trees on car
-  parks, frayed town edges with gardens; industrial estates still keep their district outlines.
+  fades out from the centre, estates in greys, trees on car parks, frayed town edges with gardens;
+  round 10: organic old cores with one ring boulevard (no concentric rings), curvilinear suburbs in
+  big cities, estates on the town grid with green buffers; estates still read as patches of grey
+  roofs and districts do not bend to rivers or relief.
 - **Speed:** tiles cost about 2–3× classic's on a GPU (Tesla P4, 64 cold tiles at z12 / z14 /
   z16: 11.2 / 6.5 / 5.6 s against 3.8 / 3.4 / 2.9 s), mostly the kits' pass B and the host-built
   routes of a new area.
