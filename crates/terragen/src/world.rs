@@ -1190,6 +1190,8 @@ impl World {
             // the floodplain-edge noise depends on the level only: once per level (from the
             // tile's coarse grid when there)
             let mut fp_noise: [Option<f64>; 4] = m.pre.map_or([None; 4], |p| p.floodplain);
+            // (the channels' distances and half widths after the kits' carve hooks)
+            let mut adj: Vec<(f64, f64)> = Vec::with_capacity(hits.len());
             for rh in &hits {
                 let lc = &self.cfg.hydro.levels[rh.level as usize];
                 let ad = rh.d.abs();
@@ -1234,6 +1236,9 @@ impl World {
                     lake_r: 0.0,
                     lake_level: 0.0,
                     narrow: 0.0,
+                    shift: 0.0,
+                    hw_k: 1.0,
+                    rough: 0.0,
                 };
                 if crate::kits::has_carve() {
                     let ci =
@@ -1241,6 +1246,11 @@ impl World {
                     crate::kits::carve(self, &ci, &mut cv);
                 }
                 let (floor, fp_w, wall_k) = (cv.floor, cv.fp_w, cv.wall_k);
+                // (a kit's meanders and uneven bed: the channel's distance and half width)
+                let ds = rh.d - cv.shift;
+                let ad = ds.abs();
+                let hw = hw * cv.hw_k;
+                adj.push((ds, hw));
                 let vnat = fp_w + wall_k * (h0 - floor);
                 let valley = lerp(rh.valley.max(vnat), vnat, cv.narrow).min(rh.reach);
                 // no carving of the deeper seabed; floodplains stay above the sea (near the coast they were
@@ -1278,7 +1288,12 @@ impl World {
                     } else {
                         wall
                     };
-                    let carved = h0.min(lerp(target, h0, wall));
+                    let mut carved = h0.min(lerp(target, h0, wall));
+                    // (a kit's fine erosion texture on the walls: rills and rough rock)
+                    if cv.rough > 0.0 && h0 > target {
+                        let r = (1.0 - perlin3(0x0C4A_9E01, p / 13.0).abs()) * band(13.0, gsd) * 0.65 + (1.0 - perlin3(0x0C4A_9E02, p / 5.0).abs()) * band(5.0, gsd) * 0.35;
+                        carved -= cv.rough * 4.0 * wall * (1.0 - wall) * r;
+                    }
                     // limit the carve depth (small streams only notch the terrain)
                     let carved = carved.max(h0 - cv.depth_cap * (1.0 - 0.3 * wall));
                     // valleys narrower than a pixel fade out per pixel (no hard level cutoff)
@@ -1301,18 +1316,18 @@ impl World {
                 }
             }
             // channel attributes from the nearest channel
-            if let Some(rh) = hits.iter().min_by(|a, b| (a.d.abs() - a.hw).total_cmp(&(b.d.abs() - b.hw))) {
+            if let Some((rh, &(d, hw))) = hits.iter().zip(&adj).min_by(|a, b| (a.1 .0.abs() - a.1 .1).total_cmp(&(b.1 .0.abs() - b.1 .1))) {
                 let lc = &self.cfg.hydro.levels[rh.level as usize];
-                let ad = rh.d.abs();
-                let floor = rh.floor.max(1.0) - (1.0 + 0.04 * rh.hw);
-                t.river_d = rh.d;
-                t.river_hw = rh.hw;
+                let ad = d.abs();
+                let floor = rh.floor.max(1.0) - (1.0 + 0.04 * hw);
+                t.river_d = d;
+                t.river_hw = hw;
                 // water surface: the drainage floor, but never buried below the (notched) ground
                 // nor above its banks: a tributary's floor (from the uncarved relief) can lie far
                 // above the floor of a bigger valley it crosses, and that perched water surface,
                 // blended into wide coarse-zoom pixels, raised walls tens of metres high along the
                 // rivers. Outside the channel the level is the ground.
-                t.river_level = if ad < rh.hw { floor.min(h + 1.0 + 0.06 * rh.hw).max(h + 0.6) } else { h };
+                t.river_level = if ad < hw { floor.min(h + 1.0 + 0.06 * hw).max(h + 0.6) } else { h };
                 t.river_wet = smoothstep(lc.wet_moisture, lc.wet_moisture + 0.12, moist);
             }
         }

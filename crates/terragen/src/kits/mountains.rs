@@ -470,19 +470,30 @@ fn fjord(m: &Macro, mountain: f64, glac: f64) -> (f64, f64) {
 /// valley carve; `mountains_carve` in WGSL).
 pub fn carve(_w: &World, ci: &CarveIn, cv: &mut Carve) {
     if ci.level > 1 {
+        // (the streams of the arid canyon plateaus: shallow swales, not straight V trenches whose
+        // sunlit sides drew white lines across the floor and up the walls, canyon@type)
+        let arid = 1.0 - smoothstep(0.15, 0.45, ci.moist);
+        let cz = arid * smoothstep(100.0, 700.0, ci.h0) * (1.0 - smoothstep(0.3, 0.6, ci.mountain)) * smoothstep(0.05, 0.3, ci.mesa) * smoothstep(0.0, 0.15, ci.m.cont);
+        if cz > 0.0 {
+            cv.depth_cap = lerp(cv.depth_cap, 1.2, cz);
+            cv.wall_k = lerp(cv.wall_k, 20.0, cz);
+        }
         return;
     }
     let m = ci.m;
     let lvl1 = ci.level == 1;
     let gsd = ci.ctx.gsd;
-    // ---- glacial troughs: a U profile, wider floors, deeper (rivers 2.6, tributaries 8)
+    // ---- glacial troughs: a U profile, wider floors, deeper (rivers 2, tributaries 3)
+    // (the tributaries' troughs 3× the stream's cut, not 8×: 280 m deep troughs along the straight
+    // pieces of the drainage cut straight walls through the ridges, a comb of gullies on their
+    // faces, alpine_south@type)
     let glac = smoothstep(0.3, 0.6, m.glaciation) * smoothstep(0.25, 0.55, ci.mountain);
     if glac > 0.0 {
         cv.u = cv.u.max(glac);
-        cv.wall_k *= lerp(1.0, 0.75, glac);
+        cv.wall_k *= lerp(1.0, if lvl1 { 0.95 } else { 0.75 }, glac);
         cv.fp_w *= lerp(1.0, 1.5, glac);
-        cv.depth_cap *= lerp(1.0, if lvl1 { 8.0 } else { 2.0 }, glac);
-        cv.floor = lerp(cv.floor, cv.floor.min((cv.floor - if lvl1 { 40.0 } else { 90.0 }).max(1.0)), glac);
+        cv.depth_cap *= lerp(1.0, if lvl1 { 3.0 } else { 2.0 }, glac);
+        cv.floor = lerp(cv.floor, cv.floor.min((cv.floor - if lvl1 { 20.0 } else { 90.0 }).max(1.0)), glac);
         // cirques: a round floor at the head of a glaciated tributary, a tarn where the head is
         if lvl1 && ci.spring {
             let ch = glac * smoothstep(0.35, 0.7, ci.mountain);
@@ -551,8 +562,19 @@ pub fn carve(_w: &World, ci: &CarveIn, cv: &mut Carve) {
                 let g2 = (1.0 - smoothstep(0.0, 0.25, perlin3(SEED + 76, ci.ctx.p / 260.0).abs())) * band(260.0, gsd);
                 let spur = smoothstep(-0.3, 0.5, perlin3(SEED + 77, ci.ctx.p / 1300.0));
                 let g3 = (1.0 - smoothstep(0.0, 0.3, perlin3(SEED + 78, ci.ctx.p / 110.0).abs())) * band(110.0, gsd);
-                cv.dad = gw * ext * (0.2 * spur - 0.2 * g1 - 0.08 * g2 - 0.035 * g3);
+                // (and rills down the walls at 45 m and 18 m: walls whose finest gullies were 110 m
+                // apart read as smooth, waxy and melted, canyon@type)
+                let g4 = (1.0 - smoothstep(0.0, 0.3, perlin3(SEED + 79, ci.ctx.p / 45.0).abs())) * band(45.0, gsd);
+                let g5 = (1.0 - smoothstep(0.0, 0.35, perlin3(SEED + 83, ci.ctx.p / 18.0).abs())) * band(18.0, gsd);
+                cv.dad = gw * ext * (0.2 * spur - 0.2 * g1 - 0.08 * g2 - 0.035 * g3 - 0.018 * g4 - 0.007 * g5);
             }
+            // (an entrenched river: the channel and the canyon meander together, the bed narrows
+            // and widens; a straight channel between straight parallel banks read as a canal)
+            let mb = band(1000.0, gsd);
+            cv.shift = cz * 300.0 * mb * (perlin3(SEED + 80, ci.ctx.p / 1000.0) + 0.3 * perlin3(SEED + 81, ci.ctx.p / 420.0));
+            cv.hw_k = 1.0 + cz * 0.35 * perlin3(SEED + 82, ci.ctx.p / 600.0);
+            // (rough rock: the walls' fine erosion texture, 4 m deep)
+            cv.rough = cz * 4.0;
         }
     }
 }
@@ -602,12 +624,12 @@ pub fn linear(s: &mut Stack) {
             srgb(178.0, 149.0, 125.0),
             srgb(186.0, 145.0, 120.0),
             srgb(188.0, 165.0, 140.0),
-            srgb(194.0, 154.0, 116.0),
-            srgb(184.0, 134.0, 98.0),
-            srgb(186.0, 118.0, 84.0),
-            srgb(158.0, 86.0, 60.0),
-            srgb(172.0, 104.0, 74.0),
-            srgb(140.0, 80.0, 60.0),
+            srgb(198.0, 140.0, 96.0),
+            srgb(188.0, 116.0, 76.0),
+            srgb(176.0, 98.0, 64.0),
+            srgb(150.0, 78.0, 56.0),
+            srgb(164.0, 92.0, 64.0),
+            srgb(132.0, 72.0, 54.0),
         ];
         let (off, nc) = if z.badland > 0.2 {
             (0, 5.999)
@@ -620,7 +642,16 @@ pub fn linear(s: &mut Stack) {
         let floor_col = if z.badland > 0.2 { srgb(190.0, 176.0, 150.0) } else { srgb(172.0, 128.0, 96.0) };
         // (cliff faces of the canyons darker than their ledges and talus: varnish and shade)
         let cliff = if z.badland > 0.2 { 0.0 } else { smoothstep(0.7, 1.3, slope) };
-        let col = mixc(floor_col, col * (1.0 - 0.2 * cliff), 0.8 * smoothstep(0.25, 0.6, slope));
+        let col = if z.badland > 0.2 {
+            mixc(floor_col, col, 0.8 * smoothstep(0.25, 0.6, slope))
+        } else {
+            // (rough rock on the faces, and aprons of paler, greyer talus with boulders below
+            // them: walls of one smooth colour from the floor to the rim read as wax, canyon@type)
+            let face = col * (1.0 - 0.2 * cliff) * (1.0 + 0.1 * perlin3(SEED + 41, p / 7.0) * band(7.0, s.ctx.gsd));
+            let tal = smoothstep(0.3, 0.5, slope) * (1.0 - smoothstep(0.75, 1.05, slope));
+            let talus = srgb(176.0, 146.0, 118.0) * (1.0 + 0.16 * perlin3(SEED + 42, p / 3.5) * band(3.5, s.ctx.gsd) + 0.1 * perlin3(SEED + 43, p / 11.0) * band(11.0, s.ctx.gsd));
+            mixc(mixc(floor_col, face, 0.85 * smoothstep(0.25, 0.6, slope)), talus, 0.7 * tal)
+        };
         s.composite(Layer { cov: cb, albedo: col, cls: if z.badland > 0.2 { cls::BADLANDS } else { cls::CLIFF }, clear: 1.0, ..Default::default() });
         s.m.natural_ok *= 1.0 - cb;
     }
@@ -798,6 +829,9 @@ mod tests {
             lake_r: 0.0,
             lake_level: 0.0,
             narrow: 0.0,
+            shift: 0.0,
+            hw_k: 1.0,
+            rough: 0.0,
         };
         fn ci<'a>(ctx: &'a Ctx, m: &'a Macro, level: u8, mountain: f64, moist: f64) -> CarveIn<'a> {
             CarveIn { ctx, m, level, ad: 50.0, u: 0.5, spring: false, hw: 30.0, h0: 600.0, temp: 5.0, moist, mountain, mesa: 0.0, smooth: 500.0 }
