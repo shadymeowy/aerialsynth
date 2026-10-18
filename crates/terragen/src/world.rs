@@ -946,6 +946,11 @@ impl World {
         self.terrain_impl(ctx, m, Mode::Relief, None, None)
     }
 
+    /// Pass A at a point without the lakes (the ground the kits' host-built lakes fill).
+    pub(crate) fn terrain_nolakes(&self, ctx: &Ctx) -> Terrain {
+        self.terrain_impl(ctx, &self.macro_at(ctx.p, ctx.gsd), Mode::NoLakes, None, None)
+    }
+
     /// Radius and level of the lattice lake `id` (feature point `pt`), as pass A draws it
     /// (`None`: on a slope or in the sea); its existence test is the caller's.
     pub(crate) fn lattice_lake(&self, id: u64, pt: DVec3) -> Option<(f64, f64)> {
