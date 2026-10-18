@@ -1283,7 +1283,7 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
             let depth = 3.0 + 0.01 * rad;
             if (de < 1.0) {
                 let bowl = level - 0.3 - depth * sqrt(1.0 - de * de);
-                let near = 1.0 - smoothstep1(2.3, 2.8, h - micro - level);
+                let near = 1.0 - smoothstep1(0.55 + 2.2 * max(1.0 - de, 0.0), 1.05 + 2.2 * max(1.0 - de, 0.0), h - micro - level);
                 h = min(h, lerp(h, bowl, near));
             }
             if (de < 1.0 && h < level) {
@@ -1322,7 +1322,7 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                 + perlin3(id ^ 9lu, p / f64(lw * 0.12)) * 0.06 * band(lw * 0.12, gsd);
             let de = d / rad * (1.0 + warpn);
             let depth = 3.0 + 0.01 * rad;
-            let near = 1.0 - smoothstep1(2.3, 2.8, h - micro - level);
+            let near = 1.0 - smoothstep1(0.55 + 2.2 * max(1.0 - de, 0.0), 1.05 + 2.2 * max(1.0 - de, 0.0), h - micro - level);
             if (de < 1.0 && near > 0.0) {
                 let bowl = level - 0.3 - depth * sqrt(1.0 - de * de);
                 h = min(h, lerp(h, bowl, near));

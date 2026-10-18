@@ -1381,7 +1381,7 @@ impl World {
                     // over its outer tenth drew a pale halo of shallows, a blend over the outer third a
                     // frayed, speckled shore, a26, and a steep bowl dug into a slope a round pit)
                     let bowl = level - 0.3 - depth * (1.0 - de * de).sqrt();
-                    let near = 1.0 - smoothstep(2.3, 2.8, h - micro - level);
+                    let near = 1.0 - smoothstep(0.55 + 2.2 * (1.0 - de).max(0.0), 1.05 + 2.2 * (1.0 - de).max(0.0), h - micro - level);
                     h = h.min(lerp(h, bowl, near));
                 }
                 if de < 1.0 && h < level {
@@ -1417,9 +1417,12 @@ impl World {
                 // follows the terrain's contours
                 // (which ground floods is decided on the ground without its micro relief, over half a
                 // metre: decided on the full ground over 2.5 m, the micro relief's bumps stood out of
-                // the water as hundreds of wooded islets, a glittery speckle, taiga_river@type)
+                // the water as hundreds of wooded islets, a glittery speckle, taiga_river@type; up to
+                // 1 m above the level near the shore, 3 m inside: at 2.5 m to the shore the lakes spread
+                // over the flat plains around them in frayed fringes and islets, terminal_lake; at
+                // 1 m everywhere the plains in the lakes stood out as islands, fp_forest)
                 let depth = 3.0 + 0.01 * rad;
-                let near = 1.0 - smoothstep(2.3, 2.8, h - micro - level);
+                let near = 1.0 - smoothstep(0.55 + 2.2 * (1.0 - de).max(0.0), 1.05 + 2.2 * (1.0 - de).max(0.0), h - micro - level);
                 if de < 1.0 && near > 0.0 {
                     let bowl = level - 0.3 - depth * (1.0 - de * de).sqrt();
                     h = h.min(lerp(h, bowl, near));
