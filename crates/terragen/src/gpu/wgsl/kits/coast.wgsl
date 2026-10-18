@@ -110,10 +110,17 @@ fn co_flats(s: ptr<function, Stack>, ty: CoTypes) {
     let mud = mixc(srgb(122.0, 108.0, 90.0), srgb(86.0, 78.0, 68.0), wet) * (1.0 + 0.07 * ripple);
     var marsh = mixc(srgb(92.0, 104.0, 64.0), srgb(128.0, 96.0, 66.0), smoothstep1(0.1, 0.6, co_nz(CO_SEED + 52lu, p, 70.0, gsd)));
     marsh = marsh * (1.0 + 0.1 * co_nz(CO_SEED + 53lu, p, 7.0, gsd));
+    let arid = 1.0 - smoothstep1(0.2, 0.34, (*s).t.moist);
+    let soil = mixc(spal(s, BP_SOIL), spal(s, BP_SOIL + 3u), 0.5);
+    let hue = mixc(vec3<f32>(1.0), soil / max(dot(soil, vec3<f32>(0.2126, 0.7152, 0.0722)), 0.01), 0.5);
+    let crust = smoothstep1(-0.2, 0.8, co_nz(CO_SEED + 54lu, p, 160.0, gsd) + 0.4 * co_nz(CO_SEED + 55lu, p, 40.0, gsd));
+    let sabkha = mixc(srgb(166.0, 154.0, 132.0) * hue, srgb(200.0, 194.0, 180.0), 0.35 * crust) * (1.0 + 0.04 * ripple);
+    marsh = mixc(marsh, sabkha, arid);
     let col = mixc(mud, marsh, high);
+    let hcls = select(LC_MARSH, LC_SALT_FLAT, arid > 0.5);
     var k = LC_TIDAL_FLAT;
     if (high > 0.5) {
-        k = LC_MARSH;
+        k = hcls;
     }
     var ly = layer_paint(zone, col, k);
     ly.clear = 1.0;
@@ -123,9 +130,8 @@ fn co_flats(s: ptr<function, Stack>, ty: CoTypes) {
     if (win > 0.0) {
         let c = co_creek(p, gsd, max(fw, 0.3 * gsd)) * zone * win;
         if (c > 0.0) {
-            let arid = 1.0 - smoothstep1(0.2, 0.34, (*s).t.moist);
             let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, max(0.7 * arid, 0.5 * high));
-            var ly2 = layer_paint(c, cc, select(LC_TIDAL_FLAT, LC_MARSH, high > 0.5));
+            var ly2 = layer_paint(c, cc, select(LC_TIDAL_FLAT, hcls, high > 0.5));
             ly2.clear = 1.0;
             composite(s, ly2);
         }

@@ -240,6 +240,19 @@ pub fn random_rotation(h: u64) -> DMat3 {
     DMat3::from_quat(q)
 }
 
+/// Sedimentary strata at absolute elevations (canyon walls and their colour bands; `strata` in
+/// WGSL): the stratum that holds height `z` (m) for a mean thickness `t` (m) as (index, height
+/// fraction 0..1 in it, bottom, thickness). One boundary per `t` of height at a hashed offset, so
+/// the thicknesses range from 0.2 t to 1.8 t (strata of one thickness drew a regular staircase).
+#[inline(always)]
+pub fn strata(z: f64, t: f64) -> (i64, f64, f64, f64) {
+    let b = |i: f64| (i + 0.1 + 0.8 * u01k(hash1(0x57A7_A000, i as i64), 1)) * t;
+    let k = (z / t).floor();
+    let bk = b(k);
+    let (j, lo, hi) = if z >= bk { (k, bk, b(k + 1.0)) } else { (k - 1.0, b(k - 1.0), bk) };
+    (j as i64, ((z - lo) / (hi - lo)).clamp(0.0, 1.0), lo, hi - lo)
+}
+
 /// Band-limiting weight for a feature of wavelength `lambda` sampled with pixel size `gsd`:
 /// 1 when well resolved (lambda >= 4 gsd), 0 when below Nyquist (lambda <= 2 gsd).
 #[inline(always)]

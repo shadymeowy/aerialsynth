@@ -9,11 +9,11 @@ fn mt_strata_col(i: u32) -> vec3<f32> {
         case 3u: { return srgb(178.0, 149.0, 125.0); }
         case 4u: { return srgb(186.0, 145.0, 120.0); }
         case 5u: { return srgb(188.0, 165.0, 140.0); }
-        case 6u: { return srgb(186.0, 118.0, 84.0); }
-        case 7u: { return srgb(158.0, 86.0, 60.0); }
-        case 8u: { return srgb(200.0, 168.0, 128.0); }
-        case 9u: { return srgb(172.0, 104.0, 74.0); }
-        case 10u: { return srgb(184.0, 134.0, 98.0); }
+        case 6u: { return srgb(194.0, 154.0, 116.0); }
+        case 7u: { return srgb(184.0, 134.0, 98.0); }
+        case 8u: { return srgb(186.0, 118.0, 84.0); }
+        case 9u: { return srgb(158.0, 86.0, 60.0); }
+        case 10u: { return srgb(172.0, 104.0, 74.0); }
         default: { return srgb(140.0, 80.0, 60.0); }
     }
 }
@@ -37,10 +37,10 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
     zi.coast_km = t.coast_km;
     zi.sand = t.sand;
     zi.style = 0.0;
-    let z = mt_zones(zi, fl.lit, fl.n1, fl.n2);
+    let z = mt_zones(zi, fl.w, fl.n1, fl.n2);
     let rn = (*s).pf.f[PF_PATCH];
     let arid = 1.0 - smoothstep1(0.16, 0.34, t.moist);
-    let soft = f32(fl.lit == MT_SEDIMENTARY || fl.lit == MT_CARBONATE || fl.lit == MT_UNCONSOLIDATED);
+    let soft = fl.w.x + fl.w.y;
     let clay = z.badland * 0.85;
     if (clay > 0.0) {
         let col = mixc(srgb(196.0, 184.0, 164.0), srgb(176.0, 160.0, 138.0), 0.5 + 0.5 * rn) * (1.0 + 0.05 * (*s).pf.f[PF_DETAIL]);
@@ -59,15 +59,21 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
             bandh = 9.0;
             cl = LC_BADLANDS;
         }
-        let kb = floor(ground / bandh + 0.6 * rn);
-        let h = hash1(MT_SEED + 40lu, i64(kb));
-        var off = 6u;
-        var floor_col = srgb(172.0, 128.0, 96.0);
-        if (z.badland > 0.2) {
-            off = 0u;
-            floor_col = srgb(190.0, 176.0, 150.0);
+        var kb = floor(ground / bandh + 0.6 * rn);
+        var off = 0u;
+        var nc = 5.999;
+        var floor_col = srgb(190.0, 176.0, 150.0);
+        if (z.badland <= 0.2) {
+            kb = strata(ground - 3.0, MT_STRATUM).x;
+            off = 9u;
+            if (u01k(hash1(0xBE4Clu, i64(kb)), 2lu) < 0.55) {
+                off = 6u;
+            }
+            nc = 2.999;
+            floor_col = srgb(172.0, 128.0, 96.0);
         }
-        let col0 = mt_strata_col(off + u32(u01k(h, 1lu) * 5.999)) * (0.94 + 0.12 * u01k(h, 2lu));
+        let h = hash1(MT_SEED + 40lu, i64(kb));
+        let col0 = mt_strata_col(off + u32(u01k(h, 1lu) * nc)) * (0.94 + 0.12 * u01k(h, 2lu));
         var cliff = smoothstep1(0.7, 1.3, slope);
         if (z.badland > 0.2) {
             cliff = 0.0;

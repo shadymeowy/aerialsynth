@@ -141,12 +141,11 @@ pub struct Carve {
     pub fp_min: f64,
     /// 0..1: the walls' profile from the smooth S to a U (parabola, steep shoulders)
     pub u: f64,
-    /// bench height (m) of stepped walls, and their share 0..1 (0: smooth walls)
+    /// mean stratum thickness (m) of stepped walls (`noise::strata`), and their share 0..1 (0: smooth walls)
     pub steps: f64,
     pub step_mix: f64,
-    /// the height the benches are counted from (m; the ground before the carve, or a smoother
-    /// reference: the number of benches then does not follow the ground's noise)
-    pub top: f64,
+    /// a warp (m) of the distance to the channel in the walls: > 0 a spur, < 0 a gully
+    pub dad: f64,
     /// a lake in the channel's head: radius (m, 0: none) and absolute water level (m)
     pub lake_r: f64,
     pub lake_level: f64,

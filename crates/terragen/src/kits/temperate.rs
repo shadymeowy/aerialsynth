@@ -307,6 +307,13 @@ fn floodplain_meadow(s: &mut Stack) {
     s.composite(Layer::paint(cov, col));
 }
 
+/// Open water of a mire, marsh or beaver pond: a flat surface just below the pixel's ground less
+/// its micro relief (water draped over the ground's bumps glittered with the reflections of banks
+/// and sky, taiga_river@type).
+fn pond_layer(s: &Stack, cov: f64, albedo: DVec3) -> Layer {
+    Layer { cov, albedo, cls: lc::LAKE, clear: 1.0, hmode: hmode::ABS, dh: s.t.ground - s.t.micro - 0.3, ..Default::default() }
+}
+
 /// Mires of the cool wet lowlands: raised bogs (ochre and red sphagnum, concentric pools,
 /// stunted pines), string bogs (aapa: strings along the iso-lines of a slow flow, flark pools
 /// between), fens (green sedge near streams and in water tracks).
@@ -388,7 +395,7 @@ fn mires(s: &mut Stack) {
     s.composite(Layer { cov, albedo: col, cls: lc::BOG, clear, ..Default::default() });
     if pool > 0.0 {
         let water = rgb(34.0, 38.0, 36.0) * (1.0 + 0.15 * perlin3(SEED_MIRE ^ 0x61, p / 7.0) * band(7.0, gsd));
-        s.composite(Layer { cov: pool * cov, albedo: water, cls: lc::LAKE, clear: 1.0, ..Default::default() });
+        s.composite(pond_layer(s, pool * cov, water));
     }
 }
 
@@ -442,7 +449,7 @@ fn marsh(s: &mut Stack) {
     let creek = (ec * kernels::band_cov(ch / 0.0107, 3.0, fw) + (1.0 - ec) * 0.05) * smoothstep(0.1, 0.3, dm);
     let water = core.max(creek) * cov;
     if water > 0.0 {
-        s.composite(Layer { cov: water, albedo: rgb(40.0, 54.0, 50.0), cls: lc::LAKE, clear: 1.0, ..Default::default() });
+        s.composite(pond_layer(s, water, rgb(40.0, 54.0, 50.0)));
     }
 }
 
@@ -494,7 +501,7 @@ fn beaver_ponds(s: &mut Stack) {
     }
     let pond = ((wp - rd) / fw + 0.5).clamp(0.0, 1.0);
     if pond > 0.0 {
-        s.composite(Layer { cov: pond, albedo: rgb(38.0, 46.0, 38.0), cls: lc::LAKE, clear: 1.0, ..Default::default() });
+        s.composite(pond_layer(s, pond, rgb(38.0, 46.0, 38.0)));
     }
 }
 

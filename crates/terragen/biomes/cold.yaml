@@ -106,6 +106,7 @@
       params: { scale: 60, fraction: 0.12, octaves: 2, colour: [40, 50, 46], colour2: [56, 66, 52] }
       class: bog
       clear: 1.0
+      height: none
     # spruce scattered over the lichen, in clumps (where the core's tree line has ended them)
     - slot: canopy
       kernel: scatter

@@ -24,11 +24,13 @@
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.3, 0.45], moist: [null, null, 0.26, 0.36] }
       params: { scale: 240, fraction: 0.2, octaves: 3, roughness: 0.65, colour: [164, 136, 104], colour2: [154, 128, 98], colour_var: 0.2, soft: 0.3 }
       class: gravel
+      height: none
     # pale gravel and silt mottling of the pavement
     - slot: azonal
       kernel: patches
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.25, 0.4], moist: [null, null, 0.26, 0.36] }
       params: { scale: 28, fraction: 0.35, octaves: 2, roughness: 0.5, colour: [184, 160, 126], colour2: [178, 154, 122], colour_var: 0.1, soft: 0.35 }
+      height: none
     # sparse scrub on the plains
     - slot: canopy
       kernel: scatter
@@ -62,10 +64,12 @@
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.3, 0.45], moist: [null, null, 0.26, 0.36] }
       params: { scale: 560, fraction: 0.18, octaves: 3, roughness: 0.55, colour: [130, 80, 58], colour2: [118, 74, 54], colour_var: 0.2, soft: 0.3 }
       class: gravel
+      height: none
     - slot: azonal
       kernel: patches
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.25, 0.4], moist: [null, null, 0.26, 0.36] }
       params: { scale: 30, fraction: 0.3, octaves: 2, roughness: 0.5, colour: [196, 132, 92], colour2: [176, 118, 84], colour_var: 0.1, soft: 0.35 }
+      height: none
     - slot: canopy
       kernel: scatter
       mask: { sand: [null, null, 0.3, 0.55], moist: [0.03, 0.2, 2, 3], veg: [0.4, 0.7, 2, 3] }
@@ -96,12 +100,16 @@
     - slot: azonal
       kernel: patches
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.3, 0.45], moist: [null, null, 0.26, 0.36] }
-      params: { scale: 640, fraction: 0.22, octaves: 3, roughness: 0.55, colour: [140, 106, 78], colour2: [124, 96, 72], colour_var: 0.2, soft: 0.3 }
+      params: { scale: 640, fraction: 0.22, octaves: 3, roughness: 0.55, colour: [140, 106, 78], colour2: [124, 96, 72], colour_var: 0.2, soft: 0.5 }
       class: gravel
+      height: none
     - slot: azonal
       kernel: patches
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.25, 0.4], moist: [null, null, 0.26, 0.36] }
-      params: { scale: 26, fraction: 0.4, octaves: 2, roughness: 0.5, colour: [214, 190, 150], colour2: [198, 176, 140], colour_var: 0.1, soft: 0.35 }
+      # (drift sand over the pavement, close to its tone and soft: pale 26 m patches on the dark
+      # pavement drew a camouflage mottle at a kilometre, desert_coast@type)
+      params: { scale: 26, fraction: 0.4, octaves: 2, roughness: 0.5, colour: [192, 168, 132], colour2: [180, 158, 124], colour_var: 0.1, soft: 0.5 }
+      height: none
     - slot: canopy
       kernel: scatter
       mask: { sand: [null, null, 0.2, 0.4], moist: [0.04, 0.2, 2, 3], veg: [0.4, 0.7, 2, 3] }
@@ -149,11 +157,13 @@
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.4, 0.6] }
       params: { scale: 700, fraction: 0.45, octaves: 3, roughness: 0.6, colour: [80, 62, 50], colour2: [62, 52, 46], colour_var: 0.2 }
       class: rock
+      height: none
     - slot: azonal
       kernel: patches
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.25, 0.4] }
       params: { scale: 160, fraction: 0.18, octaves: 2, roughness: 0.5, colour: [196, 176, 146], colour2: [184, 164, 136], colour_var: 0.1 }
       class: bare
+      height: none
     - slot: canopy
       kernel: scatter
       mask: { river_dist: [-15, 0, 20, 50], moist: [0.0, 0.08, 2, 3], veg: [0.4, 0.7, 2, 3] }
@@ -188,6 +198,7 @@
       params: { scale: 260, fraction: 0.2, octaves: 2, roughness: 0.45, colour: [182, 168, 146], colour2: [168, 154, 134], colour_var: 0.1 }
       class: bare
       clear: 1.0
+      height: none
     - slot: canopy
       kernel: scatter
       mask: { river_dist: [-15, 0, 20, 50], veg: [0.4, 0.7, 2, 3] }
@@ -232,6 +243,7 @@
       mask: { sand: [null, null, 0.1, 0.25], slope: [null, null, 0.3, 0.45] }
       params: { scale: 300, fraction: 0.25, octaves: 3, roughness: 0.55, colour: [146, 114, 86], colour2: [132, 104, 80], colour_var: 0.2, soft: 0.3 }
       class: gravel
+      height: none
     - slot: canopy
       kernel: scatter
       mask: { sand: [null, null, 0.4, 0.7], veg: [0.4, 0.7, 2, 3] }
@@ -268,10 +280,12 @@
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.3, 0.45] }
       params: { scale: 600, fraction: 0.35, octaves: 3, roughness: 0.6, colour: [116, 106, 94], colour2: [132, 120, 104], colour_var: 0.2, soft: 0.3 }
       class: gravel
+      height: none
     - slot: azonal
       kernel: patches
       mask: { sand: [null, null, 0.08, 0.2], slope: [null, null, 0.25, 0.4] }
       params: { scale: 22, fraction: 0.4, octaves: 2, roughness: 0.5, colour: [192, 182, 160], colour2: [176, 168, 150], colour_var: 0.1, soft: 0.35 }
+      height: none
     - slot: canopy
       kernel: scatter
       mask: { sand: [null, null, 0.5, 0.8], moist: [0.02, 0.15, 2, 3], veg: [0.4, 0.7, 2, 3] }

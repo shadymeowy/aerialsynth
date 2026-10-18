@@ -108,7 +108,8 @@ pub struct GTerrain {
     pub development: f32,
     pub temp_range: f32,
     pub regime: f32,
-    pub _q: [f32; 2],
+    pub micro: f32,
+    pub _q: f32,
 }
 
 /// `Seg` of world.wgsl.

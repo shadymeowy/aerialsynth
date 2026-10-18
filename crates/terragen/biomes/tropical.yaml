@@ -125,6 +125,7 @@
       params: { scale: 110, fraction: 0.14, octaves: 3, roughness: 0.55, colour: [30, 34, 28], colour2: [44, 50, 36] }
       class: lake
       clear: 1.0
+      height: none
     - slot: disturbance
       kernel: tropical_meander
       seed: 0x7E11
@@ -485,6 +486,7 @@
       params: { scale: 200, fraction: 0.9, octaves: 2, colour: [112, 128, 64], colour2: [132, 140, 76] }
       class: grass
       clear: 1.0
+      height: none
 
 # ---------------------------------------------------------------- altitudinal zones
 
@@ -519,6 +521,7 @@
       params: { scale: 70, fraction: 0.09, octaves: 3, roughness: 0.6, colour: [136, 104, 76], colour2: [102, 118, 68] }
       class: bare
       clear: 1.0
+      height: none
 
 - id: tropical_paramo
   # a zone only: never picked by an ecoregion (nor as the nearest envelope)
@@ -550,3 +553,4 @@
       params: { scale: 160, fraction: 0.08, octaves: 2, colour: [40, 52, 58], colour2: [50, 62, 66] }
       class: lake
       clear: 1.0
+      height: none

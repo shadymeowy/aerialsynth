@@ -328,3 +328,6 @@ Polish round 7: cuttings are steep rock faces (2:1, the toe at half the depth) t
 Polish round 8: tracks and dirt roads 60 % of the way from the ground's colour to their own (fixed pale khaki drew white
 ribbons over red deserts and canyons); grass on verges and fill slopes only where the ground is green (G > R), gravel
 shoulders only on paved roads.
+
+Polish round 9: power-line corridors keep shrubs and saplings (60 % of the trees cleared; a cleared lawn drew a
+bright straight line through the rainforest, volcano@type).

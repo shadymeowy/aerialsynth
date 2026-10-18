@@ -246,7 +246,7 @@ fn cold_lake_mask(s: ptr<function, Stack>, c: ColdClimate) -> f32 {
     if (m <= 0.0) {
         return 0.0;
     }
-    return m * (1.0 - smoothstep1(0.03, 0.12, l.slope))
+    return m * (1.0 - 0.7 * smoothstep1(0.15, 0.35, l.slope))
         * (1.0 - smoothstep1(350.0, 700.0, l.ground))
         * (1.0 - smoothstep1(0.2, 0.5, t.mountain))
         * smoothstep1(0.02, 0.12, t.moist)
@@ -254,20 +254,20 @@ fn cold_lake_mask(s: ptr<function, Stack>, c: ColdClimate) -> f32 {
         * (0.3 + 0.7 * smoothstep1(0.25, 0.65, t.style.x));
 }
 
-fn cold_lake_colour(h: u64, rn: f32) -> vec3<f32> {
+fn cold_lake_colour(h: u64, shore_m: f32) -> vec3<f32> {
     let u = u01k(h, 9lu);
-    var deep = srgb(44.0, 62.0, 64.0);
+    var deep = srgb(34.0, 48.0, 52.0);
     if (u < 0.55) {
         deep = srgb(16.0, 28.0, 42.0);
     } else if (u < 0.8) {
         deep = srgb(36.0, 38.0, 28.0);
     }
     let shallow = mixc(deep, srgb(98.0, 104.0, 86.0), 0.5);
-    return mixc(deep, shallow, smoothstep1(0.86, 1.0, rn));
+    return mixc(deep, shallow, 0.7 * smoothstep1(4.0, 0.0, shore_m));
 }
 
 fn cold_lake_shallow_mix(c: vec3<f32>) -> vec3<f32> {
-    return mixc(c, mixc(c, srgb(98.0, 104.0, 86.0), 0.5), 0.12);
+    return mixc(c, mixc(c, srgb(98.0, 104.0, 86.0), 0.5), 0.04);
 }
 
 fn cold_lake_mean_albedo(lat: ColdLakeLat, frozen: bool) -> vec3<f32> {
@@ -275,9 +275,9 @@ fn cold_lake_mean_albedo(lat: ColdLakeLat, frozen: bool) -> vec3<f32> {
     if (frozen) {
         lake = mixc(srgb(150.0, 170.0, 184.0), srgb(228.0, 233.0, 239.0), 0.6);
     } else {
-        lake = cold_lake_shallow_mix(srgb(16.0, 28.0, 42.0)) * 0.55 + cold_lake_shallow_mix(srgb(36.0, 38.0, 28.0)) * 0.25 + cold_lake_shallow_mix(srgb(44.0, 62.0, 64.0)) * 0.2;
+        lake = cold_lake_shallow_mix(srgb(16.0, 28.0, 42.0)) * 0.55 + cold_lake_shallow_mix(srgb(36.0, 38.0, 28.0)) * 0.25 + cold_lake_shallow_mix(srgb(34.0, 48.0, 52.0)) * 0.2;
     }
-    let basin = mixc(srgb(104.0, 104.0, 78.0), srgb(88.0, 90.0, 68.0), 0.3);
+    let basin = mixc(srgb(72.0, 76.0, 52.0), srgb(60.0, 66.0, 46.0), 0.3);
     return mixc(basin, lake, lat.p_lake);
 }
 
@@ -349,15 +349,15 @@ fn cold_lakes(s: ptr<function, Stack>, lat: ColdLakeLat, sc: f32, frozen: bool) 
                 ly.hmode = HM_BLEND;
                 ly.dh = -0.3;
             } else {
-                xa = cold_lake_colour(hit.h, hit.rn) * (1.0 + 0.05 * perlin3(hit.h ^ 0x5EDlu, p * (1.0lf / 70.0lf)) * band(70.0, gsd));
+                xa = cold_lake_colour(hit.h, (1.0 - hit.rn) * hit.b) * (1.0 + 0.05 * perlin3(hit.h ^ 0x5EDlu, p * (1.0lf / 70.0lf)) * band(70.0, gsd));
                 ly.cls = COLD_LC_LAKE;
                 ly.hmode = HM_ABS;
-                ly.dh = (*s).l.ground - 0.4;
+                ly.dh = (*s).t.ground - (*s).t.micro - 0.4;
                 ly.relit = 1.0;
                 ly.water = true;
             }
         } else {
-            xa = mixc(srgb(104.0, 104.0, 78.0), srgb(88.0, 90.0, 68.0), smoothstep1(0.55, 0.0, hit.rn)) * (1.0 + 0.08 * perlin3(hit.h ^ 0xBA5lu, p * (1.0lf / 9.0lf)) * band(9.0, gsd));
+            xa = mixc(srgb(72.0, 76.0, 52.0), srgb(60.0, 66.0, 46.0), smoothstep1(0.55, 0.0, hit.rn)) * (1.0 + 0.08 * perlin3(hit.h ^ 0xBA5lu, p * (1.0lf / 9.0lf)) * band(9.0, gsd) + 0.12 * perlin3(hit.h ^ 0xBA6lu, p * (1.0lf / 35.0lf)) * band(35.0, gsd));
             ly.cls = LC_MARSH;
             ly.hmode = HM_BLEND;
             ly.dh = -1.2;

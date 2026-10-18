@@ -173,3 +173,8 @@ threshold drew a camouflage of dark and pale patches).
 Polish round 8: the wind streaks on the stony pavement at 40 % of their contrast (crisp pale streaks read as scratches,
 a11 a13 a14). The flaky `seamless_and_deterministic` test made a generator per place in parallel (nine GPU generators at
 once on an 8 GB P4); it now shares one second generator.
+
+Polish round 9: desert washes carry fresh sand only along some stretches (a 380 m noise, 35–100 %), vary ±40 % in
+width and sit 45 % of the way to the ground's colour (continuous pale ribbons read as roads, canyon@type); the hot erg
+desert's drift-sand and gravel patches are soft and near the pavement's tone (a camouflage mottle at a kilometre,
+desert_coast@type).

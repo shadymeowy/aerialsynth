@@ -2,6 +2,7 @@
 // module with pass A, and pass B's layer): the same functions in the same order of operations.
 
 const MT_SEED: u64 = 0x4D545000lu;
+const MT_STRATUM: f32 = 46.0;
 
 const MT_SEDIMENTARY: u32 = 0u;
 const MT_CARBONATE: u32 = 1u;
@@ -29,8 +30,29 @@ fn mt_litho(p: vec3<f64>) -> u32 {
     return atlas[t + 8u] & 7u;
 }
 
+/// `mountains::litho_w`: the shares of carbonate, soft and hard rock, bilinear over the four
+/// texels around `p`.
+fn mt_litho_w(p: vec3<f64>) -> vec3<f32> {
+    let r = f32(atlas[2u]);
+    let l = atlas_locate(normalize(vec3<f32>(p)), r);
+    let xc = clamp(l.yz, vec2<f32>(-0.5), vec2<f32>(r - 0.5));
+    let x0 = floor(xc);
+    let fr = xc - x0;
+    var o = vec3<f32>(0.0);
+    for (var k = 0u; k < 4u; k++) {
+        let dx = f32(k & 1u);
+        let dy = f32(k >> 1u);
+        let wt = select(1.0 - fr.x, fr.x, dx > 0.5) * select(1.0 - fr.y, fr.y, dy > 0.5);
+        let t = atlas_texel(u32(l.x), u32(x0.x + dx + f32(ATLAS_APRON)), u32(x0.y + dy + f32(ATLAS_APRON)));
+        let lit = atlas[t + 8u] & 7u;
+        o += wt * vec3<f32>(f32(lit == MT_CARBONATE), f32(lit == MT_SEDIMENTARY || lit == MT_UNCONSOLIDATED), f32(lit == MT_CRYSTALLINE || lit == MT_VOLCANIC));
+    }
+    return o;
+}
+
 struct MtFields {
-    lit: u32,
+    /// shares of carbonate, soft and hard rock (`LitW`)
+    w: vec3<f32>,
     n1: f32,
     n2: f32,
 }
@@ -41,7 +63,7 @@ fn mt_fields(c: Ctx) -> MtFields {
     o.n1 = perlin3(MT_SEED + 1lu, c.p / MT_WARP_LAM1);
     o.n2 = perlin3(MT_SEED + 2lu, c.p / MT_WARP_LAM2);
     let q = c.p + vec3<f64>(c.east * (MT_WARP_A * o.n1) + c.north * (MT_WARP_A * o.n2));
-    o.lit = mt_litho(q);
+    o.w = mt_litho_w(q);
     return o;
 }
 
@@ -66,10 +88,10 @@ struct MtZones {
 }
 
 /// `mountains::zones`.
-fn mt_zones(z: MtZIn, lit: u32, n1: f32, n2: f32) -> MtZones {
-    let carb = f32(lit == MT_CARBONATE);
-    let soft = f32(lit == MT_SEDIMENTARY || lit == MT_UNCONSOLIDATED);
-    let hard = f32(lit == MT_CRYSTALLINE || lit == MT_VOLCANIC);
+fn mt_zones(z: MtZIn, lw: vec3<f32>, n1: f32, n2: f32) -> MtZones {
+    let carb = lw.x;
+    let soft = lw.y;
+    let hard = lw.z;
     let land = smoothstep1(0.0, 0.08, z.cont);
     let shelf = smoothstep1(-0.25, -0.1, z.cont) * smoothstep1(-30.0, -12.0, z.coast_km);
     let patch_a = smoothstep1(-0.45, -0.05, n1);
@@ -318,7 +340,7 @@ fn mountains_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
     zi.coast_km = m.coast_km;
     zi.sand = r.sand;
     zi.style = perlin3(MT_SEED + 5lu, c.p / 180000.0lf);
-    let z = mt_zones(zi, fl.lit, fl.n1, fl.n2);
+    let z = mt_zones(zi, fl.w, fl.n1, fl.n2);
     let fans = inst_list(FAM_MOUNTAINS_FANS, r.blk, c.p);
     var ae = 0.0;
     if (z.tower + z.cockpit + z.fold + z.fault > 0.0 || fans.n > 0u) {
@@ -433,11 +455,23 @@ fn mountains_carve(c: Ctx, m: Macro, ci: CarveIn, cv: ptr<function, Carve>) {
             let re = bw * (1.0 - smoothstep1(0.32, 0.6, mt_crease(perlin3(MT_SEED + 70lu, c.p / 900.0lf))));
             let sp = bw * perlin3(MT_SEED + 71lu, c.p / 1700.0lf);
             (*cv).wall_k *= lerp(1.0, 0.3 * (1.0 + 1.1 * re + 0.3 * sp), cz);
-            (*cv).fp_w *= lerp(1.0, 0.6, cz);
-            (*cv).steps = 50.0;
+            (*cv).fp_w *= lerp(1.0, 0.3, cz);
+            (*cv).u = max((*cv).u, cz);
+            (*cv).narrow = max((*cv).narrow, cz);
+            (*cv).steps = MT_STRATUM;
             let bs = 0.45 + 0.55 * smoothstep1(-0.35, 0.35, perlin3(MT_SEED + 72lu, c.p / 1400.0lf));
             (*cv).step_mix = max((*cv).step_mix, cz * band(160.0, gsd) * bs);
-            (*cv).top = (*cv).floor + 500.0;
+            let gw = cz * band(520.0, gsd);
+            if (gw > 0.0) {
+                let ext = (*cv).wall_k * max(ci.h0 - (*cv).floor, 0.0);
+                let q = c.p / 700.0lf;
+                let wq = vec3<f64>(f64(perlin3(MT_SEED + 73lu, q * 0.5lf)), f64(perlin3(MT_SEED + 74lu, q * 0.5lf)), 0.0lf) * 0.6lf;
+                let g1 = 1.0 - smoothstep1(0.0, 0.2, abs(perlin3(MT_SEED + 75lu, q + wq)));
+                let g2 = (1.0 - smoothstep1(0.0, 0.25, abs(perlin3(MT_SEED + 76lu, c.p / 260.0lf)))) * band(260.0, gsd);
+                let spur = smoothstep1(-0.3, 0.5, perlin3(MT_SEED + 77lu, c.p / 1300.0lf));
+                let g3 = (1.0 - smoothstep1(0.0, 0.3, abs(perlin3(MT_SEED + 78lu, c.p / 110.0lf)))) * band(110.0, gsd);
+                (*cv).dad = gw * ext * (0.2 * spur - 0.2 * g1 - 0.08 * g2 - 0.035 * g3);
+            }
         }
     }
 }

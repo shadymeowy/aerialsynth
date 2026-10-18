@@ -54,6 +54,7 @@ mod cls {
     pub const ROCK: u8 = 6;
     pub const AQUACULTURE: u8 = 23;
     pub const TIDAL_FLAT: u8 = 24;
+    pub const SALT_FLAT: u8 = 30;
     pub const CORAL_REEF: u8 = 25;
     pub const CLIFF: u8 = 37;
     pub const MARSH: u8 = 59;
@@ -412,8 +413,17 @@ fn flats(s: &mut Stack, ty: &Types) {
     let mud = mixc(srgb(122.0, 108.0, 90.0), srgb(86.0, 78.0, 68.0), wet) * (1.0 + 0.07 * ripple);
     let marsh = mixc(srgb(92.0, 104.0, 64.0), srgb(128.0, 96.0, 66.0), smoothstep(0.1, 0.6, nz(SEED + 52, p, 70.0, gsd)));
     let marsh = marsh * (1.0 + 0.1 * nz(SEED + 53, p, 7.0, gsd));
+    // (arid coasts: no salt marsh on the high flats but sabkha, silt crusted with salt in the hue of
+    // the land's soil, soft: green and rust marsh mottled the desert coasts, desert_coast@type)
+    let arid = 1.0 - smoothstep(0.2, 0.34, s.t.moist);
+    let soil = mixc(s.pal(crate::registry::pal::SOIL), s.pal(crate::registry::pal::SOIL + 3), 0.5);
+    let hue = mixc(DVec3::ONE, soil / soil.dot(DVec3::new(0.2126, 0.7152, 0.0722)).max(0.01), 0.5);
+    let crust = smoothstep(-0.2, 0.8, nz(SEED + 54, p, 160.0, gsd) + 0.4 * nz(SEED + 55, p, 40.0, gsd));
+    let sabkha = mixc(srgb(166.0, 154.0, 132.0) * hue, srgb(200.0, 194.0, 180.0), 0.35 * crust) * (1.0 + 0.04 * ripple);
+    let marsh = mixc(marsh, sabkha, arid);
     let col = mixc(mud, marsh, high);
-    s.composite(Layer { cov: zone, albedo: col, cls: if high > 0.5 { cls::MARSH } else { cls::TIDAL_FLAT }, clear: 1.0, ..Default::default() });
+    let hcls = if arid > 0.5 { cls::SALT_FLAT } else { cls::MARSH };
+    s.composite(Layer { cov: zone, albedo: col, cls: if high > 0.5 { hcls } else { cls::TIDAL_FLAT }, clear: 1.0, ..Default::default() });
     s.m.natural_ok *= 1.0 - zone;
     // creeks: dark wet channels (the pixel's own carving shows as shallow water); dry and only a
     // little darker on the arid flats (a net of black lines over the desert coasts)
@@ -421,11 +431,10 @@ fn flats(s: &mut Stack, ty: &Types) {
     if win > 0.0 {
         let c = creek(p, gsd, fw.max(0.3 * gsd)) * zone * win;
         if c > 0.0 {
-            let arid = 1.0 - smoothstep(0.2, 0.34, s.t.moist);
             // (fainter in the high marsh, and of the marsh's class there: a dense net of dark,
             // glossy tidal-flat lines over the marsh, desert_coast@type)
             let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, (0.7 * arid).max(0.5 * high));
-            s.composite(Layer { cov: c, albedo: cc, cls: if high > 0.5 { cls::MARSH } else { cls::TIDAL_FLAT }, clear: 1.0, ..Default::default() });
+            s.composite(Layer { cov: c, albedo: cc, cls: if high > 0.5 { hcls } else { cls::TIDAL_FLAT }, clear: 1.0, ..Default::default() });
         }
     }
     ponds(s, zone);
@@ -641,6 +650,7 @@ mod tests {
         assert_eq!(id("coral_reef"), Some(cls::CORAL_REEF));
         assert_eq!(id("cliff"), Some(cls::CLIFF));
         assert_eq!(id("marsh"), Some(cls::MARSH));
+        assert_eq!(id("salt_flat"), Some(cls::SALT_FLAT));
     }
 
     fn pt(i: u64) -> DVec3 {

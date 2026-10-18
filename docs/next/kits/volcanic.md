@@ -117,3 +117,9 @@ from above and dark spikes in oblique views (volcano@type).
 Round 8 (polish): maar lakes have a crisp shore (rho 0.66–0.71) and their tephra rings are grown over (40 % of the ring
 colour over the ground, clearing 40 % of the trees): a bare pale ring and a shore blurred over 13 % of the radius drew a
 halo around the lakes (audit a26).
+
+Polish round 9: the cinder fields' lava tongues widen from the vent to a blunt toe (`w0 √(s(1 − s⁴))`, half width
+55–115 m; a lens of sin(πs)^0.6 with half widths of 110–230 m drew round black discs, braided), are mostly weathered
+(age +0.35) and fresh basalt is 66 DN (24 read as a hole); cinder cones have a faint scoria apron to 1.6 radii
+(25 %) and their foot weathers into the ground (an outline ending at the foot looked stamped on). Means:
+`MEAN_LAVA` 51, `MEAN_CINDER` 0.219.

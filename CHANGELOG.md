@@ -55,6 +55,13 @@
   or ripe crescents on paddy terraces; dirt roads and desert washes in the ground's colour (no
   pale ribbons up canyon walls); calmer deltas, burn scars, savanna grass and shrub speckle;
   autumn colours only with frost; hedged core farmland; like-for-like volcano and boreal places.
+- `next` polish round 9, against the reviewer's worst like-for-like scenes: canyon walls of strata at
+  absolute elevations with spurs, gullies and a narrow floor (no layer cake), rivers of dry lands as a
+  low-water channel between bars, patchy washes; no straight karst cliffs at lithology texel borders; calm
+  flat lakes and ponds without islet speckle or pale halos; lava tongues instead of black discs, cinder
+  cones with scoria aprons; boreal heath and lichen openings; sabkha on arid tidal flats; even desert floors;
+  softer power corridors; cities whose grid bends, skyline fades and estates are grey (no ring city, no tower
+  cake), trees on car parks, frayed town edges; a desert coast and a volcanic valley as like-for-like places.
 - **Optional tile layers** (tile store format 2; `next` only): `tiles.layers: [dtm, instance]`
   adds the bare ground and instance ids (building lots, fields, forest stands) to a new store;
   the viewer's map shadings *Height above ground* and *Instances* show them. Format-1 stores

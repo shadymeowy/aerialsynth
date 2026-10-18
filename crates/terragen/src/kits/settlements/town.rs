@@ -185,7 +185,9 @@ pub fn pick_pattern(pl: &Pl, z: u32, did: u64, industrial: bool) -> u32 {
     }
     match pl.arch {
         3 => ORGANIC,
-        5 | 6 | 11 if u < 0.3 => RADIAL,
+        // (ring boulevards and radial avenues in the centre only: a whole city of concentric rings
+        // read as artificial, dusk@type)
+        5 | 6 | 11 if u < 0.3 && z == zone::CBD => RADIAL,
         4 | 9 if u < 0.5 => SUPER,
         _ => GRID,
     }
@@ -277,11 +279,14 @@ pub fn roof_col(arch: u32, u: f64, flat: bool) -> DVec3 {
         // tower glass, warehouse metal, informal sheets, white dome, temple tiles
         20 => return mixc(srgb(70.0, 88.0, 108.0), srgb(118.0, 126.0, 134.0), u),
         21 => {
+            // (weathered metal and membranes of several greys: half of them near-white drew the estates
+            // as white patches)
             return match k {
-                0 | 3 => srgb(172.0, 172.0, 170.0),
-                1 => srgb(128.0, 138.0, 150.0),
-                _ => srgb(150.0, 146.0, 140.0),
-            }
+                0 => srgb(134.0, 134.0, 132.0),
+                1 => srgb(118.0, 128.0, 140.0),
+                2 => srgb(136.0, 132.0, 126.0),
+                _ => srgb(112.0, 104.0, 96.0),
+            };
         }
         22 => {
             return match k {
@@ -567,6 +572,16 @@ pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
     Dist { did, zone: z, pattern, theta, art, dmul, b, asp, sw, jit, warp, w2cell }
 }
 
+/// The large-scale bend and stretch of a city's grid (WGSL `st_big_grid_warp`): ±105 m of bend at
+/// 2.7-7.9 km wavelengths, block sizes ±12 % over 10 km.
+fn big_grid_warp(qr: DVec2, seed: u64) -> DVec2 {
+    let ph = |k: u64| std::f64::consts::TAU * u01k(seed ^ 0xB16, k);
+    let b = DVec2::new((qr.y / 1100.0 + ph(1)).sin() + 0.5 * (qr.y / 430.0 + ph(2)).sin(), (qr.x / 1250.0 + ph(3)).sin() + 0.5 * (qr.x / 470.0 + ph(4)).sin())
+        * 70.0;
+    let st = DVec2::new((qr.x / 1600.0 + ph(5)).sin(), (qr.y / 1700.0 + ph(6)).sin()) * 190.0;
+    qr + b + st
+}
+
 /// The evaluation of a place at position `q` (place frame; district `d` of the sample): block,
 /// lot, building. Shadow steps use only its height.
 pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
@@ -586,6 +601,11 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         if warp > 0.0 {
             let l = 230.0 * warp / 42.0;
             qr += DVec2::new((qr.y / l + 6.0 * u01k(did, 9)).sin(), (qr.x / (1.13 * l) + 6.0 * u01k(did, 10)).sin()) * warp;
+        }
+        if pattern == pat::GRID && pl.level >= 3 {
+            // (a city's grid bends gently and its blocks grow and shrink over kilometres: one straight
+            // grid of one block size to the horizon read as a pattern, metro)
+            qr = big_grid_warp(qr, pl.seed);
         }
         let bx = b;
         let by = b * asp;
@@ -709,7 +729,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     // (streets end where the town thins out: they ran on far into the fields, a grid of empty
     // streets around every town; arterials narrower: they drew a dark outline around every
     // district, the districts read as pieces of different towns)
-    let street_ok = dens_here > 0.42;
+    // (the threshold varies by block: a town ended in a staircase along its street grid)
+    let edge_thr = 0.42 + 0.1 * (u01k(blk.id, 31) - 0.5);
+    let street_ok = dens_here > edge_thr;
     let art_hw = [3.5, 3.5, 5.0, 6.0, 7.5][pl.level as usize];
     let has_streets = !matches!(pattern, pat::DISPERSED | pat::KRAAL);
     if art < art_hw + 2.0 * fw && dens_here > 0.35 {
@@ -846,6 +868,13 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                 col *= 1.0 - 0.08 * grid.min(1.0) * band(6.0, e.gsd);
                 cls = crate::landcover::PARKING;
                 em += DVec3::new(1.0, 0.85, 0.65) * 0.02 * band(20.0, e.gsd);
+                // (rows of trees around the square: a bare paved block read as an empty hole)
+                let tq = (DVec2::new(u, v) / 10.0).round() * 10.0;
+                let de = tq.x.min(tq.y).min(blk.bw - tq.x).min(blk.bd - tq.y);
+                if (4.0..=11.0).contains(&de) {
+                    tree = aa(2.4 - (DVec2::new(u, v) - tq).length(), fw);
+                    tree_h = 8.0 + 3.0 * u01k(hash2(blk.id ^ 0x9A, tq.x as i64, tq.y as i64), 1);
+                }
             }
             parcel::PARKING => {
                 col = c_asphalt() * 1.45;
@@ -858,6 +887,12 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                 let (pc, pcol) = crate::kits::transport::px::parked(blk.id, u, v, fw, e.gsd);
                 col = mixc(col, pcol, pc);
                 em += DVec3::new(1.0, 0.6, 0.25) * 0.03 * band(30.0, e.gsd);
+                // (trees between the rows of stalls: a bare asphalt block read as an empty hole)
+                let tq = DVec2::new((u / 9.0).round() * 9.0, (v / 16.0).round() * 16.0);
+                if u01k(hash2(blk.id ^ 0x9B, tq.x as i64, tq.y as i64), 1) < 0.7 {
+                    tree = aa(2.6 - (DVec2::new(u, v) - tq).length(), fw);
+                    tree_h = 7.0 + 3.0 * u01k(hash2(blk.id ^ 0x9B, tq.x as i64, tq.y as i64), 2);
+                }
             }
             parcel::SPORTS => {
                 // a pitch and an athletics track around it (school / club)
@@ -1091,7 +1126,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     let dl = dens_at(lot_dq);
                     // (a town's lots end where its streets do (above their density 0.42): houses strewn over the fields
                     // beyond read as a broken town)
-                    let edge = if fm == form::CITY as u32 { smoothstep(0.42, 0.47, dl) } else { 1.0 };
+                    let edge = if fm == form::CITY as u32 { smoothstep(edge_thr, edge_thr + 0.1, dl) } else { 1.0 };
                     // (within the streets most lots are built: suburbs at the old 55-75 % read
                     // as sparse next to v0.2.0's dense blocks; beyond them houses stay few)
                     let occ = lerp(dl.powf(0.7) * 1.05, dl.powf(0.35) * 1.1, smoothstep(0.35, 0.5, dl));
@@ -1111,14 +1146,18 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                             typ::HOUSE
                         }
                     } else {
+                        // (the skyline thins and falls off from the centre, and towers stand beyond the
+                        // CBD near it: a round cake of towers with a hard edge read as stamped on)
+                        let fall = smoothstep(0.0, 0.14, rel_here);
                         match z {
                             zone::CBD => {
-                                if pl.level >= 3 && ut < 0.75 {
+                                if pl.level >= 3 && ut < 0.75 * (1.0 - 0.5 * fall) {
                                     typ::TOWER
                                 } else {
                                     typ::MIDRISE
                                 }
                             }
+                            zone::INNER if pl.level >= 3 && u01k(lh, 21) < 0.12 * (1.0 - smoothstep(0.1, 0.2, rel_here)) => typ::TOWER,
                             zone::INNER => {
                                 // (towns: mostly detached blocks of flats on lawns, v0.2.0's
                                 // boxes; perimeter blocks are the cities' (they filled every
@@ -1154,7 +1193,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     if built || dl > 0.65 {
                         cov_lot = 1.0;
                         col = match t {
-                            typ::WAREHOUSE => mixc(c_concrete(), c_asphalt(), 0.4 * u01k(lh, 10)),
+                            typ::WAREHOUSE => mixc(c_concrete(), c_asphalt(), 0.35 + 0.45 * u01k(lh, 10)),
                             // (a town's blocks of flats stand on watered lawns: v0.2.0's green lots)
                             typ::MIDRISE if town_box => mixc(mixc(yard, srgb(86.0, 112.0, 54.0), 0.7), c_paving(), 0.15),
                             typ::TOWER | typ::MIDRISE => mixc(c_paving(), yard, 0.25),
@@ -1178,7 +1217,8 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                             typ::TOWER => {
                                 let s = (0.5 * lw.min(ld) - 4.0).clamp(6.0, 24.0);
                                 let ps = smoothstep(1e5, 1.5e7, pl.pop);
-                                (DVec2::splat(s), 40.0 + 360.0 * ps * u01k(lh, 4).powi(3) + 40.0 * u01k(lh, 5), true)
+                                let fall = smoothstep(0.0, 0.2, rel_here);
+                                (DVec2::splat(s), (40.0 + 360.0 * ps * u01k(lh, 4).powi(3) + 40.0 * u01k(lh, 5)) * (1.0 - 0.6 * fall), true)
                             }
                             typ::MIDRISE => {
                                 if town_box {
@@ -1327,6 +1367,14 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                             }
                             em += DVec3::new(1.0, 0.5, 0.15) * 0.025 * band(30.0, e.gsd);
                         }
+                    } else if fm == form::CITY as u32 && dl > edge_thr - 0.06 && u01k(lh, 22) < 0.55 {
+                        // (the town's fringe: gardens and allotments on the lots left unbuilt, not
+                        // fields butting against the last blocks)
+                        cov_lot = 1.0;
+                        let sx = ((ublk.x - lr[0]) / 6.0).floor();
+                        let gk = u01k(hash2(lh ^ 0x6A4D, sx as i64, 0), 1);
+                        col = mixc(srgb(96.0, 118.0, 62.0), srgb(122.0, 104.0, 78.0), gk) * (0.92 + 0.1 * e.detail);
+                        cls = crate::landcover::CROP;
                     }
                 }
             }

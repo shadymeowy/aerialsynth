@@ -134,3 +134,10 @@ dates late May … mid September, and at an ecoregion's border the date fades to
 10 km borders of cold ecoregions were snowed in: a17 a02); no lakes on perennial snow and ice; silty lakes (44, 62, 64),
 sedge basins olive-brown (104, 104, 78), a narrow shallow margin (rn 0.86–1), and a gentle slope limit on the lake mask
 (0.03–0.12, was 0.03–0.07: the lakes' size follows the mask by pixel and frayed into grey patches with islands of forest).
+
+Polish round 9: the thermokarst and kettle lakes shrink with the pixel's slope only on steep ground (0.15-0.35, at most 70 %; at fine zooms the gentle slopes are mostly the
+micro relief's: lakes frayed into glittery patches with hundreds of wooded islets, taiga_river@type, and changed with
+the zoom); their water is flat (the pixel's ground less its micro relief, `Terrain.micro`: water draped over the
+ground's bumps reflected banks and sky in a speckle); the shallow margin is 4 m wide, not the outer seventh of the
+lake (a pale halo 20-50 m wide, a26); drained basins darker (72, 76, 52 / 60, 66, 46) and mottled at 35 m, silty
+lakes (34, 48, 52).

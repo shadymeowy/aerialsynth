@@ -359,9 +359,9 @@ fn apply(h: &mut f64, c: &Cone) {
 /// cover of cinder cones and lava tongues.
 const K_CONE: f64 = 0.008_581_6;
 const K_MAAR: f64 = -0.001_225_1;
-const MEAN_CINDER: f64 = 0.1790;
+const MEAN_CINDER: f64 = 0.2190;
 /// mean lava tongue cover × cell (m)
-const MEAN_LAVA: f64 = 135.0;
+const MEAN_LAVA: f64 = 51.0;
 
 /// Profile of a cinder cone at ρ = d / R (1 at the crater rim's top).
 fn cone_profile(rho: f64) -> f64 {
@@ -397,9 +397,11 @@ fn ragged(qx: f64, qy: f64, r: f64, h: u64) -> f64 {
     qx.hypot(qy) / (r * (1.0 + 0.12 * (3.0 * th + t * u01k(h, 15)).sin() + 0.08 * (5.0 * th + t * u01k(h, 16)).sin()))
 }
 
-/// Half width of a lava tongue at the fraction `sg` of its length.
+/// Half width of a lava tongue at the fraction `sg` of its length: narrow at the vent, widening
+/// downstream to a blunt toe (a lens of `sin(π sg)^0.6`, short and wide, drew round black discs
+/// in the cinder fields, braided).
 fn tongue_w(sg: f64, w0: f64) -> f64 {
-    w0 * (std::f64::consts::PI * sg).sin().max(0.0).powf(0.6)
+    w0 * (sg.max(0.0) * (1.0 - sg.powi(4)).max(0.0)).sqrt()
 }
 
 /// A lava tongue from the origin along `dir` (rad) between `s0` and `len` (m): (cover, half
@@ -450,7 +452,7 @@ pub(crate) fn field(it: &Instance, p: DVec3, gsd: f64, fw: f64, look: bool) -> F
     o.z = (1.0 - bnd) * mean_z;
     o.cinder = (1.0 - bnd) * dm * (1.0 - mshare) * MEAN_CINDER;
     o.lava = (1.0 - bnd) * dm * (1.0 - mshare) * lshare * MEAN_LAVA / cs;
-    o.age = lage;
+    o.age = (lage + 0.35).min(1.0);
     if bnd <= 0.0 {
         return o;
     }
@@ -491,20 +493,24 @@ pub(crate) fn field(it: &Instance, p: DVec3, gsd: f64, fw: f64, look: bool) -> F
                 let rho = ragged(qx, qy, rc, h);
                 if rho < 1.0 {
                     zs += hc * cone_profile(rho);
-                    if smoothstep(1.0, 0.8, rho) > cinder {
-                        cinder = smoothstep(1.0, 0.8, rho);
-                        o.chash = h;
-                        o.crho = rho;
-                    }
+                }
+                // (the cone and a faint apron of scoria around its foot: an outline that ended at
+                // the foot looked stamped on, braided)
+                let cv = smoothstep(1.0, 0.8, rho).max(0.25 * smoothstep(1.6, 0.95, rho));
+                if cv > cinder {
+                    cinder = cv;
+                    o.chash = h;
+                    o.crho = rho;
                 }
                 if look && u01k(h, 8) < lshare {
                     let dir = std::f64::consts::TAU * u01k(h, 9);
                     let len = cs * (0.55 + 0.45 * u01k(h, 10));
-                    let w0 = 110.0 + 120.0 * u01k(h, 11);
+                    let w0 = 55.0 + 60.0 * u01k(h, 11);
                     let (c, _) = tongue(qx, qy, dir, 0.8 * rc, len, w0, std::f64::consts::TAU * u01k(h, 12), nzv, fw);
                     if c > lava {
                         lava = c;
-                        age = (lage + 0.5 * (u01k(h, 13) - 0.5)).clamp(0.0, 1.0);
+                        // (the tongues of a cinder field mostly weathered: fresh black flows drew holes in the plain)
+                        age = (lage + 0.35 + 0.5 * (u01k(h, 13) - 0.5)).clamp(0.0, 1.0);
                     }
                 }
             }
@@ -552,7 +558,8 @@ fn lava_look(age: f64, p: DVec3, gsd: f64) -> (DVec3, u8, f64) {
     let (wf, wm, wo) = ((1.0 - t2) * (1.0 - t1), (1.0 - t2) * t1, t2);
     let mut c = DVec3::ZERO;
     if wf > 0.0 {
-        c += wf * srgb(24.0, 22.0, 24.0) * (1.0 + 0.2 * nz(SEED_LAVA, p, 14.0, gsd));
+        // (fresh basalt at an albedo of ~4 %, rough: 24 DN read as a hole in the ground)
+        c += wf * srgb(66.0, 62.0, 62.0) * (1.0 + 0.3 * nz(SEED_LAVA, p, 14.0, gsd));
     }
     if wm > 0.0 {
         c += wm * mixc(srgb(66.0, 58.0, 54.0), srgb(106.0, 70.0, 50.0), 0.5 + 0.5 * nz(SEED_LAVA + 1, p, 40.0, gsd));
@@ -765,7 +772,7 @@ fn field_look(s: &mut Stack, it: &Instance) {
         col = mixc(col, ash_col(u01k(f.chash, 17)) * 0.9, 0.5 * smoothstep(0.55, 0.95, rho));
         // (no light baked into the albedo: the cones are steeper instead, and their lower flanks
         // weather and grow over into the ground around them)
-        col = mixc(col, s.col, 0.5 * smoothstep(0.55, 1.0, rho));
+        col = mixc(col, s.col, 0.5 * smoothstep(0.55, 1.0, rho) + 0.4 * smoothstep(0.95, 1.4, rho));
         let col = col * (1.0 + 0.18 * nz(SEED_ASH + 6, p, 9.0, gsd));
         s.composite(Layer { cov: f.cinder, albedo: col, cls: cls::VOLCANIC_ASH, clear: 1.0, ..Default::default() });
         s.m.natural_ok *= 1.0 - f.cinder;
