@@ -814,7 +814,7 @@ struct Carve {
     u: f32,
     steps: f32,
     step_mix: f32,
-    top: f32,
+    dad: f32,
     lake_r: f32,
     lake_level: f32,
     narrow: f32,
@@ -874,6 +874,8 @@ struct Terrain {
     development: f32,
     temp_range: f32,
     regime: f32,
+    /// the micro relief's part of `ground` (m)
+    micro: f32,
 }
 
 // ---------------------------------------------------------------- drainage and lakes (batch data)
@@ -1120,7 +1122,7 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
             cv.u = 0.0;
             cv.steps = 0.0;
             cv.step_mix = 0.0;
-            cv.top = h0;
+            cv.dad = 0.0;
             cv.lake_r = 0.0;
             cv.lake_level = 0.0;
             cv.narrow = 0.0;
@@ -1140,7 +1142,12 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
             let vnat = cv.fp_w + cv.wall_k * (h0 - cv.floor);
             let valley = min(lerp(max(valley_hit, vnat), vnat, cv.narrow), reach);
             if (h0 > cv.floor && h0 > -4.0 && ad < valley) {
-                var wall = smoothstep1(cv.fp_w, valley, ad);
+                var dad = cv.dad;
+                if (dad < 0.0) {
+                    dad *= 1.0 - smoothstep1(0.75 * valley, valley, ad);
+                }
+                let adw = ad + dad * smoothstep1(1.5 * hw, 1.5 * hw + 150.0, ad);
+                var wall = smoothstep1(cv.fp_w, valley, adw);
                 wall = wall * wall * (3.0 - 2.0 * wall);
                 let fpl = max(cv.floor + 0.8, cv.fp_min) + 0.4 * abs(micro);
                 var tgt = fpl;
@@ -1149,14 +1156,19 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                 }
                 // (kits: U-shaped walls and stepped walls)
                 if (cv.u > 0.0 || cv.step_mix > 0.0) {
-                    let tt = clamp((ad - cv.fp_w) / max(valley - cv.fp_w, 1e-6), 0.0, 1.0);
+                    let tt = clamp((adw - cv.fp_w) / max(valley - cv.fp_w, 1e-6), 0.0, 1.0);
                     var w = lerp(wall, pow(tt, 1.5), cv.u);
-                    if (cv.step_mix > 0.0) {
-                        let k = max((cv.top - fpl) / max(cv.steps, 1.0), 1.0);
-                        let x = w * k;
-                        let i = floor(x);
-                        let a = 0.15 + 0.5 * u01k(hash1(0xBE4Clu, i64(i)), 1lu);
-                        w = lerp(w, (i + smoothstep1(a, 0.97, x - i)) / k, cv.step_mix * (1.0 - smoothstep1(0.8, 1.0, w)));
+                    if (cv.step_mix > 0.0 && h0 > tgt) {
+                        let z = lerp(tgt, h0, w);
+                        let st = strata(z, max(cv.steps, 1.0));
+                        let hj = hash1(0xBE4Clu, i64(st.x));
+                        var g = st.y * (0.4 + 0.6 * st.y);
+                        if (u01k(hj, 2lu) < 0.55) {
+                            let a = 0.2 + 0.5 * u01k(hj, 1lu);
+                            g = smoothstep1(a, min(a + 0.3, 1.0), st.y);
+                        }
+                        let ws = (max(st.z + st.w * g, tgt) - tgt) / (h0 - tgt);
+                        w = lerp(w, min(ws, 1.0), cv.step_mix * (1.0 - smoothstep1(0.8, 1.0, w)));
                     }
                     wall = w;
                 }
@@ -1235,7 +1247,7 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                 id = wc.id2;
                 pt = wc.point2;
             }
-            let prob = cfg.lake_density * (0.3 + 0.9 * moist) * (1.0 - 0.8 * mountain);
+            let prob = cfg.lake_density * (0.3 + 0.9 * moist) * (1.0 - 0.8 * mountain) * (1.0 - smoothstep1(0.05, 0.25, r.mesa));
             if (u01k(id, 1lu) > prob) {
                 continue;
             }
@@ -1256,8 +1268,9 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
             let de = d / rad * (1.0 + warpn);
             let depth = 3.0 + 0.01 * rad;
             if (de < 1.0) {
-                let bowl = level - depth * (1.0 - de * de);
-                h = min(h, lerp(h, bowl, smoothstep1(1.0, 0.7, de)));
+                let bowl = level - 0.3 - depth * sqrt(1.0 - de * de);
+                let near = 1.0 - smoothstep1(2.3, 2.8, h - micro - level);
+                h = min(h, lerp(h, bowl, near));
             }
             if (de < 1.0 && h < level) {
                 t.water = max(t.water, level);
@@ -1295,9 +1308,9 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                 + perlin3(id ^ 9lu, p / f64(lw * 0.12)) * 0.06 * band(lw * 0.12, gsd);
             let de = d / rad * (1.0 + warpn);
             let depth = 3.0 + 0.01 * rad;
-            let near = 1.0 - smoothstep1(1.5, 4.0, h - level);
+            let near = 1.0 - smoothstep1(2.3, 2.8, h - micro - level);
             if (de < 1.0 && near > 0.0) {
-                let bowl = level - depth * (1.0 - de * de) - 0.3;
+                let bowl = level - 0.3 - depth * sqrt(1.0 - de * de);
                 h = min(h, lerp(h, bowl, near));
                 if (h < level) {
                     t.water = max(t.water, level);
@@ -1413,5 +1426,6 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
     t.development = m.development;
     t.temp_range = m.temp_range;
     t.regime = m.regime;
+    t.micro = micro;
     return t;
 }

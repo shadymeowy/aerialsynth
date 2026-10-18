@@ -126,6 +126,9 @@ pub struct Terrain {
     pub development: f64,
     pub temp_range: f64,
     pub regime: f64,
+    /// The micro relief's part of `ground` (m): the ground less it is smooth at the scale of a
+    /// pond (the kits' pass-B lakes keep their water level flat over it)
+    pub micro: f64,
 }
 
 /// The share of the ridged mountains' fine octaves (wavelengths below 1.8 km) at mountain
@@ -1227,7 +1230,7 @@ impl World {
                     u: 0.0,
                     steps: 0.0,
                     step_mix: 0.0,
-                    top: h0,
+                    dad: 0.0,
                     lake_r: 0.0,
                     lake_level: 0.0,
                     narrow: 0.0,
@@ -1246,23 +1249,30 @@ impl World {
                 // (the channel runs on across the shallow shelf, so it reaches open water instead
                 // of stopping square at the 0 m contour of a flat coast)
                 if h0 > floor && h0 > -4.0 && ad < valley {
-                    let wall = smoothstep(fp_w, valley, ad);
+                    // (a kit's warp of the walls: spurs and gullies; a gully fades out at the rim, where
+                    // the carve ends, and none reaches the channel)
+                    let dad = if cv.dad < 0.0 { cv.dad * (1.0 - smoothstep(0.75 * valley, valley, ad)) } else { cv.dad };
+                    let adw = ad + dad * smoothstep(1.5 * hw, 1.5 * hw + 150.0, ad);
+                    let wall = smoothstep(fp_w, valley, adw);
                     let wall = wall * wall * (3.0 - 2.0 * wall);
                     let fp = (floor + 0.8).max(cv.fp_min) + 0.4 * micro.abs();
                     let target = if ad < hw { floor - 0.8 - 0.02 * width } else { fp };
                     // (kits: U-shaped walls and stepped walls)
                     let wall = if cv.u > 0.0 || cv.step_mix > 0.0 {
-                        let t = ((ad - fp_w) / (valley - fp_w).max(1e-6)).clamp(0.0, 1.0);
+                        let t = ((adw - fp_w) / (valley - fp_w).max(1e-6)).clamp(0.0, 1.0);
                         let mut w = lerp(wall, t.powf(1.5), cv.u);
-                        if cv.step_mix > 0.0 {
-                            // (a real number of benches: a rounded one jumps with the height; the
+                        if cv.step_mix > 0.0 && h0 > target {
+                            // (strata at absolute elevations, `cv.steps` m thick on average: benches level
+                            // across the canyon and along it, of many heights; cliff-forming beds rise
+                            // from a ledge in a steep riser, soft beds in a concave talus slope. The
                             // quantization fades out towards the rim, where the wall meets the ground)
-                            let k = ((cv.top - fp) / cv.steps.max(1.0)).max(1.0);
-                            let x = w * k;
-                            let i = x.floor();
-                            // (each bench its own ledge width: equal ledges drew a staircase)
-                            let a = 0.15 + 0.5 * u01k(hash1(0xBE4C, i as i64), 1);
-                            w = lerp(w, (i + smoothstep(a, 0.97, x - i)) / k, cv.step_mix * (1.0 - smoothstep(0.8, 1.0, w)));
+                            let z = lerp(target, h0, w);
+                            let (j, f, lo, th) = strata(z, cv.steps.max(1.0));
+                            let hj = hash1(0xBE4C, j);
+                            let a = 0.2 + 0.5 * u01k(hj, 1);
+                            let g = if u01k(hj, 2) < 0.55 { smoothstep(a, (a + 0.3).min(1.0), f) } else { f * (0.4 + 0.6 * f) };
+                            let ws = ((lo + th * g).max(target) - target) / (h0 - target);
+                            w = lerp(w, ws.min(1.0), cv.step_mix * (1.0 - smoothstep(0.8, 1.0, w)));
                         }
                         w
                     } else {
@@ -1332,7 +1342,9 @@ impl World {
         if with_lakes && self.cfg.hydro.lake_density > 0.0 && land > 0.3 && lake_cell > gsd {
             let wc = self.site_cell(m, SITE_LAKE, 0x1A4E, p, lake_cell, 0.85);
             for (id, pt) in [(wc.id, wc.point), (wc.id2, wc.point2)] {
-                let prob = self.cfg.hydro.lake_density * (0.3 + 0.9 * moist) * (1.0 - 0.8 * mountain);
+                // (none on the arid plateaus of mesas and canyons: the pits between the canyon walls'
+                // spurs filled up to flat discs perched on the walls)
+                let prob = self.cfg.hydro.lake_density * (0.3 + 0.9 * moist) * (1.0 - 0.8 * mountain) * (1.0 - smoothstep(0.05, 0.25, mesa));
                 if u01k(id, 1) > prob {
                     continue;
                 }
@@ -1349,8 +1361,13 @@ impl World {
                 let de = d / rad * (1.0 + warpn);
                 let depth = 3.0 + 0.01 * rad;
                 if de < 1.0 {
-                    let bowl = level - depth * (1.0 - de * de);
-                    h = h.min(lerp(h, bowl, smoothstep(1.0, 0.7, de)));
+                    // (a shore that drops steeply to the lake's depth, the ground that floods decided
+                    // without its micro relief, and higher ground not dug away: a bowl that shoaled
+                    // over its outer tenth drew a pale halo of shallows, a blend over the outer third a
+                    // frayed, speckled shore, a26, and a steep bowl dug into a slope a round pit)
+                    let bowl = level - 0.3 - depth * (1.0 - de * de).sqrt();
+                    let near = 1.0 - smoothstep(2.3, 2.8, h - micro - level);
+                    h = h.min(lerp(h, bowl, near));
                 }
                 if de < 1.0 && h < level {
                     t.water = t.water.max(level);
@@ -1383,10 +1400,13 @@ impl World {
                 // (partly flooded basins drew thin crescents of water), but higher ground is not
                 // dug away (that carved pits into the hillsides of sloping basins); the shore
                 // follows the terrain's contours
+                // (which ground floods is decided on the ground without its micro relief, over half a
+                // metre: decided on the full ground over 2.5 m, the micro relief's bumps stood out of
+                // the water as hundreds of wooded islets, a glittery speckle, taiga_river@type)
                 let depth = 3.0 + 0.01 * rad;
-                let near = 1.0 - smoothstep(1.5, 4.0, h - level);
+                let near = 1.0 - smoothstep(2.3, 2.8, h - micro - level);
                 if de < 1.0 && near > 0.0 {
-                    let bowl = level - depth * (1.0 - de * de) - 0.3;
+                    let bowl = level - 0.3 - depth * (1.0 - de * de).sqrt();
                     h = h.min(lerp(h, bowl, near));
                     if h < level {
                         t.water = t.water.max(level);
@@ -1499,6 +1519,7 @@ impl World {
         t.development = m.development;
         t.temp_range = m.temp_range;
         t.regime = m.regime;
+        t.micro = micro;
         t
     }
 }

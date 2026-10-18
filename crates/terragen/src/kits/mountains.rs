@@ -74,6 +74,8 @@ mod cls {
 }
 
 const SEED: u64 = 0x4D54_5000;
+/// Mean thickness (m) of the arid plateaus' strata (`noise::strata`): the canyon walls' benches and colour bands.
+const STRATUM: f64 = 46.0;
 
 /// Lithology codes of the atlas (`atlas::Lithology`).
 const SEDIMENTARY: u32 = 0;
@@ -99,12 +101,46 @@ pub(crate) fn litho_at(w: &World, p: DVec3) -> u32 {
     (a.raw(f, near(x) + APRON, near(y) + APRON, slot::LITHO) & 7) as u32
 }
 
+/// The lithology at a point: the nearest texel's, and the shares of carbonate, soft (sedimentary,
+/// unconsolidated) and hard (crystalline, volcanic) rock interpolated over the four texels around
+/// it (the zones read the shares: zones switched on at a texel border flattened the karst plains
+/// by hundreds of metres in a straight cliff, volcano@type).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct LitW {
+    /// (read by the tests)
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub lit: u32,
+    pub carb: f64,
+    pub soft: f64,
+    pub hard: f64,
+}
+
+/// The shares of the rock groups at `p`, bilinear over the four nearest texels (WGSL `mt_litho_w`).
+pub(crate) fn litho_w(w: &World, p: DVec3) -> LitW {
+    use crate::atlas::{slot, APRON};
+    let a = w.atlas();
+    let r = a.resolution();
+    let rf = r as f64;
+    let (f, x, y) = crate::atlas::geom::Grid::new(r).locate(p.normalize());
+    let (xc, yc) = (x.clamp(-0.5, rf - 0.5), y.clamp(-0.5, rf - 0.5));
+    let (x0, y0) = (xc.floor(), yc.floor());
+    let (fx, fy) = (xc - x0, yc - y0);
+    let mut o = LitW { lit: litho_at(w, p), ..Default::default() };
+    for (dx, dy, wt) in [(0.0, 0.0, (1.0 - fx) * (1.0 - fy)), (1.0, 0.0, fx * (1.0 - fy)), (0.0, 1.0, (1.0 - fx) * fy), (1.0, 1.0, fx * fy)] {
+        let lit = (a.raw(f, (x0 + dx + APRON as f64) as usize, (y0 + dy + APRON as f64) as usize, slot::LITHO) & 7) as u32;
+        o.carb += wt * (lit == CARBONATE) as u32 as f64;
+        o.soft += wt * (lit == SEDIMENTARY || lit == UNCONSOLIDATED) as u32 as f64;
+        o.hard += wt * (lit == CRYSTALLINE || lit == VOLCANIC) as u32 as f64;
+    }
+    o
+}
+
 /// The patch noises and the lithology at the warped position (WGSL `mt_fields`).
-pub(crate) fn fields(w: &World, c: &Ctx) -> (u32, f64, f64) {
+pub(crate) fn fields(w: &World, c: &Ctx) -> (LitW, f64, f64) {
     let n1 = perlin3(SEED + 1, c.p / WARP_LAM[0]);
     let n2 = perlin3(SEED + 2, c.p / WARP_LAM[1]);
     let q = c.p + c.east * (WARP_A * n1) + c.north * (WARP_A * n2);
-    (litho_at(w, q), n1, n2)
+    (litho_w(w, q), n1, n2)
 }
 
 /// What the zones read (smooth fields at a pixel).
@@ -132,11 +168,9 @@ pub(crate) struct Zones {
     pub drown: f64,
 }
 
-/// The zones at a pixel: `lit` the lithology, `n1`, `n2` the patch noises.
-pub(crate) fn zones(z: &ZIn, lit: u32, n1: f64, n2: f64) -> Zones {
-    let carb = (lit == CARBONATE) as u32 as f64;
-    let soft = (lit == SEDIMENTARY || lit == UNCONSOLIDATED) as u32 as f64;
-    let hard = (lit == CRYSTALLINE || lit == VOLCANIC) as u32 as f64;
+/// The zones at a pixel: `lw` the lithology, `n1`, `n2` the patch noises.
+pub(crate) fn zones(z: &ZIn, lw: &LitW, n1: f64, n2: f64) -> Zones {
+    let (carb, soft, hard) = (lw.carb, lw.soft, lw.hard);
     let land = smoothstep(0.0, 0.08, z.cont);
     let shelf = smoothstep(-0.25, -0.1, z.cont) * smoothstep(-30.0, -12.0, z.coast_km);
     let patch_a = smoothstep(-0.45, -0.05, n1);
@@ -362,7 +396,7 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
     if m.cont < -0.3 {
         return;
     }
-    let (lit, n1, n2) = fields(w, c);
+    let (lw, n1, n2) = fields(w, c);
     let zi = ZIn {
         moist: r.moist,
         temp: r.temp,
@@ -373,7 +407,7 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
         sand: r.sand,
         style: perlin3(SEED + 5, c.p / 180_000.0),
     };
-    let z = zones(&zi, lit, n1, n2);
+    let z = zones(&zi, &lw, n1, n2);
     // the flattening target: the atlas' smooth elevation (exact and the same in every tile; the
     // pixel's own low-passed relief carries the tile grid's interpolation error: steps of ~10 m
     // between tiles once it is the target of a 85 % blend)
@@ -497,13 +531,28 @@ pub fn carve(_w: &World, ci: &CarveIn, cv: &mut Carve) {
             let re = bw * (1.0 - smoothstep(0.32, 0.6, crease(perlin3(SEED + 70, ci.ctx.p / 900.0))));
             let sp = bw * perlin3(SEED + 71, ci.ctx.p / 1700.0);
             cv.wall_k *= lerp(1.0, 0.3 * (1.0 + 1.1 * re + 0.3 * sp), cz);
-            cv.fp_w *= lerp(1.0, 0.6, cz);
-            cv.steps = 50.0;
+            // (a narrow floor and walls that steepen towards the rim over a talus foot: a wide flat
+            // floor between smooth S walls read as a toy trench)
+            cv.fp_w *= lerp(1.0, 0.3, cz);
+            cv.u = cv.u.max(cz);
+            cv.narrow = cv.narrow.max(cz);
+            cv.steps = STRATUM;
             // (the benches strong along some stretches of the canyon, faint along others)
             let bs = 0.45 + 0.55 * smoothstep(-0.35, 0.35, perlin3(SEED + 72, ci.ctx.p / 1400.0));
             cv.step_mix = cv.step_mix.max(cz * band(160.0, gsd) * bs);
-            // (the benches are counted from a fixed height above the floor, not from the ground)
-            cv.top = cv.floor + 500.0;
+            // (spurs and gullies: the walls' distance to the channel warped by a fifth of their
+            // extent; benches along isolines of that distance drew a layer cake)
+            let gw = cz * band(520.0, gsd);
+            if gw > 0.0 {
+                let ext = cv.wall_k * (ci.h0 - cv.floor).max(0.0);
+                let q = ci.ctx.p / 700.0;
+                let wq = DVec3::new(perlin3(SEED + 73, q * 0.5), perlin3(SEED + 74, q * 0.5), 0.0) * 0.6;
+                let g1 = 1.0 - smoothstep(0.0, 0.2, perlin3(SEED + 75, q + wq).abs());
+                let g2 = (1.0 - smoothstep(0.0, 0.25, perlin3(SEED + 76, ci.ctx.p / 260.0).abs())) * band(260.0, gsd);
+                let spur = smoothstep(-0.3, 0.5, perlin3(SEED + 77, ci.ctx.p / 1300.0));
+                let g3 = (1.0 - smoothstep(0.0, 0.3, perlin3(SEED + 78, ci.ctx.p / 110.0).abs())) * band(110.0, gsd);
+                cv.dad = gw * ext * (0.2 * spur - 0.2 * g1 - 0.08 * g2 - 0.035 * g3);
+            }
         }
     }
 }
@@ -520,13 +569,13 @@ pub fn linear(s: &mut Stack) {
         return;
     }
     let p = s.ctx.p;
-    let (lit, n1, n2) = fields(s.world, s.ctx);
+    let (lw, n1, n2) = fields(s.world, s.ctx);
     let zi = ZIn { moist: t.moist, temp: t.temp, mountain: t.mountain, uplift: t.uplift, cont: t.cont, coast_km: t.coast_km, sand: t.sand, style: 0.0 };
-    let z = zones(&zi, lit, n1, n2);
+    let z = zones(&zi, &lw, n1, n2);
     let rn = s.pf.patch;
     // ---- badlands: pale clay floors, banded gully walls (and the strata of arid sedimentary walls)
     let arid = 1.0 - smoothstep(0.16, 0.34, t.moist);
-    let soft = (lit == SEDIMENTARY || lit == CARBONATE || lit == UNCONSOLIDATED) as u32 as f64;
+    let soft = lw.carb + lw.soft;
     let clay = z.badland * 0.85;
     if clay > 0.0 {
         let col = mixc(srgb(196.0, 184.0, 164.0), srgb(176.0, 160.0, 138.0), 0.5 + 0.5 * rn) * (1.0 + 0.05 * s.pf.detail);
@@ -539,8 +588,11 @@ pub fn linear(s: &mut Stack) {
     if cb > 0.0 {
         // (canyon strata tens of metres thick: 14 m bands drew contour lines)
         let bandh = if z.badland > 0.2 { 9.0 } else { 34.0 };
-        let kb = (ground / bandh + 0.6 * rn).floor();
-        let h = hash1(SEED + 40, kb as i64);
+        // (the canyons' bands are the strata of the walls' benches, `noise::strata`: cliff-forming
+        // sandstones in cream, orange and red, soft shales in darker reds; level, as the benches)
+        let kb = if z.badland > 0.2 { (ground / bandh + 0.6 * rn).floor() as i64 } else { strata(ground - 3.0, STRATUM).0 };
+        let hard = u01k(hash1(0xBE4C, kb), 2) < 0.55;
+        let h = hash1(SEED + 40, kb);
         // (pale clay bands in the badlands; the walls of the arid plateaus' canyons in reds,
         // oranges and cream: their pale bands read as contour lines on a map)
         let pal = [
@@ -550,15 +602,21 @@ pub fn linear(s: &mut Stack) {
             srgb(178.0, 149.0, 125.0),
             srgb(186.0, 145.0, 120.0),
             srgb(188.0, 165.0, 140.0),
+            srgb(194.0, 154.0, 116.0),
+            srgb(184.0, 134.0, 98.0),
             srgb(186.0, 118.0, 84.0),
             srgb(158.0, 86.0, 60.0),
-            srgb(200.0, 168.0, 128.0),
             srgb(172.0, 104.0, 74.0),
-            srgb(184.0, 134.0, 98.0),
             srgb(140.0, 80.0, 60.0),
         ];
-        let off = if z.badland > 0.2 { 0 } else { 6 };
-        let col = pal[off + (u01k(h, 1) * 5.999) as usize] * (0.94 + 0.12 * u01k(h, 2));
+        let (off, nc) = if z.badland > 0.2 {
+            (0, 5.999)
+        } else if hard {
+            (6, 2.999)
+        } else {
+            (9, 2.999)
+        };
+        let col = pal[off + (u01k(h, 1) * nc) as usize] * (0.94 + 0.12 * u01k(h, 2));
         let floor_col = if z.badland > 0.2 { srgb(190.0, 176.0, 150.0) } else { srgb(172.0, 128.0, 96.0) };
         // (cliff faces of the canyons darker than their ledges and talus: varnish and shade)
         let cliff = if z.badland > 0.2 { 0.0 } else { smoothstep(0.7, 1.3, slope) };
@@ -699,7 +757,14 @@ mod tests {
                 style: 2.0 * u01k(h, 10) - 1.0,
             };
             for lit in 0..5 {
-                let o = zones(&z, lit, 2.0 * u01k(h, 8) - 1.0, 2.0 * u01k(h, 9) - 1.0);
+                let ind = |c: bool| c as u32 as f64;
+                let lw = LitW {
+                    lit,
+                    carb: ind(lit == CARBONATE),
+                    soft: ind(lit == SEDIMENTARY || lit == UNCONSOLIDATED),
+                    hard: ind(lit == CRYSTALLINE || lit == VOLCANIC),
+                };
+                let o = zones(&z, &lw, 2.0 * u01k(h, 8) - 1.0, 2.0 * u01k(h, 9) - 1.0);
                 for v in [o.tower, o.cockpit, o.fold, o.fault, o.badland, o.drown] {
                     assert!((0.0..=1.0 + 1e-9).contains(&v), "{o:?}");
                 }
@@ -729,7 +794,7 @@ mod tests {
             u: 0.0,
             steps: 0.0,
             step_mix: 0.0,
-            top: 600.0,
+            dad: 0.0,
             lake_r: 0.0,
             lake_level: 0.0,
             narrow: 0.0,
@@ -774,10 +839,10 @@ mod tests {
             let (mountain, _) = w.mountain_mask(&m);
             let (temp, moist) = w.climate(&m, lat, w.smooth_elevation(ctx.p).max(0.0));
             let r = ReliefIn { ctx: &ctx, m: &m, temp, moist, mountain, sand: 0.0, mesa: 0.0, smooth: w.smooth_elevation(ctx.p), inst: None };
-            let (lit, n1, n2) = fields(&w, &ctx);
+            let (lw, n1, n2) = fields(&w, &ctx);
             let zi =
                 ZIn { moist, temp, mountain, uplift: m.uplift, cont: m.cont, coast_km: m.coast_km, sand: 0.0, style: perlin3(SEED + 5, ctx.p / 180_000.0) };
-            let z = zones(&zi, lit, n1, n2);
+            let z = zones(&zi, &lw, n1, n2);
             if z.tower + z.cockpit + z.fold + z.fault + z.badland < 0.5 {
                 continue;
             }
@@ -1031,10 +1096,10 @@ mod tests {
                 let lon = 360.0 * u01k(h, 2) - 180.0;
                 let ctx = Ctx::new(lat.to_radians(), lon.to_radians(), 150.0, &w.ell);
                 let t = w.terrain(&ctx);
-                let (lit, n1, n2) = fields(&w, &ctx);
+                let (lw, n1, n2) = fields(&w, &ctx);
                 let zi =
                     ZIn { moist: t.moist, temp: t.temp, mountain: t.mountain, uplift: t.uplift, cont: t.cont, coast_km: t.coast_km, sand: t.sand, style: 0.0 };
-                Pt { lat, lon, z: zones(&zi, lit, n1, n2), lit, t }
+                Pt { lat, lon, z: zones(&zi, &lw, n1, n2), lit: lw.lit, t }
             })
             .collect();
         let land = |p: &Pt| p.t.water_kind == 0 && p.t.ground > 2.0;
@@ -1098,17 +1163,17 @@ mod tests {
             let (mountain, _) = w.mountain_mask(&m);
             let smooth = w.smooth_elevation(ctx.p);
             let (temp, moist) = w.climate(&m, ctx.lat, smooth.max(0.0));
-            let (lit, n1, n2) = fields(&w, &ctx);
+            let (lw, n1, n2) = fields(&w, &ctx);
             let zi =
                 ZIn { moist, temp, mountain, uplift: m.uplift, cont: m.cont, coast_km: m.coast_km, sand: 0.0, style: perlin3(SEED + 5, ctx.p / 180_000.0) };
-            let z = zones(&zi, lit, n1, n2);
+            let z = zones(&zi, &lw, n1, n2);
             let r = ReliefIn { ctx: &ctx, m: &m, temp, moist, mountain, sand: 0.0, mesa: 0.0, smooth, inst: None };
             let mut h = 0.0;
             relief(&w, &r, &mut h);
             let t = w.terrain(&ctx);
             eprintln!(
-                "{dx:6.1} km lit {lit} mtn {mountain:.2} up {:.2} glac {:.2} moist {moist:.2} zones fold {:.2} fault {:.2} bad {:.2} tow {:.2} cock {:.2} | smooth {smooth:.0} relief {h:.1} ground {:.0} water {:.0} kind {} river {:.0} ck {:.0}",
-                m.uplift, m.glaciation, z.fold, z.fault, z.badland, z.tower, z.cockpit, t.ground, t.water, t.water_kind, t.river_d, t.coast_km
+                "{dx:6.1} km lit {} mtn {mountain:.2} up {:.2} glac {:.2} moist {moist:.2} zones fold {:.2} fault {:.2} bad {:.2} tow {:.2} cock {:.2} | smooth {smooth:.0} relief {h:.1} ground {:.0} water {:.0} kind {} river {:.0} ck {:.0}",
+                lw.lit, m.uplift, m.glaciation, z.fold, z.fault, z.badland, z.tower, z.cockpit, t.ground, t.water, t.water_kind, t.river_d, t.coast_km
             );
         }
     }

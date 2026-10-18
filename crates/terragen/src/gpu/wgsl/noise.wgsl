@@ -80,6 +80,23 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 fn saturate1(x: f32) -> f32 {
     return clamp(x, 0.0, 1.0);
 }
+/// `noise::strata`: (index, height fraction in it, bottom, thickness) of the stratum at height z.
+fn strata_b(i: f32, t: f32) -> f32 {
+    return (i + 0.1 + 0.8 * u01k(hash1(0x57A7A000lu, i64(i)), 1lu)) * t;
+}
+fn strata(z: f32, t: f32) -> vec4<f32> {
+    let k = floor(z / t);
+    let bk = strata_b(k, t);
+    var j = k - 1.0;
+    var lo = strata_b(k - 1.0, t);
+    var hi = bk;
+    if (z >= bk) {
+        j = k;
+        lo = bk;
+        hi = strata_b(k + 1.0, t);
+    }
+    return vec4<f32>(j, clamp((z - lo) / (hi - lo), 0.0, 1.0), lo, hi - lo);
+}
 /// Band-limiting weight of a feature of wavelength `lam` sampled with pixel size `gsd`.
 fn band(lam: f32, gsd: f32) -> f32 {
     return smoothstep1(2.0 * gsd, 4.0 * gsd, lam);
