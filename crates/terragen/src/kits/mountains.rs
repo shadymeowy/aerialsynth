@@ -470,13 +470,13 @@ fn fjord(m: &Macro, mountain: f64, glac: f64) -> (f64, f64) {
 /// valley carve; `mountains_carve` in WGSL).
 pub fn carve(_w: &World, ci: &CarveIn, cv: &mut Carve) {
     if ci.level > 1 {
-        // (the streams of the arid canyon plateaus: shallow swales, not straight V trenches whose
-        // sunlit sides drew white lines across the floor and up the walls, canyon@type)
+        // (the streams of the arid canyon plateaus: no trench (straight V trenches, and then wide
+        // swales, drew pale lines across the floor and up the walls, canyon@type); their dry beds and
+        // washes are not drawn either (`layers::water`, `desert::washes`)
         let arid = 1.0 - smoothstep(0.15, 0.45, ci.moist);
         let cz = arid * smoothstep(100.0, 700.0, ci.h0) * (1.0 - smoothstep(0.3, 0.6, ci.mountain)) * smoothstep(0.05, 0.3, ci.mesa) * smoothstep(0.0, 0.15, ci.m.cont);
         if cz > 0.0 {
-            cv.depth_cap = lerp(cv.depth_cap, 1.2, cz);
-            cv.wall_k = lerp(cv.wall_k, 20.0, cz);
+            cv.depth_cap = lerp(cv.depth_cap, 0.1, cz);
         }
         return;
     }

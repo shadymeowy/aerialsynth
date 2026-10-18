@@ -76,7 +76,8 @@ pub fn rivers(s: &mut Stack) {
     // the riparian trees
     // (fainter in dry lands, whose ground is pale already, and none down steep slopes: a dry
     // stream's straight pale bed ran up the canyon walls like a road, canyon@type)
-    let dry_k = 0.4 * (1.0 - 0.7 * s.m.riparian) * (1.0 - 0.55 * (1.0 - smoothstep(0.2, 0.4, t.moist))) * (1.0 - smoothstep(0.2, 0.45, l.slope));
+    let plateau = if l.river_hw < 15.0 { 1.0 - smoothstep(0.05, 0.3, t.mesa) * (1.0 - smoothstep(0.2, 0.4, t.moist)) } else { 1.0 };
+    let dry_k = 0.4 * (1.0 - 0.7 * s.m.riparian) * (1.0 - 0.55 * (1.0 - smoothstep(0.2, 0.4, t.moist))) * (1.0 - smoothstep(0.2, 0.45, l.slope)) * plateau;
     let dry_col = mixc(s.col, mixc(pal.gravel, pal.sand[2], 0.5) * (1.0 + 0.1 * detail), dry_k);
     // (a river only partly wet runs in a low-water channel that wanders inside its bed of sand and
     // gravel: the whole bed in a mix of water and sand read as a uniform brown ribbon, canyon@type)

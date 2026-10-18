@@ -398,8 +398,7 @@ fn mountains_carve(c: Ctx, m: Macro, ci: CarveIn, cv: ptr<function, Carve>) {
         let arid2 = 1.0 - smoothstep1(0.15, 0.45, ci.moist);
         let cz2 = arid2 * smoothstep1(100.0, 700.0, ci.h0) * (1.0 - smoothstep1(0.3, 0.6, ci.mountain)) * smoothstep1(0.05, 0.3, ci.mesa) * smoothstep1(0.0, 0.15, m.cont);
         if (cz2 > 0.0) {
-            (*cv).depth_cap = lerp((*cv).depth_cap, 1.2, cz2);
-            (*cv).wall_k = lerp((*cv).wall_k, 20.0, cz2);
+            (*cv).depth_cap = lerp((*cv).depth_cap, 0.1, cz2);
         }
         return;
     }

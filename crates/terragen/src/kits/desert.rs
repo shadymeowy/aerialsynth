@@ -849,7 +849,10 @@ pub fn washes(s: &mut Stack) {
     // the canyon walls, canyon@type; and fresh sand only along some stretches, desert pavement
     // between them: continuous pale ribbons of one width read as roads)
     let fresh = 0.35 + 0.65 * smoothstep(-0.45, 0.35, perlin3(seed ^ S_WASH ^ 0x55, p / 380.0));
-    let cov = crate::kernels::band_cov(l.river_d, half, fwr) * (1.0 - smoothstep(0.25, 0.55, l.slope)) * fresh;
+    // (none along the streams of the arid canyon plateaus: their straight pale ribbons ran across
+    // the canyon's floor and up its walls like roads, canyon@type)
+    let plateau = if hw < 15.0 { 1.0 - smoothstep(0.05, 0.3, t.mesa) } else { 1.0 };
+    let cov = crate::kernels::band_cov(l.river_d, half, fwr) * (1.0 - smoothstep(0.25, 0.55, l.slope)) * fresh * plateau;
     if cov <= 0.0 {
         return;
     }
