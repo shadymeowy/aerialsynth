@@ -575,7 +575,7 @@ pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
 /// The large-scale bend and stretch of a city's grid (WGSL `st_big_grid_warp`): ±105 m of bend at
 /// 2.7-7.9 km wavelengths, block sizes ±12 % over 10 km.
 fn big_grid_warp(qr: DVec2, seed: u64) -> DVec2 {
-    let ph = |k: u64| 6.283 * u01k(seed ^ 0xB16, k);
+    let ph = |k: u64| std::f64::consts::TAU * u01k(seed ^ 0xB16, k);
     let b = DVec2::new((qr.y / 1100.0 + ph(1)).sin() + 0.5 * (qr.y / 430.0 + ph(2)).sin(), (qr.x / 1250.0 + ph(3)).sin() + 0.5 * (qr.x / 470.0 + ph(4)).sin())
         * 70.0;
     let st = DVec2::new((qr.x / 1600.0 + ph(5)).sin(), (qr.y / 1700.0 + ph(6)).sin()) * 190.0;

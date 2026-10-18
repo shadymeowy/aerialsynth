@@ -634,10 +634,10 @@ fn st_dens_at(pl: StPl, q: vec2<f32>, dq: vec2<f32>, n: f32, dmul: f32) -> f32 {
 fn st_big_grid_warp(qr: vec2<f32>, seed: u64) -> vec2<f32> {
     let s = seed ^ 0xB16lu;
     let b = vec2<f32>(
-        sin(qr.y / 1100.0 + 6.283 * u01k(s, 1lu)) + 0.5 * sin(qr.y / 430.0 + 6.283 * u01k(s, 2lu)),
-        sin(qr.x / 1250.0 + 6.283 * u01k(s, 3lu)) + 0.5 * sin(qr.x / 470.0 + 6.283 * u01k(s, 4lu)),
+        sin(qr.y / 1100.0 + TAU * u01k(s, 1lu)) + 0.5 * sin(qr.y / 430.0 + TAU * u01k(s, 2lu)),
+        sin(qr.x / 1250.0 + TAU * u01k(s, 3lu)) + 0.5 * sin(qr.x / 470.0 + TAU * u01k(s, 4lu)),
     ) * 70.0;
-    let st = vec2<f32>(sin(qr.x / 1600.0 + 6.283 * u01k(s, 5lu)), sin(qr.y / 1700.0 + 6.283 * u01k(s, 6lu))) * 190.0;
+    let st = vec2<f32>(sin(qr.x / 1600.0 + TAU * u01k(s, 5lu)), sin(qr.y / 1700.0 + TAU * u01k(s, 6lu))) * 190.0;
     return qr + b + st;
 }
 
