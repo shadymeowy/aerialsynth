@@ -89,7 +89,7 @@
 - `next` polish round 13: no "bunch of small trees scattered" over open land: trees in groves, clumps
   and closed stands (a pixel-filtered clump density, `noise::clumped`), lone trees only in savannas,
   shrubs, tussocks, stones and spires drawn one by one only from ~4–10 pixels (their mean below),
-  shaded gaps in closed canopies (isolated dark dots of the audit 2.24× classic's → 0.93×); a macro
+  shaded gaps in closed canopies (isolated dark dots of the audit 2.24× classic's → 0.92×); a macro
   tone over 600 m – 1.5 km on the ground and in fields; less orange night lamps (38 % white LED);
   softer polygon troughs, shallower crevasses, small streams snowed over in winter; tower karst walls
   bare in streaks between vegetation; airports graded over 220 m and fading into the land, no tracks

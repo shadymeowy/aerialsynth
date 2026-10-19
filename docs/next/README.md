@@ -74,7 +74,7 @@ landscapes but looks worse in places, which is why it is not the default:
   ones), lone trees only in the savanna biomes; shrubs, tussocks, stones and the spires of open
   woodland are drawn one by one only where they span ~4–10 pixels (`kernels::resolve_size`), their
   mean otherwise; the gaps of a closed canopy show shaded lower crowns, not the pale floor: the
-  isolated dark dots of the audit (`round13/tools/dots.py`) fell from 2.24× classic's to 0.93×.
+  isolated dark dots of the audit (`round13/tools/dots.py`) fell from 2.24× classic's to 0.92×.
   Dense forests keep their crowns' relief (at 2–4 pixels each crown still casts a small shadow:
   forest places count 10–26k dots/MP, like v0.2.0's own forest stills, 9–21k); the highest ranges (5–7 km)
   are as steep as the Himalaya (mean slope ~31° at 30 m, round 7); under perennial snow their gullies
@@ -232,8 +232,9 @@ the polar plain without classic's snow (a30) and a16's far half, now in clumps b
 borderline; none is clearly worse. The clutter (mean high-frequency energy 20.8 against classic's 12.1)
 is the crowns' steep sides in the surface model (see above), not reduced. In round 13 the "bunch of
 small trees scattered" look is gone from open land (steppe, tundra, desert scrub, lichen woodland:
-groves and clumps, shrubs in the ground's texture; isolated dark dots 0.93× classic's on average,
-2.24× in round 12, places above twice classic's 13 of 30, were 20); the land has a macro tone over
+groves and clumps, shrubs in the ground's texture; isolated dark dots 0.92× classic's on average,
+2.24× in round 12, places above twice classic's 13 of 30, were 20; mean high-frequency energy
+13.8, was 20.8, classic 12.1); the land has a macro tone over
 600 m – 1.5 km (soil moisture, vigour, drainage) on the ground and inside fields, and the night's
 lamps are less orange (part C of round 13; the tonal contrast of the like-for-like scenes moved
 little: it is set by what the scenes show).
