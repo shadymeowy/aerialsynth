@@ -6,7 +6,6 @@ use crate::noise::*;
 use crate::registry::pal;
 use crate::stack::{Layer, Stack};
 use crate::surface::{mixc, PF_STRATA, PF_STRATA2};
-use glam::DVec3;
 
 pub fn layer(s: &mut Stack) {
     let t = s.t;
@@ -40,10 +39,6 @@ pub fn layer(s: &mut Stack) {
         let strata = (s.l.ground / strata_h + 3.0 * s.sm.pf_lazy(pf, PF_STRATA)).sin();
         let strata_w = std::f64::consts::TAU * strata_h / slope.max(0.05);
         rc *= 1.0 + 0.06 * strata * band(strata_w, 1.5 * gsd) + 0.25 * detail + 0.12 * s.sm.pf_lazy(pf, PF_STRATA2);
-        // (frost-shattered rock in the cold greys: the warm rock colours drew rusty mottles between
-        // the snow patches, audit a07)
-        let cold = smoothstep(3.0, -5.0, t.temp);
-        let rc = mixc(rc, DVec3::splat(rc.dot(DVec3::new(0.3, 0.59, 0.11))), 0.55 * cold);
         s.composite(Layer::paint_cls(rock, rc, lc::ROCK));
     }
     // ---- sand seas

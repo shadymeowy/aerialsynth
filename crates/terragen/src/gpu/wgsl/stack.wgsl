@@ -593,7 +593,6 @@ fn layer_azonal(s: ptr<function, Stack>) {
         let strata = sin((*s).l.ground / strata_h + 3.0 * s_pf_lazy(s, PF_STRATA));
         let strata_w = TAU * strata_h / max(slope, 0.05);
         rc *= 1.0 + 0.06 * strata * band(strata_w, 1.5 * gsd) + 0.25 * detail + 0.12 * s_pf_lazy(s, PF_STRATA2);
-        rc = mixc(rc, vec3<f32>(dot(rc, vec3<f32>(0.3, 0.59, 0.11))), 0.55 * smoothstep1(3.0, -5.0, t.temp));
         composite(s, layer_paint(rock, rc, LC_ROCK));
     }
     (*s).m.sand = t.sand;
