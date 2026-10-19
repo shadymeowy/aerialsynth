@@ -169,7 +169,8 @@ fn glow(s: &mut Stack) {
     let arch = s.bio.style.archetype as usize;
     const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.68, 0.40), DVec3::new(1.0, 0.84, 0.64), DVec3::new(0.86, 0.92, 1.0)];
     let sodium = 0.25 + 0.25 * (1.0 - dev);
-    let lamp = mixc3(LAMPS[1], LAMPS[0], sodium);
+    // (round 13: a share of white LED, as the towns' streets)
+    let lamp = mixc3(mixc3(LAMPS[1], LAMPS[2], 0.4), LAMPS[0], sodium);
     let devm = (0.5 + 0.45 * dev.min(1.0)) * (0.55 + 0.9 * dev);
     let (mut cover, mut emit) = (0.0, DVec3::ZERO);
     for l in 0..places::NLEVELS {

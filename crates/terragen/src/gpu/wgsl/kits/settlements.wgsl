@@ -2239,7 +2239,7 @@ fn st_lamps(pl: StPl, o: StEv, dens: f32, gsd: f32, fw: f32, block: f32, resolve
                 lc = l2;
             } else if (o.pattern == SP_INDUSTRIAL || u < sodium) {
                 lc = l0;
-            } else if (u < 0.88) {
+            } else if (u < 0.62) {
                 lc = l1;
             }
             e = lc * ((pool + core) * m * (0.75 + 0.5 * u01k(lh, 2lu)));
@@ -2257,7 +2257,8 @@ fn st_lamps(pl: StPl, o: StEv, dens: f32, gsd: f32, fw: f32, block: f32, resolve
         zf = 0.75;
     }
     let lamp_mean = lamp_e * 2.0 / (block * sp) * zf;
-    var mc = mixc(l1, l0, sodium);
+    let amber = max(0.62 - sodium, 0.0);
+    var mc = (l0 * sodium + l1 * amber + l2 * 0.38) / (sodium + amber + 0.38);
     if (o.zone == SZ_CBD) {
         mc = l2;
     } else if (o.pattern == SP_INDUSTRIAL) {
@@ -2903,7 +2904,7 @@ fn st_glow(s: ptr<function, Stack>) {
     var aw_t = array<f32, 12>(1.0, 0.85, 0.7, 0.8, 0.6, 1.2, 1.05, 0.9, 1.25, 0.6, 0.25, 0.85);
     var spr = array<f32, 12>(0.95, 0.9, 0.9, 0.8, 0.95, 0.82, 0.92, 1.3, 0.85, 1.05, 0.85, 0.85);
     let sodium = 0.25 + 0.25 * (1.0 - dev);
-    let lamp = mixc(vec3<f32>(1.0, 0.84, 0.64), vec3<f32>(1.0, 0.68, 0.40), sodium);
+    let lamp = mixc(mixc(vec3<f32>(1.0, 0.84, 0.64), vec3<f32>(0.86, 0.92, 1.0), 0.4), vec3<f32>(1.0, 0.68, 0.40), sodium);
     let devm = (0.5 + 0.45 * min(dev, 1.0)) * (0.55 + 0.9 * dev);
     let sprawl2 = pow(spr[arch] * (0.85 + 0.3 * dev), 2.0) * (1.0 + 0.04 / 12.0);
     var cover = 0.0;

@@ -2150,7 +2150,7 @@ pub fn lamps(pl: &Pl, o: &Ev, dens: f64, gsd: f64, fw: f64, block: f64, resolved
             LAMPS[2]
         } else if o.pattern == pat::INDUSTRIAL || u < sodium {
             LAMPS[0]
-        } else if u < 0.88 {
+        } else if u < 0.62 {
             LAMPS[1]
         } else {
             LAMPS[2]
@@ -2189,7 +2189,10 @@ pub fn lamps(pl: &Pl, o: &Ev, dens: f64, gsd: f64, fw: f64, block: f64, resolved
     } else if o.pattern == pat::INDUSTRIAL {
         LAMPS[0]
     } else {
-        mixc(LAMPS[1], LAMPS[0], sodium)
+        // (the mix of the lamps above: sodium, amber to 0.62, white LED beyond; round 13: 38 %
+        // white, was 12 %: an orange night, night@type)
+        let amber = (0.62 - sodium).max(0.0);
+        (LAMPS[0] * sodium + LAMPS[1] * amber + LAMPS[2] * 0.38) / (sodium + amber + 0.38)
     };
     e * lamp_res + mc * lamp_mean * (1.0 - lamp_res) * smoothstep(0.1, 0.35, dens)
 }
