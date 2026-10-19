@@ -997,7 +997,7 @@ fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     let gsd = s.ctx.gsd;
     let hollow = smoothstep(0.1, 0.8, -t.gully);
     let spur = smoothstep(0.2, 0.8, t.gully);
-    let mut n = 0.6 * s.pf.snow - (1.6 + 1.4 * polar) * hollow + 0.5 * spur - 2.0 * polar * smoothstep(0.0, 0.8, s.pf.snow);
+    let mut n = (0.6 + 1.2 * polar) * s.pf.snow - (1.6 + 1.4 * polar) * hollow + 0.5 * spur;
     let b45 = band(45.0, gsd);
     if b45 > 0.0 {
         n += 0.5 * perlin3(SEED_SNOW + 2, p / 45.0) * b45;

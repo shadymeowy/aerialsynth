@@ -644,7 +644,7 @@ fn cold_snow(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
     let gsd = (*s).c.gsd;
     let hollow = smoothstep1(0.1, 0.8, -t.gully);
     let spur = smoothstep1(0.2, 0.8, t.gully);
-    var n = 0.6 * (*s).pf.f[PF_SNOW] - (1.6 + 1.4 * polar) * hollow + 0.5 * spur - 2.0 * polar * smoothstep1(0.0, 0.8, (*s).pf.f[PF_SNOW]);
+    var n = (0.6 + 1.2 * polar) * (*s).pf.f[PF_SNOW] - (1.6 + 1.4 * polar) * hollow + 0.5 * spur;
     let b45 = band(45.0, gsd);
     if (b45 > 0.0) {
         n += 0.5 * perlin3(COLD_SEED_SNOW + 2lu, p * (1.0lf / 45.0lf)) * b45;
