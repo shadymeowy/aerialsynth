@@ -488,6 +488,9 @@ fn bl_apply(s: ptr<function, Stack>, li: u32, o: KOut) {
     ly.albedo = o.albedo;
     ly.dh = o.dh;
     ly.hmode = l.head.w & 0xffu;
+    if (ly.hmode == HM_MAX && l.head.y == 0u) {
+        ly.dh = o.dh * smoothstep1(0.0, 0.5, o.cov);
+    }
     ly.cls = l.head.z;
     ly.emit = l.col[2].xyz * o.emit;
     ly.clear = l.sz.y;

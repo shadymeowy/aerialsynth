@@ -373,7 +373,7 @@ fn stages_wgsl() -> String {
             steps.iter().filter(|t| t.1 == 0).flat_map(|t| kinds.iter().filter(move |p| p.0 == STEP_SLOTS[t.0 as usize]).map(|p| p.1)).collect();
         kk.sort_unstable();
         kk.dedup();
-        s += &format!("fn kernel_eval_st{si}(li: u32, i: KIn) -> KOut {{\n    let l = klayers[li];\n    let k = kp_load(li);\n    let e = kernel_resolved(k, l.sz.x, i);\n    var x = kout_none();\n");
+        s += &format!("fn kernel_eval_st{si}(li: u32, i0: KIn) -> KOut {{\n    let l = klayers[li];\n    let k = kp_load(li);\n    let i = kernel_clumped(k, i0);\n    let e = kernel_resolved(k, l.sz.x, i);\n    var x = kout_none();\n");
         if !kk.is_empty() {
             s += "    if (e > 0.0) {\n        switch k.kind {\n";
             for &kind in &kk {

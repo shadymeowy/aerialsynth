@@ -162,6 +162,8 @@ const SCATTER_P: &[P] = &[
     P::Enum("orient", 11, &["random", "aux"], 0),
     P::Num("ring", 12, 0.05, 1.0, 0.3),
     P::Num("second", 13, 0.0, 1.0, 0.0),
+    // (round 13) instances in clumps (`noise::clumped`): 0 a uniform scatter … 1 all clumped
+    P::Num("clump", 14, 0.0, 1.0, 0.0),
     P::Col("colour", 0, C::N("crown_decid")),
     P::Col("colour2", 1, C::N("crown_dry")),
 ];
@@ -522,10 +524,41 @@ pub fn size_at(k: &KParams, i: &KIn) -> f64 {
     match spec_of(k.kind) {
         Some(s) => match s.dyn_size {
             Some(f) => f(k, i),
-            None => k.v[s.size_slot],
+            None => resolve_size(k),
         },
         None => 0.0,
     }
+}
+
+/// The size that sets where a kernel's features are drawn one by one (`eval`'s crossfade; the
+/// registry's layer size, the GPU's `kernel_size`): the feature size, except for `scatter`'s
+/// small instances (under 8 m across: spires of open woodland, shrubs, bushes, stones) only
+/// where they span ~4–10 pixels, low ones (under 3.5 m high: krummholz, mounds) ~3–7. Lone
+/// dark instances of 1–3 pixels over pale ground, even partly drawn, with their DSM bump,
+/// shading and shadow read as a scatter of dark dots (the "bunch of small trees scattered"
+/// look, round 13); unresolved, they are their calibrated mean.
+pub fn resolve_size(k: &KParams) -> f64 {
+    let sz = size(k);
+    if k.kind != kind::SCATTER {
+        return sz;
+    }
+    let d = 2.0 * k.v[4] * k.v[10].max(1.0);
+    if d < 8.0 {
+        0.3 * sz.min(d)
+    } else if k.v[6] < 3.5 {
+        0.45 * sz.min(d)
+    } else {
+        sz
+    }
+}
+
+/// The amount of a kernel at a sample with its instances in clumps (`scatter`'s `clump`): the
+/// density's share where the clump field puts it (WGSL `kernel_clumped`).
+pub fn clumped_amount(k: &KParams, i: &KIn) -> f64 {
+    if k.kind != kind::SCATTER || k.v[14] <= 0.0 || k.v[1] <= 0.0 {
+        return i.amount;
+    }
+    crate::noise::clumped(k.v[1] * i.amount, k.v[14], i.p, i.gsd) / k.v[1]
 }
 
 /// Instances must stay within the cells the kernel looks at (bounded work, no cut shapes):
@@ -550,6 +583,13 @@ pub fn explicit(k: &KParams, i: &KIn) -> KOut {
 /// The kernel at a sample: explicit where its features are resolved, the calibrated mean
 /// where not, crossfaded over `smoothstep(1.2 gsd, 3 gsd, size)`.
 pub fn eval(k: &KParams, mean: &KMean, i: &KIn) -> KOut {
+    let ic;
+    let i = if k.kind == kind::SCATTER && k.v[14] > 0.0 {
+        ic = KIn { amount: clumped_amount(k, i), ..*i };
+        &ic
+    } else {
+        i
+    };
     let e = smoothstep(1.2 * i.gsd, 3.0 * i.gsd, size_at(k, i));
     let mc = mean.cov * i.amount.clamp(0.0, 1.0);
     if e <= 0.0 {
