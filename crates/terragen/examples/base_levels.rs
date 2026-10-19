@@ -1,5 +1,6 @@
-//! Time the viewer's base levels: every tile of z0..=Z (default 4) with a fresh generator, level
-//! by level in batches, as `terrain view` generates them on an empty store.
+//! Time the viewer's base levels of the next generator (`world.generator: next`): every tile of
+//! z0..=Z (default 4) with a fresh generator, level by level in batches, as `terrain view`
+//! generates them on an empty store.
 //!
 //!     cargo run --release -p terragen --example base_levels -- [Z] [BATCH] [cpu|gpu|auto]
 use geodesy::tiles::TileId;

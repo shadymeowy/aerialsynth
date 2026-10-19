@@ -156,6 +156,7 @@
 
 ### Fixes
 
+- The `ground` example (terrain heights at points, used by `showcase/route.py`) always queried the next generator, so with the classic default it reported another world's heights (up to ~1.6 km off). It now uses the configured generator (`--generator classic|next`, default classic), and `route.py` uses the showcase world's seed and generator.
 - Rock walls (`render.walls`) on terraced canyon faces drew vertical stripes (the wall colour was a nearest coarse texel, whose skewed grid made teeth): bilinear colour, soft strata keyed on elevation only, rare faint fractures, scree at the foot, and rock takes the wall material from ~40° of slope (before | after: `docs/images/render_walls_canyon.jpg`, `render_walls_alpine.jpg`).
 - A GPU generator that fails to set up (device or pipeline compile) is an error with
   `backend: gpu` and under `AERIALSYNTH_GPU_STRICT=1`, as a failed batch was; `auto` still falls back to the CPU.

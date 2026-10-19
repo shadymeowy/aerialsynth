@@ -28,12 +28,13 @@ E2 = F_WGS * (2 - F_WGS)
 G = 9.80665
 
 
-def ground_heights(pts, seed=1):
-    """Terrain surface (m above the ellipsoid; water level over water) at (lat, lon) degrees."""
+def ground_heights(pts, seed=1, generator="classic"):
+    """Terrain surface (m above the ellipsoid; water level over water) at (lat, lon) degrees, in the
+    world of `seed` and `generator` (the showcase's `world:`; see `world_of`)."""
     if not os.path.exists(GROUND):
         subprocess.run(["cargo", "build", "--release", "-p", "terragen", "--example", "ground"], cwd=ROOT, check=True)
     inp = "".join(f"{a:.7f} {b:.7f} 60\n" for a, b in pts)
-    out = subprocess.run([GROUND, str(seed)], input=inp, capture_output=True, text=True, check=True).stdout.split("\n")
+    out = subprocess.run([GROUND, str(seed), "--generator", generator], input=inp, capture_output=True, text=True, check=True).stdout.split("\n")
     return np.array([float(line.split()[0]) for line in out if line.strip()])
 
 
@@ -164,14 +165,22 @@ def smooth(x, sigma):
     return np.convolve(xp, k, "valid")
 
 
-def build(cfg, seed=1):
+def world_of(story):
+    """(seed, generator) of the world the showcase renders: showcase/base.yaml's `world:` under the
+    storyboard's `base:` overrides (as make_airliner.py merges them)."""
+    world = dict(yaml.safe_load(open(os.path.join(HERE, "base.yaml"))).get("world", {}))
+    world.update(story.get("base", {}).get("world", {}))
+    return int(world.get("seed", 1)), str(world.get("generator", "classic"))
+
+
+def build(cfg, seed=1, generator="classic"):
     dep, arr = cfg["departure"], cfg["arrival"]
     # waypoints: lift-off, runway heading for `straight_m`, the route, the final approach fix
     w = [(dep["lat"], dep["lon"]), destination(dep["lat"], dep["lon"], dep["heading_deg"], dep.get("straight_m", 6000.0))]
     w += [tuple(p[:2]) for p in cfg["waypoints"]]
     back = (arr["course_deg"] + 180.0) % 360.0
     w += [destination(arr["lat"], arr["lon"], back, arr.get("final_m", 30000.0)), (arr["lat"], arr["lon"])]
-    g_dep, g_arr = ground_heights([w[0], w[-1]], seed)
+    g_dep, g_arr = ground_heights([w[0], w[-1]], seed, generator)
     h0, h_td = g_dep + cfg["start_agl_m"], g_arr + cfg.get("touchdown_agl_m", 3.0)
     # (a waypoint's third value: its turn speed; default the cruise speed)
     turn_v = [cfg["liftoff_mps"] + 10] * 2 + [p[2] if len(p) > 2 else cfg["cruise_mps"] for p in cfg["waypoints"]] + [cfg["low_mps"], cfg["approach_mps"]]
@@ -243,11 +252,11 @@ def build(cfg, seed=1):
     return out, meta
 
 
-def clearance(out, seed=1, every_s=20.0):
+def clearance(out, seed=1, generator="classic", every_s=20.0):
     """Lowest height above the terrain along the flight (sampled every `every_s` seconds)."""
     k = max(1, int(every_s * 10))
     idx = np.arange(0, len(out["t"]), k)
-    g = ground_heights(list(zip(out["lat"][idx], out["lon"][idx])), seed)
+    g = ground_heights(list(zip(out["lat"][idx], out["lon"][idx])), seed, generator)
     return out["t"][idx], out["h"][idx] - g
 
 
@@ -258,8 +267,9 @@ def main():
     cfg = story["route"]
     d = os.path.join(ROOT, cfg.get("out", "out/airliner"))
     os.makedirs(d, exist_ok=True)
-    out, meta = build(cfg)
-    tc, agl = clearance(out)
+    seed, generator = world_of(story)
+    out, meta = build(cfg, seed, generator)
+    tc, agl = clearance(out, seed, generator)
     meta["min_clearance"] = [[float(a), float(b)] for a, b in zip(tc, agl)]
     with open(os.path.join(d, "route.csv"), "w") as f:
         f.write("t,lat,lon,h,roll,pitch,yaw\n")
