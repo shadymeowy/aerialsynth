@@ -135,7 +135,8 @@ pub fn biome_layers(s: &mut Stack, slot: usize) {
             }
             // (round 13: scattered instances raise the surface by their coverage: the mean of
             // sparse spruce or shrubs lifted the whole stand to their mean height, `max`)
-            let dh = if l.hmode == crate::stack::hmode::MAX && l.k.kind == kernels::kind::SCATTER { o.dh * crate::noise::smoothstep(0.0, 0.5, o.cov) } else { o.dh };
+            let dh =
+                if l.hmode == crate::stack::hmode::MAX && l.k.kind == kernels::kind::SCATTER { o.dh * crate::noise::smoothstep(0.0, 0.5, o.cov) } else { o.dh };
             s.composite(Layer {
                 cov: o.cov,
                 albedo: o.albedo,

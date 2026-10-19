@@ -239,19 +239,9 @@ pub fn layer(s: &mut crate::stack::Stack) {
     let conifer_c = clumped(conifer, 1.0, p + DVec3::new(3.0e3, -2.0e3, 1.0e3), gsd);
     let reg = &s.sm.registry;
     let crowns = &reg.biomes[s.bio.a as usize].crowns;
-    let mut layers = [TreeLayer {
-        cell: 1.0,
-        seed: 0,
-        density: 0.0,
-        closure: 0.0,
-        height: 0.0,
-        color: DVec3::ZERO,
-        shape: 0,
-        scale: 1.0,
-        tone: DVec3::ONE,
-        resolve: 1.0,
-    };
-        crate::registry::MAX_CROWNS];
+    let mut layers =
+        [TreeLayer { cell: 1.0, seed: 0, density: 0.0, closure: 0.0, height: 0.0, color: DVec3::ZERO, shape: 0, scale: 1.0, tone: DVec3::ONE, resolve: 1.0 };
+            crate::registry::MAX_CROWNS];
     let n = crowns.len().min(layers.len());
     for (k, c) in crowns.iter().enumerate().take(n) {
         let share = match c.share {
