@@ -250,3 +250,11 @@ channel drew contour lines), a narrow floor and U walls (a wide flat floor betwe
 trench); the colour bands follow the strata. The zones read the lithology's shares bilinear over the four nearest
 texels (`LitW`): a zone switched on at a texel border (karst flattening by 0.88) cut straight cliffs of 300 m through
 a volcanic upland (volcano@type).
+
+Polish round 10: canyon walls carry rills at 45 m and 18 m in the spurs-and-gullies warp and a rough rock texture
+4 m deep (`Carve.rough`; walls whose finest gullies were 110 m apart read as smooth, waxy and melted); the river and
+its canyon meander together (`Carve.shift`: the channel's distance shifted ±300 m at 1 km and 420 m) and the bed
+narrows and widens (`Carve.hw_k`, ±35 %); faces in redder sandstones and shales, rough, over aprons of paler, greyer
+talus with boulders; the streams of the canyon plateaus carve no trench and draw no dry bed or wash (their straight
+pale ribbons ran across the floor and up the walls like roads). Glaciated tributaries' troughs are 3× the stream's
+cut, not 8× (280 m troughs along the straight drainage pieces cut straight walls through ridges).

@@ -496,10 +496,13 @@ impl NextGenerator {
         let ng = (n as f64 / G) as usize + 5;
         // Smooth per-pixel inputs taken from the grid (bicubic) where its spacing is a small
         // fraction of their shortest wavelength, else evaluated exactly per pixel: the mountain
-        // domain warp (>= 7.5 km), the low-passed relief gradient for the gullies (>= 700 m) and
-        // the road networks (band-limited at >= 200 m).
+        // domain warp (>= 7.5 km) and the road networks (band-limited at >= 200 m). (Not the
+        // gullies' low-passed relief gradient and long octaves: interpolated between the nodes,
+        // the stripes' direction turned node by node where the gradient turns over a valley's
+        // axis, a comb of ribs metres high along the valleys of the highest ranges, one per node,
+        // alpine_south@type.)
         let warp_on_grid = use_grid && g_m <= 1000.0;
-        let gully_on_grid = use_grid && g_m <= 100.0;
+        let gully_on_grid = false;
         let roads_on_grid = use_grid && g_m <= 400.0 && crate::kits::legacy_roads();
         // the octaves of the pixel fields (surface) with wavelengths >= 8 node spacings come from
         // the grid too, the rest per pixel; the cut depends on the zoom only (node spacing at the

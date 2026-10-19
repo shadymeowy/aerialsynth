@@ -62,6 +62,14 @@
   cones with scoria aprons; boreal heath and lichen openings; sabkha on arid tidal flats; even desert floors;
   softer power corridors; cities whose grid bends, skyline fades and estates are grey (no ring city, no tower
   cake), trees on car parks, frayed town edges; a desert coast and a volcanic valley as like-for-like places.
+- `next` polish round 10: eroded canyon walls (rills, rough rock, talus aprons) over a river that meanders
+  with its canyon, no stream trenches or pale beds on the canyon plateaus, sunken faint dry beds, silty
+  desert rivers; no comb of ribs along high-mountain valleys (gullies per pixel, not from the tile grid);
+  glaciers without contour arcs; one flat level per thermokarst and kettle lake (no tilted sheets) and
+  lighter dark lakes; grown-over cinder cones and lobate lava flows in humid fields; boreal openings on the
+  hills, calmer taiga floors and steppe crowns; lower barchans; cleaner lake shores on flat plains; routes off
+  high-mountain ice; organic old city cores with one ring boulevard, curvilinear suburbs, estates on the town
+  grid with green buffers, frayed town edges.
 - **Optional tile layers** (tile store format 2; `next` only): `tiles.layers: [dtm, instance]`
   adds the bare ground and instance ids (building lots, fields, forest stands) to a new store;
   the viewer's map shadings *Height above ground* and *Instances* show them. Format-1 stores

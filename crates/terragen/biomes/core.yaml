@@ -85,6 +85,10 @@
   palette:
     grass_dry: [168, 158, 112]
     grass_wet: [104, 116, 64]
+    # (dusty olive crowns: dark green crowns and shrubs on the buff steppe read as black dots,
+    # a speckle of noise, audit a21 a24)
+    crown_decid: [78, 92, 54]
+    shrub: [100, 102, 72]
   vegetation: { trees: 0.55, shrubs: 1.4, groves: 0.6 }
 
 - id: semiarid_shrub
@@ -93,7 +97,8 @@
   weight: 0.8
   palette:
     grass_dry: [176, 160, 120]
-    shrub: [92, 92, 64]
+    crown_decid: [84, 94, 58]
+    shrub: [100, 100, 70]
   vegetation: { trees: 0.5, shrubs: 1.8, savanna: 1.3 }
 
 - id: desert

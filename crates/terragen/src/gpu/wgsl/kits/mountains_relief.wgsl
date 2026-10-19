@@ -395,6 +395,11 @@ fn mt_fjord(m: Macro, mountain: f32, glac: f32) -> vec2<f32> {
 /// `mountains::carve`.
 fn mountains_carve(c: Ctx, m: Macro, ci: CarveIn, cv: ptr<function, Carve>) {
     if (ci.level > 1u) {
+        let arid2 = 1.0 - smoothstep1(0.15, 0.45, ci.moist);
+        let cz2 = arid2 * smoothstep1(100.0, 700.0, ci.h0) * (1.0 - smoothstep1(0.3, 0.6, ci.mountain)) * smoothstep1(0.05, 0.3, ci.mesa) * smoothstep1(0.0, 0.15, m.cont);
+        if (cz2 > 0.0) {
+            (*cv).depth_cap = lerp((*cv).depth_cap, 0.1, cz2);
+        }
         return;
     }
     let lvl1 = ci.level == 1u;
@@ -402,13 +407,13 @@ fn mountains_carve(c: Ctx, m: Macro, ci: CarveIn, cv: ptr<function, Carve>) {
     let glac = smoothstep1(0.3, 0.6, m.glaciation) * smoothstep1(0.25, 0.55, ci.mountain);
     if (glac > 0.0) {
         (*cv).u = max((*cv).u, glac);
-        (*cv).wall_k *= lerp(1.0, 0.75, glac);
+        (*cv).wall_k *= lerp(1.0, select(0.75, 0.95, lvl1), glac);
         (*cv).fp_w *= lerp(1.0, 1.5, glac);
         var dmul = 2.0;
         var over = 90.0;
         if (lvl1) {
-            dmul = 8.0;
-            over = 40.0;
+            dmul = 3.0;
+            over = 20.0;
         }
         (*cv).depth_cap *= lerp(1.0, dmul, glac);
         (*cv).floor = lerp((*cv).floor, min((*cv).floor, max((*cv).floor - over, 1.0)), glac);
@@ -470,8 +475,14 @@ fn mountains_carve(c: Ctx, m: Macro, ci: CarveIn, cv: ptr<function, Carve>) {
                 let g2 = (1.0 - smoothstep1(0.0, 0.25, abs(perlin3(MT_SEED + 76lu, c.p / 260.0lf)))) * band(260.0, gsd);
                 let spur = smoothstep1(-0.3, 0.5, perlin3(MT_SEED + 77lu, c.p / 1300.0lf));
                 let g3 = (1.0 - smoothstep1(0.0, 0.3, abs(perlin3(MT_SEED + 78lu, c.p / 110.0lf)))) * band(110.0, gsd);
-                (*cv).dad = gw * ext * (0.2 * spur - 0.2 * g1 - 0.08 * g2 - 0.035 * g3);
+                let g4 = (1.0 - smoothstep1(0.0, 0.3, abs(perlin3(MT_SEED + 79lu, c.p / 45.0lf)))) * band(45.0, gsd);
+                let g5 = (1.0 - smoothstep1(0.0, 0.35, abs(perlin3(MT_SEED + 83lu, c.p / 18.0lf)))) * band(18.0, gsd);
+                (*cv).dad = gw * ext * (0.2 * spur - 0.2 * g1 - 0.08 * g2 - 0.035 * g3 - 0.018 * g4 - 0.007 * g5);
             }
+            let mb = band(1000.0, gsd);
+            (*cv).shift = cz * 300.0 * mb * (perlin3(MT_SEED + 80lu, c.p / 1000.0lf) + 0.3 * perlin3(MT_SEED + 81lu, c.p / 420.0lf));
+            (*cv).hw_k = 1.0 + cz * 0.35 * perlin3(MT_SEED + 82lu, c.p / 600.0lf);
+            (*cv).rough = cz * 4.0;
         }
     }
 }

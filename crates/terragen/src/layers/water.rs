@@ -64,7 +64,8 @@ pub fn rivers(s: &mut Stack) {
     let wet_r = t.river_wet;
     let mut wcol = mixc(pal.river, pal.lake_deep, smoothstep(30.0, 200.0, l.river_hw * 2.0));
     // (the rivers of dry lands carry silt: olive-green, not the deep blue of humid lowland rivers)
-    wcol = mixc(wcol, srgb(74.0, 82.0, 62.0), 0.6 * (1.0 - smoothstep(0.2, 0.4, t.moist)));
+    // (silty green-brown in the deserts: a teal river read as a canal in a desert canyon, canyon@type)
+    wcol = mixc(wcol, srgb(84.0, 84.0, 58.0), 0.85 * (1.0 - smoothstep(0.2, 0.4, t.moist)));
     // mountain rivers carry glacial flour: milky turquoise, not deep dark water
     wcol = mixc(wcol, srgb(96.0, 138.0, 140.0), 0.7 * t.mountain * smoothstep(8.0, 0.0, temp));
     // in the cold the river freezes over and is snowed on (a dark channel through the
@@ -73,7 +74,11 @@ pub fn rivers(s: &mut Stack) {
     wcol = mixc(wcol, mixc(pal.snow * 0.9, srgb(170.0, 190.0, 200.0), 0.35 * (0.5 + 0.5 * detail)), ice);
     // dry beds are only a subtle pale line (gravel / sand with some vegetation), fainter under
     // the riparian trees
-    let dry_col = mixc(s.col, mixc(pal.gravel, pal.sand[2], 0.5) * (1.0 + 0.1 * detail), 0.4 * (1.0 - 0.7 * s.m.riparian));
+    // (fainter in dry lands, whose ground is pale already, and none down steep slopes: a dry
+    // stream's straight pale bed ran up the canyon walls like a road, canyon@type)
+    let plateau = if l.river_hw < 15.0 { 1.0 - smoothstep(0.05, 0.3, t.mesa) * (1.0 - smoothstep(0.2, 0.4, t.moist)) } else { 1.0 };
+    let dry_k = 0.4 * (1.0 - 0.7 * s.m.riparian) * (1.0 - 0.55 * (1.0 - smoothstep(0.2, 0.4, t.moist))) * (1.0 - smoothstep(0.2, 0.45, l.slope)) * plateau;
+    let dry_col = mixc(s.col, mixc(pal.gravel, pal.sand[2], 0.5) * (1.0 + 0.1 * detail), dry_k);
     // (a river only partly wet runs in a low-water channel that wanders inside its bed of sand and
     // gravel: the whole bed in a mix of water and sand read as a uniform brown ribbon, canyon@type)
     // (it swings from bank to bank between bars, and narrows and widens: centred, it left two even
@@ -105,5 +110,8 @@ pub fn rivers(s: &mut Stack) {
         } else {
             0.0
         };
-    s.composite(Layer { cov, albedo: rc, dh: l.river_level, hmode: hmode::ABS, cls, relit: 1.0, water: !frozen && wet, ..Default::default() });
+    // (a dry bed lies a little below the ground: at the water level, a metre above it, it stood
+    // as a flat embankment across the bumps of the ground, canyon@type)
+    let (dh, hm) = if tw > 0.0 { (l.river_level, hmode::ABS) } else { (-0.3, hmode::BLEND) };
+    s.composite(Layer { cov, albedo: rc, dh, hmode: hm, cls, relit: 1.0, water: !frozen && wet, ..Default::default() });
 }

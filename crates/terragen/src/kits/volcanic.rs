@@ -361,7 +361,7 @@ const K_CONE: f64 = 0.008_581_6;
 const K_MAAR: f64 = -0.001_225_1;
 const MEAN_CINDER: f64 = 0.2190;
 /// mean lava tongue cover × cell (m)
-const MEAN_LAVA: f64 = 51.0;
+const MEAN_LAVA: f64 = 36.0;
 
 /// Profile of a cinder cone at ρ = d / R (1 at the crater rim's top).
 fn cone_profile(rho: f64) -> f64 {
@@ -417,15 +417,18 @@ fn tongue(x: f64, y: f64, dir: f64, s0: f64, len: f64, w0: f64, ph: f64, nzv: f6
         return (0.0, 0.0);
     }
     let wander = 0.035 * len * (s / (0.22 * len) + ph).sin();
-    let w = tongue_w(sg, w0) * (1.0 + 0.22 * nzv);
+    let w = tongue_w(sg, w0) * (1.0 + 0.4 * nzv);
     (((w - (t - wander).abs()) / fw + 0.5).clamp(0.0, 1.0), w)
 }
 
 /// The margin noise of the lava tongues at (x, y) of an instance's frame.
 fn margin_noise(id: u64, x: f64, y: f64, gsd: f64) -> f64 {
+    // (lobes at 90 m and 30 m: a smooth outline read as a paddle, braided)
     let b = band(90.0, gsd);
     if b > 0.0 {
-        perlin3(SEED_LAVA ^ id, DVec3::new(x / 90.0, y / 90.0, 0.37)) * b
+        let b3 = band(30.0, gsd);
+        (0.75 * perlin3(SEED_LAVA ^ id, DVec3::new(x / 90.0, y / 90.0, 0.37)) + 0.45 * perlin3(SEED_LAVA ^ id ^ 0x3, DVec3::new(x / 30.0, y / 30.0, 0.71)) * b3)
+            * b
     } else {
         0.0
     }
@@ -505,7 +508,8 @@ pub(crate) fn field(it: &Instance, p: DVec3, gsd: f64, fw: f64, look: bool) -> F
                 if look && u01k(h, 8) < lshare {
                     let dir = std::f64::consts::TAU * u01k(h, 9);
                     let len = cs * (0.55 + 0.45 * u01k(h, 10));
-                    let w0 = 55.0 + 60.0 * u01k(h, 11);
+                    // (narrow flows: 110-230 m wide paddles, braided)
+                    let w0 = 40.0 + 40.0 * u01k(h, 11);
                     let (c, _) = tongue(qx, qy, dir, 0.8 * rc, len, w0, std::f64::consts::TAU * u01k(h, 12), nzv, fw);
                     if c > lava {
                         lava = c;
@@ -752,21 +756,35 @@ fn field_look(s: &mut Stack, it: &Instance) {
     if f.dens <= 0.0 && f.apron <= 0.0 {
         return;
     }
+    // (humid climates grow the cones and the ash over: every cone bare scoria drew a pink rash
+    // over the rainforest, volcano@type)
+    let humid = smoothstep(0.2, 0.45, s.t.moist);
     // ash apron: a darkened ground, strongest at the field's heart
     if f.apron > 0.0 {
         let n = 0.5 + 0.5 * nz(SEED_ASH + 5, p, 120.0, gsd);
-        let cov = 0.5 * f.apron * smoothstep(0.2, 0.8, n);
+        let cov = 0.5 * f.apron * smoothstep(0.2, 0.8, n) * (1.0 - 0.75 * humid);
         s.composite(Layer { cov, albedo: ash_col(n) * 0.9, cls: cls::VOLCANIC_ASH, clear: 0.8, ..Default::default() });
     }
     if f.lava > 0.0 {
         let (col, cl, clear) = lava_look(f.age, p, gsd);
+        // (rough blocky lava, a third of the way to the ground around it and some plants on it:
+        // dark smooth tongues read as paddles stamped on the plain, braided)
+        let col = mixc(col, s.col, 0.3) * (1.0 + 0.22 * nz(SEED_LAVA + 5, p, 6.0, gsd));
+        let clear = 0.85 * clear;
         s.composite(Layer { cov: f.lava, albedo: col, cls: cl, clear, ..Default::default() });
         s.m.natural_ok *= 1.0 - f.lava * clear;
     }
-    if f.cinder > 0.0 {
+    // (the share of young bare cones: all in dry climates, a tenth in humid ones; the others are
+    // under the vegetation around them, hills of the relief only)
+    let ys = 1.0 - 0.9 * humid;
+    let (cs, mshare) = (it.v[1] as f64, it.v[6] as f64);
+    let m0 = (1.0 - band(0.35 * cs, gsd)) * f.dens * (1.0 - mshare) * MEAN_CINDER;
+    let young = if u01k(f.chash, 18) < ys { 1.0 } else { 0.0 };
+    let cinder = m0 * ys + (f.cinder - m0).max(0.0) * young;
+    if cinder > 0.0 {
         let t = u01k(f.chash, 14);
         let rho = f.crho;
-        let mut col = mixc(srgb(44.0, 38.0, 38.0), srgb(118.0, 62.0, 42.0), 0.65 * t * t);
+        let mut col = mixc(srgb(44.0, 38.0, 38.0), srgb(118.0, 62.0, 42.0), 0.65 * (1.0 - 0.5 * humid) * t * t);
         // dark crater, pale rim, weathered to the ash at the foot
         col *= mix1(1.0, 0.72, smoothstep(0.22, 0.12, rho)) * (1.0 + 0.15 * smoothstep(0.15, 0.22, rho) * smoothstep(0.4, 0.22, rho));
         col = mixc(col, ash_col(u01k(f.chash, 17)) * 0.9, 0.5 * smoothstep(0.55, 0.95, rho));
@@ -774,12 +792,28 @@ fn field_look(s: &mut Stack, it: &Instance) {
         // weather and grow over into the ground around them)
         col = mixc(col, s.col, 0.5 * smoothstep(0.55, 1.0, rho) + 0.4 * smoothstep(0.95, 1.4, rho));
         let col = col * (1.0 + 0.18 * nz(SEED_ASH + 6, p, 9.0, gsd));
-        s.composite(Layer { cov: f.cinder, albedo: col, cls: cls::VOLCANIC_ASH, clear: 1.0, ..Default::default() });
-        s.m.natural_ok *= 1.0 - f.cinder;
+        s.composite(Layer { cov: cinder, albedo: col, cls: cls::VOLCANIC_ASH, clear: 1.0, ..Default::default() });
+        s.m.natural_ok *= 1.0 - cinder;
+    }
+    // (grown-over cones keep their plants on their steep flanks: the rock of the steep slopes drew
+    // pink scars on every old cone in the rainforest, volcano@type)
+    let og = humid * (1.0 - young) * band(0.35 * cs, gsd) * smoothstep(1.0, 0.85, f.crho) * if f.chash != 0 { 1.0 } else { 0.0 };
+    if og > 0.0 && s.m.rock > 0.0 {
+        let k = og * s.m.rock;
+        let g = mixc(s.pal(crate::registry::pal::GRASS_WET), s.pal(crate::registry::pal::FLOOR), 0.5);
+        s.composite(Layer { cov: k, albedo: g, ..Default::default() });
+        s.m.rock *= 1.0 - og;
+        s.m.natural_ok = lerp(s.m.natural_ok, 1.0, k);
     }
     if f.ring > 0.0 {
         // (the tephra ring grown over: a bare pale ring drew a halo around every maar in the forest)
-        s.composite(Layer { cov: f.ring, albedo: mixc(s.col, srgb(138.0, 118.0, 98.0), 0.4), cls: cls::VOLCANIC_ASH, clear: 0.4, ..Default::default() });
+        s.composite(Layer {
+            cov: f.ring * (1.0 - 0.8 * humid),
+            albedo: mixc(s.col, srgb(138.0, 118.0, 98.0), 0.4),
+            cls: cls::VOLCANIC_ASH,
+            clear: 0.4,
+            ..Default::default()
+        });
     }
     if f.lake > 0.0 {
         s.composite(Layer {

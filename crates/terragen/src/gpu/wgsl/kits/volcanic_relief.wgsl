@@ -9,7 +9,7 @@ const VC_GULLY_AMP: f32 = 0.04;
 const VC_K_CONE: f32 = 0.0085816;
 const VC_K_MAAR: f32 = -0.0012251;
 const VC_MEAN_CINDER: f32 = 0.2190;
-const VC_MEAN_LAVA: f32 = 51.0;
+const VC_MEAN_LAVA: f32 = 36.0;
 
 // ---------------------------------------------------------------- existence
 
@@ -375,7 +375,8 @@ fn vc_tongue_w(sg: f32, w0: f32) -> f32 {
 fn vc_margin_noise(id: u64, x: f32, y: f32, gsd: f32) -> f32 {
     let b = band(90.0, gsd);
     if (b > 0.0) {
-        return perlin3(VC_SEED_LAVA ^ id, vec3<f64>(f64(x / 90.0), f64(y / 90.0), 0.37lf)) * b;
+        let b3 = band(30.0, gsd);
+        return (0.75 * perlin3(VC_SEED_LAVA ^ id, vec3<f64>(f64(x / 90.0), f64(y / 90.0), 0.37lf)) + 0.45 * perlin3(VC_SEED_LAVA ^ id ^ 0x3lu, vec3<f64>(f64(x / 30.0), f64(y / 30.0), 0.71lf)) * b3) * b;
     }
     return 0.0;
 }
@@ -391,7 +392,7 @@ fn vc_tongue(x: f32, y: f32, dir: f32, s0: f32, len: f32, w0: f32, ph: f32, nzv:
         return vec2<f32>(0.0, 0.0);
     }
     let wander = 0.035 * len * sin(s / (0.22 * len) + ph);
-    let w = vc_tongue_w(sg, w0) * (1.0 + 0.22 * nzv);
+    let w = vc_tongue_w(sg, w0) * (1.0 + 0.4 * nzv);
     return vec2<f32>(clamp((w - abs(t - wander)) / fw + 0.5, 0.0, 1.0), w);
 }
 
@@ -494,7 +495,7 @@ fn vc_field(it: Inst, p: vec3<f64>, gsd: f32, fw: f32, look: bool) -> VcField {
                 if (look && u01k(h, 8lu) < lshare) {
                     let dir = TAU * u01k(h, 9lu);
                     let len = cs * (0.55 + 0.45 * u01k(h, 10lu));
-                    let w0 = 55.0 + 60.0 * u01k(h, 11lu);
+                    let w0 = 40.0 + 40.0 * u01k(h, 11lu);
                     let tg = vc_tongue(qx, qy, dir, 0.8 * rc, len, w0, TAU * u01k(h, 12lu), nzv, fw);
                     if (tg.x > lava) {
                         lava = tg.x;

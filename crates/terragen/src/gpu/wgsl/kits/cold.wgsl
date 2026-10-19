@@ -145,87 +145,95 @@ struct ColdLake {
     b: f32,
 }
 
-fn cold_lake_at(lat: ColdLakeLat, p: vec3<f64>, sc: f32, fw: f32) -> ColdLake {
-    let q = p / lat.cell;
-    let qf = floor(q);
-    let fq = vec3<f32>(q - qf);
-    let ix = i64(qf.x);
-    let iy = i64(qf.y);
-    let iz = i64(qf.z);
-    let cell = f32(lat.cell);
-    let reach = (lat.r1 * COLD_LAKE_EL * COLD_LAKE_WN * sc + fw) / cell;
-    var best: ColdLake;
-    best.cov = 0.0;
-    best.rn = 0.0;
-    best.kind = 0u;
-    best.h = 0lu;
-    best.b = 0.0;
-    for (var dz = -1; dz <= 1; dz++) {
-        for (var dy = -1; dy <= 1; dy++) {
-            for (var dx = -1; dx <= 1; dx++) {
-                let gx = nb_gap(fq.x, dx, 0.4);
-                let gy = nb_gap(fq.y, dy, 0.4);
-                let gz = nb_gap(fq.z, dz, 0.4);
-                if (gx * gx + gy * gy + gz * gz > reach * reach) {
-                    continue;
-                }
-                let cx = ix + i64(dx);
-                let cy = iy + i64(dy);
-                let cz = iz + i64(dz);
-                let h = hash3(lat.seed, cx, cy, cz);
-                if (u01k(h, 4lu) >= lat.dens) {
-                    continue;
-                }
-                let c = vec3<f64>(f64(cx) + 0.5lf + 0.8lf * (u01kd(h, 1lu) - 0.5lf), f64(cy) + 0.5lf + 0.8lf * (u01kd(h, 2lu) - 0.5lf), f64(cz) + 0.5lf + 0.8lf * (u01kd(h, 3lu) - 0.5lf)) * lat.cell;
-                let rel = vec3<f32>(p - c);
-                let r = lat.r0 + (lat.r1 - lat.r0) * u01k(h, 5lu);
-                let el = 1.25 + 0.6 * u01k(h, 6lu);
-                let lim = r * el * COLD_LAKE_WN * sc + fw;
-                if (dot(rel, rel) > lim * lim) {
-                    continue;
-                }
-                let up = normalize(vec3<f32>(c));
-                var e = vec3<f32>(1.0, 0.0, 0.0);
-                if (abs(up.z) <= 0.999) {
-                    e = normalize(cross(vec3<f32>(0.0, 0.0, 1.0), up));
-                }
-                let nn = cross(up, e);
-                let th = 0.45 + 0.35 * (u01k(h, 7lu) - 0.5);
-                let sn = sin(th);
-                let cs = cos(th);
-                let ax = e * cs + nn * sn;
-                let ay = nn * cs - e * sn;
-                let a = r * el;
-                let b = r / el;
-                let x = dot(rel, ax) / a;
-                let y = dot(rel, ay) / b;
-                let z = dot(rel, up) / r;
-                let rho = sqrt(x * x + y * y + z * z);
-                if (rho > COLD_LAKE_WN * sc + fw / b) {
-                    continue;
-                }
-                let se = sc * (1.0 + 0.24 * perlin3(h, vec3<f64>(vec3<f32>(2.6 * x, 2.6 * y, 0.37))));
-                let gr = sqrt((x / a) * (x / a) + (y / b) * (y / b)) / max(rho, 1e-6);
-                let dist = (se - rho) / max(gr, 1e-9);
-                let cov = clamp(dist / fw + 0.5, 0.0, 1.0);
-                if (cov > best.cov) {
-                    let u = u01k(h, 8lu);
-                    var kind = 2u;
-                    if (u < lat.p_lake) {
-                        kind = 0u;
-                    } else if (u < lat.p_lake + lat.p_basin) {
-                        kind = 1u;
-                    }
-                    best.cov = cov;
-                    best.rn = min(rho / max(se, 1e-6), 1.0);
-                    best.kind = kind;
-                    best.h = h;
-                    best.b = b * se;
-                }
-            }
+fn cold_lake_none() -> ColdLake {
+    var l: ColdLake;
+    l.cov = 0.0;
+    l.rn = 0.0;
+    l.kind = 0u;
+    l.h = 0lu;
+    l.b = 0.0;
+    return l;
+}
+
+/// `cold::lake_site`: the lake of site `c` (hash `h`) at `p`.
+fn cold_lake_site(lat: ColdLakeLat, c: vec3<f64>, h: u64, p: vec3<f64>, sc: f32, fw: f32) -> ColdLake {
+    let rel = vec3<f32>(p - c);
+    let r = lat.r0 + (lat.r1 - lat.r0) * u01k(h, 5lu);
+    let el = 1.25 + 0.6 * u01k(h, 6lu);
+    let lim = r * el * COLD_LAKE_WN * sc + fw;
+    if (dot(rel, rel) > lim * lim) {
+        return cold_lake_none();
+    }
+    let up = normalize(vec3<f32>(c));
+    var e = vec3<f32>(1.0, 0.0, 0.0);
+    if (abs(up.z) <= 0.999) {
+        e = normalize(cross(vec3<f32>(0.0, 0.0, 1.0), up));
+    }
+    let nn = cross(up, e);
+    let th = 0.45 + 0.35 * (u01k(h, 7lu) - 0.5);
+    let sn = sin(th);
+    let cs = cos(th);
+    let ax = e * cs + nn * sn;
+    let ay = nn * cs - e * sn;
+    let a = r * el;
+    let b = r / el;
+    let x = dot(rel, ax) / a;
+    let y = dot(rel, ay) / b;
+    let z = dot(rel, up) / r;
+    let rho = sqrt(x * x + y * y + z * z);
+    if (rho > COLD_LAKE_WN * sc + fw / b) {
+        return cold_lake_none();
+    }
+    let se = sc * (1.0 + 0.24 * perlin3(h, vec3<f64>(vec3<f32>(2.6 * x, 2.6 * y, 0.37))));
+    let gr = sqrt((x / a) * (x / a) + (y / b) * (y / b)) / max(rho, 1e-6);
+    let dist = (se - rho) / max(gr, 1e-9);
+    let cov = clamp(dist / fw + 0.5, 0.0, 1.0);
+    if (cov <= 0.0) {
+        return cold_lake_none();
+    }
+    let u = u01k(h, 8lu);
+    var kind = 2u;
+    if (u < lat.p_lake) {
+        kind = 0u;
+    } else if (u < lat.p_lake + lat.p_basin) {
+        kind = 1u;
+    }
+    var o: ColdLake;
+    o.cov = cov;
+    o.rn = min(rho / max(se, 1e-6), 1.0);
+    o.kind = kind;
+    o.h = h;
+    o.b = b * se;
+    return o;
+}
+
+/// `cold::stamped_lake`: the large lake of the host's stamps at the sample; its level in `.b`
+/// of the second return value.
+struct ColdStamped {
+    hit: ColdLake,
+    level: f32,
+}
+
+fn cold_stamped_lake(s: ptr<function, Stack>, li: u32, sc: f32, fw: f32) -> ColdStamped {
+    let lat = cold_lake_lat(li);
+    let p = (*s).c.p;
+    let blk = (*s).l.blk;
+    var o: ColdStamped;
+    o.hit = cold_lake_none();
+    o.level = 0.0;
+    for (var k = 0u; k < feat_stamp_n(blk); k++) {
+        let st = feat_stamp(blk, k);
+        if (st.tmpl != 160u + li) {
+            continue;
+        }
+        let h = u64(u32(st.v0.x)) | (u64(u32(st.v0.y)) << 24u) | (u64(u32(st.v0.z)) << 48u);
+        let hit = cold_lake_site(lat, st.center.xyz, h, p, sc, fw);
+        if (hit.cov > o.hit.cov) {
+            o.hit = hit;
+            o.level = st.h;
         }
     }
-    return best;
+    return o;
 }
 
 fn cold_lake_mean_cov(lat: ColdLakeLat, sc: f32) -> f32 {
@@ -256,11 +264,11 @@ fn cold_lake_mask(s: ptr<function, Stack>, c: ColdClimate) -> f32 {
 
 fn cold_lake_colour(h: u64, shore_m: f32) -> vec3<f32> {
     let u = u01k(h, 9lu);
-    var deep = srgb(34.0, 48.0, 52.0);
+    var deep = srgb(42.0, 58.0, 62.0);
     if (u < 0.55) {
-        deep = srgb(16.0, 28.0, 42.0);
+        deep = srgb(28.0, 42.0, 56.0);
     } else if (u < 0.8) {
-        deep = srgb(36.0, 38.0, 28.0);
+        deep = srgb(44.0, 48.0, 38.0);
     }
     let shallow = mixc(deep, srgb(98.0, 104.0, 86.0), 0.5);
     return mixc(deep, shallow, 0.7 * smoothstep1(4.0, 0.0, shore_m));
@@ -275,7 +283,7 @@ fn cold_lake_mean_albedo(lat: ColdLakeLat, frozen: bool) -> vec3<f32> {
     if (frozen) {
         lake = mixc(srgb(150.0, 170.0, 184.0), srgb(228.0, 233.0, 239.0), 0.6);
     } else {
-        lake = cold_lake_shallow_mix(srgb(16.0, 28.0, 42.0)) * 0.55 + cold_lake_shallow_mix(srgb(36.0, 38.0, 28.0)) * 0.25 + cold_lake_shallow_mix(srgb(34.0, 48.0, 52.0)) * 0.2;
+        lake = cold_lake_shallow_mix(srgb(28.0, 42.0, 56.0)) * 0.55 + cold_lake_shallow_mix(srgb(44.0, 48.0, 38.0)) * 0.25 + cold_lake_shallow_mix(srgb(42.0, 58.0, 62.0)) * 0.2;
     }
     let basin = mixc(srgb(72.0, 76.0, 52.0), srgb(60.0, 66.0, 46.0), 0.3);
     return mixc(basin, lake, lat.p_lake);
@@ -309,27 +317,29 @@ fn cold_slot_azonal(s: ptr<function, Stack>) {
     let sc = pow(lm, 1.0 / 3.0);
     let frozen = c.date < COLD_FREEZE;
     for (var i = 0u; i < 2u; i++) {
-        cold_lakes(s, cold_lake_lat(i), sc, frozen);
+        cold_lakes(s, cold_lake_lat(i), i, sc, frozen);
         if ((*s).done) {
             return;
         }
     }
 }
 
-fn cold_lakes(s: ptr<function, Stack>, lat: ColdLakeLat, sc: f32, frozen: bool) {
+fn cold_lakes(s: ptr<function, Stack>, lat: ColdLakeLat, li: u32, sc: f32, frozen: bool) {
     let gsd = (*s).c.gsd;
     let p = (*s).c.p;
     let fw = (*s).l.fw;
     let e = smoothstep1(1.2 * gsd, 3.0 * gsd, 0.5 * (lat.r0 + lat.r1));
     let mc = cold_lake_mean_cov(lat, sc);
-    var hit: ColdLake;
-    hit.cov = 0.0;
-    hit.rn = 0.0;
-    hit.kind = 0u;
-    hit.h = 0lu;
-    hit.b = 0.0;
+    var hit = cold_lake_none();
+    var level = 0.0;
     if (e > 0.0) {
-        hit = cold_lake_at(lat, p, sc, fw);
+        let st = cold_stamped_lake(s, li, sc, fw);
+        hit = st.hit;
+        level = st.level;
+    }
+    let flat = (*s).l.ground - (*s).t.micro;
+    if (hit.kind == 0u && hit.cov > 0.0) {
+        hit.cov *= clamp((level - flat) / max((*s).l.slope, 0.01) / fw + 0.5, 0.0, 1.0);
     }
     let xc = e * hit.cov;
     let mw = (1.0 - e) * mc;
@@ -352,7 +362,7 @@ fn cold_lakes(s: ptr<function, Stack>, lat: ColdLakeLat, sc: f32, frozen: bool) 
                 xa = cold_lake_colour(hit.h, (1.0 - hit.rn) * hit.b) * (1.0 + 0.05 * perlin3(hit.h ^ 0x5EDlu, p * (1.0lf / 70.0lf)) * band(70.0, gsd));
                 ly.cls = COLD_LC_LAKE;
                 ly.hmode = HM_ABS;
-                ly.dh = (*s).t.ground - (*s).t.micro - 0.4;
+                ly.dh = level;
                 ly.relit = 1.0;
                 ly.water = true;
             }
@@ -391,6 +401,10 @@ fn cold_lakes(s: ptr<function, Stack>, lat: ColdLakeLat, sc: f32, frozen: bool) 
         }
     }
     ly.clear = 1.0;
+    if (xc > 0.0 && hit.kind != 0u) {
+        let n = perlin3(hit.h ^ 0xBA7lu, p * (1.0lf / 60.0lf)) * band(60.0, gsd);
+        ly.clear = mix(1.0, 0.3 + 0.65 * smoothstep1(0.95, 0.4, hit.rn + 0.3 * n), xc / cov);
+    }
     let water = ly.water;
     composite(s, ly);
     if (water) {
@@ -574,11 +588,6 @@ fn cold_glacier(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
         col = mixc(col, srgb(160.0, 180.0, 196.0), bi);
     }
     let sl = max(slope, 0.03);
-    if (abl > 0.0) {
-        let og_w = 35.0 / sl;
-        let og = (0.5 + 0.5 * cos(TAU * l.ground / 35.0)) * band(og_w, gsd) * smoothstep1(0.08, 0.2, slope);
-        col *= 1.0 - 0.08 * og * abl;
-    }
     let cs = smoothstep1(0.18, 0.4, slope) * (0.45 + 0.55 * abl);
     if (cs > 0.0) {
         let spacing = 6.0 / sl;
@@ -596,14 +605,6 @@ fn cold_glacier(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
         cr = cr * cs;
         col = mixc(col, srgb(70.0, 82.0, 92.0), 0.4 * cr);
         dh -= 1.0 * cr;
-    }
-    if (abl > 0.2 && l.river_hw > 0.0) {
-        let ad = abs(l.river_d);
-        let w = 12.0 + 8.0 * perlin3(COLD_SEED_ICE + 11lu, p * (1.0lf / 80.0lf)) + 3.0 * perlin3(COLD_SEED_ICE + 14lu, p * (1.0lf / 9.0lf)) * band(9.0, gsd);
-        let off = 110.0 + 0.6 * l.river_hw;
-        let mm = max(kband_cov(ad, w, max(fw, 0.6 * w)), 0.5 * kband_cov(ad - off, 0.7 * w, max(fw, 0.4 * w))) * smoothstep1(0.2, 0.6, abl) * smoothstep1(0.15, 0.4, (*s).t.mountain);
-        col = mixc(col, srgb(112.0, 106.0, 98.0), 0.5 * mm);
-        dh += 1.0 * mm;
     }
     var ly = layer_paint(g.ice, col, LC_GLACIER);
     ly.dh = (*s).m.micro + dh;

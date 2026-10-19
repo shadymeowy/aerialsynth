@@ -23,7 +23,7 @@ the ecoregion's date for seasonal snow and frozen water):
 | 1 zonal | perennial snow mask by the summer temperature (snow line lower on shaded, steep ground by aspect) |
 | 3 azonal | thermokarst and kettle lakes, drained lake basins (sedge meadow), pingos (some collapsed) |
 | 8 water | sea ice (fast ice, floes, leads, pressure ridges), frozen lakes, seasonal (frozen) rivers |
-| 9 seasonal | glaciers (firn, bare ice, crevasses, ogives, medial moraines), lateral and terminal moraines, seasonal snow and névé |
+| 9 seasonal | glaciers (firn, bare ice, crevasses), lateral and terminal moraines, seasonal snow and névé |
 
 **Drumlin fields with eskers** (instance family `cold_drumlins`, pass-A relief): glaciated lowlands
 (atlas `glaciation`) get streamlined hills along one ice-flow azimuth per field and sinuous esker
@@ -109,9 +109,9 @@ ponds.
   from the mountains kit's carve hook, not from the glaciers drawn here.
 * Sea ice is a function of the atlas' temperature at the ecoregion's date and of the depth: no
   drift, no polynyas tied to winds or coasts; leads and pressure ridges are noise patterns.
-* Kettle and thermokarst lakes are lattices tested per pixel: their existence near a lattice
-  site's threshold is decided at the site (both backends agree), but the transport kit's routing
-  only estimates their mask from pass A's values and the relief's slope.
+* Kettle and thermokarst lakes are host-built stamps with a flat level (round 10): their mask is
+  still tested per pixel, and the transport kit's routing only estimates it from pass A's values
+  and the relief's slope (it avoids the whole outline, not only the water below the level).
 * Drumlin fields take one ice-flow azimuth per field (no fanning around obstacles); eskers are
   sinuous ridges independent of the drainage.
 * Pingos and polygons ignore the drainage: polygons continue across small streams.
@@ -141,3 +141,13 @@ the zoom); their water is flat (the pixel's ground less its micro relief, `Terra
 ground's bumps reflected banks and sky in a speckle); the shallow margin is 4 m wide, not the outer seventh of the
 lake (a pale halo 20-50 m wide, a26); drained basins darker (72, 76, 52 / 60, 66, 46) and mottled at 35 m, silty
 lakes (34, 48, 52).
+
+Polish round 10: every thermokarst and kettle lake (both lattices) is a host-built stamp (template 160 + lattice,
+shared by both backends) with one flat water level: its spill point, the lowest ground (pass A without lakes, less
+its micro relief) on its widest outline, at most 15 m above its centre; open water only where the ground lies below
+it, its surface at the level (water at the pixel's ground less its micro relief lay tilted as a grey sheet on a
+slope, a29; the analytic relief before the drainage carve put levels hundreds of metres above the valley floors).
+Lakes are fewer on undulating ground and none on slopes. The darkest lake colours are at ~2 % albedo (28, 42, 56;
+44, 48, 38; 42, 58, 62: black holes in the tundra, a29); the forest closes in on drained basins from their rims (bare
+sedge to the rim drew pale ovals, taiga_river@type). Glaciers have no ogives (bands along the ground's contours) nor
+medial moraines (dark lines along the drainage under the ice): both drew contour-like arcs (mountains@type, a29).

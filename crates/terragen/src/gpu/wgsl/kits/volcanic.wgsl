@@ -218,35 +218,53 @@ fn vc_field_look(s: ptr<function, Stack>, it: Inst) {
     if (f.dens <= 0.0 && f.apron <= 0.0) {
         return;
     }
+    let humid = smoothstep1(0.2, 0.45, (*s).t.moist);
     if (f.apron > 0.0) {
         let n = 0.5 + 0.5 * vc_nz(VC_SEED_ASH + 5lu, p, 120.0, gsd);
-        let cov = 0.5 * f.apron * smoothstep1(0.2, 0.8, n);
+        let cov = 0.5 * f.apron * smoothstep1(0.2, 0.8, n) * (1.0 - 0.75 * humid);
         var ly = layer_paint(cov, vc_ash_col(n) * 0.9, LC_VOLCANIC_ASH);
         ly.clear = 0.8;
         composite(s, ly);
     }
     if (f.lava > 0.0) {
         let lv = vc_lava_look(f.age, p, gsd);
-        var ly = layer_paint(f.lava, lv.col, lv.cls);
-        ly.clear = lv.clear;
+        let lcol = mixc(lv.col, (*s).col, 0.3) * (1.0 + 0.22 * vc_nz(VC_SEED_LAVA + 5lu, p, 6.0, gsd));
+        let lclear = 0.85 * lv.clear;
+        var ly = layer_paint(f.lava, lcol, lv.cls);
+        ly.clear = lclear;
         composite(s, ly);
-        (*s).m.natural_ok *= 1.0 - f.lava * lv.clear;
+        (*s).m.natural_ok *= 1.0 - f.lava * lclear;
     }
-    if (f.cinder > 0.0) {
+    let ys = 1.0 - 0.9 * humid;
+    let m0 = (1.0 - band(0.35 * it.v[1], gsd)) * f.dens * (1.0 - it.v[6]) * VC_MEAN_CINDER;
+    let young = select(0.0, 1.0, u01k(f.chash, 18lu) < ys);
+    let cinder = m0 * ys + max(f.cinder - m0, 0.0) * young;
+    if (cinder > 0.0) {
         let t = u01k(f.chash, 14lu);
         let rho = f.crho;
-        var col = mixc(srgb(44.0, 38.0, 38.0), srgb(118.0, 62.0, 42.0), 0.65 * t * t);
+        var col = mixc(srgb(44.0, 38.0, 38.0), srgb(118.0, 62.0, 42.0), 0.65 * (1.0 - 0.5 * humid) * t * t);
         col *= mix(1.0, 0.72, smoothstep1(0.22, 0.12, rho)) * (1.0 + 0.15 * smoothstep1(0.15, 0.22, rho) * smoothstep1(0.4, 0.22, rho));
         col = mixc(col, vc_ash_col(u01k(f.chash, 17lu)) * 0.9, 0.5 * smoothstep1(0.55, 0.95, rho));
         col = mixc(col, (*s).col, 0.5 * smoothstep1(0.55, 1.0, rho) + 0.4 * smoothstep1(0.95, 1.4, rho));
         col = col * (1.0 + 0.18 * vc_nz(VC_SEED_ASH + 6lu, p, 9.0, gsd));
-        var ly = layer_paint(f.cinder, col, LC_VOLCANIC_ASH);
+        var ly = layer_paint(cinder, col, LC_VOLCANIC_ASH);
         ly.clear = 1.0;
         composite(s, ly);
-        (*s).m.natural_ok *= 1.0 - f.cinder;
+        (*s).m.natural_ok *= 1.0 - cinder;
+    }
+    var og = humid * (1.0 - young) * band(0.35 * it.v[1], gsd) * smoothstep1(1.0, 0.85, f.crho);
+    if (f.chash == 0lu) {
+        og = 0.0;
+    }
+    if (og > 0.0 && (*s).m.rock > 0.0) {
+        let k = og * (*s).m.rock;
+        let g = mixc(spal(s, BP_GRASS_WET), spal(s, BP_FLOOR), 0.5);
+        composite(s, layer_paint(k, g, 0u));
+        (*s).m.rock *= 1.0 - og;
+        (*s).m.natural_ok = mix((*s).m.natural_ok, 1.0, k);
     }
     if (f.ring > 0.0) {
-        var ly = layer_paint(f.ring, mixc((*s).col, srgb(138.0, 118.0, 98.0), 0.4), LC_VOLCANIC_ASH);
+        var ly = layer_paint(f.ring * (1.0 - 0.8 * humid), mixc((*s).col, srgb(138.0, 118.0, 98.0), 0.4), LC_VOLCANIC_ASH);
         ly.clear = 0.4;
         composite(s, ly);
     }

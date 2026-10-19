@@ -152,6 +152,13 @@ pub struct Carve {
     /// 0..1: the valley's extent from the drainage level's wide valley to what the walls alone need
     /// (`fp_w + wall_k` per metre of depth): a narrow trough (fjords)
     pub narrow: f64,
+    /// a lateral shift (m, along the signed distance) of the channel and its whole valley: the
+    /// meanders of an entrenched river (canyons)
+    pub shift: f64,
+    /// a factor of the channel's half width (an uneven bed)
+    pub hw_k: f64,
+    /// the depth (m) of the fine erosion texture of the walls (rills and rough rock; 0: none)
+    pub rough: f64,
 }
 
 /// A host-built pass-A stamp (`Kit::astamps`): a landform that needs the drainage or exact

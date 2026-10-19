@@ -123,3 +123,9 @@ Polish round 9: the cinder fields' lava tongues widen from the vent to a blunt t
 (age +0.35) and fresh basalt is 66 DN (24 read as a hole); cinder cones have a faint scoria apron to 1.6 radii
 (25 %) and their foot weathers into the ground (an outline ending at the foot looked stamped on). Means:
 `MEAN_LAVA` 51, `MEAN_CINDER` 0.219.
+
+Polish round 10: in humid climates (moisture 0.2–0.45 up) nine cinder cones in ten are grown over (no scoria; their
+steep flanks keep the plants instead of the rock of steep slopes) and the ash apron and tephra rings fade: bare cones
+drew a pink rash over the rainforest (volcano@type). Lava tongues are narrower (`w0` 40–80 m), lobate (margin noise
+0.4 at 90 m and 30 m), rough and a third of the way to the ground's colour (dark smooth paddles, braided);
+`MEAN_LAVA` 36.

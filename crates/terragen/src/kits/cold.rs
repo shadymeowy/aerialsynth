@@ -6,9 +6,9 @@
 //! | slot | layer |
 //! |---|---|
 //! | 1 zonal | [`zonal`]: the perennial snow mask (`Masks::snow`) of the kit's snow model: snow line and glaciers by the summer temperature |
-//! | 3 azonal | [`azonal`]: thermokarst and kettle lakes, drained lake basins, pingos |
+//! | 3 azonal | [`azonal`]: thermokarst and kettle lakes (host-built stamps with a flat level, `lake_host`), drained lake basins, pingos |
 //! | 8 water | [`water`]: sea ice (floes, leads, pressure ridges, fast ice), frozen lakes |
-//! | 9 seasonal | [`seasonal`]: glaciers (firn, bare ice, crevasses, ogives, medial moraines), lateral and terminal moraines, seasonal snow |
+//! | 9 seasonal | [`seasonal`]: glaciers (firn, bare ice, crevasses), lateral and terminal moraines, seasonal snow |
 //!
 //! Kernel `cold_polygons` (YAML): ice-wedge polygons and sorted circles on a 3D Worley lattice
 //! (seamless, no local frame).
@@ -46,6 +46,7 @@ pub static KIT: Kit = Kit {
     relief: Some(relief),
     relief_wgsl: include_str!("../gpu/wgsl/kits/cold_relief.wgsl"),
     families: &[Family { name: "cold_drumlins", cell: 45_000.0, jitter: 0.8, reach: 14_000.0, relief: true, exists: drumlins_exist }],
+    host: Some(lake_host),
     ..Kit::EMPTY
 };
 
@@ -230,7 +231,71 @@ pub(crate) struct LakeHit {
     pub b: f64,
 }
 
-/// The lake of `lat` at `p` (lakes scaled by `sc`; `fw` the filter width).
+/// The site of the lattice `lat` in the cell `(cx, cy, cz)`: its point (ECEF) and hash, or None.
+pub(crate) fn lake_site_of(lat: &LakeLat, cx: i64, cy: i64, cz: i64) -> Option<(DVec3, u64)> {
+    let h = hash3(lat.seed, cx, cy, cz);
+    if u01k(h, 4) >= lat.dens {
+        return None;
+    }
+    let c = DVec3::new(cx as f64 + 0.5 + 0.8 * (u01k(h, 1) - 0.5), cy as f64 + 0.5 + 0.8 * (u01k(h, 2) - 0.5), cz as f64 + 0.5 + 0.8 * (u01k(h, 3) - 0.5))
+        * lat.cell;
+    Some((c, h))
+}
+
+/// The axes and semi-axes of the lake of site `c` (hash `h`): long axis, short axis, up, a, b,
+/// and the ellipsoid's third radius.
+fn lake_frame(lat: &LakeLat, c: DVec3, h: u64) -> (DVec3, DVec3, DVec3, f64, f64, f64) {
+    let r = lat.r0 + (lat.r1 - lat.r0) * u01k(h, 5);
+    let el = 1.25 + 0.6 * u01k(h, 6);
+    // the site's frame: its up, east, north; the long axis ~25° north of east
+    let up = c.normalize();
+    let e = if up.z.abs() > 0.999 { DVec3::X } else { DVec3::Z.cross(up).normalize() };
+    let nn = up.cross(e);
+    let th = 0.45 + 0.35 * (u01k(h, 7) - 0.5);
+    let (sn, cs) = th.sin_cos();
+    (e * cs + nn * sn, nn * cs - e * sn, up, r * el, r / el, r)
+}
+
+/// The lake of site `c` (hash `h`) of the lattice `lat` at `p` (scaled by `sc`; `fw` the filter
+/// width); coverage 0 outside it.
+pub(crate) fn lake_site(lat: &LakeLat, c: DVec3, h: u64, p: DVec3, sc: f64, fw: f64) -> LakeHit {
+    let rel = p - c;
+    let r = lat.r0 + (lat.r1 - lat.r0) * u01k(h, 5);
+    let el = 1.25 + 0.6 * u01k(h, 6);
+    let lim = r * el * LAKE_WN * sc + fw;
+    if rel.length_squared() > lim * lim {
+        return LakeHit::default();
+    }
+    let (ax, ay, up, a, b, r) = lake_frame(lat, c, h);
+    let x = rel.dot(ax) / a;
+    let y = rel.dot(ay) / b;
+    let z = rel.dot(up) / r;
+    let rho = (x * x + y * y + z * z).sqrt();
+    if rho > LAKE_WN * sc + fw / b {
+        return LakeHit::default();
+    }
+    // ragged shore (bays and points): noise in the lake's own frame
+    let se = sc * (1.0 + 0.24 * perlin3(h, DVec3::new(2.6 * x, 2.6 * y, 0.37)));
+    // distance to the shore (m): the index over its gradient in the plane
+    let gr = ((x / a) * (x / a) + (y / b) * (y / b)).sqrt() / rho.max(1e-6);
+    let dist = (se - rho) / gr.max(1e-9);
+    let cov = (dist / fw + 0.5).clamp(0.0, 1.0);
+    if cov <= 0.0 {
+        return LakeHit::default();
+    }
+    let u = u01k(h, 8);
+    let kind = if u < lat.p_lake {
+        0
+    } else if u < lat.p_lake + lat.p_basin {
+        1
+    } else {
+        2
+    };
+    LakeHit { cov, rn: (rho / se.max(1e-6)).min(1.0), kind, h, b: b * se }
+}
+
+/// The lake of `lat` at `p` (lakes scaled by `sc`; `fw` the filter width) by a search of the
+/// lattice (the routes and the means test; pass B draws the host's stamps, with their levels).
 pub(crate) fn lake_at(lat: &LakeLat, p: DVec3, sc: f64, fw: f64) -> LakeHit {
     let q = p / lat.cell;
     let qf = q.floor();
@@ -245,55 +310,10 @@ pub(crate) fn lake_at(lat: &LakeLat, p: DVec3, sc: f64, fw: f64) -> LakeHit {
                 if gx * gx + gy * gy + gz * gz > reach * reach {
                     continue;
                 }
-                let (cx, cy, cz) = (ix + dx, iy + dy, iz + dz);
-                let h = hash3(lat.seed, cx, cy, cz);
-                if u01k(h, 4) >= lat.dens {
-                    continue;
-                }
-                let c = DVec3::new(
-                    cx as f64 + 0.5 + 0.8 * (u01k(h, 1) - 0.5),
-                    cy as f64 + 0.5 + 0.8 * (u01k(h, 2) - 0.5),
-                    cz as f64 + 0.5 + 0.8 * (u01k(h, 3) - 0.5),
-                ) * lat.cell;
-                let rel = p - c;
-                let r = lat.r0 + (lat.r1 - lat.r0) * u01k(h, 5);
-                let el = 1.25 + 0.6 * u01k(h, 6);
-                let lim = r * el * LAKE_WN * sc + fw;
-                if rel.length_squared() > lim * lim {
-                    continue;
-                }
-                // the site's frame: its up, east, north; the long axis ~25° north of east
-                let up = c.normalize();
-                let e = if up.z.abs() > 0.999 { DVec3::X } else { DVec3::Z.cross(up).normalize() };
-                let nn = up.cross(e);
-                let th = 0.45 + 0.35 * (u01k(h, 7) - 0.5);
-                let (sn, cs) = th.sin_cos();
-                let ax = e * cs + nn * sn;
-                let ay = nn * cs - e * sn;
-                let (a, b) = (r * el, r / el);
-                let x = rel.dot(ax) / a;
-                let y = rel.dot(ay) / b;
-                let z = rel.dot(up) / r;
-                let rho = (x * x + y * y + z * z).sqrt();
-                if rho > LAKE_WN * sc + fw / b {
-                    continue;
-                }
-                // ragged shore (bays and points): noise in the lake's own frame
-                let se = sc * (1.0 + 0.24 * perlin3(h, DVec3::new(2.6 * x, 2.6 * y, 0.37)));
-                // distance to the shore (m): the index over its gradient in the plane
-                let gr = ((x / a) * (x / a) + (y / b) * (y / b)).sqrt() / rho.max(1e-6);
-                let dist = (se - rho) / gr.max(1e-9);
-                let cov = (dist / fw + 0.5).clamp(0.0, 1.0);
-                if cov > best.cov {
-                    let u = u01k(h, 8);
-                    let kind = if u < lat.p_lake {
-                        0
-                    } else if u < lat.p_lake + lat.p_basin {
-                        1
-                    } else {
-                        2
-                    };
-                    best = LakeHit { cov, rn: (rho / se.max(1e-6)).min(1.0), kind, h, b: b * se };
+                let Some((c, h)) = lake_site_of(lat, ix + dx, iy + dy, iz + dz) else { continue };
+                let hit = lake_site(lat, c, h, p, sc, fw);
+                if hit.cov > best.cov {
+                    best = hit;
                 }
             }
         }
@@ -332,16 +352,144 @@ pub(crate) fn lake_mask(s: &Stack, c: &ColdClimate) -> f64 {
         * (0.3 + 0.7 * smoothstep(0.25, 0.65, t.style[0]))
 }
 
+/// The stamps of the lakes (host-built; template `LAKE_TEMPLATE` + the lattice's index): the
+/// site's point (`center`), its hash in `v[0..3]` (24, 24, 16 bits) and its flat water level
+/// (`h`).
+pub const LAKE_TEMPLATE: u32 = 160;
+
+/// A lattice's lakes are explicit below this pixel size (m; `lakes`' `e` > 0): their stamps are
+/// built there.
+fn lake_gsd(lat: &LakeLat) -> f64 {
+    0.5 * (lat.r0 + lat.r1) / 1.2 + 1.0
+}
+
+/// The flat water level of the lake of lattice `li` at site `c` (hash `h`): just below the lowest
+/// ground (less its micro relief: pass B's flat water) on its widest outline, its spill point,
+/// and at most 15 m above the ground at its centre. Water stands only where the ground is below
+/// it: in the hollows of the outline, none on a slope (a lake on a hillside lay tilted as a
+/// sheet, a29). None in the sea and where no cold lakes can be (a superset of `lake_mask`'s
+/// climate, height and relief). Host code (both backends), cached.
+pub(crate) fn lake_level(w: &crate::world::World, li: usize, c: DVec3, h: u64) -> Option<f64> {
+    static CACHE: crate::memo::Memo<(u64, u64, u64), Option<f64>> = crate::memo::Memo::new(1 << 18);
+    let lat = &LAKE_LATS[li];
+    CACHE.get_or((w.cache_key, h, lat.seed), || {
+        let at = w.atlas().sample(c.normalize());
+        if !(at.temp_c < 6.0 || (at.glaciation > 0.0 && at.temp_c < 16.0)) {
+            return None;
+        }
+        let (ax, ay, up, a, b, r) = lake_frame(lat, c, h);
+        let sp = crate::kits::transport::route::surface(w, c);
+        let z = (c - sp).dot(up) / r;
+        if z.abs() >= 1.0 {
+            return None;
+        }
+        let k = (1.0 - z * z).sqrt();
+        let ground = |q: DVec3| {
+            let g = geodesy::ecef2geodetic(q, &w.ell);
+            let ctx = crate::world::Ctx::new(g.lat, g.lon, 40.0, &w.ell);
+            // (with the drainage carve: the analytic relief before it lay hundreds of metres
+            // above the floors of the valleys, and so did the lakes' levels)
+            w.terrain_nolakes(&ctx)
+        };
+        let tc = ground(sp);
+        if tc.ground < 1.0 || tc.ground > 720.0 || tc.mountain > 0.52 || !(tc.temp < 0.0 || (tc.glaciation > 0.0 && tc.temp < 10.0)) {
+            return None;
+        }
+        let g0 = tc.ground - tc.micro;
+        let mut rim = f64::MAX;
+        let n = if li == 0 { 10 } else { 8 };
+        for i in 0..n {
+            let t = i as f64 * std::f64::consts::TAU / n as f64;
+            let q = sp + (ax * (a * k * t.cos()) + ay * (b * k * t.sin()));
+            let tq = ground(crate::kits::transport::route::surface(w, q));
+            if tq.ground < 0.5 || tq.water_kind != crate::world::water::NONE {
+                return None;
+            }
+            rim = rim.min(tq.ground - tq.micro);
+        }
+        Some((rim - 0.3).min(g0 + 15.0))
+    })
+}
+
+/// The kit's host features: the stamps of the lakes that can reach the area (with a level).
+fn lake_host(ctx: &mut crate::features::HostCtx, area: &crate::features::Area) -> crate::features::Features {
+    let mut f = crate::features::Features::default();
+    let w = ctx.world;
+    // (none near the equator: a quick test of the area's climate)
+    let at = w.atlas().sample(area.center.normalize());
+    if at.temp_c > 24.0 && at.glaciation <= 0.0 {
+        return f;
+    }
+    for (li, lat) in LAKE_LATS.iter().enumerate() {
+        if area.gsd >= lake_gsd(lat) {
+            continue;
+        }
+        let reach = lat.r1 * LAKE_EL * LAKE_WN;
+        let rr = area.radius + reach + lat.cell;
+        let lo = ((area.center - DVec3::splat(rr)) / lat.cell).floor();
+        let hi = ((area.center + DVec3::splat(rr)) / lat.cell).floor();
+        let rs = area.center.length();
+        for z in lo.z as i64..=hi.z as i64 {
+            for y in lo.y as i64..=hi.y as i64 {
+                for x in lo.x as i64..=hi.x as i64 {
+                    // (cells whose site can lie within reach of the surface: the area centre's
+                    // radius, ± the ellipsoid's change of radius over the area)
+                    let cc = (DVec3::new(x as f64, y as f64, z as f64) + 0.5) * lat.cell;
+                    let dc = cc - area.center;
+                    if (cc.length() - rs).abs() > 0.87 * lat.cell + lat.r1 + 0.01 * rr || dc.length() > rr + 0.87 * lat.cell {
+                        continue;
+                    }
+                    let Some((c, h)) = lake_site_of(lat, x, y, z) else { continue };
+                    let (ax, ay, up, a, _, r) = lake_frame(lat, c, h);
+                    let sp = crate::kits::transport::route::surface(w, c);
+                    if (c - sp).dot(up).abs() >= r || (sp - area.center).length() > area.radius + a * LAKE_WN + 1.0 {
+                        continue;
+                    }
+                    let Some(level) = lake_level(w, li, c, h) else { continue };
+                    f.stamps.push(crate::features::FStamp {
+                        center: c,
+                        ex: ax,
+                        ey: ay,
+                        half: [(a * LAKE_WN) as f32 + 1.0, (a * LAKE_WN) as f32 + 1.0],
+                        template: LAKE_TEMPLATE + li as u32,
+                        h: level as f32,
+                        v: [(h & 0xFF_FFFF) as f32, ((h >> 24) & 0xFF_FFFF) as f32, ((h >> 48) & 0xFFFF) as f32, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    });
+                }
+            }
+        }
+    }
+    f
+}
+
+/// The lake of lattice `li` (stamps of [`lake_host`]) at the sample, and its level.
+fn stamped_lake(s: &Stack, li: usize, sc: f64, fw: f64) -> (LakeHit, f64) {
+    let lat = &LAKE_LATS[li];
+    let p = s.ctx.p;
+    let mut best = (LakeHit::default(), 0.0);
+    for st in s.stamps() {
+        if st.template != LAKE_TEMPLATE + li as u32 {
+            continue;
+        }
+        let h = st.v[0] as u64 | ((st.v[1] as u64) << 24) | ((st.v[2] as u64) << 48);
+        let hit = lake_site(lat, st.center, h, p, sc, fw);
+        if hit.cov > best.0.cov {
+            best = (hit, st.h as f64);
+        }
+    }
+    best
+}
+
 /// Lake colours (linear): dark, tea-coloured, silty; the shallow margin; the drained basins;
-/// lake ice.
+/// lake ice. (The dark ones at ~2 % albedo, not ~1 %: black holes in the tundra, a29.)
 fn lake_colour(h: u64, shore_m: f64) -> DVec3 {
     let u = u01k(h, 9);
     let deep = if u < 0.55 {
-        srgb(16.0, 28.0, 42.0)
+        srgb(28.0, 42.0, 56.0)
     } else if u < 0.8 {
-        srgb(36.0, 38.0, 28.0)
+        srgb(44.0, 48.0, 38.0)
     } else {
-        srgb(34.0, 48.0, 52.0)
+        srgb(42.0, 58.0, 62.0)
     };
     let shallow = mixc(deep, srgb(98.0, 104.0, 86.0), 0.5);
     // (a shallow margin a few metres wide: over the outer third of a big lake, and then over its
@@ -355,7 +503,7 @@ fn lake_mean_albedo(lat: &LakeLat, frozen: bool) -> DVec3 {
         mixc(srgb(150.0, 170.0, 184.0), srgb(228.0, 233.0, 239.0), 0.6)
     } else {
         let w = |c: DVec3| mixc(c, mixc(c, srgb(98.0, 104.0, 86.0), 0.5), 0.04);
-        w(srgb(16.0, 28.0, 42.0)) * 0.55 + w(srgb(36.0, 38.0, 28.0)) * 0.25 + w(srgb(34.0, 48.0, 52.0)) * 0.2
+        w(srgb(28.0, 42.0, 56.0)) * 0.55 + w(srgb(44.0, 48.0, 38.0)) * 0.25 + w(srgb(42.0, 58.0, 62.0)) * 0.2
     };
     let basin = mixc(srgb(72.0, 76.0, 52.0), srgb(60.0, 66.0, 46.0), 0.3);
     mixc(basin, lake, lat.p_lake)
@@ -372,22 +520,30 @@ pub fn azonal(s: &mut Stack) {
     }
     let sc = lm.cbrt();
     let frozen = c.date < FREEZE;
-    for lat in &LAKE_LATS {
-        lakes(s, lat, sc, frozen);
+    for (i, lat) in LAKE_LATS.iter().enumerate() {
+        lakes(s, lat, i, sc, frozen);
         if s.done {
             return;
         }
     }
 }
 
-/// One lattice's lakes at the sample: explicit where resolved, the mean colour where not.
-fn lakes(s: &mut Stack, lat: &LakeLat, sc: f64, frozen: bool) {
+/// One lattice's lakes at the sample: explicit where resolved, the mean colour where not. The
+/// explicit lakes come from the host's stamps, with their flat level: open water only where the
+/// ground (less its micro relief) lies below it.
+fn lakes(s: &mut Stack, lat: &LakeLat, li: usize, sc: f64, frozen: bool) {
     let gsd = s.ctx.gsd;
     let p = s.ctx.p;
     let fw = s.l.fw;
     let e = smoothstep(1.2 * gsd, 3.0 * gsd, 0.5 * (lat.r0 + lat.r1));
     let mc = lake_mean_cov(lat, sc);
-    let hit = if e > 0.0 { lake_at(lat, p, sc, fw) } else { LakeHit::default() };
+    let (mut hit, level) = if e <= 0.0 { (LakeHit::default(), 0.0) } else { stamped_lake(s, li, sc, fw) };
+    // (the shore where the ground rises above the level: antialiased over the filter width, the
+    // height difference over the slope)
+    let flat = s.l.ground - s.t.micro;
+    if hit.kind == 0 && hit.cov > 0.0 {
+        hit.cov *= ((level - flat) / s.l.slope.max(0.01) / fw + 0.5).clamp(0.0, 1.0);
+    }
     let xc = e * hit.cov;
     let mw = (1.0 - e) * mc;
     let cov = xc + mw;
@@ -409,10 +565,9 @@ fn lakes(s: &mut Stack, lat: &LakeLat, sc: f64, frozen: bool) {
                 xa = lake_colour(hit.h, (1.0 - hit.rn) * hit.b) * (1.0 + 0.05 * perlin3(hit.h ^ 0x5ED, p / 70.0) * band(70.0, gsd));
                 ly.cls = cls::LAKE;
                 ly.hmode = hmode::ABS;
-                // (a flat water surface: the pixel's ground less its micro relief; on the ground's
-                // bumps the water's reflections of the banks and the sky drew a glittery speckle,
-                // taiga_river@type)
-                ly.dh = s.t.ground - s.t.micro - 0.4;
+                // (a flat water surface: the lake's level; water draped over the ground's bumps
+                // drew a glittery speckle, taiga_river@type, and over a slope a tilted sheet, a29)
+                ly.dh = level;
                 ly.relit = 1.0;
                 ly.water = true;
             }
@@ -455,7 +610,14 @@ fn lakes(s: &mut Stack, lat: &LakeLat, sc: f64, frozen: bool) {
             ly.hmode = hmode::NONE;
         }
     }
-    ly.clear = 1.0;
+    // (the forest closes in on the drained basins from their rims: bare sedge meadows to the rim
+    // drew pale ovals in the taiga, taiga_river@type)
+    ly.clear = if xc > 0.0 && hit.kind != 0 {
+        let n = perlin3(hit.h ^ 0xBA7, p / 60.0) * band(60.0, gsd);
+        lerp(1.0, 0.3 + 0.65 * smoothstep(0.95, 0.4, hit.rn + 0.3 * n), xc / cov)
+    } else {
+        1.0
+    };
     let water = ly.water;
     s.composite(ly);
     // an open lake ends the stack (no vegetation, rivers or snow on it)
@@ -745,9 +907,9 @@ pub fn seasonal(s: &mut Stack) {
     snow(s, &c, &g);
 }
 
-/// Glacier ice: firn above the equilibrium line, bare blue-grey ice below it with dirt bands
-/// (ogives), crevasses across the flow (along the contours) where the ice is steep, medial
-/// moraines along the valley's axis, blue ice on cold, wind-scoured ice caps.
+/// Glacier ice: firn above the equilibrium line, bare blue-grey ice below it, dirtier towards the
+/// margin, crevasses across the flow (along the contours) where the ice is steep, blue ice on
+/// cold, wind-scoured ice caps.
 fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     let p = s.ctx.p;
     let gsd = s.ctx.gsd;
@@ -773,13 +935,7 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
             * (1.0 - smoothstep(0.04, 0.08, slope));
         col = mixc(col, srgb(160.0, 180.0, 196.0), bi);
     }
-    // ogives: arcs of darker ice below icefalls (bands along the contours, 35 m in height)
     let sl = slope.max(0.03);
-    if abl > 0.0 {
-        let og_w = 35.0 / sl;
-        let og = (0.5 + 0.5 * (std::f64::consts::TAU * l.ground / 35.0).cos()) * band(og_w, gsd) * smoothstep(0.08, 0.2, slope);
-        col *= 1.0 - 0.08 * og * abl;
-    }
     // crevasses: across the flow, i.e. along the contours of the ground, every 6 m of height,
     // broken (en echelon) into short dashes, where the ice is steep (long dark lines along the
     // contours over every tongue read as a contour map)
@@ -802,19 +958,9 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
         col = mixc(col, srgb(70.0, 82.0, 92.0), 0.4 * cr);
         dh -= 1.0 * cr;
     }
-    // medial moraines along the valley's axis (the drainage line under the ice) and beside it
-    if abl > 0.2 && l.river_hw > 0.0 {
-        let ad = l.river_d.abs();
-        let w = 12.0 + 8.0 * perlin3(SEED_ICE + 11, p / 80.0) + 3.0 * perlin3(SEED_ICE + 14, p / 9.0) * band(9.0, gsd);
-        let off = 110.0 + 0.6 * l.river_hw;
-        // (faint, and only on the valley glaciers of the mountains: three dark lines along every
-        // tongue read as a drawing, and along the streams under a lowland ice field as stripes)
-        let mm = band_cov(ad, w, fw.max(0.6 * w)).max(0.5 * band_cov(ad - off, 0.7 * w, fw.max(0.4 * w)))
-            * smoothstep(0.2, 0.6, abl)
-            * smoothstep(0.15, 0.4, s.t.mountain);
-        col = mixc(col, srgb(112.0, 106.0, 98.0), 0.5 * mm);
-        dh += 1.0 * mm;
-    }
+    // (no ogives nor medial moraines: bands along the contours of the ground and dark lines along
+    // the drainage under the ice drew contour-like arcs over the tongues and ice fields,
+    // mountains@type, a29)
     let ly = Layer { cov: g.ice, albedo: col, dh: s.m.micro + dh, hmode: hmode::BLEND, cls: cls::GLACIER, relit: 1.0, clear: 1.0, ..Default::default() };
     s.composite(ly);
 }

@@ -9,12 +9,12 @@ fn mt_strata_col(i: u32) -> vec3<f32> {
         case 3u: { return srgb(178.0, 149.0, 125.0); }
         case 4u: { return srgb(186.0, 145.0, 120.0); }
         case 5u: { return srgb(188.0, 165.0, 140.0); }
-        case 6u: { return srgb(194.0, 154.0, 116.0); }
-        case 7u: { return srgb(184.0, 134.0, 98.0); }
-        case 8u: { return srgb(186.0, 118.0, 84.0); }
-        case 9u: { return srgb(158.0, 86.0, 60.0); }
-        case 10u: { return srgb(172.0, 104.0, 74.0); }
-        default: { return srgb(140.0, 80.0, 60.0); }
+        case 6u: { return srgb(198.0, 140.0, 96.0); }
+        case 7u: { return srgb(188.0, 116.0, 76.0); }
+        case 8u: { return srgb(176.0, 98.0, 64.0); }
+        case 9u: { return srgb(150.0, 78.0, 56.0); }
+        case 10u: { return srgb(164.0, 92.0, 64.0); }
+        default: { return srgb(132.0, 72.0, 54.0); }
     }
 }
 
@@ -78,7 +78,14 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
         if (z.badland > 0.2) {
             cliff = 0.0;
         }
-        let col = mixc(floor_col, col0 * (1.0 - 0.2 * cliff), 0.8 * smoothstep1(0.25, 0.6, slope));
+        var col = mixc(floor_col, col0, 0.8 * smoothstep1(0.25, 0.6, slope));
+        if (z.badland <= 0.2) {
+            let gsd = (*s).c.gsd;
+            let face = col0 * (1.0 - 0.2 * cliff) * (1.0 + 0.1 * perlin3(MT_SEED + 41lu, p / 7.0lf) * band(7.0, gsd));
+            let tal = smoothstep1(0.3, 0.5, slope) * (1.0 - smoothstep1(0.75, 1.05, slope));
+            let talus = srgb(176.0, 146.0, 118.0) * (1.0 + 0.16 * perlin3(MT_SEED + 42lu, p / 3.5lf) * band(3.5, gsd) + 0.1 * perlin3(MT_SEED + 43lu, p / 11.0lf) * band(11.0, gsd));
+            col = mixc(mixc(floor_col, face, 0.85 * smoothstep1(0.25, 0.6, slope)), talus, 0.7 * tal);
+        }
         var ly = layer_paint(cb, col, cl);
         ly.clear = 1.0;
         composite(s, ly);

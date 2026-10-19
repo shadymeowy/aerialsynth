@@ -331,3 +331,7 @@ shoulders only on paved roads.
 
 Polish round 9: power-line corridors keep shrubs and saplings (60 % of the trees cleared; a cleared lawn drew a
 bright straight line through the rainforest, volcano@type).
+
+Polish round 10: routes keep off the ice of high mountains (mountain > 0.25, mean annual temperature at the ground
+below −3 °C): twice a lake's cost per metre, and a route with more than 300 m of it is rejected (minor roads went
+over 6 km summits in switchbacks).
