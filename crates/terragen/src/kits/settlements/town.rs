@@ -633,6 +633,26 @@ pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
             pat::INFORMAL => {
                 b = 60.0 + 20.0 * u2;
                 sw = 2.3;
+/// The distance from `q` to the edge of an industrial estate on the town's grid where `q` lies
+/// beside one (1e9: none): `Dist::nbind` without the rest of the district (round 12: the whole
+/// district evaluated again at each block's centre cost ~2 s of pass B's compile time).
+pub fn nbind_at(pl: &Pl, q: DVec2) -> f64 {
+    if pl.form != form::CITY as u32 || pl.level < 2 || !shared_industry(pl) {
+        return 1e9;
+    }
+    let dcell = [400.0, 400.0, 600.0, 1000.0, 1400.0][pl.level as usize];
+    let wl = 0.3 * dcell;
+    let qd = q
+        + DVec2::new((q.y / wl + 6.0 * u01k(pl.seed, 51)).sin(), (q.x / (1.17 * wl) + 6.0 * u01k(pl.seed, 52)).sin()) * (0.16 * dcell)
+        + DVec2::new((q.y / (0.4 * wl) + 6.0 * u01k(pl.seed, 54)).sin(), (q.x / (0.43 * wl) + 6.0 * u01k(pl.seed, 55)).sin()) * (0.045 * dcell);
+    let dc = worley2(pl.seed ^ 0xD15, qd, dcell, 0.85);
+    if district_pattern(pl, dc.point, dc.id).0 == pat::GRID && district_pattern(pl, dc.point2, dc.id2).0 == pat::INDUSTRIAL {
+        worley2_edge_dist(&dc, qd)
+    } else {
+        1e9
+    }
+}
+
                 jit = 0.45;
                 warp = 9.0;
                 w2cell = 7.5;
@@ -1299,8 +1319,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     // estates read as separate patches, town@type, fp_town)
                     let lind = pattern == pat::GRID && nbind < 260.0 && {
                         let qc = q + rot2(DVec2::new(0.5 * blk.bw - blk.u, 0.5 * blk.bd - blk.v), -theta);
-                        let dc = district(pl, qc, rel0(pl, qc) / (1.0 + e.n));
-                        u01k(blk.id, 79) < 0.6 * (1.0 - smoothstep(30.0, 230.0, dc.nbind))
+                        u01k(blk.id, 79) < 0.6 * (1.0 - smoothstep(30.0, 230.0, nbind_at(pl, qc)))
                     };
                     let ind = pattern == pat::INDUSTRIAL || lind;
                     // (estates: lots of 30-150 m, halls, yards and car parks; lots of 45 m and up

@@ -625,6 +625,28 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
             sw = 9.0;
             jit = 0.1;
         } else if (pattern == SP_INFORMAL) {
+/// `town::nbind_at`.
+fn st_nbind_at(pl: StPl, q: vec2<f32>) -> f32 {
+    if (pl.form != SF_CITY || pl.level < 2u || !st_shared_industry(pl)) {
+        return 1e9;
+    }
+    var dcell = 600.0;
+    if (pl.level == 3u) {
+        dcell = 1000.0;
+    } else if (pl.level >= 4u) {
+        dcell = 1400.0;
+    }
+    let wl = 0.3 * dcell;
+    let qd = q
+        + vec2<f32>(sin(q.y / wl + 6.0 * u01k(pl.seed, 51lu)), sin(q.x / (1.17 * wl) + 6.0 * u01k(pl.seed, 52lu))) * (0.16 * dcell)
+        + vec2<f32>(sin(q.y / (0.4 * wl) + 6.0 * u01k(pl.seed, 54lu)), sin(q.x / (0.43 * wl) + 6.0 * u01k(pl.seed, 55lu))) * (0.045 * dcell);
+    let dc = worley2(pl.seed ^ 0xD15lu, qd, dcell, 0.85);
+    if (st_district_pattern(pl, dc.point, dc.id).x == SP_GRID && st_district_pattern(pl, dc.point2, dc.id2).x == SP_INDUSTRIAL) {
+        return worley2_edge_dist(dc, qd);
+    }
+    return 1e9;
+}
+
             b = 60.0 + 20.0 * u2;
             sw = 2.3;
             jit = 0.45;
@@ -1364,8 +1386,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             var lind = false;
             if (pattern == SP_GRID && d.nbind < 260.0) {
                 let qc = q + st_rot2(vec2<f32>(0.5 * blk.bw - blk.u, 0.5 * blk.bd - blk.v), -theta);
-                let dc = st_district(pl, qc, st_rel0(pl, qc) / (1.0 + e.n));
-                lind = u01k(blk.id, 79lu) < 0.6 * (1.0 - smoothstep1(30.0, 230.0, dc.nbind));
+                lind = u01k(blk.id, 79lu) < 0.6 * (1.0 - smoothstep1(30.0, 230.0, st_nbind_at(pl, qc)));
             }
             let ind = pattern == SP_INDUSTRIAL || lind;
             if (ind) {
