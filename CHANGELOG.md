@@ -70,6 +70,14 @@
   hills, calmer taiga floors and steppe crowns; lower barchans; cleaner lake shores on flat plains; routes off
   high-mountain ice; organic old city cores with one ring boulevard, curvilinear suburbs, estates on the town
   grid with green buffers, frayed town edges.
+- `next` polish round 11: industrial estates of matte halls (skylights, HVAC, loading aprons), yards
+  and car parks with light industry beside them (no glassy sheets of roof); old city cores on the
+  town's grid, bent, cut by lanes into small blocks of terraced houses and fading into the grid (no
+  crisp patch of rubble), an old quarter off the CBD's centre in big cities; ribbons along main streets
+  and scattered houses at town edges; snowbeds and late snow where summers are cold (snowfields on
+  high mountains, glaciers under the season's snow); cinder cones kept on fault-block uplands; long
+  narrow rough lava flows; plants over steep rainforest slopes and a lighter rainforest canopy;
+  semi-arid tussocks and larger shrubs; fewer, sandier barchans; calmer barely resolved crowns.
 - **Optional tile layers** (tile store format 2; `next` only): `tiles.layers: [dtm, instance]`
   adds the bare ground and instance ids (building lots, fields, forest stands) to a new store;
   the viewer's map shadings *Height above ground* and *Instances* show them. Format-1 stores

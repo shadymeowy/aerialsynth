@@ -280,3 +280,16 @@ cultures are curvilinear (a 190 m warp of long blocks); industrial estates of gr
 has its own density threshold and main streets run on beyond the edge (ribbons). Still open: estates still read as
 patches of large grey roofs, the organic core's border with the grid is crisp, districts do not bend to rivers or
 relief, and fp_town's edge still follows its grid in places (round 10's metro stills: `round10/metro_before_after.jpg`).
+
+Polish round 11: industrial estates are lots of 30–150 m (BSP depth 3), each a hall (60 %), a car park, a container
+yard or vacant grass; halls are at most 160 × 100 m with a loading apron and trailers on one side, half of them with a
+shallow gable, skylight strips and HVAC units, under matte light grey, beige and white roofs (round 10's blue-grey
+roofs over 200–400 m lots read as glass or water, town@type); blocks of light industry stand beside estates on the
+town's grid (decided by the district at the block's centre: whole blocks). The old core of a city of an old culture
+is no longer a W2 network of its own but the town's grid, bent by 16 m, with narrower paved streets and its blocks cut
+by lanes (W2 36–48 m) into small blocks of terraced houses along the streets and lanes, courtyards and small squares,
+warm tiled roofs (`old_core`: it fades out block by block over a band; in the big cities it is an old quarter off the
+CBD's centre, so the towers stay; round 10's core read as a crisp patch of rubble, metro nadir). Lots along main
+streets keep their houses further out and the main streets run on (ribbons), and a few houses stand beyond the last
+streets (fp_town). Car parks show the cars' mean colour below 2 m pixels. Still open: districts do not bend to rivers
+or relief (the place stamp carries no river direction), and dusk@type's CBD has fewer towers than round 10's.

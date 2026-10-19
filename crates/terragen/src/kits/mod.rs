@@ -341,10 +341,23 @@ pub fn kernels() -> impl Iterator<Item = &'static KernelSpec> {
     KITS.iter().flat_map(|k| k.kernels.iter())
 }
 
+/// The kits in the order of their relief operators: the volcanic kit's right after the
+/// mountains' (round 11: the fault blocks' and folds' flattening towards the atlas elevation erased
+/// the cinder cones and left their dark scoria as flat blobs, braided).
+pub fn relief_order() -> impl Iterator<Item = &'static Kit> {
+    let late = |k: &Kit| std::ptr::eq(k, &volcanic::KIT);
+    let after = |k: &Kit| std::ptr::eq(k, &mountains::KIT);
+    KITS.iter().flat_map(move |&k| {
+        let me = if late(k) { None } else { Some(k) };
+        let then = if after(k) { Some(&volcanic::KIT) } else { None };
+        me.into_iter().chain(then)
+    })
+}
+
 /// Run the kits' relief operators.
 #[inline]
 pub fn relief(w: &crate::world::World, r: &ReliefIn, h: &mut f64) {
-    for k in KITS {
+    for k in relief_order() {
         if let Some(f) = k.relief {
             f(w, r, h);
         }
@@ -403,7 +416,7 @@ pub fn wgsl_relief() -> String {
     s.push_str("fn kits_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {\n");
     // (the module's instance lists of the point: `relief_lists`, gpu::sources)
     s.push_str("    relief_lists(c.p, r.blk);\n");
-    for k in KITS {
+    for k in relief_order() {
         if k.relief.is_some() {
             s.push_str(&format!("    {}_relief(c, m, r, h);\n", k.name));
         }

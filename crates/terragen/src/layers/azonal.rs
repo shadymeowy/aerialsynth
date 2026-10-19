@@ -24,7 +24,10 @@ pub fn layer(s: &mut Stack) {
     let slope_eff = lerp(exp_slope, slope.max(exp_slope * 0.6), resolve);
     let rock_n = 0.7 * patch + 0.3 * pf.land;
     let rock = smoothstep(0.55, 0.85, slope_eff + 0.25 * detail + 0.25 * rock_n + 0.2 * (t.rock_expect - 0.4) + 0.15 * t.gully)
-        * (1.0 - 0.5 * smoothstep(0.3, 0.8, s.m.cover) * (1.0 - t.mountain));
+        * (1.0 - 0.5 * smoothstep(0.3, 0.8, s.m.cover) * (1.0 - t.mountain))
+        // (the rainforest grows over steep slopes: rock on the rims of the stream valleys drew
+        // orange arcs through the forest, volcano@type)
+        * (1.0 - 0.85 * smoothstep(0.5, 0.65, t.moist) * smoothstep(16.0, 21.0, t.temp) * (1.0 - smoothstep(0.9, 1.5, slope_eff)));
     s.m.rock = rock;
     if rock > 0.0 {
         let ri = st[2] * 2.0;

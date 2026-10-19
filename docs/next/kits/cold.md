@@ -151,3 +151,9 @@ Lakes are fewer on undulating ground and none on slopes. The darkest lake colour
 44, 48, 38; 42, 58, 62: black holes in the tundra, a29); the forest closes in on drained basins from their rims (bare
 sedge to the rim drew pale ovals, taiga_river@type). Glaciers have no ogives (bands along the ground's contours) nor
 medial moraines (dark lines along the drainage under the ice): both drew contour-like arcs (mountains@type, a29).
+
+Polish round 11: where the warmest month is below ~8 °C the season's snow lingers (snowbeds and late snow): the
+date's temperature is lowered by up to 5 °C, more in the hollows and in patches of the snow noise, and the glaciers
+lie under that snow too (glacier ice no longer counts as a crown). High mountains read as snowfields instead of brown
+slopes (mountains@type), the snowed-in land around a glacier no longer frames bare grey ice (a29), and the alpine snow
+melt of a07 is grey and white.

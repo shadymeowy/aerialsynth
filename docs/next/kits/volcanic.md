@@ -129,3 +129,11 @@ steep flanks keep the plants instead of the rock of steep slopes) and the ash ap
 drew a pink rash over the rainforest (volcano@type). Lava tongues are narrower (`w0` 40–80 m), lobate (margin noise
 0.4 at 90 m and 30 m), rough and a third of the way to the ground's colour (dark smooth paddles, braided);
 `MEAN_LAVA` 36.
+
+Polish round 11: the kit's relief runs right after the mountains kit's (`kits::relief_order`, CPU and WGSL glue): the
+fault blocks' and folds' flattening towards the atlas elevation erased the cinder cones of upland fields and left
+their dark scoria as flat blobs (braided). Field lava flows are long (0.75–1 lattice cell) and of even width
+(45–85 m; `tongue_w` exponent 0.25 against 0.5 for the volcanoes' flows), old flows dark rough basalt with patches of
+soil and plants, grown over in humid climates; `MEAN_LAVA` 27. In humid climates 3 % of the cones are bare (a
+tenth left bare far cones, volcano@type). Still open: a cone carved away by a small stream's valley keeps its dark
+scoria as a flat patch (braided).

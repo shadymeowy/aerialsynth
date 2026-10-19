@@ -130,14 +130,14 @@ fn vc_flows(s: ptr<function, Stack>, v: VcVol, k: VcCone) {
                 nzv = vc_margin_noise(v.id, k.x, k.y, gsd);
                 have_nzv = true;
             }
-            tg = vc_tongue(k.x, k.y, dir, s0, len, w0, ph, nzv, fw);
+            tg = vc_tongue(k.x, k.y, dir, s0, len, w0, 0.5, ph, nzv, fw);
         }
         if (tg.x > cov) {
             cov = tg.x;
             age = a;
         }
         if (e < 1.0 && k.rr > s0 && k.rr < len) {
-            let m = vc_tongue_w((k.rr - s0) / (len - s0), w0) / (PI * k.rr);
+            let m = vc_tongue_w((k.rr - s0) / (len - s0), w0, 0.5) / (PI * k.rr);
             if (m > mean) {
                 mean = m;
                 mage = a;
@@ -228,14 +228,18 @@ fn vc_field_look(s: ptr<function, Stack>, it: Inst) {
     }
     if (f.lava > 0.0) {
         let lv = vc_lava_look(f.age, p, gsd);
-        let lcol = mixc(lv.col, (*s).col, 0.3) * (1.0 + 0.22 * vc_nz(VC_SEED_LAVA + 5lu, p, 6.0, gsd));
+        let old = smoothstep1(0.5, 0.9, f.age);
+        let lcol = mixc(mixc(lv.col, srgb(74.0, 68.0, 62.0), 0.5 * old), (*s).col, 0.25)
+            * (1.0 + 0.25 * vc_nz(VC_SEED_LAVA + 5lu, p, 6.0, gsd) + 0.15 * vc_nz(VC_SEED_LAVA + 7lu, p, 16.0, gsd));
+        let soil = smoothstep1(0.1, 0.6, vc_nz(VC_SEED_LAVA + 6lu, p, 28.0, gsd)) + 0.2 * (1.0 - band(28.0, gsd));
+        let lcov = f.lava * (1.0 - 0.55 * soil * old) * (1.0 - 0.6 * humid);
         let lclear = 0.85 * lv.clear;
-        var ly = layer_paint(f.lava, lcol, lv.cls);
+        var ly = layer_paint(lcov, lcol, lv.cls);
         ly.clear = lclear;
         composite(s, ly);
-        (*s).m.natural_ok *= 1.0 - f.lava * lclear;
+        (*s).m.natural_ok *= 1.0 - lcov * lclear;
     }
-    let ys = 1.0 - 0.9 * humid;
+    let ys = 1.0 - 0.97 * humid;
     let m0 = (1.0 - band(0.35 * it.v[1], gsd)) * f.dens * (1.0 - it.v[6]) * VC_MEAN_CINDER;
     let young = select(0.0, 1.0, u01k(f.chash, 18lu) < ys);
     let cinder = m0 * ys + max(f.cinder - m0, 0.0) * young;

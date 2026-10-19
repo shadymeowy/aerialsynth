@@ -634,7 +634,9 @@ fn cold_moraine(s: ptr<function, Stack>, g: ColdIce) {
 }
 
 fn cold_snow(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
-    if (c.date > 2.5 || (*s).cls == LC_FROZEN_WATER) {
+    let polar = smoothstep1(8.0, 2.0, c.summer);
+    let date = c.date - 5.0 * polar;
+    if (date > 2.5 || (*s).cls == LC_FROZEN_WATER) {
         return;
     }
     let t = (*s).t;
@@ -642,7 +644,7 @@ fn cold_snow(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
     let gsd = (*s).c.gsd;
     let hollow = smoothstep1(0.1, 0.8, -t.gully);
     let spur = smoothstep1(0.2, 0.8, t.gully);
-    var n = 0.6 * (*s).pf.f[PF_SNOW] - 1.6 * hollow + 0.5 * spur;
+    var n = (0.6 + 1.2 * polar) * (*s).pf.f[PF_SNOW] - (1.6 + 1.4 * polar) * hollow + 0.5 * spur;
     let b45 = band(45.0, gsd);
     if (b45 > 0.0) {
         n += 0.5 * perlin3(COLD_SEED_SNOW + 2lu, p * (1.0lf / 45.0lf)) * b45;
@@ -651,7 +653,7 @@ fn cold_snow(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
             n += 0.25 * perlin3(COLD_SEED_SNOW + 3lu, p * (1.0lf / 12.0lf)) * b12;
         }
     }
-    var x = c.date + n + 2.5 * clamp(cold_sunny(s), -1.0, 1.0);
+    var x = date + n + 2.5 * clamp(cold_sunny(s), -1.0, 1.0);
     if (x > -3.2 && x < 1.0) {
         let b4 = band(4.0, gsd);
         if (b4 > 0.0) {
@@ -662,12 +664,12 @@ fn cold_snow(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
     if (cov <= 0.0) {
         return;
     }
-    let crown = smoothstep1(1.5, 4.0, (*s).height - (*s).l.ground);
+    let crown = smoothstep1(1.5, 4.0, (*s).height - (*s).l.ground) * (1.0 - min(g.ice, 1.0));
     cov *= 1.0 - 0.7 * crown;
     cov *= 1.0 - 0.85 * (*s).m.road_cov;
     cov *= 1.0 - 0.55 * (*s).m.town_cov;
     cov *= 1.0 - (*s).m.river_cov;
-    cov *= 1.0 - g.snow;
+    cov *= 1.0 - g.snow * (1.0 - polar);
     if (cov <= 0.0) {
         return;
     }

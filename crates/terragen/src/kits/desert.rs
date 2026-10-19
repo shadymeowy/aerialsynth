@@ -812,12 +812,14 @@ pub fn barchan_field(s: &mut Stack) {
     let w = s.world;
     let c = *s.ctx;
     let (wd, rho) = wind(w.seed, c.p, c.lat, DVec2::from_array(t.wind));
-    let zb = z0 * (0.35 + 0.65 * (1.0 - smoothstep(0.35, 0.6, rho)));
+    // (round 11: fewer, and whole sand bodies, not only their lit crests: crescents of the
+    // pavement's tone showed as outlines, a11)
+    let zb = 0.6 * z0 * (0.35 + 0.65 * (1.0 - smoothstep(0.35, 0.6, rho)));
     let (cov, dh) = barchans(w, w.seed, c.p, c.east, c.north, wd, zb, c.gsd, s.l.fw);
     if cov > 0.0 {
         let cls = if s.bio.style.litho == 3 { LC_VOLCANIC_ASH } else { LC_SAND };
         // (the pavement's tone in their sand: pale crescents on a dark plain read as a pattern)
-        let sc = mixc(sand_colour(s), s.pal(pal::SOIL + 1), 0.5) * 0.98;
+        let sc = mixc(sand_colour(s), s.pal(pal::SOIL + 1), 0.3) * 0.98;
         s.composite(Layer { cov, albedo: sc, dh, hmode: hmode::ADD, cls, clear: 1.0, ..Default::default() });
     }
 }

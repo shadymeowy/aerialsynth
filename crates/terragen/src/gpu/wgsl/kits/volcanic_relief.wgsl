@@ -9,7 +9,7 @@ const VC_GULLY_AMP: f32 = 0.04;
 const VC_K_CONE: f32 = 0.0085816;
 const VC_K_MAAR: f32 = -0.0012251;
 const VC_MEAN_CINDER: f32 = 0.2190;
-const VC_MEAN_LAVA: f32 = 36.0;
+const VC_MEAN_LAVA: f32 = 27.0;
 
 // ---------------------------------------------------------------- existence
 
@@ -367,8 +367,8 @@ fn vc_ragged(qx: f32, qy: f32, r: f32, h: u64) -> f32 {
     return sqrt(qx * qx + qy * qy) / (r * (1.0 + 0.12 * sin(3.0 * th + TAU * u01k(h, 15lu)) + 0.08 * sin(5.0 * th + TAU * u01k(h, 16lu))));
 }
 
-fn vc_tongue_w(sg: f32, w0: f32) -> f32 {
-    return w0 * sqrt(max(sg, 0.0) * max(1.0 - sg * sg * sg * sg, 0.0));
+fn vc_tongue_w(sg: f32, w0: f32, e: f32) -> f32 {
+    return w0 * pow(max(sg, 0.0), e) * sqrt(max(1.0 - sg * sg * sg * sg, 0.0));
 }
 
 /// `volcanic::margin_noise`.
@@ -382,7 +382,7 @@ fn vc_margin_noise(id: u64, x: f32, y: f32, gsd: f32) -> f32 {
 }
 
 /// `volcanic::tongue`: (cover, half width).
-fn vc_tongue(x: f32, y: f32, dir: f32, s0: f32, len: f32, w0: f32, ph: f32, nzv: f32, fw: f32) -> vec2<f32> {
+fn vc_tongue(x: f32, y: f32, dir: f32, s0: f32, len: f32, w0: f32, e: f32, ph: f32, nzv: f32, fw: f32) -> vec2<f32> {
     let sn = sin(dir);
     let cs = cos(dir);
     let s = x * cs + y * sn;
@@ -392,7 +392,7 @@ fn vc_tongue(x: f32, y: f32, dir: f32, s0: f32, len: f32, w0: f32, ph: f32, nzv:
         return vec2<f32>(0.0, 0.0);
     }
     let wander = 0.035 * len * sin(s / (0.22 * len) + ph);
-    let w = vc_tongue_w(sg, w0) * (1.0 + 0.4 * nzv);
+    let w = vc_tongue_w(sg, w0, e) * (1.0 + 0.4 * nzv);
     return vec2<f32>(clamp((w - abs(t - wander)) / fw + 0.5, 0.0, 1.0), w);
 }
 
@@ -494,9 +494,9 @@ fn vc_field(it: Inst, p: vec3<f64>, gsd: f32, fw: f32, look: bool) -> VcField {
                 }
                 if (look && u01k(h, 8lu) < lshare) {
                     let dir = TAU * u01k(h, 9lu);
-                    let len = cs * (0.55 + 0.45 * u01k(h, 10lu));
-                    let w0 = 40.0 + 40.0 * u01k(h, 11lu);
-                    let tg = vc_tongue(qx, qy, dir, 0.8 * rc, len, w0, TAU * u01k(h, 12lu), nzv, fw);
+                    let len = cs * (0.75 + 0.25 * u01k(h, 10lu));
+                    let w0 = 22.0 + 20.0 * u01k(h, 11lu);
+                    let tg = vc_tongue(qx, qy, dir, 0.8 * rc, len, w0, 0.25, TAU * u01k(h, 12lu), nzv, fw);
                     if (tg.x > lava) {
                         lava = tg.x;
                         age = clamp(lage + 0.35 + 0.5 * (u01k(h, 13lu) - 0.5), 0.0, 1.0);
