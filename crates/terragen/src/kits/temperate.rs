@@ -325,7 +325,9 @@ fn mires(s: &mut Stack) {
     let flat = 1.0 - smoothstep(0.02, 0.07, s.l.slope);
     let low = 1.0 - smoothstep(0.3, 0.6, t.mountain);
     let region = (0.5 + 1.1 * site_boreal(s) + 0.7 * site_oceanic(s)) * (0.5 + 0.8 * eco_u2(s));
-    let amount = (0.4 * wet * cool * flat * low * region).min(0.8);
+    // (round 13: farmland's mires are drained: red-brown bogs cut across the fields, gallery g23)
+    let drained = 1.0 - 0.85 * smoothstep(0.15, 0.45, s.agri());
+    let amount = (0.4 * wet * cool * flat * low * region * drained).min(0.8);
     if amount <= 0.01 {
         return;
     }
