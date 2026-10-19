@@ -1287,6 +1287,29 @@ fn stack_surface(sp: ptr<function, Stack>) -> Surface {
 }
 
 /// `ground::semi_clumps`.
+/// Clumped density (`noise::clumped`).
+fn clumped(d: f32, c0: f32, p: vec3<f64>, gsd: f32) -> f32 {
+    let b1 = band(160.0, gsd);
+    let b2 = band(34.0, 2.0 * gsd);
+    let c = c0;
+    if (c <= 0.0 || d <= 0.0 || d >= 1.0 || b1 <= 0.0) {
+        return d;
+    }
+    let a2 = 0.8;
+    var r = perlin3(0xC1A7lu, p * (1.0lf / 160.0lf)) * b1;
+    if (b2 * a2 > 0.0) {
+        r += a2 * perlin3(0xC1A8lu, p * (1.0lf / 34.0lf)) * b2;
+    }
+    let z = r / (0.211 * sqrt(1.0 + a2 * a2));
+    let u2 = ((1.0 - b1 * b1) + a2 * a2 * (1.0 - b2 * b2)) / (1.0 + a2 * a2);
+    let w2 = 0.22 * 0.22;
+    let q = log(d / (1.0 - d)) / 1.702 * sqrt(1.0 + w2);
+    let sv0 = 1.0 / (1.0 + exp(-1.702 * (q - z) / sqrt(u2 + w2)));
+    let fl = 1.0 - smoothstep1(0.0, 0.4, u2);
+    let sv = sv0 * (1.0 - fl + fl * smoothstep1(0.03, 0.15, sv0));
+    return d + (sv - d) * c;
+}
+
 fn semi_clumps(p: vec3<f64>, gsd: f32) -> f32 {
     var v = 1.1 * perlin3(0x5B3lu, p * (1.0lf / 250.0lf)) * band(250.0, gsd) + 0.8 * perlin3(0x5B1lu, p * (1.0lf / 90.0lf)) * band(90.0, gsd);
     let b = band(34.0, gsd);
