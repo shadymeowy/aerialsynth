@@ -2126,7 +2126,9 @@ pub fn zone_mean(pl: &Pl, d: &Dist, moist: f64) -> (DVec3, f64) {
 /// nearest street (thinned with their energy kept where they would merge), or their mean.
 #[allow(clippy::too_many_arguments)]
 pub fn lamps(pl: &Pl, o: &Ev, dens: f64, gsd: f64, fw: f64, block: f64, resolved: f64) -> DVec3 {
-    const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.48, 0.12), DVec3::new(1.0, 0.72, 0.38), DVec3::new(0.86, 0.92, 1.0)];
+    // (round 13: sodium and amber less saturated: a garish orange night, night@type's saturation
+    // 0.59 against v0.2.0's 0.31; every lamp colour of next likewise: sodium (1, .68, .40), amber (1, .84, .64))
+    const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.68, 0.40), DVec3::new(1.0, 0.84, 0.64), DVec3::new(0.86, 0.92, 1.0)];
     // sodium share by development (and culture), white LED in CBDs and on main streets
     let sodium = 0.25 + 0.5 * (1.0 - pl.dev) * u01k(pl.seed, 20);
     let pick = |u: f64, major: bool| -> DVec3 {

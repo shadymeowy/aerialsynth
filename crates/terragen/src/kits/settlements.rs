@@ -167,7 +167,7 @@ fn glow(s: &mut Stack) {
     }
     let (pop, dev) = (t.population, t.development);
     let arch = s.bio.style.archetype as usize;
-    const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.48, 0.12), DVec3::new(1.0, 0.72, 0.38), DVec3::new(0.86, 0.92, 1.0)];
+    const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.68, 0.40), DVec3::new(1.0, 0.84, 0.64), DVec3::new(0.86, 0.92, 1.0)];
     let sodium = 0.25 + 0.25 * (1.0 - dev);
     let lamp = mixc3(LAMPS[1], LAMPS[0], sodium);
     let devm = (0.5 + 0.45 * dev.min(1.0)) * (0.55 + 0.9 * dev);

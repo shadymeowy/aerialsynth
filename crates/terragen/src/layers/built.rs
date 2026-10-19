@@ -32,7 +32,7 @@ impl SurfaceModel {
         // lamp light pool (also lights the surrounding field a little)
         let lamp = rel - DVec2::new(2.0, 6.0);
         let d2 = lamp.length_squared();
-        let lamp_col = if u01k(fid, 9) < 0.6 { DVec3::new(1.0, 0.72, 0.38) } else { DVec3::new(0.86, 0.92, 1.0) };
+        let lamp_col = if u01k(fid, 9) < 0.6 { DVec3::new(1.0, 0.84, 0.64) } else { DVec3::new(0.86, 0.92, 1.0) };
         let res = band(10.0, gsd);
         let emission = lamp_col * (0.04 * (-d2 / (2.0 * 7.0 * 7.0)).exp() + point_light(d2, 5.0, 0.4, fw)) * res
             + lamp_col * 0.02 * (1.0 - res) * (1.0 - smoothstep(20.0, 60.0, rel.length()));
@@ -320,7 +320,7 @@ impl SurfaceModel {
         let lamp_sp = 18.0 + 8.0 * town.organic;
         // lamp types: high-pressure sodium (amber), warm LED (3000 K) and neutral LED (4000 K),
         // chosen per street with a town-specific mix (main streets lean to neutral LED)
-        const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.48, 0.12), DVec3::new(1.0, 0.72, 0.38), DVec3::new(0.86, 0.92, 1.0)];
+        const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.68, 0.40), DVec3::new(1.0, 0.84, 0.64), DVec3::new(0.86, 0.92, 1.0)];
         let mix_sodium = 0.25 + 0.4 * u01k(town.seed, 20);
         let dominant = if mix_sodium > 0.45 { 0 } else { 1 };
         let lamp_type = |axis: u64, line: i64| -> DVec3 {
@@ -471,7 +471,7 @@ pub fn layer(s: &mut crate::stack::Stack) {
                 let ql = (q_loc / sp).round() * sp;
                 let d2 = (q_loc - ql).length_squared();
                 let lh = hash2(town.seed ^ 0x40AD, (ql.x / sp) as i64, (ql.y / sp) as i64);
-                let lamp_col = if u01k(lh, 1) < 0.5 { DVec3::new(1.0, 0.48, 0.12) } else { DVec3::new(0.86, 0.92, 1.0) };
+                let lamp_col = if u01k(lh, 1) < 0.5 { DVec3::new(1.0, 0.68, 0.40) } else { DVec3::new(0.86, 0.92, 1.0) };
                 let pool = (0.04 * (-d2 / (2.0 * 6.0 * 6.0)).exp() + point_light(d2, 6.0, 0.4, fw)) * res + 0.04 * (1.0 - res);
                 s.composite(Layer { emit: lamp_col * pool * near * m.road_major_cov, ..Default::default() });
             }

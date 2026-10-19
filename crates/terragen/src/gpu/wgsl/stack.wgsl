@@ -850,7 +850,7 @@ fn layer_built(s: ptr<function, Stack>) {
             let lh = hash2(town.seed ^ 0x40ADlu, i64(kq.x), i64(kq.y));
             var lamp_col = vec3<f32>(0.86, 0.92, 1.0);
             if (u01k(lh, 1lu) < 0.5) {
-                lamp_col = vec3<f32>(1.0, 0.48, 0.12);
+                lamp_col = vec3<f32>(1.0, 0.68, 0.40);
             }
             let pool = (0.04 * exp(-d2 / (2.0 * 6.0 * 6.0)) + point_light(d2, 6.0, 0.4, fw)) * res + 0.04 * (1.0 - res);
             composite(s, layer_emit(lamp_col * pool * near * m.road_major_cov));

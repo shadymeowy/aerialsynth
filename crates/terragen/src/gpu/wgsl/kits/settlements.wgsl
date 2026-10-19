@@ -2198,8 +2198,8 @@ fn st_zone_mean(pl: StPl, d: StDist, moist: f32) -> vec4<f32> {
 
 /// `town::lamps`.
 fn st_lamps(pl: StPl, o: StEv, dens: f32, gsd: f32, fw: f32, block: f32, resolved: f32) -> vec3<f32> {
-    let l0 = vec3<f32>(1.0, 0.48, 0.12);
-    let l1 = vec3<f32>(1.0, 0.72, 0.38);
+    let l0 = vec3<f32>(1.0, 0.68, 0.40);
+    let l1 = vec3<f32>(1.0, 0.84, 0.64);
     let l2 = vec3<f32>(0.86, 0.92, 1.0);
     let sodium = 0.25 + 0.5 * (1.0 - pl.dev) * u01k(pl.seed, 20lu);
     let sp = o.lamp_sp;
@@ -2881,7 +2881,7 @@ fn st_glow(s: ptr<function, Stack>) {
     var aw_t = array<f32, 12>(1.0, 0.85, 0.7, 0.8, 0.6, 1.2, 1.05, 0.9, 1.25, 0.6, 0.25, 0.85);
     var spr = array<f32, 12>(0.95, 0.9, 0.9, 0.8, 0.95, 0.82, 0.92, 1.3, 0.85, 1.05, 0.85, 0.85);
     let sodium = 0.25 + 0.25 * (1.0 - dev);
-    let lamp = mixc(vec3<f32>(1.0, 0.72, 0.38), vec3<f32>(1.0, 0.48, 0.12), sodium);
+    let lamp = mixc(vec3<f32>(1.0, 0.84, 0.64), vec3<f32>(1.0, 0.68, 0.40), sodium);
     let devm = (0.5 + 0.45 * min(dev, 1.0)) * (0.55 + 0.9 * dev);
     let sprawl2 = pow(spr[arch] * (0.85 + 0.3 * dev), 2.0) * (1.0 + 0.04 / 12.0);
     var cover = 0.0;
