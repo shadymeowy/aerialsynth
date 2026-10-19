@@ -342,6 +342,8 @@ struct TreeLayer {
     /// crown shape (SHAPE_*)
     shape: u32,
     scale: f32,
+    /// size factor of the crowns' resolution (`TreeLayer::resolve`)
+    resolve: f32,
 }
 
 /// (colour, canopy height, coverage)
@@ -367,8 +369,9 @@ fn trees(layers: array<TreeLayer, 6>, mask: u32, q: vec2<f32>, gsd: f32, fw: f32
         if (layer.density <= 1e-4) {
             continue;
         }
-        let expl = smoothstep1(1.2 * gsd, 3.0 * gsd, layer.cell);
-        let contrast = smoothstep1(2.5 * gsd, 6.0 * gsd, layer.cell);
+        let rc = layer.cell * layer.resolve;
+        let expl = smoothstep1(1.2 * gsd, 3.0 * gsd, rc);
+        let contrast = smoothstep1(2.5 * gsd, 6.0 * gsd, rc);
         // expected coverage when unresolved
         let mean_r = layer.cell * 0.48;
         let cov_mean = min(layer.density * PI * mean_r * mean_r / (layer.cell * layer.cell), 1.0);

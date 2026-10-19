@@ -875,7 +875,7 @@ fn layer_canopy(s: ptr<function, Stack>) {
     let cold = (1.0 - smoothstep1(0.0, 8.0, temp)) * (1.0 - smoothstep1(0.35, 0.7, t.mountain));
     let base_cover = smoothstep1(0.3 - 0.2 * cold, 0.68 - 0.36 * cold, wet) * smoothstep1(-6.0 - 3.0 * cold, 2.0 - 2.0 * cold, temp) * td * trees_mult;
     let fpu = 0.5 + 0.5 * (*s).pf.f[PF_FOREST];
-    let forest = max(smoothstep1(-0.09, 0.09, base_cover - fpu), m.woodlot * smoothstep1(0.05, 0.4, s_agri(s)));
+    let forest = max(smoothstep1(-0.06, 0.06, base_cover - fpu), m.woodlot * smoothstep1(0.05, 0.4, s_agri(s)));
     let savanna = smoothstep1(0.18, 0.35, wet) * (1.0 - smoothstep1(0.55, 0.7, wet)) * smoothstep1(12.0, 20.0, temp) * 0.12 * sveg(s, VEG_SAVANNA);
     let groves = 0.04 * smoothstep1(0.15, 0.3, wet) * sveg(s, VEG_GROVES);
     let base = m.natural_ok * (1.0 - m.field_cov) * td;
@@ -915,18 +915,28 @@ fn layer_canopy(s: ptr<function, Stack>) {
     let tropic = clamp(smoothstep1(19.0, 25.0, temp) * smoothstep1(0.55, 0.75, wet) + sveg(s, VEG_TROPIC), 0.0, 1.0);
     let dry = 1.0 - smoothstep1(0.3, 0.5, wet);
     let tall = 0.5 + 0.5 * st.w + sveg(s, VEG_TALL);
+    // (round 13) groves, clumps and closed stands (`clumped`)
+    let sav_biome = smoothstep1(1.05, 1.5, sveg(s, VEG_SAVANNA));
+    var sav_frac = 0.0;
+    if (dens > 0.0) {
+        sav_frac = min(dens_sav / dens, 1.0) * sav_biome;
+    }
+    let dens_c = clumped(dens, 0.9 * (1.0 - 0.7 * sav_frac) * (1.0 - smoothstep1(0.3, 0.75, dens)), p, gsd);
+    let dens_sav_c = clumped(dens_sav, 0.9 - 0.6 * sav_biome, p, gsd);
+    let shrub_c = clumped(shrub, 0.6, p, gsd);
+    let conifer_c = clumped(conifer, 1.0, p + vec3<f64>(3.0e3lf, -2.0e3lf, 1.0e3lf), gsd);
     let bm = biomes[(*s).bio.a];
     let n = min(bm.r0.y, MAX_CROWNS);
     var layers: array<TreeLayer, 6>;
     for (var k = 0u; k < n; k++) {
         let cr = crowns[bm.r0.x + k];
-        var share = dens;
+        var share = dens_c;
         switch cr.share {
-            case 0u: { share = dens * conifer; }
-            case 1u: { share = dens * (1.0 - conifer) * (1.0 - tropic); }
-            case 2u: { share = dens * tropic; }
-            case 3u: { share = shrub; }
-            case 4u: { share = dens_sav; }
+            case 0u: { share = dens_c * conifer_c; }
+            case 1u: { share = dens_c * (1.0 - conifer_c) * (1.0 - tropic); }
+            case 2u: { share = dens_c * tropic; }
+            case 3u: { share = shrub_c; }
+            case 4u: { share = dens_sav_c; }
             default: {}
         }
         var colour = cr.colour.xyz;
@@ -943,18 +953,48 @@ fn layer_canopy(s: ptr<function, Stack>) {
             select(vec3<f32>(1.0), stand_tone, stand_ok),
             share * cr.density,
             u64(cr.seed_lo) | (u64(cr.seed_hi) << 32u),
-            select(0.0, dens, (cr.flags & 1u) != 0u),
+            select(0.0, dens_c, (cr.flags & 1u) != 0u),
             (cr.h0 + cr.h_tall * tall) * (cr.open_height + (1.0 - cr.open_height) * stand_d),
             cr.shape,
             select(1.0, scale, stand_ok),
+            select(1.0, 0.4, cr.share == 3u),
         );
     }
     let all = (1u << n) - 1u;
     if (m.riparian > 0.0) {
         composite(s, layer_paint(0.85 * m.riparian * limit, mixc(spal(s, BP_GRASS_WET), spal(s, BP_FLOOR), 0.4), 0u));
     }
-    let floor_ = smoothstep1(0.25, 0.8, dens);
+    let floor_ = smoothstep1(0.25, 0.8, dens_c);
     composite(s, layer_paint(floor_ * 0.85, spal(s, BP_FLOOR) * 0.7, 0u));
+    // closed stands where the crowns are drawn one by one: the gaps' shaded lower crowns
+    // (`layers::canopy::layer`)
+    var fill_w = 0.0;
+    var fill_col = vec3<f32>(0.0);
+    var fill_n = 0.0;
+    for (var k = 0u; k < n; k++) {
+        let ly = layers[k];
+        if (ly.density <= 1e-4) {
+            continue;
+        }
+        let fe = smoothstep1(0.55, 0.9, ly.closure) * smoothstep1(1.2 * gsd, 3.0 * gsd, ly.cell * ly.resolve);
+        if (fe > 0.0) {
+            fill_w = max(fill_w, fe);
+            fill_col += ly.color * ly.tone * (ly.density * fe);
+            fill_n += ly.density * fe;
+        }
+    }
+    if (fill_w > 0.0) {
+        var ft = 0.0;
+        let b9 = band(9.0, gsd);
+        if (b9 > 0.0) {
+            ft = perlin3(0xF11lu, p * (1.0lf / 9.0lf)) * b9;
+        }
+        let b30 = band(30.0, gsd);
+        if (b30 > 0.0) {
+            ft += 0.7 * perlin3(0xF12lu, p * (1.0lf / 30.0lf)) * b30;
+        }
+        composite(s, layer_paint(fill_w, fill_col / fill_n * (0.6 * (1.0 + 0.4 * ft)), 0u));
+    }
     // the crowns (`it` 0), then each layer's crowns shifted towards the sun (their shadows): one
     // call site of `trees`
     let shadows = (cfg.flags & CF_SHADOWS) != 0u;
