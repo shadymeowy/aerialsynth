@@ -604,7 +604,7 @@ fn cold_glacier(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
         cr += (1.0 - e) * on * min(0.8 / spacing, 1.0);
         cr = cr * cs;
         col = mixc(col, srgb(70.0, 82.0, 92.0), 0.4 * cr);
-        dh -= 1.0 * cr;
+        dh -= 0.35 * cr;
     }
     var ly = layer_paint(g.ice, col, LC_GLACIER);
     ly.dh = (*s).m.micro + dh;

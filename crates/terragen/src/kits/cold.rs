@@ -956,7 +956,8 @@ fn glacier(s: &mut Stack, c: &ColdClimate, g: &Ice) {
         cr += (1.0 - e) * on * (0.8 / spacing).min(1.0);
         let cr = cr * cs;
         col = mixc(col, srgb(70.0, 82.0, 92.0), 0.4 * cr);
-        dh -= 1.0 * cr;
+        // (round 13: 0.35 m, was 1 m: the dashes' walls shaded dark over the snowed-in ice, a07)
+        dh -= 0.35 * cr;
     }
     // (no ogives nor medial moraines: bands along the contours of the ground and dark lines along
     // the drainage under the ice drew contour-like arcs over the tongues and ice fields,
