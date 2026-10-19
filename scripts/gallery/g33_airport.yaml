@@ -1,0 +1,80 @@
+# title: airport
+# category: settlements
+# landcover: tropical moist, paddy country
+# look: runway, taxiways, apron with aircraft and terminal
+# target: -10.53900 115.35700
+# status: rendered OK (h13); artefacts: the airport sits on a flat green pad with sharp edges, a long dark straight line crosses it
+# local solar time 09:00 on 2026-07-15
+world:
+  seed: 1
+  generator: next
+tiles:
+  file: out/world.h5
+  max_zoom: 18
+  margin: 0
+  plan_every: 5
+trajectory:
+  synth:
+    rate_hz: 400
+    speed_mps: 50.0
+    altitude_m: 900.0
+    heading_deg: 20.0
+    kind: line
+    lat: -10.55071
+    lon: 115.35267
+    duration_s: 3.0
+render:
+  supersample: 2
+  shading: relit
+  lighting:
+    mode: clock
+    date: '2026-07-15'
+    time_utc: '01:19:00'
+    time_scale: 1.0
+    sky_intensity: 0.55
+  atmosphere:
+    visibility_km: 40.0
+    inscatter: 1.0
+cameras:
+- path: /cam0
+  intrinsics:
+    model: pinhole
+    width: 1280
+    height: 720
+    intrinsics:
+    - 914.0
+    - 914.0
+    - 639.5
+    - 359.5
+  extrinsics:
+    mount: forward
+    pitch_deg: -35.0
+  frame_rate: 1.0
+  rgb:
+    sensor:
+      exposure:
+        mode: auto
+        tau_s: 0.4
+        target: 0.13
+      motion_blur:
+        enabled: true
+        max_samples: 24
+      optics:
+        defocus_px: 0.25
+        chromatic_aberration_px: 0.3
+        vignette: 0.25
+        bloom: 0.06
+      noise:
+        enabled: true
+        read: 0.08
+        shot: 0.1
+      tone:
+        curve: filmic
+        saturation: 0.92
+    supersample: 2
+output:
+  start: 2.0
+  end: 2.0
+  max_frames: 1
+  compression:
+    level: 1

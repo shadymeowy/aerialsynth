@@ -1,0 +1,80 @@
+# title: desert coast with a sabkha
+# category: deserts
+# landcover: hot desert erg (86 mm a year), wadi with palms, sabkha and tidal flats
+# look: a wadi with palm groves reaching a sabkha and tidal-flat shore, late afternoon
+# target: 18.47000 114.15000
+# status: rendered OK (h13); hazy
+# local solar time 16:50 on 2026-11-15
+world:
+  seed: 1
+  generator: next
+tiles:
+  file: out/world.h5
+  max_zoom: 18
+  margin: 0
+  plan_every: 5
+trajectory:
+  synth:
+    rate_hz: 400
+    speed_mps: 50.0
+    altitude_m: 900.0
+    heading_deg: 40.0
+    kind: line
+    lat: 18.45765
+    lon: 114.13908
+    duration_s: 3.0
+render:
+  supersample: 2
+  shading: relit
+  lighting:
+    mode: clock
+    date: '2026-11-15'
+    time_utc: '09:13:00'
+    time_scale: 1.0
+    sky_intensity: 0.55
+  atmosphere:
+    visibility_km: 40.0
+    inscatter: 1.0
+cameras:
+- path: /cam0
+  intrinsics:
+    model: pinhole
+    width: 1280
+    height: 720
+    intrinsics:
+    - 914.0
+    - 914.0
+    - 639.5
+    - 359.5
+  extrinsics:
+    mount: forward
+    pitch_deg: -28.0
+  frame_rate: 1.0
+  rgb:
+    sensor:
+      exposure:
+        mode: auto
+        tau_s: 0.4
+        target: 0.13
+      motion_blur:
+        enabled: true
+        max_samples: 24
+      optics:
+        defocus_px: 0.25
+        chromatic_aberration_px: 0.3
+        vignette: 0.25
+        bloom: 0.06
+      noise:
+        enabled: true
+        read: 0.08
+        shot: 0.1
+      tone:
+        curve: filmic
+        saturation: 0.92
+    supersample: 2
+output:
+  start: 2.0
+  end: 2.0
+  max_frames: 1
+  compression:
+    level: 1

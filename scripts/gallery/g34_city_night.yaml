@@ -1,0 +1,82 @@
+# title: metropolis at night
+# category: settlements
+# landcover: temperate, metropolis of 7.9 M
+# look: night lights by zone: white CBD, orange streets, villages as points
+# target: 46.99800 -3.06900
+# status: rendered OK (h13)
+# local solar time 18:30 on 2026-12-10
+world:
+  seed: 1
+  generator: next
+tiles:
+  file: out/world.h5
+  max_zoom: 18
+  margin: 0
+  plan_every: 5
+trajectory:
+  synth:
+    rate_hz: 400
+    speed_mps: 50.0
+    altitude_m: 2500.0
+    heading_deg: 60.0
+    kind: line
+    lat: 46.97343
+    lon: -3.13134
+    duration_s: 3.0
+render:
+  supersample: 2
+  shading: relit
+  lighting:
+    mode: clock
+    date: '2026-12-10'
+    time_utc: '18:43:00'
+    time_scale: 1.0
+    sky_intensity: 0.55
+  atmosphere:
+    visibility_km: 40.0
+    inscatter: 1.0
+cameras:
+- path: /cam0
+  intrinsics:
+    model: pinhole
+    width: 1280
+    height: 720
+    intrinsics:
+    - 914.0
+    - 914.0
+    - 639.5
+    - 359.5
+  extrinsics:
+    mount: forward
+    pitch_deg: -25.0
+  frame_rate: 1.0
+  rgb:
+    sensor:
+      exposure:
+        mode: auto
+        tau_s: 0.4
+        target: 0.012
+        max_gain: 64
+        max_time_s: 0.008
+      motion_blur:
+        enabled: true
+        max_samples: 24
+      optics:
+        defocus_px: 0.0
+        chromatic_aberration_px: 0.0
+        vignette: 0.25
+        bloom: 0.02
+      noise:
+        enabled: true
+        read: 0.04
+        shot: 0.06
+      tone:
+        curve: filmic
+        saturation: 0.92
+    supersample: 2
+output:
+  start: 2.0
+  end: 2.0
+  max_frames: 1
+  compression:
+    level: 1
