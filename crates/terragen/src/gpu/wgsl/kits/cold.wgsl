@@ -634,8 +634,8 @@ fn cold_moraine(s: ptr<function, Stack>, g: ColdIce) {
 }
 
 fn cold_snow(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
-    let polar = smoothstep1(8.0, 2.0, c.summer);
-    let date = c.date - 5.0 * polar;
+    let polar = smoothstep1(9.0, 3.0, c.summer);
+    let date = c.date - 7.0 * polar;
     if (date > 2.5 || (*s).cls == LC_FROZEN_WATER) {
         return;
     }
@@ -669,6 +669,9 @@ fn cold_snow(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
     cov *= 1.0 - 0.85 * (*s).m.road_cov;
     cov *= 1.0 - 0.55 * (*s).m.town_cov;
     cov *= 1.0 - (*s).m.river_cov;
+    if ((*s).l.river_hw > 0.0) {
+        cov *= 1.0 - polar * (1.0 - smoothstep1((*s).l.river_hw + 2.0, (*s).l.river_hw + 30.0, abs((*s).l.river_d)));
+    }
     cov *= 1.0 - g.snow * (1.0 - polar);
     if (cov <= 0.0) {
         return;

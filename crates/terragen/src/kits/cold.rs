@@ -987,8 +987,10 @@ fn moraine(s: &mut Stack, g: &Ice) {
 fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     // (round 11: where the summers are cold, snowbeds linger in the hollows and on shaded slopes
     // all summer: polar tundra read as a plain brown sheet, audit a02, a30)
-    let polar = smoothstep(8.0, 2.0, c.summer);
-    let date = c.date - 5.0 * polar;
+    // (round 12: a little more, later in the season: polar land in midsummer still read as a bare
+    // brown sheet, a30)
+    let polar = smoothstep(9.0, 3.0, c.summer);
+    let date = c.date - 7.0 * polar;
     if date > 2.5 || s.class == cls::FROZEN_WATER {
         return;
     }
@@ -1030,6 +1032,10 @@ fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     cov *= 1.0 - 0.85 * s.m.road_cov;
     cov *= 1.0 - 0.55 * s.m.town_cov;
     cov *= 1.0 - s.m.river_cov;
+    // (the late snow keeps off the banks of the rivers: a white line along every stream, a30)
+    if s.l.river_hw > 0.0 {
+        cov *= 1.0 - polar * (1.0 - smoothstep(s.l.river_hw + 2.0, s.l.river_hw + 30.0, s.l.river_d.abs()));
+    }
     cov *= 1.0 - g.snow * (1.0 - polar);
     if cov <= 0.0 {
         return;
