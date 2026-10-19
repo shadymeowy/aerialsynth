@@ -38,12 +38,15 @@ pub fn zonal(s: &mut Stack) {
     // blurred bare plain, audit a16)
     let semi = smoothstep(0.02, 0.12, wet) * (1.0 - smoothstep(0.3, 0.45, wet)) * smoothstep(-1.0, 4.0, temp);
     let b5 = band(8.0, gsd);
+    // (round 12: the tussocks' mean in clumps of 34-90 m: beyond the resolved tussocks the far
+    // half of the frame was a soft bare plain, a16)
+    let tm = 0.17 * if semi > 0.0 { 1.0 + 0.9 * semi_clumps(p, gsd) } else { 1.0 };
     let cover_px = if semi > 0.0 && b5 > 0.0 {
         let n = perlin3(0x7C55, p / 8.0) + 0.5 * perlin3(0x7C56, p / 3.0) * band(3.0, gsd);
-        (cover + semi * (2.4 * cover * (1.0 - cover) * n + 0.6 * smoothstep(-0.1, 0.6, n) * (1.0 - cover)) * b5 + 0.17 * semi * (1.0 - cover) * (1.0 - b5))
+        (cover + semi * (2.4 * cover * (1.0 - cover) * n + 0.6 * smoothstep(-0.1, 0.6, n) * (1.0 - cover)) * b5 + tm * semi * (1.0 - cover) * (1.0 - b5))
             .clamp(0.0, 1.0)
     } else {
-        cover + 0.17 * semi * (1.0 - cover)
+        cover + tm * semi * (1.0 - cover)
     };
     let mut col = mixc(soil, grass, cover_px) * (1.0 + 0.16 * land_n);
     let mut class = if cover > 0.5 { lc::GRASS } else { lc::BARE };
@@ -82,4 +85,15 @@ pub fn zonal(s: &mut Stack) {
     }
     s.m.cover = cover;
     s.composite(Layer { cov: 1.0, albedo: col, cls: class, ..Default::default() });
+}
+
+/// Clumps of the semi-arid ground cover (zero mean, ~[-1, 1], band-limited at 34, 90 and 250 m):
+/// tussock grass and shrubs denser and sparser over tens to hundreds of metres (WGSL
+/// `semi_clumps`).
+pub(crate) fn semi_clumps(p: glam::DVec3, gsd: f64) -> f64 {
+    let b = band(34.0, gsd);
+    (1.1 * perlin3(0x5B3, p / 250.0) * band(250.0, gsd)
+        + 0.8 * perlin3(0x5B1, p / 90.0) * band(90.0, gsd)
+        + if b > 0.0 { 0.45 * perlin3(0x5B2, p / 34.0) * b } else { 0.0 })
+    .clamp(-1.0, 1.0)
 }

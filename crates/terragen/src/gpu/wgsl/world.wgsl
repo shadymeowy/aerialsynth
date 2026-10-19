@@ -642,6 +642,8 @@ struct Relief {
     mesa: f32,
     sand: f32,
     gully_n: f32,
+    /// the volcanic kit's share of the kits' relief (`kits::relief`)
+    dv: f32,
 }
 
 fn relief(c: Ctx, m: Macro, pre: Pre, blk: u32) -> Relief {
@@ -733,6 +735,10 @@ fn relief_core(c: Ctx, m: Macro, pre: Pre) -> Relief {
     let cl = climate(m, c.lat, max(smooth_h, 0.0));
     let temp0 = cl.x;
     let moist = cl.y;
+    let firn = smoothstep1(-4.0, -10.0, temp0);
+    if (firn > 0.0) {
+        h -= firn * (0.6 * gully + 0.4 * micro);
+    }
 
     // mesas (arid terraces)
     let arid = 1.0 - smoothstep1(0.18, 0.42, moist);
@@ -759,6 +765,7 @@ fn relief_core(c: Ctx, m: Macro, pre: Pre) -> Relief {
     }
 
     o.h = h;
+    o.dv = 0.0;
     o.smooth_h = smooth_h;
     o.temp0 = temp0;
     o.moist = moist;
@@ -783,9 +790,10 @@ fn relief_kits(c: Ctx, m: Macro, r: Relief, blk: u32) -> Relief {
     rin.smooth_h = r.smooth_h;
     rin.blk = blk;
     var h = r.h;
-    kits_relief(c, m, rin, &h);
+    let dv = kits_relief(c, m, rin, &h);
     var o = r;
     o.h = h;
+    o.dv = dv;
     return o;
 }
 
@@ -1182,12 +1190,17 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                     }
                     wall = w;
                 }
-                var carved = min(h0, lerp(tgt, h0, wall));
+                let keep = smoothstep1(hwc, hwc + 60.0, adc);
+                var carved = min(h0, lerp(tgt, h0 - r.dv, wall) + r.dv * keep);
                 if (cv.rough > 0.0 && h0 > tgt) {
-                    let rr = (1.0 - abs(perlin3(0x0C4A9E01lu, p / 13.0lf))) * band(13.0, gsd) * 0.65 + (1.0 - abs(perlin3(0x0C4A9E02lu, p / 5.0lf))) * band(5.0, gsd) * 0.35;
+                    let rr = (1.0 - abs(perlin3(0x0C4A9E01lu, p / 13.0lf))) * band(13.0, 2.5 * gsd) * 0.65 + (1.0 - abs(perlin3(0x0C4A9E02lu, p / 5.0lf))) * band(5.0, 2.5 * gsd) * 0.35;
                     carved -= cv.rough * 4.0 * wall * (1.0 - wall) * rr;
                 }
-                carved = max(carved, h0 - cv.depth_cap * (1.0 - 0.3 * wall));
+                var wcap = 0.0;
+                if (cv.u <= 0.0 && cv.step_mix <= 0.0) {
+                    wcap = smoothstep1(cv.fp_w, cv.fp_w + 3.0 * cv.wall_k * cv.depth_cap, adw);
+                }
+                carved = max(carved, h0 - cv.depth_cap * min(1.0 - 0.3 * wall, 1.0 - wcap));
                 var fade = 1.0;
                 if (width < 0.3 * gsd) {
                     fade = smoothstep1(0.25, 0.5, valley_hit / gsd);

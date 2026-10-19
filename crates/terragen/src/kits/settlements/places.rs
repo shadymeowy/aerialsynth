@@ -471,7 +471,17 @@ fn base_place(w: &World, level: usize, c: (i64, i64, i64)) -> Option<Place> {
     let (rot, elong) = match fm {
         form::LINEAR | form::WALDHUFEN => (axis, 2.6 + 2.0 * u01k(id, 21)),
         _ if arch == crate::atlas::Archetype::SurveyGrid as usize => (0.04 * (u01k(id, 20) - 0.5), 1.0 + 0.5 * u01k(id, 21).powi(2)),
-        _ => (u01k(id, 20) * std::f64::consts::FRAC_PI_2, 1.0 + 0.7 * u01k(id, 21).powi(2)),
+        // (round 12: the streets of a town on sloping ground follow its relief: one axis down the
+        // smooth relief's slope over the site's ring (the valley's axis its river runs along), the
+        // other along the contours, the town stretched along the first; a random grid on flat land)
+        _ => {
+            let r0 = u01k(id, 20) * std::f64::consts::FRAC_PI_2;
+            let k = smoothstep(0.003, 0.012, slope);
+            // (the town stretched along that axis)
+            let d = (axis - r0).rem_euclid(std::f64::consts::PI);
+            let d = if d > std::f64::consts::FRAC_PI_2 { d - std::f64::consts::PI } else { d };
+            (r0 + k * (d + 0.12 * (u01k(id, 22) - 0.5)), 1.0 + 0.7 * u01k(id, 21).powi(2))
+        }
     };
     let elong = if fm == form::KRAAL || fm == form::PERCHED { 1.0 } else { elong };
     Some(Place {

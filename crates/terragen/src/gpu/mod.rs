@@ -52,7 +52,7 @@ const OUT_U: usize = 8;
 const NBIN: usize = 17;
 const NODE_F: usize = 84;
 const NODE_IDS: usize = 10;
-const PIX_F: usize = 40;
+const PIX_F: usize = 41;
 /// grid node spacing (pixels)
 const G: f64 = 16.0;
 const NG: usize = N / 16 + 5;

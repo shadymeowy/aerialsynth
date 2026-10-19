@@ -987,8 +987,10 @@ fn moraine(s: &mut Stack, g: &Ice) {
 fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     // (round 11: where the summers are cold, snowbeds linger in the hollows and on shaded slopes
     // all summer: polar tundra read as a plain brown sheet, audit a02, a30)
+    // (round 12: a little more, later in the season: polar land in midsummer still read as a bare
+    // brown sheet, a30; from 9 C it whitened temperate highlands, a23)
     let polar = smoothstep(8.0, 2.0, c.summer);
-    let date = c.date - 5.0 * polar;
+    let date = c.date - 7.0 * polar;
     if date > 2.5 || s.class == cls::FROZEN_WATER {
         return;
     }
@@ -1017,7 +1019,8 @@ fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
             x += 0.8 * perlin3(SEED_SNOW + 4, p / 4.0) * b4 + 0.4 * perlin3(SEED_SNOW + 5, p / 1.3) * band(1.3, gsd);
         }
     }
-    let mut cov = smoothstep(-0.55, -1.25, x) * (1.0 - smoothstep(0.75, 1.3, s.l.slope));
+    // (snow holds on slopes to ~50°: cut from ~37° the high faces were grey rock, alpine_south@type)
+    let mut cov = smoothstep(-0.55, -1.25, x) * (1.0 - smoothstep(0.95, 1.5, s.l.slope));
     if cov <= 0.0 {
         return;
     }

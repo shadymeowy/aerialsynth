@@ -137,3 +137,9 @@ their dark scoria as flat blobs (braided). Field lava flows are long (0.75–1 l
 soil and plants, grown over in humid climates; `MEAN_LAVA` 27. In humid climates 3 % of the cones are bare (a
 tenth left bare far cones, volcano@type). Still open: a cone carved away by a small stream's valley keeps its dark
 scoria as a flat patch (braided).
+
+Polish round 12: the volcanic kit's share of the relief (`kits::relief` returns it; WGSL `Relief.dv`, a 41st pass-A
+pixel float) rides on the core's valley carve instead of being squeezed with the valley walls: cones in a big
+valley keep their height except within ~60 m of the channel (the flat dark scoria blob of braided was a cone inside
+a large river's valley 2 km away, on its 13° wall, not a stream's; it keeps its 48 m now but on that slope still reads
+as a flat patch).

@@ -260,7 +260,7 @@ fn desert_slot_disturbance(s: ptr<function, Stack>) {
     }
     let c = (*s).c;
     let wd = desert_wind(c.p, c.lat, t.wind);
-    let zb = 0.6 * z0 * (0.35 + 0.65 * (1.0 - smoothstep1(0.35, 0.6, wd.rho)));
+    let zb = 0.25 * z0 * (0.35 + 0.65 * (1.0 - smoothstep1(0.35, 0.6, wd.rho)));
     let b = desert_barchans(c.p, c.east, c.north, wd.d, zb, c.gsd, (*s).l.fw);
     if (b.x > 0.0) {
         var cls = DS_LC_SAND;

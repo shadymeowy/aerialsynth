@@ -1124,6 +1124,12 @@ impl World {
 
         // ---- climate (from smooth elevation, so it does not alias)
         let (temp0, moist) = self.climate(m, ctx.lat, smooth.max(0.0));
+        // (round 12: firn and perennial snow fill the gullies and the micro relief of the highest
+        // ranges: ribbed grey faces where v0.2.0 shows smooth snowfields, alpine_south@type)
+        let firn = smoothstep(-4.0, -10.0, temp0);
+        if firn > 0.0 {
+            h -= firn * (0.6 * gully + 0.4 * micro);
+        }
 
         // ---- mesas (arid terraces)
         let arid = 1.0 - smoothstep(0.18, 0.42, moist);
@@ -1156,9 +1162,10 @@ impl World {
         }
 
         // ---- the kits' relief operators (volcanoes, karst, dunes …)
+        let mut dv = 0.0;
         if !crate::kits::KITS.is_empty() {
             let rin = crate::kits::ReliefIn { ctx, m, temp: temp0, moist, mountain, sand, mesa, smooth, inst: near_segs.map(|n| n.inst) };
-            crate::kits::relief(self, &rin, &mut h);
+            dv = crate::kits::relief(self, &rin, &mut h);
         }
 
         // ---- rivers: major + minor networks carve valleys, set water level
@@ -1293,15 +1300,26 @@ impl World {
                     } else {
                         wall
                     };
-                    let mut carved = h0.min(lerp(target, h0, wall));
+                    // (the volcanic relief `dv` rides on the valley's walls and floor instead of
+                    // being squeezed with them, fading out at the channel: a big valley flattened
+                    // the cinder cones in it into dark blobs of scoria, braided)
+                    let keep = smoothstep(hw, hw + 60.0, ad);
+                    let mut carved = h0.min(lerp(target, h0 - dv, wall) + dv * keep);
                     // (a kit's fine erosion texture on the walls: rills and rough rock)
                     if cv.rough > 0.0 && h0 > target {
-                        let r = (1.0 - perlin3(0x0C4A_9E01, p / 13.0).abs()) * band(13.0, gsd) * 0.65
-                            + (1.0 - perlin3(0x0C4A_9E02, p / 5.0).abs()) * band(5.0, gsd) * 0.35;
+                        // (resolved by 5 pixels: finer, it drew the far walls hairy, round 12)
+                        let r = (1.0 - perlin3(0x0C4A_9E01, p / 13.0).abs()) * band(13.0, 2.5 * gsd) * 0.65
+                            + (1.0 - perlin3(0x0C4A_9E02, p / 5.0).abs()) * band(5.0, 2.5 * gsd) * 0.35;
                         carved -= cv.rough * 4.0 * wall * (1.0 - wall) * r;
                     }
                     // limit the carve depth (small streams only notch the terrain)
-                    let carved = carved.max(h0 - cv.depth_cap * (1.0 - 0.3 * wall));
+                    // (round 12: the capped depth tapers off over a notch of three times the walls' run
+                    // for the cap: the hillside lowered by the cap across a wide valley rose in a
+                    // scarp at its rim, dark arcs along the streams of steep forested uplands,
+                    // volcano@type)
+                    // (V valleys only: the kits' troughs and canyons keep their profiles)
+                    let wcap = if cv.u <= 0.0 && cv.step_mix <= 0.0 { smoothstep(fp_w, fp_w + 3.0 * wall_k * cv.depth_cap, adw) } else { 0.0 };
+                    let carved = carved.max(h0 - cv.depth_cap * (1.0 - 0.3 * wall).min(1.0 - wcap));
                     // valleys narrower than a pixel fade out per pixel (no hard level cutoff)
                     let fade = if width < 0.3 * ctx.gsd { smoothstep(0.25, 0.5, rh.valley / ctx.gsd) } else { 1.0 };
                     // the cut fades out across the shallow shelf (a channel continuing into the sea

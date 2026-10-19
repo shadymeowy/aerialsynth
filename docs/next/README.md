@@ -64,11 +64,16 @@ landscapes but looks worse in places, which is why it is not the default:
   **canyons** have walls of strata at absolute elevations (cliff-forming beds and talus slopes of
   varied thickness), warped by spurs and gullies, over a narrow floor with a low-water river between
   bars (round 9), rills, rough rock and talus aprons on the walls, and a river that meanders with its
-  canyon (round 10), but still read as a canyon, not v0.2.0's red badlands; desert floors and arid deltas are even
+  canyon (round 10); badlands are red, dissected and banded where warm (round 12: `canyon@type` shows them, like
+  v0.2.0's frame); a valley's capped carve depth tapers off over a notch (round 12: it rose in a scarp at
+  the valley's rim, dark arcs along forest streams); desert floors and arid deltas are even
   (round 6), barchans only near the ergs of hyper-arid deserts (round 7); temperate forests have
   v0.2.0's crowns but render darker (the tints and rims of crowns of 1–6 pixels fade to their mean since
-  round 11); the highest ranges (5–7 km) are as steep as the Himalaya
-  (mean slope ~31° at 30 m, round 7), still steeper and greyer than v0.2.0's smooth snowfields.
+  round 11), and their crowns of a few pixels clutter the image (their steep sides in the surface
+  model, shaded by the renderer as walls and casting shadows: with `vegetation.trees_in_dsm: false`
+  a taiga place's high-frequency energy falls from 50 to 12, classic's); the highest ranges (5–7 km)
+  are as steep as the Himalaya (mean slope ~31° at 30 m, round 7); under perennial snow their gullies
+  fill in (round 12), still greyer than v0.2.0's smooth snowfields under a low sun.
 - **Ecotones:** the 10 km borders of ecoregions are a mosaic of the two biomes' crowns and
   landforms; their palettes, styles, vegetation densities and flat layers blend smoothly
   (rounds 7–8), so steppe and forest no longer draw a patchwork of patches there.
@@ -77,14 +82,17 @@ landscapes but looks worse in places, which is why it is not the default:
   ecoregion borders. Lakes and ponds have flat water and crisp shores without islets or pale
   halos (round 9); every thermokarst and kettle lake has one flat level, its spill point, and
   water only below it (round 10: no tilted sheets on slopes, fewer lakes on undulating ground);
-  where summers are cold the season's snow lingers in snowbeds and over the glaciers (round 11).
+  where summers are cold the season's snow lingers in snowbeds and over the glaciers (round 11), and
+  polar land is a moss and lichen mosaic over polygons (round 12).
 - **Towns** (round 9): a city's grid bends and its block size drifts over kilometres, the skyline
   fades out from the centre, estates in greys, trees on car parks, frayed town edges with gardens;
   round 10: one ring boulevard around big old cores (no concentric rings), curvilinear suburbs in
   big cities, estates on the town grid with green buffers; round 11: estates of matte halls,
   yards and car parks with light industry beside them, old cores on the town's grid (bent, lanes,
-  terraced houses, fading into the grid), ribbons and scattered houses at town edges; districts
-  still do not bend to rivers or relief.
+  terraced houses, fading into the grid), ribbons and scattered houses at town edges; round 12: old
+  quarters of small blocks and single houses with an irregular outline fading into the grid (beside
+  the CBD in big cities), streets that end at crossings, a town's grid turned to its relief (down
+  the valley); the grid itself does not bend along a river.
 - **Speed:** tiles cost about 2–3× classic's on a GPU (Tesla P4, 64 cold tiles at z12 / z14 /
   z16: 11.2 / 6.5 / 5.6 s against 3.8 / 3.4 / 2.9 s), mostly the kits' pass B and the host-built
   routes of a new area.
@@ -183,7 +191,7 @@ fields at 53° N, and a hard, circular biome border in the oblique view (one of 
 `scripts/ab_v020/<scene>.yaml` are the same scenes with `generator: next`, and
 `<scene>@type.yaml` the same camera at a place of the same landscape type in next's world.
 [`ab/next_quality/`](ab/next_quality/) has the sheets of the latest comparison (columns:
-v0.2.0, round 10, round 11) and their image statistics (`stats.md`). Scenes whose pose shows
+v0.2.0, round 11, round 12) and their image statistics (`stats.md`). Scenes whose pose shows
 another landscape in next's world (sea at `bank` and `coast`, farmland at `night` and `dusk`)
 have an `@type` twin at a place of v0.2.0's landscape; `probe_px towns LAT LON R_KM` lists the
 settlements near a point to find one.
@@ -195,7 +203,7 @@ hand picking) with the nearest land point of the classic world (the same point a
 `scripts/ab_v020.py audit` renders them with the `farmland` still's camera (700 m above the
 ground, 42° down, 640 × 360, the still's local solar time 10:41, June; December south of the
 equator) with either generator, and `sheet --audit` puts classic | next side by side
-([`ab/next_quality/audit*.jpg`](ab/next_quality/): classic, round 10, round 11; `audit_stats.md`).
+([`ab/next_quality/audit*.jpg`](ab/next_quality/): classic, round 11, round 12; `audit_stats.md`).
 In round 7, 6 of the 30 places looked clearly worse than classic's typical quality (13 in
 round 6), 5 of them cold (frozen lakes in snow-free forest, glacier stripes, snow nets over
 tundra), 6 more borderline (ecotone patchworks, autumn and burn colours, paddy terraces). In
@@ -213,7 +221,11 @@ is clearly worse; plain tundra (a02 a30), a rusty snow melt (a07), pale barchans
 plain (a16) stay borderline. In round 11 the snowbeds of cold summers put a29 and a07 under snow like
 classic (a07 no longer rusty); a16 has tussocks and larger shrubs but its far half stays a soft bare plain;
 plain brown tundra (a02 a30, warm summers in next's climate), fewer and sandier barchans (a11) and a16 stay
-borderline; none is clearly worse.
+borderline; none is clearly worse. In round 12 polar land (a30) is a moss and lichen mosaic over faint
+polygons and a28 is snowed in like classic; a11 has a few barchans left (about equal); plain tundra (a02),
+the polar plain without classic's snow (a30) and a16's far half, now in clumps but still soft, stay
+borderline; none is clearly worse. The clutter (mean high-frequency energy 20.8 against classic's 12.1)
+is the crowns' steep sides in the surface model (see above), not reduced.
 
 ```sh
 scripts/ab_v020.py audit --terrain target/release/terrain --generator classic --out /tmp/audit_c

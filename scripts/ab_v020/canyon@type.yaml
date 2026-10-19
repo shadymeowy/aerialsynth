@@ -1,6 +1,6 @@
-# canyon at a place of the same type in the next generator's world: canyon (docs/next/kits/mountains_places.csv), the camera
-# over the floor of the 850 m deep canyon 10 km SSE of the listed place, looking along it (heading 80 instead of 120:
-# along the canyon; round 4 looked at the shallow side canyons on the plateau) (the same local solar time)
+# canyon at a place of the same type in the next generator's world: red badlands (v0.2.0's frame is badlands, not a
+# canyon): the dissected badlands of soft sediment 60 km NNE of the canyon of rounds 5-11 (21.65 N 121.00 W, arid,
+# 16-18 C; round 12) (the same local solar time, heading 120 as v0.2.0)
 world:
   seed: 1
   generator: next
@@ -14,10 +14,10 @@ trajectory:
     rate_hz: 400
     speed_mps: 50
     altitude_m: 900
-    heading_deg: 80
+    heading_deg: 120
     kind: line
-    lat: 21.172
-    lon: -121.31
+    lat: 21.65
+    lon: -121.00
     duration_s: 7.6
 render:
   supersample: 2
@@ -25,7 +25,7 @@ render:
   lighting:
     mode: clock
     date: '2026-06-21'
-    time_utc: '00:35:14'
+    time_utc: '00:34:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:

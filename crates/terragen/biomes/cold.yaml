@@ -107,6 +107,12 @@
       class: bog
       clear: 1.0
       height: none
+    # (round 12: faint polygons and frost boils on the wet flats, a02)
+    - slot: azonal
+      kernel: cold_polygons
+      mask: { slope: [null, null, 0.03, 0.06], moist: [0.1, 0.2, null, null] }
+      params: { cell: 20, trough: 1.2, trough_depth: 0.3, rim: 0, pond: 0.05, high: 0.5, colour: [134, 130, 98], trough_colour: [72, 82, 52], pond_colour: [28, 42, 52] }
+      class: polygon_tundra
     # spruce scattered over the lichen, in clumps (where the core's tree line has ended them)
     - slot: canopy
       kernel: scatter
