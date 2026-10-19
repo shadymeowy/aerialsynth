@@ -668,7 +668,7 @@ fn cold_snow(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
     cov *= 1.0 - 0.7 * crown;
     cov *= 1.0 - 0.85 * (*s).m.road_cov;
     cov *= 1.0 - 0.55 * (*s).m.town_cov;
-    cov *= 1.0 - (*s).m.river_cov;
+    cov *= 1.0 - (*s).m.river_cov * smoothstep1(2.0, 8.0, (*s).l.river_hw);
     cov *= 1.0 - g.snow * (1.0 - polar);
     if (cov <= 0.0) {
         return;

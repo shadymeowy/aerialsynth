@@ -1032,7 +1032,9 @@ fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     cov *= 1.0 - 0.7 * crown;
     cov *= 1.0 - 0.85 * s.m.road_cov;
     cov *= 1.0 - 0.55 * s.m.town_cov;
-    cov *= 1.0 - s.m.river_cov;
+    // (round 13: streams narrower than ~4-16 m under the season's snow are snowed over: dark
+    // lines ran straight over the snowfields and glaciers, gallery g02)
+    cov *= 1.0 - s.m.river_cov * smoothstep(2.0, 8.0, s.l.river_hw);
     cov *= 1.0 - g.snow * (1.0 - polar);
     if cov <= 0.0 {
         return;
