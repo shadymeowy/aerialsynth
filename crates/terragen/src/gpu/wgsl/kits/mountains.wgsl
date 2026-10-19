@@ -118,9 +118,23 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
         let col = mixc(srgb(40.0, 60.0, 36.0), srgb(64.0, 86.0, 48.0), 0.5 + 0.5 * rn) * (1.0 + 0.15 * (*s).pf.f[PF_DETAIL]);
         composite(s, layer_paint(cf, col, LC_BROADLEAF_FOREST));
     }
-    let ck = min(z.tower * smoothstep1(3.5, 6.0, slope + 0.8 * rn) + z.cockpit * smoothstep1(0.8, 1.4, slope + 0.2 * rn), 1.0);
+    let tw = z.tower * smoothstep1(3.5, 6.0, slope + 0.8 * rn);
+    var streak = 0.0;
+    if (tw > 0.0) {
+        var sn = perlin3(0x7A51lu, (*s).c.p * (1.0lf / 24.0lf));
+        let b9 = band(9.0, (*s).c.gsd);
+        if (b9 > 0.0) {
+            sn += 0.5 * perlin3(0x7A52lu, (*s).c.p * (1.0lf / 9.0lf)) * b9;
+        }
+        streak = smoothstep1(-0.1, 0.1, sn);
+    }
+    if (tw * (1.0 - streak) > 0.0) {
+        let colv = mixc(srgb(34.0, 52.0, 32.0), srgb(58.0, 78.0, 44.0), 0.5 + 0.5 * rn) * (1.0 + 0.15 * (*s).pf.f[PF_DETAIL]);
+        composite(s, layer_paint(tw * (1.0 - streak), colv, LC_BROADLEAF_FOREST));
+    }
+    let ck = min(tw * streak + z.cockpit * smoothstep1(0.8, 1.4, slope + 0.2 * rn), 1.0);
     if (ck > 0.0) {
-        let col = mixc(srgb(168.0, 164.0, 150.0), srgb(120.0, 118.0, 108.0), 0.5 + 0.5 * rn) * (1.0 + 0.06 * (*s).pf.f[PF_DETAIL]);
+        let col = mixc(srgb(150.0, 146.0, 134.0), srgb(100.0, 98.0, 90.0), 0.5 + 0.5 * rn) * (1.0 + 0.06 * (*s).pf.f[PF_DETAIL]);
         var ly = layer_paint(ck, col, LC_CLIFF);
         ly.clear = 1.0;
         composite(s, ly);
