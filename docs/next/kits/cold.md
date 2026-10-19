@@ -157,3 +157,9 @@ date's temperature is lowered by up to 5 °C, more in the hollows and in patches
 lie under that snow too (glacier ice no longer counts as a crown). High mountains read as snowfields instead of brown
 slopes (mountains@type), the snowed-in land around a glacier no longer frames bare grey ice (a29), and the alpine snow
 melt of a07 is grey and white.
+
+Polish round 12: the late snow of cold summers lowers the date's temperature by up to 7 °C (was 5 °C; still from 8 °C,
+full at 2 °C: from 9 °C it whitened temperate highlands, a23); seasonal snow holds on slopes to ~50° (was ~37–45°). Under perennial snow (annual mean below −4 … −10 °C at the smooth elevation) the core's
+erosion gullies and micro relief fill in by 60 % and 40 % (firn: ribbed grey faces, alpine_south@type). The polar
+biome has a moss and lichen mosaic over polygons with small ponds on the flats, the forest–tundra faint polygons on
+wet flats (plain brown tundra, a02 a30).

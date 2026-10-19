@@ -184,3 +184,7 @@ are not drawn along the streams of the arid canyon plateaus (canyon@type).
 
 Polish round 11: barchans are fewer (60 %) and of sand (30 % of the pavement's tone, was 50 %): crescents of the
 pavement's tone showed only their lit crests, as outlines (a11).
+
+Polish round 12: barchans are a quarter as many (`zb` 0.25: distinct crescents strewn over the pavement, a11). Semi-arid
+ground: the tussocks' mean and the shrubs' density vary in clumps at 34, 90 and 250 m (`ground::semi_clumps`), so the
+far plain keeps a texture (a16).

@@ -78,6 +78,14 @@
   high mountains, glaciers under the season's snow); cinder cones kept on fault-block uplands; long
   narrow rough lava flows; plants over steep rainforest slopes and a lighter rainforest canopy;
   semi-arid tussocks and larger shrubs; fewer, sandier barchans; calmer barely resolved crowns.
+- `next` polish round 12: old quarters of small blocks and single houses with an irregular outline
+  fading into the town's grid (no stamped star), beside the CBD in big cities (no pale disc among the
+  towers); grid streets that end at crossings and built edge lots (no empty stubs); a town's grid turned
+  to its relief; red, deep, dissected badlands where warm (`canyon@type` now shows them); far canyon
+  walls without hairy rills; capped valley carves that taper off (no scarps along forest streams);
+  volcanic relief kept in big valleys; firn-filled gullies under perennial snow and snow on steeper
+  slopes; polar moss and lichen over polygons with later snowbeds; fewer barchans; semi-arid ground
+  in clumps; a lighter pass-B stage (light industry beside estates no longer re-evaluates the district).
 - **Optional tile layers** (tile store format 2; `next` only): `tiles.layers: [dtm, instance]`
   adds the bare ground and instance ids (building lots, fields, forest stands) to a new store;
   the viewer's map shadings *Height above ground* and *Instances* show them. Format-1 stores

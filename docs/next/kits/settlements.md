@@ -293,3 +293,20 @@ CBD's centre, so the towers stay; round 10's core read as a crisp patch of rubbl
 streets keep their houses further out and the main streets run on (ribbons), and a few houses stand beyond the last
 streets (fp_town). Car parks show the cars' mean colour below 2 m pixels. Still open: districts do not bend to rivers
 or relief (the place stamp carries no river direction), and dusk@type's CBD has fewer towers than round 10's.
+
+Polish round 12: the old quarter is a wobbling blob (harmonics 3, 5 and 8 of its outline, ±30 %; `old_quarter`)
+fading out over its outer half, decided per small block from the share at the small block's centre (round 11's
+quarter of whole W2-cut grid blocks drew a hard star, town@type). Its grid blocks are cut by staggered lanes ~30–44 m
+apart (`old_sub`; six in ten open, houses back to back where none) into small blocks lined with houses of 6–11 m
+frontage, each with its own height (±1 storey) and roof tone, around green courtyards with trees. Towns: around the
+centre, 1.5× the ring's radius (~200–300 m); big cities: beside the CBD, astride the ring boulevard, 4–7 storeys
+(round 11's quarter inside the CBD read as a pale low disc in the ring of towers, metro oblique). Streets of a grid
+are decided by the segment between two crossings, at its middle (`Blk::seg`, `smid`): they end at crossings, never
+mid-block or with half their width; main streets run on only 0.04 beyond the edge, and the lots along the streets of
+the edge and the ribbons are mostly built (empty street stubs, fp_town). The street frame of a town on sloping
+ground follows its relief (`places::base_place`): one axis down the smooth relief's slope over the site's ring (the
+valley axis its river runs along), the town stretched along it; random on flat land (|slope| < 0.3–1.2 %). The
+place stamp carries no river direction: the drainage at a town's centre costs milliseconds of pass A per town,
+where the transport kit visits every town of a continent. Blocks of light industry beside an estate read the estate's
+edge at their centre with `nbind_at` (the district's cells only) instead of the whole district; with the old
+quarter's small blocks and the street segments pass B's stage 4 still compiles in ~14.5 s on a P4 (round 11: ~12.8 s).

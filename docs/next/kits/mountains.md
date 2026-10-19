@@ -258,3 +258,11 @@ narrows and widens (`Carve.hw_k`, ±35 %); faces in redder sandstones and shales
 talus with boulders; the streams of the canyon plateaus carve no trench and draw no dry bed or wash (their straight
 pale ribbons ran across the floor and up the walls like roads). Glaciated tributaries' troughs are 3× the stream's
 cut, not 8× (280 m troughs along the straight drainage pieces cut straight walls through ridges).
+
+Polish round 12: badlands are deeper and sharper: knife-edge ridges 900 m apart (the inverted crease, weight 1.8) over
+the creased gullies at 300, 130, 60 and 26 m, 120–240 m of amplitude (was 34–67 m: a pale rippled plain from 1–5 km);
+where warm (11–17 °C) they are rust and red with patches of tan clay on the gentler ground and gully walls banded in
+ochre, rust and dark red (v0.2.0's red badlands, canyon@type, which moved to such badlands 60 km NNE of the canyon of
+rounds 5–11). Strata and badland bands fade to their mean colour where they are thinner than ~3 pixels across the
+slope, and the canyon walls' rills (45 and 18 m) and rough rock (13 and 5 m) are resolved from 5 pixels (at 2–4 pixels
+they drew the far walls hairy).
