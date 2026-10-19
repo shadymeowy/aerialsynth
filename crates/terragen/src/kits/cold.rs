@@ -985,7 +985,11 @@ fn moraine(s: &mut Stack, g: &Ice) {
 /// Seasonal snow at the ecoregion's date: ragged edges, lingering in hollows, shed by steep
 /// slopes; tree crowns stay dark, roads are ploughed, towns grey.
 fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
-    if c.date > 2.5 || s.class == cls::FROZEN_WATER {
+    // (round 11: where the summers are cold, snowbeds linger in the hollows and on shaded slopes
+    // all summer: polar tundra read as a plain brown sheet, audit a02, a30)
+    let polar = smoothstep(8.0, 2.0, c.summer);
+    let date = c.date - 5.0 * polar;
+    if date > 2.5 || s.class == cls::FROZEN_WATER {
         return;
     }
     let t = s.t;
@@ -993,7 +997,7 @@ fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
     let gsd = s.ctx.gsd;
     let hollow = smoothstep(0.1, 0.8, -t.gully);
     let spur = smoothstep(0.2, 0.8, t.gully);
-    let mut n = 0.6 * s.pf.snow - 1.6 * hollow + 0.5 * spur;
+    let mut n = 0.6 * s.pf.snow - (1.6 + 1.4 * polar) * hollow + 0.5 * spur - 2.0 * polar * smoothstep(0.0, 0.8, s.pf.snow);
     let b45 = band(45.0, gsd);
     if b45 > 0.0 {
         n += 0.5 * perlin3(SEED_SNOW + 2, p / 45.0) * b45;
@@ -1003,7 +1007,7 @@ fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
         }
     }
     // (slopes facing the equator lose their snow first)
-    let mut x = c.date + n + 2.5 * sunny(s).clamp(-1.0, 1.0);
+    let mut x = date + n + 2.5 * sunny(s).clamp(-1.0, 1.0);
     // late melt: the edges ragged with fine noise (a net of snow in the troughs of 18 m frost
     // polygons, and polygons bare or white one by one, drew a white net and a crisp patchwork
     // of cells over the land)
@@ -1018,12 +1022,14 @@ fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
         return;
     }
     // crowns (tall above the ground) keep a little snow; ploughed roads; grey towns
-    let crown = smoothstep(1.5, 4.0, s.height - s.l.ground);
+    // (glacier ice is no crown; where the summers are cold the glaciers lie under the season's snow
+    // too: bare grey ice inside snowed-in land, a29)
+    let crown = smoothstep(1.5, 4.0, s.height - s.l.ground) * (1.0 - g.ice.min(1.0));
     cov *= 1.0 - 0.7 * crown;
     cov *= 1.0 - 0.85 * s.m.road_cov;
     cov *= 1.0 - 0.55 * s.m.town_cov;
     cov *= 1.0 - s.m.river_cov;
-    cov *= 1.0 - g.snow;
+    cov *= 1.0 - g.snow * (1.0 - polar);
     if cov <= 0.0 {
         return;
     }
