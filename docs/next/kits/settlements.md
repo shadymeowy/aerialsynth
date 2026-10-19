@@ -139,7 +139,7 @@ results are memoized per lattice cell or place (pure functions of the world).
 Places of the default world (`PLACES` in the tests): metropolis (30.35, 128.849) and its outer
 districts (30.45, 128.95), survey-grid city (−6.177, −114.240), desert town with a medina
 (−12.198, −21.454), city with informal fringes (−20.865, −142.615), forest-strip village
-(20.715, −22.646), street village (−9.162, 96.553), kraal village (−15.971, 62.836), perched
+(20.713, −22.660), street village (−9.162, 96.553), kraal village (−15.971, 62.836), perched
 village (−38.778, −166.808), airport (−10.539, 115.357), port (−11.717, −173.520), quarry
 (−20.458, −152.138), solar farm (40.497, 46.920), wind farm (42.418, 33.345), gas flares
 (24.031, −57.483), dam (−0.699, −17.687). Find more with the ignored tests
@@ -196,7 +196,7 @@ roofs (stills of round B: grid districts beside the medina are gone since).
 ![grid city 1.5 km](images/settlements_grid_city_1500m.jpg)
 ![medina 800 m](images/settlements_medina_800m.jpg)
 
-**Forest-strip village** (20.715, −22.646): farms along the valley street, each with its strip
+**Forest-strip village** (20.713, −22.660): farms along the valley street, each with its strip
 of fields and hedges up the slopes.
 ![Waldhufen 800 m](images/settlements_waldhufen_800m.jpg)
 

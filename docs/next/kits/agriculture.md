@@ -77,7 +77,7 @@ equinox. Lat, lon in brackets.
 ![strips 300 m](images/agriculture_strips_300m.jpg)
 ![strips 10 km](images/agriculture_strips_10km.jpg)
 
-**Bocage** (-51.817, -103.984), **rice paddies** (18.420, 160.804), **dry terraces**
+**Bocage** (-51.817, -103.984), **rice paddies** (18.345, 160.810), **dry terraces**
 (-38.496, 176.292), **groves** (29.000, 107.235), **greenhouse sea** (27.783, 172.016),
 **pasture** (34.443, 147.270, nadir 1.5 km):
 
