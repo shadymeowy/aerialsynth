@@ -413,7 +413,18 @@ fn st_roof_col(arch: u32, u: f32, flat: bool) -> vec3<f32> {
     let k = u32(u * 3.99);
     switch arch {
         case 20u: {
-            return mixc(srgb(70.0, 88.0, 108.0), srgb(118.0, 126.0, 134.0), u);
+            let k6 = u32(u * 5.99);
+            let f = u * 6.0 - f32(k6);
+            var c = srgb(184.0, 180.0, 170.0);
+            switch k6 {
+                case 0u: { c = srgb(52.0, 66.0, 86.0); }
+                case 1u: { c = srgb(64.0, 88.0, 92.0); }
+                case 2u: { c = srgb(96.0, 104.0, 114.0); }
+                case 3u: { c = srgb(108.0, 94.0, 78.0); }
+                case 4u: { c = srgb(150.0, 152.0, 150.0); }
+                default: {}
+            }
+            return c * (0.92 + 0.16 * f);
         }
         case 21u: {
             if (u < 0.3) {

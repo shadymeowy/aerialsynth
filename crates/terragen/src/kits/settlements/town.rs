@@ -432,7 +432,21 @@ pub fn roof_col(arch: u32, u: f64, flat: bool) -> DVec3 {
     let k = (u * 3.99) as u32;
     match arch {
         // tower glass, warehouse metal, informal sheets, white dome, temple tiles
-        20 => return mixc(srgb(70.0, 88.0, 108.0), srgb(118.0, 126.0, 134.0), u),
+        // (round 13: towers in six tints and tones, dark blue and green glass to pale concrete
+        // and bronze: one blue-grey ramp drew a uniform grey skyline, gallery g30)
+        20 => {
+            let k6 = (u * 5.99) as u32;
+            let f = u * 6.0 - k6 as f64;
+            let c = match k6 {
+                0 => srgb(52.0, 66.0, 86.0),
+                1 => srgb(64.0, 88.0, 92.0),
+                2 => srgb(96.0, 104.0, 114.0),
+                3 => srgb(108.0, 94.0, 78.0),
+                4 => srgb(150.0, 152.0, 150.0),
+                _ => srgb(184.0, 180.0, 170.0),
+            };
+            return c * (0.92 + 0.16 * f);
+        }
         21 => {
             // (matte metal and membranes: light greys, beige, a few white, weathered and blue-grey
             // ones; round 10's blue-greys over whole estates read as glass or water, town@type)
