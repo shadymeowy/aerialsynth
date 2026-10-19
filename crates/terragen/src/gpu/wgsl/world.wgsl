@@ -1192,7 +1192,11 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                     let rr = (1.0 - abs(perlin3(0x0C4A9E01lu, p / 13.0lf))) * band(13.0, 2.5 * gsd) * 0.65 + (1.0 - abs(perlin3(0x0C4A9E02lu, p / 5.0lf))) * band(5.0, 2.5 * gsd) * 0.35;
                     carved -= cv.rough * 4.0 * wall * (1.0 - wall) * rr;
                 }
-                carved = max(carved, h0 - cv.depth_cap * (1.0 - 0.3 * wall));
+                var wcap = 0.0;
+                if (cv.u <= 0.0 && cv.step_mix <= 0.0) {
+                    wcap = smoothstep1(cv.fp_w, cv.fp_w + 3.0 * cv.wall_k * cv.depth_cap, adw);
+                }
+                carved = max(carved, h0 - cv.depth_cap * min(1.0 - 0.3 * wall, 1.0 - wcap));
                 var fade = 1.0;
                 if (width < 0.3 * gsd) {
                     fade = smoothstep1(0.25, 0.5, valley_hit / gsd);

@@ -1307,7 +1307,13 @@ impl World {
                         carved -= cv.rough * 4.0 * wall * (1.0 - wall) * r;
                     }
                     // limit the carve depth (small streams only notch the terrain)
-                    let carved = carved.max(h0 - cv.depth_cap * (1.0 - 0.3 * wall));
+                    // (round 12: the capped depth tapers off over a notch of three times the walls' run
+                    // for the cap: the hillside lowered by the cap across a wide valley rose in a
+                    // scarp at its rim, dark arcs along the streams of steep forested uplands,
+                    // volcano@type)
+                    // (V valleys only: the kits' troughs and canyons keep their profiles)
+                    let wcap = if cv.u <= 0.0 && cv.step_mix <= 0.0 { smoothstep(fp_w, fp_w + 3.0 * wall_k * cv.depth_cap, adw) } else { 0.0 };
+                    let carved = carved.max(h0 - cv.depth_cap * (1.0 - 0.3 * wall).min(1.0 - wcap));
                     // valleys narrower than a pixel fade out per pixel (no hard level cutoff)
                     let fade = if width < 0.3 * ctx.gsd { smoothstep(0.25, 0.5, rh.valley / ctx.gsd) } else { 1.0 };
                     // the cut fades out across the shallow shelf (a channel continuing into the sea
