@@ -160,3 +160,7 @@ signal (more on ridges and spurs than in valleys), in soft-edged patches 520 m a
 the micro relief broke them into a pale speckle on every slope, boreal@type, and into blotches over the flat lowland
 forests, fp_forest); the taiga's moss and lichen floor is darker and closer in tone (salt-and-pepper speckle between
 the crowns, a26 a17).
+
+Polish round 13: the open spruce taiga and lichen woodland scatters gather in clumps (`clump` 0.8); mires are
+drained in farmland (their amount × 1 − 0.85 · smoothstep(0.15, 0.45, agriculture): red-brown bogs cut across the
+fields, gallery g23).

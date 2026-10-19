@@ -310,3 +310,10 @@ place stamp carries no river direction: the drainage at a town's centre costs mi
 where the transport kit visits every town of a continent. Blocks of light industry beside an estate read the estate's
 edge at their centre with `nbind_at` (the district's cells only) instead of the whole district; with the old
 quarter's small blocks and the street segments pass B's stage 4 still compiles in ~14.5 s on a P4 (round 11: ~12.8 s).
+
+Polish round 13: airports grade over a 220 m margin and their mown grass fades into the land along a wavy edge
+beyond the perimeter road, toned over ~170 m; no tracks or minor roads cross the airfield (a flat green pad with
+hard edges and a track across it, gallery g33). Towers in six tints and tones (dark blue and green glass, grey
+glass, bronze, grey and pale concrete; one blue-grey ramp drew a uniform grey skyline, g30). Street lamps 38 % white
+LED (was 12 %), sodium (1, .68, .40) and amber (1, .84, .64) less saturated (an orange night, night@type). The kit's
+forest-strip village place is at (20.713, −22.660): the world drifted 1.4 km under the old one.

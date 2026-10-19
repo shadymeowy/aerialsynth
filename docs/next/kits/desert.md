@@ -188,3 +188,10 @@ pavement's tone showed only their lit crests, as outlines (a11).
 Polish round 12: barchans are a quarter as many (`zb` 0.25: distinct crescents strewn over the pavement, a11). Semi-arid
 ground: the tussocks' mean and the shrubs' density vary in clumps at 34, 90 and 250 m (`ground::semi_clumps`), so the
 far plain keeps a texture (a16).
+
+Polish round 13: the scrub of the plains in clumps (`clump` 0.6, acacias 0.35); shrubs under 8 m across are drawn
+one by one only where they span ~4–10 pixels, their calibrated mean otherwise (`kernels::resolve_size`: lone dark
+shrubs dotted the plains, audit a13 a14); outside the savanna biomes the warm climate's savanna trees gather in
+groves. Known limit: a wash's band ends on a straight line where the nearest channel switches to a tributary
+(`world.rs` picks one channel by edge distance; gallery g18); braided wet rivers are not part of next (only braided
+dry washes).

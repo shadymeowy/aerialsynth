@@ -69,9 +69,14 @@ landscapes but looks worse in places, which is why it is not the default:
   the valley's rim, dark arcs along forest streams); desert floors and arid deltas are even
   (round 6), barchans only near the ergs of hyper-arid deserts (round 7); temperate forests have
   v0.2.0's crowns but render darker (the tints and rims of crowns of 1–6 pixels fade to their mean since
-  round 11), and their crowns of a few pixels clutter the image (their steep sides in the surface
-  model, shaded by the renderer as walls and casting shadows: with `vegetation.trees_in_dsm: false`
-  a taiga place's high-frequency energy falls from 50 to 12, classic's); the highest ranges (5–7 km)
+  round 11); round 13: trees stand in groves, clumps and closed stands with open ground between them
+  (`noise::clumped`, a pixel-filtered clump density: a coarse pixel shows the mean of its finer
+  ones), lone trees only in the savanna biomes; shrubs, tussocks, stones and the spires of open
+  woodland are drawn one by one only where they span ~4–10 pixels (`kernels::resolve_size`), their
+  mean otherwise; the gaps of a closed canopy show shaded lower crowns, not the pale floor: the
+  isolated dark dots of the audit (`round13/tools/dots.py`) fell from 2.24× classic's to 0.93×.
+  Dense forests keep their crowns' relief (at 2–4 pixels each crown still casts a small shadow:
+  forest places count 10–26k dots/MP, like v0.2.0's own forest stills, 9–21k); the highest ranges (5–7 km)
   are as steep as the Himalaya (mean slope ~31° at 30 m, round 7); under perennial snow their gullies
   fill in (round 12), still greyer than v0.2.0's smooth snowfields under a low sun.
 - **Ecotones:** the 10 km borders of ecoregions are a mosaic of the two biomes' crowns and
@@ -191,7 +196,7 @@ fields at 53° N, and a hard, circular biome border in the oblique view (one of 
 `scripts/ab_v020/<scene>.yaml` are the same scenes with `generator: next`, and
 `<scene>@type.yaml` the same camera at a place of the same landscape type in next's world.
 [`ab/next_quality/`](ab/next_quality/) has the sheets of the latest comparison (columns:
-v0.2.0, round 11, round 12) and their image statistics (`stats.md`). Scenes whose pose shows
+v0.2.0, round 12, round 13) and their image statistics (`stats.md`). Scenes whose pose shows
 another landscape in next's world (sea at `bank` and `coast`, farmland at `night` and `dusk`)
 have an `@type` twin at a place of v0.2.0's landscape; `probe_px towns LAT LON R_KM` lists the
 settlements near a point to find one.
@@ -203,7 +208,7 @@ hand picking) with the nearest land point of the classic world (the same point a
 `scripts/ab_v020.py audit` renders them with the `farmland` still's camera (700 m above the
 ground, 42° down, 640 × 360, the still's local solar time 10:41, June; December south of the
 equator) with either generator, and `sheet --audit` puts classic | next side by side
-([`ab/next_quality/audit*.jpg`](ab/next_quality/): classic, round 11, round 12; `audit_stats.md`).
+([`ab/next_quality/audit*.jpg`](ab/next_quality/): classic, round 12, round 13; `audit_stats.md`).
 In round 7, 6 of the 30 places looked clearly worse than classic's typical quality (13 in
 round 6), 5 of them cold (frozen lakes in snow-free forest, glacier stripes, snow nets over
 tundra), 6 more borderline (ecotone patchworks, autumn and burn colours, paddy terraces). In
@@ -225,7 +230,13 @@ borderline; none is clearly worse. In round 12 polar land (a30) is a moss and li
 polygons and a28 is snowed in like classic; a11 has a few barchans left (about equal); plain tundra (a02),
 the polar plain without classic's snow (a30) and a16's far half, now in clumps but still soft, stay
 borderline; none is clearly worse. The clutter (mean high-frequency energy 20.8 against classic's 12.1)
-is the crowns' steep sides in the surface model (see above), not reduced.
+is the crowns' steep sides in the surface model (see above), not reduced. In round 13 the "bunch of
+small trees scattered" look is gone from open land (steppe, tundra, desert scrub, lichen woodland:
+groves and clumps, shrubs in the ground's texture; isolated dark dots 0.93× classic's on average,
+2.24× in round 12, places above twice classic's 13 of 30, were 20); the land has a macro tone over
+600 m – 1.5 km (soil moisture, vigour, drainage) on the ground and inside fields, and the night's
+lamps are less orange (part C of round 13; the tonal contrast of the like-for-like scenes moved
+little: it is set by what the scenes show).
 
 ```sh
 scripts/ab_v020.py audit --terrain target/release/terrain --generator classic --out /tmp/audit_c
