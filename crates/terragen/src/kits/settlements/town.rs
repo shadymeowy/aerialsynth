@@ -228,22 +228,109 @@ pub fn ring_dist(pl: &Pl, q: DVec2) -> f64 {
     }
 }
 
-/// How much `q` lies in the old core of a city of an old culture (1 inside, 0 outside, a band of
-/// a quarter of its radius between): the town's grid there is bent, its streets narrower and its
-/// blocks cut by lanes into small irregular blocks of terraced houses (round 11: round 10's core of
-/// its own W2 street network read as a crisp patch of rubble against the grid, metro).
+/// The old quarter of a city of an old culture: its centre (place frame, elongated) and radius
+/// (m; the outline wobbles by a fifth). Towns: around the centre, 1.5 of the ring's radius; big
+/// cities: beside the CBD, astride the ring boulevard (round 11's quarter inside the CBD read as a
+/// pale low disc in the ring of towers, metro oblique).
+fn old_quarter(pl: &Pl, q: DVec2) -> Option<(f64, f64)> {
+    if pl.form != form::CITY as u32 || pl.level < 2 || !matches!(pl.arch, 5 | 6 | 8 | 11) {
+        return None;
+    }
+    // (the ring's mean radius: its wobble moved the quarter's centre with the direction of `q`)
+    let cbd = if pl.level >= 3 { 0.07 + 0.03 * (pl.level as f64 - 3.0) + 0.03 * u01k(pl.seed, 40) } else { 0.07 };
+    let rr = pl.r * (1.25 * cbd + 0.015);
+    let se = pl.elong.sqrt();
+    let s = pl.seed ^ 0x219;
+    let a = std::f64::consts::TAU * u01k(s, 4);
+    let (c0, ro) = if pl.level >= 3 { (0.95 * rr, 0.62 * rr) } else { (0.2 * rr, 1.5 * rr) };
+    let rel = DVec2::new(q.x / se, q.y * se) - DVec2::new(a.cos(), a.sin()) * c0;
+    // (an irregular outline: a round stamp read as stamped in, town@type)
+    let phi = rel.y.atan2(rel.x);
+    let t = std::f64::consts::TAU;
+    let wob = 1.0 + 0.16 * (3.0 * phi + t * u01k(s, 5)).sin() + 0.09 * (5.0 * phi + t * u01k(s, 6)).sin() + 0.05 * (8.0 * phi + t * u01k(s, 7)).sin();
+    Some((rel.length() / wob, ro))
+}
+
+/// How much `q` lies in the old core of a city of an old culture (1 inside, 0 outside, fading over
+/// the outer half of its radius): the town's grid there is bent, its streets narrower and its
+/// blocks cut by lanes into small blocks of terraced houses (`old_sub`; round 11: round 10's core
+/// of its own W2 street network read as a crisp patch of rubble against the grid, metro).
 pub fn old_core(pl: &Pl, q: DVec2) -> f64 {
-    match core_ring(pl, q) {
-        // (in the big cities an old quarter inside the CBD, off its centre: a core of the CBD's
-        // size left a ring of towers around a low hole, metro)
-        Some((_, rr)) if pl.level >= 3 => {
-            let se = pl.elong.sqrt();
-            let a = std::f64::consts::TAU * u01k(pl.seed ^ 0x219, 4);
-            let c0 = DVec2::new(a.cos(), a.sin()) * (0.3 * rr);
-            1.0 - smoothstep(0.3 * rr, 0.5 * rr, (DVec2::new(q.x / se, q.y * se) - c0).length())
-        }
-        Some((d, rr)) => 1.0 - smoothstep(0.55 * rr, 0.8 * rr, d),
+    match old_quarter(pl, q) {
+        Some((d, ro)) => 1.0 - smoothstep(0.45 * ro, ro, d),
         None => 0.0,
+    }
+}
+
+/// Can a small block of the old quarter reach `q` (within 70 m of its outline)?
+fn old_near(pl: &Pl, q: DVec2) -> bool {
+    matches!(old_quarter(pl, q), Some((d, ro)) if d < ro + 70.0)
+}
+
+/// A small block of an old quarter: the grid block cut by lanes (~30-44 m apart, the lanes across
+/// staggered from column to column, 6 in 10 of them open: houses back to back where none) into
+/// small blocks; its id, the distance to its edge (an open lane's half width off), its centre
+/// (block coordinates), the side of its nearest edge (0-3) and the coordinate along it.
+#[derive(Clone, Copy, Debug)]
+pub struct OldSub {
+    pub id: u64,
+    pub d: f64,
+    pub c: DVec2,
+    pub side: i64,
+    pub along: f64,
+}
+
+pub fn old_sub(blk: &Blk) -> OldSub {
+    let lw = 30.0 + 14.0 * u01k(blk.id, 15);
+    let lane_hw = 1.4 + 0.8 * u01k(blk.id, 78);
+    let nu = (blk.bw / lw).round().max(1.0);
+    let nv = (blk.bd / lw).round().max(1.0);
+    let (su, sv) = (blk.bw / nu, blk.bd / nv);
+    let line = |k: f64, n: f64, s: f64, len: f64, salt: i64| -> f64 {
+        if k <= 0.0 {
+            0.0
+        } else if k >= n {
+            len
+        } else {
+            (k + 0.44 * (u01(hash2(blk.id ^ 0x1A5, salt, k as i64)) - 0.5)) * s
+        }
+    };
+    let mut iu = (blk.u / su).floor().clamp(0.0, nu - 1.0);
+    if blk.u < line(iu, nu, su, blk.bw, -1) {
+        iu -= 1.0;
+    } else if blk.u >= line(iu + 1.0, nu, su, blk.bw, -1) {
+        iu += 1.0;
+    }
+    let iu = iu.clamp(0.0, nu - 1.0);
+    let salt = iu as i64;
+    let mut iv = (blk.v / sv).floor().clamp(0.0, nv - 1.0);
+    if blk.v < line(iv, nv, sv, blk.bd, salt) {
+        iv -= 1.0;
+    } else if blk.v >= line(iv + 1.0, nv, sv, blk.bd, salt) {
+        iv += 1.0;
+    }
+    let iv = iv.clamp(0.0, nv - 1.0);
+    let (u0, u1) = (line(iu, nu, su, blk.bw, -1), line(iu + 1.0, nu, su, blk.bw, -1));
+    let (v0, v1) = (line(iv, nv, sv, blk.bd, salt), line(iv + 1.0, nv, sv, blk.bd, salt));
+    let lane = |k: f64, n: f64, salt: i64| if k > 0.0 && k < n && u01k(hash2(blk.id ^ 0x1A6, salt, k as i64), 1) < 0.6 { lane_hw } else { 0.0 };
+    let ds = [
+        blk.u - u0 - lane(iu, nu, -1),
+        u1 - blk.u - lane(iu + 1.0, nu, -1),
+        blk.v - v0 - lane(iv, nv, salt),
+        v1 - blk.v - lane(iv + 1.0, nv, salt),
+    ];
+    let mut side = 0;
+    for k in 1..4 {
+        if ds[k] < ds[side] {
+            side = k;
+        }
+    }
+    OldSub {
+        id: hash3(blk.id ^ 0x01D, iu as i64, iv as i64, 5),
+        d: ds[side],
+        c: DVec2::new(0.5 * (u0 + u1), 0.5 * (v0 + v1)),
+        side: side as i64,
+        along: if side < 2 { blk.v } else { blk.u },
     }
 }
 
@@ -265,6 +352,10 @@ pub struct Blk {
     pub major: bool,
     /// main streets along the block's sides (bits: x0, x1, y0, y1; grids)
     pub mj: u32,
+    /// grids: the nearest street's segment between two crossings (its hash; 0: none) and the
+    /// offset (place frame) to its middle
+    pub seg: u64,
+    pub smid: DVec2,
 }
 
 /// What a position of a place shows (`place_eval`).
@@ -542,6 +633,26 @@ pub fn district_pattern(pl: &Pl, point: DVec2, id: u64) -> (u32, u32, bool) {
     (pattern, zd, ind)
 }
 
+/// The distance from `q` to the edge of an industrial estate on the town's grid where `q` lies
+/// beside one (1e9: none): `Dist::nbind` without the rest of the district (round 12: the whole
+/// district evaluated again at each block's centre cost ~2 s of pass B's compile time).
+pub fn nbind_at(pl: &Pl, q: DVec2) -> f64 {
+    if pl.form != form::CITY as u32 || pl.level < 2 || !shared_industry(pl) {
+        return 1e9;
+    }
+    let dcell = [400.0, 400.0, 600.0, 1000.0, 1400.0][pl.level as usize];
+    let wl = 0.3 * dcell;
+    let qd = q
+        + DVec2::new((q.y / wl + 6.0 * u01k(pl.seed, 51)).sin(), (q.x / (1.17 * wl) + 6.0 * u01k(pl.seed, 52)).sin()) * (0.16 * dcell)
+        + DVec2::new((q.y / (0.4 * wl) + 6.0 * u01k(pl.seed, 54)).sin(), (q.x / (0.43 * wl) + 6.0 * u01k(pl.seed, 55)).sin()) * (0.045 * dcell);
+    let dc = worley2(pl.seed ^ 0xD15, qd, dcell, 0.85);
+    if district_pattern(pl, dc.point, dc.id).0 == pat::GRID && district_pattern(pl, dc.point2, dc.id2).0 == pat::INDUSTRIAL {
+        worley2_edge_dist(&dc, qd)
+    } else {
+        1e9
+    }
+}
+
 /// The district at `q` (relative distance `rel_here` at the sample).
 pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
     let fm = pl.form;
@@ -633,26 +744,6 @@ pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
             pat::INFORMAL => {
                 b = 60.0 + 20.0 * u2;
                 sw = 2.3;
-/// The distance from `q` to the edge of an industrial estate on the town's grid where `q` lies
-/// beside one (1e9: none): `Dist::nbind` without the rest of the district (round 12: the whole
-/// district evaluated again at each block's centre cost ~2 s of pass B's compile time).
-pub fn nbind_at(pl: &Pl, q: DVec2) -> f64 {
-    if pl.form != form::CITY as u32 || pl.level < 2 || !shared_industry(pl) {
-        return 1e9;
-    }
-    let dcell = [400.0, 400.0, 600.0, 1000.0, 1400.0][pl.level as usize];
-    let wl = 0.3 * dcell;
-    let qd = q
-        + DVec2::new((q.y / wl + 6.0 * u01k(pl.seed, 51)).sin(), (q.x / (1.17 * wl) + 6.0 * u01k(pl.seed, 52)).sin()) * (0.16 * dcell)
-        + DVec2::new((q.y / (0.4 * wl) + 6.0 * u01k(pl.seed, 54)).sin(), (q.x / (0.43 * wl) + 6.0 * u01k(pl.seed, 55)).sin()) * (0.045 * dcell);
-    let dc = worley2(pl.seed ^ 0xD15, qd, dcell, 0.85);
-    if district_pattern(pl, dc.point, dc.id).0 == pat::GRID && district_pattern(pl, dc.point2, dc.id2).0 == pat::INDUSTRIAL {
-        worley2_edge_dist(&dc, qd)
-    } else {
-        1e9
-    }
-}
-
                 jit = 0.45;
                 warp = 9.0;
                 w2cell = 7.5;
@@ -725,6 +816,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     // (the old core of a city of an old culture: its grid bent, its streets narrower, lanes in
     // its blocks; fading into the grid over a band)
     let oldk = if pattern == pat::GRID { old_core(pl, q) } else { 0.0 };
+    let oldg = pattern == pat::GRID && old_near(pl, q);
     let sw = sw * (1.0 - 0.4 * oldk);
     o.zone = z;
     o.pattern = pattern;
@@ -775,19 +867,26 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         let main_x = near_x.rem_euclid(4) == 0 && pattern == pat::GRID;
         let main_y = near_y.rem_euclid(4) == 0 && pattern == pat::GRID;
         let (swx, swy) = (if main_x { sw * 1.5 } else { sw }, if main_y { sw * 1.5 } else { sw });
-        if dx - swx < dy - swy {
+        // (the street's segment between two crossings: streets end at crossings, all or nothing;
+        // decided per block they ended mid-block in empty stubs, or one half of their width, fp_town)
+        let mid = if dx - swx < dy - swy {
             blk.ds = dx;
             blk.sw = swx;
             blk.along = qr.y;
             blk.sid = hash2(sd ^ 0x1A, 0, near_x);
             blk.major = main_x;
+            blk.seg = hash2(blk.sid, 3, biy);
+            DVec2::new(if near_x > bix { bsx - bqx } else { -bqx }, 0.5 * bsy - bqy)
         } else {
             blk.ds = dy;
             blk.sw = swy;
             blk.along = qr.x;
             blk.sid = hash2(sd ^ 0x1A, 1, near_y);
             blk.major = main_y;
-        }
+            blk.seg = hash2(blk.sid, 4, bix);
+            DVec2::new(0.5 * bsx - bqx, if near_y > biy { bsy - bqy } else { -bqy })
+        };
+        blk.smid = rot2(mid, -theta);
         blk.id = hash3(sd, bix, biy, 7);
         let mjl = |i: i64| (pattern == pat::GRID && i.rem_euclid(4) == 0) as u32;
         blk.mj = mjl(bix) | mjl(bix + m) << 1 | mjl(biy) << 2 | mjl(biy + m) << 3;
@@ -847,8 +946,6 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     // ---- the cellular layouts (one W2 for all of them)
     let mut wc = Cell2 { id: 0, point: DVec2::ZERO, f1: 0.0, f2: 0.0, id2: 0, point2: DVec2::ZERO };
     let mut qw = q;
-    // (the old core's lanes: a W2 of 36-48 m)
-    let w2cell = if oldk > 0.0 { 36.0 + 12.0 * u01k(did, 15) } else { w2cell };
     if w2cell > 0.0 {
         if pattern == pat::ORGANIC {
             qw = q + DVec2::new((q.y / (1.7 * w2cell) + 6.0 * u01k(did, 11)).sin(), (q.x / (1.9 * w2cell) + 6.0 * u01k(did, 12)).sin()) * (0.22 * w2cell);
@@ -881,7 +978,13 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     // (the threshold varies by block: a town ended in a staircase along its street grid)
     let edge_thr = 0.42 + 0.1 * (u01k(blk.id, 31) - 0.5);
     // (main streets run on beyond the town's edge with houses along them: ribbons)
-    let street_ok = dens_here > edge_thr - if blk.major { 0.18 } else { 0.0 };
+    // (grids: by the street's segment, at its middle)
+    let street_ok = if blk.seg != 0 && fm == form::CITY as u32 {
+        let ds = density(pl, rel0(pl, q + blk.smid) / (1.0 + e.n)) * dmul;
+        ds > 0.42 + 0.1 * (u01k(blk.seg, 31) - 0.5) - if blk.major { 0.04 } else { 0.0 }
+    } else {
+        dens_here > edge_thr - if blk.major { 0.18 } else { 0.0 }
+    };
     let art_hw = [3.5, 3.5, 5.0, 6.0, 7.5][pl.level as usize];
     let has_streets = !matches!(pattern, pat::DISPERSED | pat::KRAAL);
     if art < art_hw + 2.0 * fw && dens_here > 0.35 {
@@ -1258,28 +1361,40 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
             _ => {
                 if matches!(pattern, pat::DISPERSED | pat::KRAAL) {
                     // handled below (W2 units)
-                } else if oldk > 0.0 && u01k(blk.id, 77) < oldk {
-                    // the old core: the block cut by lanes (the W2 cells) into small irregular
-                    // blocks, terraced houses 9-13 m deep along the streets and lanes, courtyards
-                    // inside, a small square here and there
-                    let ed = worley2_edge_dist(&wc, qw);
-                    let sh = wc.id ^ blk.id;
-                    let lane_hw = 1.4 + 0.8 * u01k(blk.id, 78);
-                    let db = blk.u.min(blk.v).min(blk.bw - blk.u).min(blk.bd - blk.v);
-                    let dsub = (ed - lane_hw).min(db);
-                    let depthb = 9.0 + 4.0 * u01k(sh, 2);
-                    lot_id = sh;
+                } else if let Some(os) = if oldg {
+                    // (by small block, from the share at its centre: the quarter fades into the grid
+                    // over a band, its outline irregular; whole blocks drew a hard star of
+                    // W2 cells, town@type)
+                    let os = old_sub(&blk);
+                    (u01k(os.id, 77) < old_core(pl, q + rot2(os.c - ublk, -theta))).then_some(os)
+                } else {
+                    None
+                } {
+                    // the old core: the block cut by lanes into small blocks, terraced houses
+                    // 9-13 m deep along the streets and lanes, courtyards inside, a small square
+                    // here and there
+                    let sh = os.id;
+                    let dsub = os.d;
+                    let depthb = 8.0 + 6.0 * u01k(sh, 2);
+                    // (houses of 6-11 m frontage along the edge, each its own height and roof: rows
+                    // of one roof read as stamped perimeter blocks)
+                    let uw = 6.0 + 5.0 * u01k(sh, 12);
+                    let hu = hash3(sh ^ 0x40F, os.side, (os.along / uw).floor() as i64, 1);
+                    lot_id = hu;
                     cov_lot = 1.0;
-                    col = mixc(mixc(yard, c_paving(), 0.45), srgb(84.0, 112.0, 60.0), 0.2 + 0.3 * e.moist.clamp(0.0, 1.0));
+                    // (courtyards of gardens and trees, not pale paving)
+                    col = mixc(mixc(yard, c_paving(), 0.3), srgb(70.0, 96.0, 52.0), 0.35 + 0.3 * e.moist.clamp(0.0, 1.0));
                     cls = if z == zone::CBD { crate::landcover::COMMERCIAL } else { crate::landcover::RESIDENTIAL };
                     let square = u01k(sh, 1) < 0.07;
-                    let hb = 3.0 * (3.0 + 2.0 * u01k(sh, 3)) * if z == zone::CBD { 1.25 } else { 1.0 };
-                    let flat = u01k(sh, 6) < 0.2;
+                    // (a big city's quarter 4-7 storeys: a low patch beside the towers read as a hole)
+                    let hb = 3.0 * if pl.level >= 3 { 4.0 + 3.0 * u01k(sh, 3) } else { 3.0 + 2.0 * u01k(sh, 3) } * if z == zone::CBD { 1.25 } else { 1.0 };
+                    let flat = u01k(sh, 6) < 0.06;
                     let frac = if square { 0.0 } else { 0.7 };
                     lot_mean = Some((col, frac, hb * frac));
+                    let hb = hb + 3.0 * ((u01k(hu, 1) * 2.99).floor() - 1.0) * 0.8;
                     col = mixc(col, c_paving() * 0.9, aa(-dsub, fw).max(if square { 1.0 } else { 0.0 }));
                     // (the warm middle of the culture's pitched roofs: tiles, not the dark slates)
-                    rf = (pl.arch, 0.25 + 0.5 * u01k(sh, 9), flat, 0.9 + 0.2 * u01k(sh, 11));
+                    rf = (pl.arch, 0.2 + 0.6 * u01k(hu, 9), flat, 0.86 + 0.28 * u01k(hu, 11));
                     let dr = dsub.min(depthb - dsub);
                     let ins = if square { 0.0 } else { aa(dr, fw) };
                     if ins > 0.0 {
@@ -1298,7 +1413,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         // courtyard trees
                         let tc = (qw / 10.0).floor();
                         let th = hash2(sh ^ 0xC07, tc.x as i64, tc.y as i64);
-                        if u01k(th, 1) < 0.2 {
+                        if u01k(th, 1) < 0.35 {
                             let tp = (tc + 0.5 + 0.4 * (DVec2::new(u01k(th, 2), u01k(th, 3)) - 0.5)) * 10.0;
                             tree = aa(2.6 + 1.2 * u01k(th, 4) - (qw - tp).length(), fw);
                             tree_h = 8.0 + 5.0 * u01k(th, 5);
@@ -1350,11 +1465,18 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         || (blk.mj & 2 != 0 && lr[2] >= blk.bw)
                         || (blk.mj & 4 != 0 && lr[1] <= 0.0)
                         || (blk.mj & 8 != 0 && lr[3] >= blk.bd);
-                    let thr = edge_thr - 0.16 * u01k(lh, 33) - if on_major { 0.22 } else { 0.0 };
+                    let thr = edge_thr - 0.16 * u01k(lh, 33) - if on_major { 0.16 } else { 0.0 };
                     let edge = if fm == form::CITY as u32 { smoothstep(thr, thr + 0.1, dl).max(0.22 * smoothstep(thr - 0.14, thr - 0.04, dl)) } else { 1.0 };
                     // (within the streets most lots are built: suburbs at the old 55-75 % read
                     // as sparse next to v0.2.0's dense blocks; beyond them houses stay few)
                     let occ = lerp(dl.powf(0.7) * 1.05, dl.powf(0.35) * 1.1, smoothstep(0.35, 0.5, dl));
+                    // (round 12: the lots along the streets of the edge and along the ribbons mostly
+                    // built: streets between empty lots read as stubs, fp_town)
+                    let occ = if fm == form::CITY as u32 {
+                        occ.max(0.88 * smoothstep(0.32, 0.42, dl)).max(if on_major { 0.85 * smoothstep(thr, thr + 0.06, dl) } else { 0.0 })
+                    } else {
+                        occ
+                    };
                     let built = u01k(lh, 3) < occ * edge;
                     // typology
                     let a = pl.arch;
