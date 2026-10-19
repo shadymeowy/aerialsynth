@@ -519,10 +519,14 @@ fn layer_zonal(s: ptr<function, Stack>) {
     let cover = smoothstep1(0.08, 0.45, wet + 0.25 * patchv + 0.2 * land_n) * smoothstep1(-9.0, -1.0, temp);
     let semi = smoothstep1(0.02, 0.12, wet) * (1.0 - smoothstep1(0.3, 0.45, wet)) * smoothstep1(-1.0, 4.0, temp);
     let b5 = band(8.0, gsd);
-    var cover_px = cover + 0.17 * semi * (1.0 - cover);
+    var tm = 0.17;
+    if (semi > 0.0) {
+        tm = 0.17 * (1.0 + 0.9 * semi_clumps(p, gsd));
+    }
+    var cover_px = cover + tm * semi * (1.0 - cover);
     if (semi > 0.0 && b5 > 0.0) {
         let n = perlin3(0x7C55lu, p * (1.0lf / 8.0lf)) + 0.5 * perlin3(0x7C56lu, p * (1.0lf / 3.0lf)) * band(3.0, gsd);
-        cover_px = clamp(cover + semi * (2.4 * cover * (1.0 - cover) * n + 0.6 * smoothstep1(-0.1, 0.6, n) * (1.0 - cover)) * b5 + 0.17 * semi * (1.0 - cover) * (1.0 - b5), 0.0, 1.0);
+        cover_px = clamp(cover + semi * (2.4 * cover * (1.0 - cover) * n + 0.6 * smoothstep1(-0.1, 0.6, n) * (1.0 - cover)) * b5 + tm * semi * (1.0 - cover) * (1.0 - b5), 0.0, 1.0);
     }
     var col = mixc(soil, grass, cover_px) * (1.0 + 0.16 * land_n);
     var cls = select(LC_BARE, LC_GRASS, cover > 0.5);
@@ -885,7 +889,7 @@ fn layer_canopy(s: ptr<function, Stack>) {
     let shrub_clim = smoothstep1(0.04, 0.26, wet) * (1.0 - smoothstep1(0.6, 0.8, wet)) * smoothstep1(2.0, 10.0, temp);
     let shrub_patch = max(smoothstep1(-0.2, 0.5, (*s).pf.f[PF_PATCH] + 0.4 * (*s).pf.f[PF_LAND]), 0.6 * (1.0 - smoothstep1(0.2, 0.35, wet)));
     let shrub = clamp((0.45 * shrub_clim * shrub_patch * (1.0 - forest) * max(m.natural_ok, 0.4 * m.rock) * (1.0 - m.field_cov) * sveg(s, VEG_SHRUBS) * style.veg.z + gully_scrub)
-        * td * m.veg, 0.0, 0.7);
+        * td * m.veg * (1.0 + 0.9 * (1.0 - smoothstep1(0.3, 0.45, wet)) * semi_clumps(p, gsd)), 0.0, 0.7);
     var stand = (*s).pf.stand;
     if ((*s).pf.has_stand == 0u) {
         stand = stand_id(p, vec3<f32>((*s).pf.f[13], (*s).pf.f[14], (*s).pf.f[15]));
@@ -1280,4 +1284,14 @@ fn stack_surface(sp: ptr<function, Stack>) -> Surface {
     o.lit = (*sp).lit;
     o.emission = (*sp).emission;
     return o;
+}
+
+/// `ground::semi_clumps`.
+fn semi_clumps(p: vec3<f64>, gsd: f32) -> f32 {
+    var v = 1.1 * perlin3(0x5B3lu, p * (1.0lf / 250.0lf)) * band(250.0, gsd) + 0.8 * perlin3(0x5B1lu, p * (1.0lf / 90.0lf)) * band(90.0, gsd);
+    let b = band(34.0, gsd);
+    if (b > 0.0) {
+        v += 0.45 * perlin3(0x5B2lu, p * (1.0lf / 34.0lf)) * b;
+    }
+    return clamp(v, -1.0, 1.0);
 }

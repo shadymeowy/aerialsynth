@@ -193,7 +193,10 @@ pub fn layer(s: &mut crate::stack::Stack) {
         ((0.45 * shrub_clim * shrub_patch * (1.0 - forest) * m.natural_ok.max(0.4 * m.rock) * (1.0 - m.field_cov) * s.veg(|v| v.shrubs) * style.shrubs
             + gully_scrub)
             * veg.tree_density
-            * m.veg)
+            * m.veg
+            // (round 12: in clumps over tens to hundreds of metres in dry land: the far semi-arid
+            // plain read as bare, a16)
+            * (1.0 + 0.9 * (1.0 - smoothstep(0.3, 0.45, wet)) * crate::layers::ground::semi_clumps(p, gsd)))
             .clamp(0.0, 0.7);
     // forest stands (~240 m, irregular borders): each of its own age (crown size, height), tone
     // and conifer / broadleaf mix, with small canopy gaps
