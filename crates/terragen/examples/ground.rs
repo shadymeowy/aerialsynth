@@ -2,20 +2,25 @@
 //! `surface ground water_kind` per line on stdout (m above the ellipsoid); with `--cover`, the
 //! land-cover class name and the height of what stands on the ground (trees, buildings; m) at
 //! the given gsd as fourth and fifth columns (CPU, slower). An optional positional argument sets
-//! the world seed (default config otherwise). Used by `showcase/route.py` for the airliner's
-//! airports and terrain clearance.
+//! the world seed; `--generator classic|next` the generator (default: the default config's,
+//! classic, the one `terrain run` uses unless `world.generator` says otherwise). Used by
+//! `showcase/route.py` for the airliner's airports and terrain clearance.
 //!
-//!     echo "47.0 8.0" | cargo run --release -p terragen --example ground -- [SEED] [--cover]
+//!     echo "47.0 8.0" | cargo run --release -p terragen --example ground -- [SEED] [--cover] [--generator classic|next]
 use std::io::{BufRead, Write};
 
 fn main() -> anyhow::Result<()> {
     let mut cfg = terragen::Config::default();
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let cover = args.iter().any(|a| a == "--cover");
-    if let Some(seed) = args.iter().find(|a| *a != "--cover") {
-        cfg.seed = seed.parse()?;
+    let mut cover = false;
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--cover" => cover = true,
+            "--generator" => cfg.generator = args.next().ok_or_else(|| anyhow::anyhow!("--generator needs classic or next"))?.parse()?,
+            _ => cfg.seed = a.parse()?,
+        }
     }
-    let g = terragen::NextGenerator::new(cfg);
+    let g = terragen::Generator::new(cfg);
     let mut pts = Vec::new();
     for line in std::io::stdin().lock().lines() {
         let v: Vec<f64> = line?.split_whitespace().map(|s| s.parse()).collect::<Result<_, _>>()?;

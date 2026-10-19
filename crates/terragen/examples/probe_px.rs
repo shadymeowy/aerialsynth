@@ -1,4 +1,5 @@
-//! Terrain / climate values of the default world at points:
+//! Terrain / climate values of the next generator's world (`world.generator: next`; the default
+//! world is classic) at points:
 //!
 //!     cargo run --release -p terragen --example probe_px -- LAT LON [GSD_M]
 //!     cargo run --release -p terragen --example probe_px -- scan LAT0 LAT1 LON0 LON1 STEP_DEG

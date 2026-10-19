@@ -1,5 +1,5 @@
-//! Per-zoom benchmark and stills of fixed places (the performance budget of
-//! `docs/design/terrain-next.md` §9, and a visual before / after check).
+//! Per-zoom benchmark and stills of fixed places of the next generator (`world.generator: next`;
+//! the performance budget of `docs/design/terrain-next.md` §9, and a visual before / after check).
 //!
 //!     cargo run --release -p terragen --example zoom_bench -- [cpu|gpu] [OPTIONS]
 //!
