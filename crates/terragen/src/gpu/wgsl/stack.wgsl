@@ -720,7 +720,7 @@ fn layer_agriculture(s: ptr<function, Stack>) {
     if (b70 > 0.0) {
         ft += 0.3 * perlin3(0x70E4lu, (*s).c.p * (1.0lf / 70.0lf)) * b70;
     }
-    var ly = layer_paint(a, toned(fr.col, ft, 0.6), cls);
+    var ly = layer_paint(a, toned(fr.col, ft, 1.0), cls);
     ly.dh = fr.h - 0.6 * m.micro;
     ly.hmode = HM_ADD;
     if (cls == LC_CROP && fr.id != 0lu) {
