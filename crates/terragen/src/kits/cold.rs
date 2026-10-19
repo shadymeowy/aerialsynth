@@ -1017,7 +1017,8 @@ fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
             x += 0.8 * perlin3(SEED_SNOW + 4, p / 4.0) * b4 + 0.4 * perlin3(SEED_SNOW + 5, p / 1.3) * band(1.3, gsd);
         }
     }
-    let mut cov = smoothstep(-0.55, -1.25, x) * (1.0 - smoothstep(0.75, 1.3, s.l.slope));
+    // (snow holds on slopes to ~50°: cut from ~37° the high faces were grey rock, alpine_south@type)
+    let mut cov = smoothstep(-0.55, -1.25, x) * (1.0 - smoothstep(0.95, 1.5, s.l.slope));
     if cov <= 0.0 {
         return;
     }

@@ -660,7 +660,7 @@ fn cold_snow(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
             x += 0.8 * perlin3(COLD_SEED_SNOW + 4lu, p * (1.0lf / 4.0lf)) * b4 + 0.4 * perlin3(COLD_SEED_SNOW + 5lu, p * (1.0lf / 1.3lf)) * band(1.3, gsd);
         }
     }
-    var cov = smoothstep1(-0.55, -1.25, x) * (1.0 - smoothstep1(0.75, 1.3, (*s).l.slope));
+    var cov = smoothstep1(-0.55, -1.25, x) * (1.0 - smoothstep1(0.95, 1.5, (*s).l.slope));
     if (cov <= 0.0) {
         return;
     }

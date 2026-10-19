@@ -735,6 +735,10 @@ fn relief_core(c: Ctx, m: Macro, pre: Pre) -> Relief {
     let cl = climate(m, c.lat, max(smooth_h, 0.0));
     let temp0 = cl.x;
     let moist = cl.y;
+    let firn = smoothstep1(-4.0, -10.0, temp0);
+    if (firn > 0.0) {
+        h -= firn * (0.6 * gully + 0.4 * micro);
+    }
 
     // mesas (arid terraces)
     let arid = 1.0 - smoothstep1(0.18, 0.42, moist);

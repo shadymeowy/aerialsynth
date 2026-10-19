@@ -1124,6 +1124,12 @@ impl World {
 
         // ---- climate (from smooth elevation, so it does not alias)
         let (temp0, moist) = self.climate(m, ctx.lat, smooth.max(0.0));
+        // (round 12: firn and perennial snow fill the gullies and the micro relief of the highest
+        // ranges: ribbed grey faces where v0.2.0 shows smooth snowfields, alpine_south@type)
+        let firn = smoothstep(-4.0, -10.0, temp0);
+        if firn > 0.0 {
+            h -= firn * (0.6 * gully + 0.4 * micro);
+        }
 
         // ---- mesas (arid terraces)
         let arid = 1.0 - smoothstep(0.18, 0.42, moist);
