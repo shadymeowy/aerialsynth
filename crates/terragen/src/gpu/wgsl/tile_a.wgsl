@@ -70,7 +70,7 @@ const NODE_PRE: u32 = 29u;
 const NODE_NPRE: u32 = 37u;
 const NODE_PF: u32 = 66u;
 /// floats per pass-A pixel: Macro (29), Relief (11)
-const PIX_F: u32 = 40u;
+const PIX_F: u32 = 41u;
 const PIX_REL: u32 = 29u;
 /// the `Pre` fields a node holds (P_* flags, as f32 bits)
 const NODE_FLAGS: u32 = 82u;
@@ -439,6 +439,7 @@ fn pass_a1(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocat
         pix_a[b + PIX_REL + 8u] = rl.mesa;
         pix_a[b + PIX_REL + 9u] = rl.sand;
         pix_a[b + PIX_REL + 10u] = rl.gully_n;
+        pix_a[b + PIX_REL + 11u] = rl.dv;
         atomicMax(&wg_hmax, orderable(rl.h));
         lake_requests(ctx, m, pre, rl, li);
     } else {
@@ -568,6 +569,7 @@ fn pix_relief(b: u32) -> Relief {
     r.mesa = pix_a[b + PIX_REL + 8u];
     r.sand = pix_a[b + PIX_REL + 9u];
     r.gully_n = pix_a[b + PIX_REL + 10u];
+    r.dv = pix_a[b + PIX_REL + 11u];
     return r;
 }
 

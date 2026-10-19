@@ -354,14 +354,21 @@ pub fn relief_order() -> impl Iterator<Item = &'static Kit> {
     })
 }
 
-/// Run the kits' relief operators.
+/// Run the kits' relief operators; returns the volcanic kit's share of the change (the core's
+/// valley carve keeps the cones on the valley walls: `World::terrain_impl`).
 #[inline]
-pub fn relief(w: &crate::world::World, r: &ReliefIn, h: &mut f64) {
+pub fn relief(w: &crate::world::World, r: &ReliefIn, h: &mut f64) -> f64 {
+    let mut dv = 0.0;
     for k in relief_order() {
         if let Some(f) = k.relief {
+            let h0 = *h;
             f(w, r, h);
+            if std::ptr::eq(k, &volcanic::KIT) {
+                dv = *h - h0;
+            }
         }
     }
+    dv
 }
 
 /// Does a kit have a carve hook?
@@ -413,15 +420,19 @@ pub fn wgsl_relief() -> String {
     }
     s.push_str(&format!("const KITS_LEGACY_TOWNS: bool = {};\n", legacy_towns()));
     s.push_str(&format!("const KITS_LEGACY_ROADS: bool = {};\n", legacy_roads()));
-    s.push_str("fn kits_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {\n");
+    s.push_str("fn kits_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) -> f32 {\n");
     // (the module's instance lists of the point: `relief_lists`, gpu::sources)
-    s.push_str("    relief_lists(c.p, r.blk);\n");
+    s.push_str("    relief_lists(c.p, r.blk);\n    var dv = 0.0;\n");
     for k in relief_order() {
         if k.relief.is_some() {
-            s.push_str(&format!("    {}_relief(c, m, r, h);\n", k.name));
+            if std::ptr::eq(k, &volcanic::KIT) {
+                s.push_str(&format!("    let hv0 = *h;\n    {}_relief(c, m, r, h);\n    dv = *h - hv0;\n", k.name));
+            } else {
+                s.push_str(&format!("    {}_relief(c, m, r, h);\n", k.name));
+            }
         }
     }
-    s.push_str("}\n");
+    s.push_str("    return dv;\n}\n");
     s.push_str("fn kits_astamp(c: Ctx, st: Sink, ai: AStampIn, h: ptr<function, f32>) {\n");
     for k in KITS {
         if k.astamp.is_some() {

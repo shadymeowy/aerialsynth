@@ -1156,9 +1156,10 @@ impl World {
         }
 
         // ---- the kits' relief operators (volcanoes, karst, dunes …)
+        let mut dv = 0.0;
         if !crate::kits::KITS.is_empty() {
             let rin = crate::kits::ReliefIn { ctx, m, temp: temp0, moist, mountain, sand, mesa, smooth, inst: near_segs.map(|n| n.inst) };
-            crate::kits::relief(self, &rin, &mut h);
+            dv = crate::kits::relief(self, &rin, &mut h);
         }
 
         // ---- rivers: major + minor networks carve valleys, set water level
@@ -1293,7 +1294,11 @@ impl World {
                     } else {
                         wall
                     };
-                    let mut carved = h0.min(lerp(target, h0, wall));
+                    // (the volcanic relief `dv` rides on the valley's walls and floor instead of
+                    // being squeezed with them, fading out at the channel: a big valley flattened
+                    // the cinder cones in it into dark blobs of scoria, braided)
+                    let keep = smoothstep(hw, hw + 60.0, ad);
+                    let mut carved = h0.min(lerp(target, h0 - dv, wall) + dv * keep);
                     // (a kit's fine erosion texture on the walls: rills and rough rock)
                     if cv.rough > 0.0 && h0 > target {
                         // (resolved by 5 pixels: finer, it drew the far walls hairy, round 12)

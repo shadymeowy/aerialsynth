@@ -642,6 +642,8 @@ struct Relief {
     mesa: f32,
     sand: f32,
     gully_n: f32,
+    /// the volcanic kit's share of the kits' relief (`kits::relief`)
+    dv: f32,
 }
 
 fn relief(c: Ctx, m: Macro, pre: Pre, blk: u32) -> Relief {
@@ -759,6 +761,7 @@ fn relief_core(c: Ctx, m: Macro, pre: Pre) -> Relief {
     }
 
     o.h = h;
+    o.dv = 0.0;
     o.smooth_h = smooth_h;
     o.temp0 = temp0;
     o.moist = moist;
@@ -783,9 +786,10 @@ fn relief_kits(c: Ctx, m: Macro, r: Relief, blk: u32) -> Relief {
     rin.smooth_h = r.smooth_h;
     rin.blk = blk;
     var h = r.h;
-    kits_relief(c, m, rin, &h);
+    let dv = kits_relief(c, m, rin, &h);
     var o = r;
     o.h = h;
+    o.dv = dv;
     return o;
 }
 
@@ -1182,7 +1186,8 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                     }
                     wall = w;
                 }
-                var carved = min(h0, lerp(tgt, h0, wall));
+                let keep = smoothstep1(hwc, hwc + 60.0, adc);
+                var carved = min(h0, lerp(tgt, h0 - r.dv, wall) + r.dv * keep);
                 if (cv.rough > 0.0 && h0 > tgt) {
                     let rr = (1.0 - abs(perlin3(0x0C4A9E01lu, p / 13.0lf))) * band(13.0, 2.5 * gsd) * 0.65 + (1.0 - abs(perlin3(0x0C4A9E02lu, p / 5.0lf))) * band(5.0, 2.5 * gsd) * 0.35;
                     carved -= cv.rough * 4.0 * wall * (1.0 - wall) * rr;
