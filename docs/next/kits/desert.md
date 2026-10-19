@@ -181,3 +181,6 @@ desert_coast@type).
 
 Polish round 10: barchans are half as high (9–15 % of their radius: bright lit crests and slip-face rims, a11); washes
 are not drawn along the streams of the arid canyon plateaus (canyon@type).
+
+Polish round 11: barchans are fewer (60 %) and of sand (30 % of the pavement's tone, was 50 %): crescents of the
+pavement's tone showed only their lit crests, as outlines (a11).
