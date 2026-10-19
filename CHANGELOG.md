@@ -86,6 +86,15 @@
   volcanic relief kept in big valleys; firn-filled gullies under perennial snow and snow on steeper
   slopes; polar moss and lichen over polygons with later snowbeds; fewer barchans; semi-arid ground
   in clumps; a lighter pass-B stage (light industry beside estates no longer re-evaluates the district).
+- `next` polish round 13: no "bunch of small trees scattered" over open land: trees in groves, clumps
+  and closed stands (a pixel-filtered clump density, `noise::clumped`), lone trees only in savannas,
+  shrubs, tussocks, stones and spires drawn one by one only from ~4–10 pixels (their mean below),
+  shaded gaps in closed canopies (isolated dark dots of the audit 2.24× classic's → 0.92×); a macro
+  tone over 600 m – 1.5 km on the ground and in fields; less orange night lamps (38 % white LED);
+  softer polygon troughs, shallower crevasses, small streams snowed over in winter; tower karst walls
+  bare in streaks between vegetation; airports graded over 220 m and fading into the land, no tracks
+  across them; drained mires in farmland; towers in six tints; the kit places of the forest-strip
+  village and the rice paddies moved to where the world now has them.
 - **Optional tile layers** (tile store format 2; `next` only): `tiles.layers: [dtm, instance]`
   adds the bare ground and instance ids (building lots, fields, forest stands) to a new store;
   the viewer's map shadings *Height above ground* and *Instances* show them. Format-1 stores

@@ -724,7 +724,7 @@ pub(crate) fn kernel_parity(cases: &[(&str, &str)]) -> Option<Vec<(String, f64, 
         let m: std::collections::BTreeMap<String, serde_yaml::Value> = serde_yaml::from_str(y).unwrap();
         let k = crate::kernels::compile_params(spec, &m, mix64(0x7E57 ^ layers.len() as u64), &pal).unwrap();
         let mean = crate::kernels::calibrate(&k);
-        let li = crate::registry::LayerInst { slot: 1, k, mean, size: crate::kernels::size(&k), win: vec![], cls: 0, clear: 0.0, hmode: 0, mat: 0 };
+        let li = crate::registry::LayerInst { slot: 1, k, mean, size: crate::kernels::resolve_size(&k), win: vec![], cls: 0, clear: 0.0, hmode: 0, mat: 0 };
         layers.push(crate::registry::gpu::klayer(&li));
         ks.push((k, mean));
     }

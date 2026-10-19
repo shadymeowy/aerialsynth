@@ -189,7 +189,8 @@ fn temperate_mires(s: ptr<function, Stack>) {
     let flat = 1.0 - smoothstep1(0.02, 0.07, (*s).l.slope);
     let low = 1.0 - smoothstep1(0.3, 0.6, t.mountain);
     let region = (0.5 + 1.1 * temperate_site_boreal(s) + 0.7 * temperate_site_oceanic(s)) * (0.5 + 0.8 * temperate_eco_u2(s));
-    let amount = min(0.4 * wet * cool * flat * low * region, 0.8);
+    let drained = 1.0 - 0.85 * smoothstep1(0.15, 0.45, s_agri(s));
+    let amount = min(0.4 * wet * cool * flat * low * region * drained, 0.8);
     if (amount <= 0.01) {
         return;
     }

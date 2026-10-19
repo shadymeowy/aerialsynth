@@ -253,6 +253,57 @@ pub fn strata(z: f64, t: f64) -> (i64, f64, f64, f64) {
     (j as i64, ((z - lo) / (hi - lo)).clamp(0.0, 1.0), lo, hi - lo)
 }
 
+/// Clumped density (round 13): the crowns of a layer gather in groves, clumps and closed
+/// stands with open ground between them, by `c` (0: the uniform scatter, 1: all in clumps).
+/// Lone crowns of 1–3 pixels, each with its own shading and cast shadow, read as a scatter of
+/// dark dots over open land (the "bunch of small trees scattered" look); real open woodland,
+/// forest edges, groves and shrubland are clumped. The density `d` at `p` goes to a full stand
+/// where the clump field (160 and 34 m) is below its `d` quantile and to none where above, with
+/// a soft edge. Pixel-filtered: the octaves a pixel does not resolve (`band`) widen the edge as
+/// noise of their variance, so a coarse pixel shows the mean of its finer pixels (at the
+/// coarsest, `d`) and the density's mean over an area is kept (the field is about normal:
+/// `perlin3` has a deviation of 0.211; the logistic approximation of the normal distribution).
+/// WGSL `clumped`.
+pub fn clumped(d: f64, c: f64, p: glam::DVec3, gsd: f64) -> f64 {
+    clumped_at(d, c, clump_field(p, gsd))
+}
+
+/// The clump field of `clumped` at `p`: the resolved field in units of the whole field's
+/// deviation and the unresolved variance (`None` where no octave is resolved). One field serves
+/// several densities (`clumped_at`; WGSL `clump_field`).
+pub fn clump_field(p: glam::DVec3, gsd: f64) -> Option<(f64, f64)> {
+    // (the 34 m octave from ~8 pixels: resolved or not on both sides of zooms 13/14)
+    let (b1, b2) = (band(160.0, gsd), band(34.0, 2.0 * gsd));
+    if b1 <= 0.0 {
+        return None;
+    }
+    // (a finer octave fading out at low densities, for larger groves, moved the LOD of u_valley z11)
+    const A2: f64 = 0.8;
+    let mut r = perlin3(0xC1A7, p / 160.0) * b1;
+    if b2 > 0.0 {
+        r += A2 * perlin3(0xC1A8, p / 34.0) * b2;
+    }
+    let z = r / (0.211 * (1.0 + A2 * A2).sqrt());
+    let u2 = ((1.0 - b1 * b1) + A2 * A2 * (1.0 - b2 * b2)) / (1.0 + A2 * A2);
+    Some((z, u2))
+}
+
+/// `clumped` with its field (`clump_field`; WGSL `clumped_at`).
+pub fn clumped_at(d: f64, c: f64, field: Option<(f64, f64)>) -> f64 {
+    let Some((z, u2)) = field else { return d };
+    if c <= 0.0 || d <= 0.0 || d >= 1.0 {
+        return d;
+    }
+    // the edge's softness (deviations), the density's quantile
+    const W2: f64 = 0.22 * 0.22;
+    let q = (d / (1.0 - d)).ln() / 1.702 * (1.0 + W2).sqrt();
+    let s = 1.0 / (1.0 + (-1.702 * (q - z) / (u2 + W2).sqrt()).exp());
+    // (no thin scatter around the groves where they are resolved: single crowns at their edges)
+    let f = 1.0 - smoothstep(0.0, 0.4, u2);
+    let s = s * (1.0 - f + f * smoothstep(0.03, 0.15, s));
+    d + (s - d) * c
+}
+
 /// Band-limiting weight for a feature of wavelength `lambda` sampled with pixel size `gsd`:
 /// 1 when well resolved (lambda >= 4 gsd), 0 when below Nyquist (lambda <= 2 gsd).
 #[inline(always)]
@@ -583,6 +634,29 @@ pub fn worley2_edge_dist(c: &Cell2, q: DVec2) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `clumped` keeps the density's mean over an area (the explicit crowns at fine zooms vs the
+    /// uniform scatter at coarse ones) within a few per cent, and gathers it: most of the area
+    /// is either open or a closed stand.
+    #[test]
+    fn clumped_keeps_the_mean() {
+        let base = DVec3::new(6_371_000.0, 0.0, 0.0);
+        for gsd in [1.0, 20.0] {
+            for d in [0.04, 0.1, 0.3, 0.5, 0.7, 0.9] {
+                let (mut sum, mut open, n) = (0.0, 0.0, 40_000);
+                for j in 0..n {
+                    let h = mix64(0xC1 ^ j as u64);
+                    let p = base + DVec3::new(0.0, u01k(h, 1) * 20_000.0, u01k(h, 2) * 20_000.0);
+                    let c = clumped(d, 1.0, p, gsd);
+                    sum += c;
+                    open += if c < 0.02 { 1.0 } else { 0.0 };
+                }
+                let (m, o) = (sum / n as f64, open / n as f64);
+                eprintln!("gsd {gsd} d {d}: mean {m:.3} open {o:.2}");
+                assert!((m - d).abs() < 0.12 * d + 0.01, "gsd {gsd} d {d}: mean {m}");
+            }
+        }
+    }
 
     #[test]
     fn perlin_gradient_matches_finite_difference() {

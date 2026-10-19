@@ -373,7 +373,10 @@ fn stages_wgsl() -> String {
             steps.iter().filter(|t| t.1 == 0).flat_map(|t| kinds.iter().filter(move |p| p.0 == STEP_SLOTS[t.0 as usize]).map(|p| p.1)).collect();
         kk.sort_unstable();
         kk.dedup();
-        s += &format!("fn kernel_eval_st{si}(li: u32, i: KIn) -> KOut {{\n    let l = klayers[li];\n    let k = kp_load(li);\n    let e = kernel_resolved(k, l.sz.x, i);\n    var x = kout_none();\n");
+        // (scatter's clumps only in the stages that evaluate scatter layers: the clump field's noise
+        // in every stage grew their compile times)
+        let clump = if kk.contains(&crate::kernels::kind::SCATTER) { "kernel_clumped(k, i0)" } else { "i0" };
+        s += &format!("fn kernel_eval_st{si}(li: u32, i0: KIn) -> KOut {{\n    let l = klayers[li];\n    let k = kp_load(li);\n    let i = {clump};\n    let e = kernel_resolved(k, l.sz.x, i);\n    var x = kout_none();\n");
         if !kk.is_empty() {
             s += "    if (e > 0.0) {\n        switch k.kind {\n";
             for &kind in &kk {

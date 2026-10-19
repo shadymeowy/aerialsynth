@@ -432,7 +432,21 @@ pub fn roof_col(arch: u32, u: f64, flat: bool) -> DVec3 {
     let k = (u * 3.99) as u32;
     match arch {
         // tower glass, warehouse metal, informal sheets, white dome, temple tiles
-        20 => return mixc(srgb(70.0, 88.0, 108.0), srgb(118.0, 126.0, 134.0), u),
+        // (round 13: towers in six tints and tones, dark blue and green glass to pale concrete
+        // and bronze: one blue-grey ramp drew a uniform grey skyline, gallery g30)
+        20 => {
+            let k6 = (u * 5.99) as u32;
+            let f = u * 6.0 - k6 as f64;
+            let c = match k6 {
+                0 => srgb(52.0, 66.0, 86.0),
+                1 => srgb(64.0, 88.0, 92.0),
+                2 => srgb(96.0, 104.0, 114.0),
+                3 => srgb(108.0, 94.0, 78.0),
+                4 => srgb(150.0, 152.0, 150.0),
+                _ => srgb(184.0, 180.0, 170.0),
+            };
+            return c * (0.92 + 0.16 * f);
+        }
         21 => {
             // (matte metal and membranes: light greys, beige, a few white, weathered and blue-grey
             // ones; round 10's blue-greys over whole estates read as glass or water, town@type)
@@ -2126,7 +2140,9 @@ pub fn zone_mean(pl: &Pl, d: &Dist, moist: f64) -> (DVec3, f64) {
 /// nearest street (thinned with their energy kept where they would merge), or their mean.
 #[allow(clippy::too_many_arguments)]
 pub fn lamps(pl: &Pl, o: &Ev, dens: f64, gsd: f64, fw: f64, block: f64, resolved: f64) -> DVec3 {
-    const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.48, 0.12), DVec3::new(1.0, 0.72, 0.38), DVec3::new(0.86, 0.92, 1.0)];
+    // (round 13: sodium and amber less saturated: a garish orange night, night@type's saturation
+    // 0.59 against v0.2.0's 0.31; every lamp colour of next likewise: sodium (1, .68, .40), amber (1, .84, .64))
+    const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.68, 0.40), DVec3::new(1.0, 0.84, 0.64), DVec3::new(0.86, 0.92, 1.0)];
     // sodium share by development (and culture), white LED in CBDs and on main streets
     let sodium = 0.25 + 0.5 * (1.0 - pl.dev) * u01k(pl.seed, 20);
     let pick = |u: f64, major: bool| -> DVec3 {
@@ -2134,7 +2150,7 @@ pub fn lamps(pl: &Pl, o: &Ev, dens: f64, gsd: f64, fw: f64, block: f64, resolved
             LAMPS[2]
         } else if o.pattern == pat::INDUSTRIAL || u < sodium {
             LAMPS[0]
-        } else if u < 0.88 {
+        } else if u < 0.62 {
             LAMPS[1]
         } else {
             LAMPS[2]
@@ -2173,7 +2189,10 @@ pub fn lamps(pl: &Pl, o: &Ev, dens: f64, gsd: f64, fw: f64, block: f64, resolved
     } else if o.pattern == pat::INDUSTRIAL {
         LAMPS[0]
     } else {
-        mixc(LAMPS[1], LAMPS[0], sodium)
+        // (the mix of the lamps above: sodium, amber to 0.62, white LED beyond; round 13: 38 %
+        // white, was 12 %: an orange night, night@type)
+        let amber = (0.62 - sodium).max(0.0);
+        (LAMPS[0] * sodium + LAMPS[1] * amber + LAMPS[2] * 0.38) / (sodium + amber + 0.38)
     };
     e * lamp_res + mc * lamp_mean * (1.0 - lamp_res) * smoothstep(0.1, 0.35, dens)
 }

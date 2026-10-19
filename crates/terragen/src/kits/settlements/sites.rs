@@ -912,15 +912,21 @@ pub fn airport_px(st: &FStamp, p: DVec3, ground: f64, gsd: f64, fw: f64) -> Site
     let seed = seed_of(st.v[2], st.v[3]);
     let spacing = st.v[4] as f64;
     let side = st.v[6] as f64;
-    let margin = 120.0;
+    // (round 13: a 220 m cut-and-fill margin, the grass beyond the perimeter road fading into
+    // the land along a wavy edge, the grass toned over ~170 m: the airport sat on a flat green
+    // pad with hard straight edges, gallery g33)
+    let margin = 220.0;
     let din = (hx - q.x.abs()).min(hy - q.y.abs());
     if din <= 0.0 {
         return SitePx::default();
     }
-    let mut o = SitePx { cov: 1.0, abs: true, clear: 1.0, cls: crate::landcover::GRASS, ..Default::default() };
+    let wn = perlin3(seed ^ 0xED1, p / 170.0);
+    let edge = smoothstep(0.0, 0.8 * margin, din + 65.0 * wn);
+    let mut o = SitePx { cov: edge, abs: true, clear: edge, cls: crate::landcover::GRASS, ..Default::default() };
     // grass, mown in stripes
     let stripe = ((q.x / 18.0).floor() as i64).rem_euclid(2) as f64;
-    o.col = srgb(132.0, 146.0, 92.0) * (0.95 + 0.06 * stripe * band(18.0, gsd));
+    let tone = 1.0 + 0.12 * wn * band(170.0, gsd);
+    o.col = srgb(132.0, 146.0, 92.0) * (0.95 + 0.06 * stripe * band(18.0, gsd)) * tone;
     // graded plane, cut-and-fill margin to the ground
     let wgt = smoothstep(0.0, margin, din);
     o.dh = ground + (st.h as f64 - ground) * wgt;

@@ -22,6 +22,9 @@ pub(crate) struct TreeLayer {
     pub scale: f64,
     /// colour of the stand (species, age, health)
     pub tone: DVec3,
+    /// size factor of the crowns' resolution (1: drawn one by one from a cell of ~1.2–3
+    /// pixels; shrubs 0.4: only where their cell spans ~3–8 pixels)
+    pub resolve: f64,
 }
 
 impl SurfaceModel {
@@ -41,8 +44,9 @@ impl SurfaceModel {
             // the scenes' main high-frequency clutter, audit a26 a20 a25: their tints and rims fade in
             // up to 6 pixels; drawing them only from 1.6 pixels on moved the crossfade of the canopy's
             // heights and classes between zooms beyond the LOD tests' limits)
-            let explicit = smoothstep(1.2 * gsd, 3.0 * gsd, layer.cell);
-            let contrast = smoothstep(2.5 * gsd, 6.0 * gsd, layer.cell);
+            let rc = layer.cell * layer.resolve;
+            let explicit = smoothstep(1.2 * gsd, 3.0 * gsd, rc);
+            let contrast = smoothstep(2.5 * gsd, 6.0 * gsd, rc);
             // expected coverage when unresolved
             let mean_r = layer.cell * 0.48;
             let cov_mean = (layer.density * std::f64::consts::PI * mean_r * mean_r / (layer.cell * layer.cell)).min(1.0);
@@ -161,10 +165,11 @@ pub fn layer(s: &mut crate::stack::Stack) {
     // ~[0, 1]
     let fpu = 0.5 + 0.5 * pf.forest;
     // forests where the patch field is below the cover fraction (noisy edges, feathered over
-    // ~100 m: the trees thin out into the open land; a crisp edge drew dark forest blobs cut out
-    // of the grass), and the farmland's woodlots whatever the climate's cover (they were bare
-    // meadow with a few trees where the forest share is low)
-    let forest = smoothstep(-0.09, 0.09, base_cover - fpu).max(m.woodlot * smoothstep(0.05, 0.4, s.agri()));
+    // ~70 m: the trees thin out into the open land in clumps; a crisp edge drew dark forest blobs
+    // cut out of the grass; round 13: a 100 m feather of lone crowns dotted it), and the
+    // farmland's woodlots whatever the climate's cover (they were bare meadow with a few trees
+    // where the forest share is low)
+    let forest = smoothstep(-0.06, 0.06, base_cover - fpu).max(m.woodlot * smoothstep(0.05, 0.4, s.agri()));
     // savanna / steppe scattered trees, groves
     let savanna = smoothstep(0.18, 0.35, wet) * (1.0 - smoothstep(0.55, 0.7, wet)) * smoothstep(12.0, 20.0, temp) * 0.12 * s.veg(|v| v.savanna);
     let groves = 0.04 * smoothstep(0.15, 0.3, wet) * s.veg(|v| v.groves);
@@ -217,19 +222,37 @@ pub fn layer(s: &mut crate::stack::Stack) {
     let tropic = (smoothstep(19.0, 25.0, temp) * smoothstep(0.55, 0.75, wet) + s.veg(|v| v.tropic)).clamp(0.0, 1.0);
     let dry = 1.0 - smoothstep(0.3, 0.5, wet);
     let tall = 0.5 + 0.5 * st[3] + s.veg(|v| v.tall);
+    // (round 13) groves, clumps and closed stands with open ground between them instead of a
+    // uniform scatter of lone crowns; the savanna's own trees stay mostly lone, shrubs mottle
+    // the ground in patches
+    // (lone trees only in the savanna biomes: the warm climate's savanna share dotted steppe and
+    // desert with lone trees, audit a14 a21)
+    let sav_biome = smoothstep(1.05, 1.5, s.veg(|v| v.savanna));
+    let sav_frac = if dens > 0.0 { (dens_sav / dens).min(1.0) * sav_biome } else { 0.0 };
+    // (dense forest keeps its canopy: clearings cut by the clumps read as moth-eaten; and the
+    // heights of clumped closed stands, resolved or a mean, broke the LOD at the airport)
+    let cf = clump_field(p, gsd);
+    let dens_c = clumped_at(dens, 0.9 * (1.0 - 0.7 * sav_frac) * (1.0 - smoothstep(0.3, 0.75, dens)), cf);
+    let dens_sav_c = clumped_at(dens_sav, 0.9 - 0.6 * sav_biome, cf);
+    let shrub_c = clumped_at(shrub, 0.6, cf);
+    // (the species of a mixed stand in patches, not tree by tree: dark spruces dotted among pale
+    // broadleaves, audit a25; conifers where the clump field is high, on the stands' sparser
+    // ground: one field, a second one grew the pass's compile time)
+    let conifer_c = clumped_at(conifer, 1.0, cf.map(|(z, u2)| (-z, u2)));
     let reg = &s.sm.registry;
     let crowns = &reg.biomes[s.bio.a as usize].crowns;
-    let mut layers = [TreeLayer { cell: 1.0, seed: 0, density: 0.0, closure: 0.0, height: 0.0, color: DVec3::ZERO, shape: 0, scale: 1.0, tone: DVec3::ONE };
-        crate::registry::MAX_CROWNS];
+    let mut layers =
+        [TreeLayer { cell: 1.0, seed: 0, density: 0.0, closure: 0.0, height: 0.0, color: DVec3::ZERO, shape: 0, scale: 1.0, tone: DVec3::ONE, resolve: 1.0 };
+            crate::registry::MAX_CROWNS];
     let n = crowns.len().min(layers.len());
     for (k, c) in crowns.iter().enumerate().take(n) {
         let share = match c.share {
-            share::CONIFER => dens * conifer,
-            share::BROADLEAF => dens * (1.0 - conifer) * (1.0 - tropic),
-            share::TROPICAL => dens * tropic,
-            share::SHRUB => shrub,
-            share::SAVANNA => dens_sav,
-            _ => dens,
+            share::CONIFER => dens_c * conifer_c,
+            share::BROADLEAF => dens_c * (1.0 - conifer_c) * (1.0 - tropic),
+            share::TROPICAL => dens_c * tropic,
+            share::SHRUB => shrub_c,
+            share::SAVANNA => dens_sav_c,
+            _ => dens_c,
         };
         let colour = match c.colour_dry {
             Some(d) => mixc(c.colour, d, dry),
@@ -242,12 +265,15 @@ pub fn layer(s: &mut crate::stack::Stack) {
             cell: c.cell,
             seed: c.seed,
             density: share * c.density,
-            closure: if c.closure { dens } else { 0.0 },
+            closure: if c.closure { dens_c } else { 0.0 },
             height: (c.h0 + c.h_tall * tall) * (c.open_height + (1.0 - c.open_height) * stand_d),
             color: colour * style.crown,
             shape: c.shape,
             scale: if c.stand { scale } else { 1.0 },
             tone: if c.stand { stand_tone } else { DVec3::ONE },
+            // (shrubs, dwarf shrubs: in the ground's texture, not one by one: dark specks of
+            // 1-3 pixels with their shading and shadows read as noise, round 13)
+            resolve: if c.share == share::SHRUB { 0.4 } else { 1.0 },
         };
     }
     let layers = &layers[..n];
@@ -257,8 +283,29 @@ pub fn layer(s: &mut crate::stack::Stack) {
         s.composite(Layer::paint(0.85 * m.riparian * limit, mixc(s.pal(pal::GRASS_WET), s.pal(pal::FLOOR), 0.4)));
     }
     // forest floor: shaded litter and understory, not sunlit grass, between the crowns
-    let floor = smoothstep(0.25, 0.8, dens);
+    let floor = smoothstep(0.25, 0.8, dens_c);
     s.composite(Layer::paint(floor * 0.85, s.pal(pal::FLOOR) * 0.7));
+    // (round 13) closed stands where the crowns are drawn one by one: the gaps between them
+    // show shaded lower crowns and understorey, not the pale floor (the crowns read as dark
+    // specks on the lichen or the grass, audit a26 a22); colour only, in clusters (a smooth
+    // sheet read as plastic); the mean of unresolved crowns keeps its floor (LOD)
+    {
+        let (mut fill_w, mut fill_col, mut fill_n) = (0.0f64, DVec3::ZERO, 0.0);
+        for layer in layers {
+            if layer.density <= 1e-4 {
+                continue;
+            }
+            let fe = smoothstep(0.55, 0.9, layer.closure) * smoothstep(1.2 * gsd, 3.0 * gsd, layer.cell * layer.resolve);
+            if fe > 0.0 {
+                fill_w = fill_w.max(fe);
+                fill_col += layer.color * layer.tone * (layer.density * fe);
+                fill_n += layer.density * fe;
+            }
+        }
+        if fill_w > 0.0 {
+            s.composite(Layer::paint(fill_w, fill_col / fill_n * (0.6 * (1.0 + 0.5 * s.pf.detail))));
+        }
+    }
     let (mut tc, th, tcov) = s.sm.trees(layers, s.q_loc, gsd, fw, p);
     if tcov > 0.0 {
         // forest stands of different age / species composition

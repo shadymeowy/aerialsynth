@@ -913,7 +913,7 @@ impl Registry {
                 if !(0.0..=1.0).contains(&l.clear) {
                     e.push(&format!("{lk}.clear"), "must be in [0, 1]");
                 }
-                let size = kernels::size(&k);
+                let size = kernels::resolve_size(&k);
                 if let Err(m) = kernels::check_reach(&k) {
                     e.push(&format!("{lk}.params"), m);
                 }

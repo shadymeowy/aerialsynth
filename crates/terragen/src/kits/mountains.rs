@@ -702,9 +702,17 @@ pub fn linear(s: &mut Stack) {
     }
     // (towers are forest-clad: bare rock only on their steepest walls; cockpit cones keep the
     // lower threshold)
-    let ck = (z.tower * smoothstep(3.5, 6.0, slope + 0.8 * rn) + z.cockpit * smoothstep(0.8, 1.4, slope + 0.2 * rn)).min(1.0);
+    // (round 13: the towers' steep walls bare in streaks around the tower, vegetation clinging
+    // between them, weathered darker grey: uniform pale walls read as smooth grey domes, g05)
+    let tw = z.tower * smoothstep(3.5, 6.0, slope + 0.8 * rn);
+    let streak = if tw > 0.0 { smoothstep(-0.1, 0.1, perlin3(0x7A51, p / 24.0) + 0.5 * perlin3(0x7A52, p / 9.0) * band(9.0, s.ctx.gsd)) } else { 0.0 };
+    if tw * (1.0 - streak) > 0.0 {
+        let col = mixc(srgb(34.0, 52.0, 32.0), srgb(58.0, 78.0, 44.0), 0.5 + 0.5 * rn) * (1.0 + 0.15 * s.pf.detail);
+        s.composite(Layer { cov: tw * (1.0 - streak), albedo: col, cls: crate::landcover::BROADLEAF_FOREST, ..Default::default() });
+    }
+    let ck = (tw * streak + z.cockpit * smoothstep(0.8, 1.4, slope + 0.2 * rn)).min(1.0);
     if ck > 0.0 {
-        let col = mixc(srgb(168.0, 164.0, 150.0), srgb(120.0, 118.0, 108.0), 0.5 + 0.5 * rn) * (1.0 + 0.06 * s.pf.detail);
+        let col = mixc(srgb(150.0, 146.0, 134.0), srgb(100.0, 98.0, 90.0), 0.5 + 0.5 * rn) * (1.0 + 0.06 * s.pf.detail);
         s.composite(Layer { cov: ck, albedo: col, cls: cls::CLIFF, clear: 1.0, ..Default::default() });
         s.m.natural_ok *= 1.0 - ck;
     }

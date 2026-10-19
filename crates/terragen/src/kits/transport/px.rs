@@ -152,7 +152,7 @@ pub fn frame(sg: &FSeg, p: DVec3, sun: DVec3) -> Frame {
     Frame { d: side * fp.length(), along: s0 + t * len, t, len, su: sun.dot(u), sl: sun.dot(left), ar: s0 + tr * len, dl: (p - sg.a).dot(left) }
 }
 
-const LAMP_SODIUM: DVec3 = DVec3::new(1.0, 0.48, 0.12);
+const LAMP_SODIUM: DVec3 = DVec3::new(1.0, 0.68, 0.40);
 const LAMP_LED: DVec3 = DVec3::new(0.86, 0.92, 1.0);
 
 /// Street lamps every `sp` m on the segment's own stretch (heads at lateral `off`, both sides

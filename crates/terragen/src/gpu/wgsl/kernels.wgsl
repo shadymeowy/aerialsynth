@@ -620,13 +620,23 @@ fn kernel_size(k: KP, size: f32, i: KIn) -> f32 {
 }
 
 /// Explicit where resolved, the calibrated mean where not (`kernels::eval`).
-fn kernel_mix(k: KP, li: u32, size: f32, mean: vec4<f32>, mean_albedo: vec3<f32>, i: KIn) -> KOut {
+fn kernel_mix(k: KP, li: u32, size: f32, mean: vec4<f32>, mean_albedo: vec3<f32>, i0: KIn) -> KOut {
+    let i = kernel_clumped(k, i0);
     let e = kernel_resolved(k, size, i);
     var x = kout_none();
     if (e > 0.0) {
         x = kernel_explicit(k, li, i);
     }
     return kernel_blend(e, x, mean, mean_albedo, i);
+}
+
+/// The inputs with `scatter`'s instances in clumps (`kernels::clumped_amount`).
+fn kernel_clumped(k: KP, i: KIn) -> KIn {
+    var o = i;
+    if (k.kind == 0u && k.v[14] > 0.0 && k.v[1] > 0.0) {
+        o.amount = clumped(k.v[1] * i.amount, k.v[14], i.p, i.gsd) / k.v[1];
+    }
+    return o;
 }
 
 /// How far the kernel's features are resolved (0: the mean only, 1: explicit only).

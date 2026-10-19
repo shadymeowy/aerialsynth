@@ -413,7 +413,18 @@ fn st_roof_col(arch: u32, u: f32, flat: bool) -> vec3<f32> {
     let k = u32(u * 3.99);
     switch arch {
         case 20u: {
-            return mixc(srgb(70.0, 88.0, 108.0), srgb(118.0, 126.0, 134.0), u);
+            let k6 = u32(u * 5.99);
+            let f = u * 6.0 - f32(k6);
+            var c = srgb(184.0, 180.0, 170.0);
+            switch k6 {
+                case 0u: { c = srgb(52.0, 66.0, 86.0); }
+                case 1u: { c = srgb(64.0, 88.0, 92.0); }
+                case 2u: { c = srgb(96.0, 104.0, 114.0); }
+                case 3u: { c = srgb(108.0, 94.0, 78.0); }
+                case 4u: { c = srgb(150.0, 152.0, 150.0); }
+                default: {}
+            }
+            return c * (0.92 + 0.16 * f);
         }
         case 21u: {
             if (u < 0.3) {
@@ -2198,8 +2209,8 @@ fn st_zone_mean(pl: StPl, d: StDist, moist: f32) -> vec4<f32> {
 
 /// `town::lamps`.
 fn st_lamps(pl: StPl, o: StEv, dens: f32, gsd: f32, fw: f32, block: f32, resolved: f32) -> vec3<f32> {
-    let l0 = vec3<f32>(1.0, 0.48, 0.12);
-    let l1 = vec3<f32>(1.0, 0.72, 0.38);
+    let l0 = vec3<f32>(1.0, 0.68, 0.40);
+    let l1 = vec3<f32>(1.0, 0.84, 0.64);
     let l2 = vec3<f32>(0.86, 0.92, 1.0);
     let sodium = 0.25 + 0.5 * (1.0 - pl.dev) * u01k(pl.seed, 20lu);
     let sp = o.lamp_sp;
@@ -2228,7 +2239,7 @@ fn st_lamps(pl: StPl, o: StEv, dens: f32, gsd: f32, fw: f32, block: f32, resolve
                 lc = l2;
             } else if (o.pattern == SP_INDUSTRIAL || u < sodium) {
                 lc = l0;
-            } else if (u < 0.88) {
+            } else if (u < 0.62) {
                 lc = l1;
             }
             e = lc * ((pool + core) * m * (0.75 + 0.5 * u01k(lh, 2lu)));
@@ -2246,7 +2257,8 @@ fn st_lamps(pl: StPl, o: StEv, dens: f32, gsd: f32, fw: f32, block: f32, resolve
         zf = 0.75;
     }
     let lamp_mean = lamp_e * 2.0 / (block * sp) * zf;
-    var mc = mixc(l1, l0, sodium);
+    let amber = max(0.62 - sodium, 0.0);
+    var mc = (l0 * sodium + l1 * amber + l2 * 0.38) / (sodium + amber + 0.38);
     if (o.zone == SZ_CBD) {
         mc = l2;
     } else if (o.pattern == SP_INDUSTRIAL) {
@@ -2302,18 +2314,21 @@ fn st_airport_px(st: FStamp, p: vec3<f64>, ground: f32, gsd: f32, fw: f32) -> St
     let seed = st_seed(st.v0.z, st.v0.w);
     let spacing = st.v1.x;
     let side = st.v1.z;
-    let margin = 120.0;
+    let margin = 220.0;
     let din = min(hx - abs(q.x), hy - abs(q.y));
     var o = st_site_none();
     if (din <= 0.0) {
         return o;
     }
-    o.cov = 1.0;
+    let wn = perlin3(seed ^ 0xED1lu, p * (1.0lf / 170.0lf));
+    let edge = smoothstep1(0.0, 0.8 * margin, din + 65.0 * wn);
+    o.cov = edge;
     o.abs = true;
-    o.clear = 1.0;
+    o.clear = edge;
     o.cls = LC_GRASS;
     let stripe = f32(st_rem(i64(floor(q.x / 18.0)), 2li));
-    o.col = srgb(132.0, 146.0, 92.0) * (0.95 + 0.06 * stripe * band(18.0, gsd));
+    let tone = 1.0 + 0.12 * wn * band(170.0, gsd);
+    o.col = srgb(132.0, 146.0, 92.0) * (0.95 + 0.06 * stripe * band(18.0, gsd)) * tone;
     let wgt = smoothstep1(0.0, margin, din);
     o.dh = ground + (st.h - ground) * wgt;
     let wr = select(22.5, 30.0, lay == 2u);
@@ -2881,7 +2896,7 @@ fn st_glow(s: ptr<function, Stack>) {
     var aw_t = array<f32, 12>(1.0, 0.85, 0.7, 0.8, 0.6, 1.2, 1.05, 0.9, 1.25, 0.6, 0.25, 0.85);
     var spr = array<f32, 12>(0.95, 0.9, 0.9, 0.8, 0.95, 0.82, 0.92, 1.3, 0.85, 1.05, 0.85, 0.85);
     let sodium = 0.25 + 0.25 * (1.0 - dev);
-    let lamp = mixc(vec3<f32>(1.0, 0.72, 0.38), vec3<f32>(1.0, 0.48, 0.12), sodium);
+    let lamp = mixc(mixc(vec3<f32>(1.0, 0.84, 0.64), vec3<f32>(0.86, 0.92, 1.0), 0.4), vec3<f32>(1.0, 0.68, 0.40), sodium);
     let devm = (0.5 + 0.45 * min(dev, 1.0)) * (0.55 + 0.9 * dev);
     let sprawl2 = pow(spr[arch] * (0.85 + 0.3 * dev), 2.0) * (1.0 + 0.04 / 12.0);
     var cover = 0.0;
@@ -2970,6 +2985,9 @@ fn settlements_slot_built(s: ptr<function, Stack>) {
             continue;
         } else if (st.tmpl == ST_AIRPORT) {
             sp = st_airport_px(st, p, ground, gsd, fw);
+            if (sp.cov > 0.5) {
+                (*s).no_town = true;
+            }
         } else if (st.tmpl == ST_PORT) {
             sp = st_port_land_px(st, p, gsd, fw);
         } else if (st.tmpl == ST_QUARRY) {

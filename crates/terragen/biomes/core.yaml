@@ -89,7 +89,9 @@
     # a speckle of noise, audit a21 a24)
     crown_decid: [78, 92, 54]
     shrub: [100, 102, 72]
-  vegetation: { trees: 0.55, shrubs: 1.4, groves: 0.6 }
+  # (round 13: fewer groves; they gather in patches, `noise::clumped`: lone trees dotted the
+  # steppe, audit a21 a24)
+  vegetation: { trees: 0.55, shrubs: 1.4, groves: 0.25, savanna: 0.3 }
 
 - id: semiarid_shrub
   group: vegetation
@@ -157,7 +159,7 @@
     - slot: azonal
       kernel: cold_polygons
       mask: { slope: [null, null, 0.04, 0.08] }
-      params: { cell: 14, trough: 1.3, trough_depth: 0.35, rim: 0.8, rim_height: 0.2, pond: 0.06, high: 0.4, colour: [116, 112, 90], trough_colour: [76, 84, 60], pond_colour: [28, 42, 52] }
+      params: { cell: 14, trough: 1.3, trough_depth: 0.25, rim: 0.8, rim_height: 0.15, pond: 0.06, high: 0.4, colour: [116, 112, 90], trough_colour: [92, 98, 72], pond_colour: [28, 42, 52] }
       class: polygon_tundra
     # (over the polygons: the moss and lichen mosaic)
     - slot: azonal

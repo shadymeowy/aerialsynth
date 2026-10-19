@@ -1,0 +1,80 @@
+# title: polygon tundra
+# category: polar
+# landcover: polygon tundra (ET)
+# look: moss and lichen mosaic over ice-wedge polygons, ponds and late snow, low morning sun
+# target: 65.03700 -131.94800
+# status: rendered OK (h13); dark
+# local solar time 05:20 on 2026-07-15
+world:
+  seed: 1
+  generator: next
+tiles:
+  file: out/world.h5
+  max_zoom: 18
+  margin: 0
+  plan_every: 5
+trajectory:
+  synth:
+    rate_hz: 400
+    speed_mps: 50.0
+    altitude_m: 500.0
+    heading_deg: 300.0
+    kind: line
+    lat: 65.03266
+    lon: -131.93018
+    duration_s: 3.0
+render:
+  supersample: 2
+  shading: relit
+  lighting:
+    mode: clock
+    date: '2026-07-15'
+    time_utc: '14:08:00'
+    time_scale: 1.0
+    sky_intensity: 0.55
+  atmosphere:
+    visibility_km: 40.0
+    inscatter: 1.0
+cameras:
+- path: /cam0
+  intrinsics:
+    model: pinhole
+    width: 1280
+    height: 720
+    intrinsics:
+    - 914.0
+    - 914.0
+    - 639.5
+    - 359.5
+  extrinsics:
+    mount: forward
+    pitch_deg: -30.0
+  frame_rate: 1.0
+  rgb:
+    sensor:
+      exposure:
+        mode: auto
+        tau_s: 0.4
+        target: 0.13
+      motion_blur:
+        enabled: true
+        max_samples: 24
+      optics:
+        defocus_px: 0.25
+        chromatic_aberration_px: 0.3
+        vignette: 0.25
+        bloom: 0.06
+      noise:
+        enabled: true
+        read: 0.08
+        shot: 0.1
+      tone:
+        curve: filmic
+        saturation: 0.92
+    supersample: 2
+output:
+  start: 2.0
+  end: 2.0
+  max_frames: 1
+  compression:
+    level: 1

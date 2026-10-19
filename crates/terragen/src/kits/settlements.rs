@@ -167,9 +167,10 @@ fn glow(s: &mut Stack) {
     }
     let (pop, dev) = (t.population, t.development);
     let arch = s.bio.style.archetype as usize;
-    const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.48, 0.12), DVec3::new(1.0, 0.72, 0.38), DVec3::new(0.86, 0.92, 1.0)];
+    const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.68, 0.40), DVec3::new(1.0, 0.84, 0.64), DVec3::new(0.86, 0.92, 1.0)];
     let sodium = 0.25 + 0.25 * (1.0 - dev);
-    let lamp = mixc3(LAMPS[1], LAMPS[0], sodium);
+    // (round 13: a share of white LED, as the towns' streets)
+    let lamp = mixc3(mixc3(LAMPS[1], LAMPS[2], 0.4), LAMPS[0], sodium);
     let devm = (0.5 + 0.45 * dev.min(1.0)) * (0.55 + 0.9 * dev);
     let (mut cover, mut emit) = (0.0, DVec3::ZERO);
     for l in 0..places::NLEVELS {
@@ -227,7 +228,15 @@ fn built(s: &mut Stack) {
                 }
                 continue;
             }
-            tpl::AIRPORT => sites::airport_px(st, p, ground, gsd, fw),
+            tpl::AIRPORT => {
+                let sp = sites::airport_px(st, p, ground, gsd, fw);
+                // (round 13: no tracks and minor roads across the airfield, only the network's
+                // motorways and trunk roads: tracks crossed the runways, gallery g33)
+                if sp.cov > 0.5 {
+                    s.no_town = true;
+                }
+                sp
+            }
             tpl::PORT => sites::port_px(st, p, false, 0.0, gsd, fw),
             tpl::QUARRY => sites::quarry_px(st, p, gsd, fw),
             tpl::SOLAR => sites::solar_px(st, p, gsd, fw),
@@ -437,7 +446,7 @@ mod tests {
         ("survey_city", -6.1773, -114.2395),
         ("desert_town", -12.198, -21.4536),
         ("poor_city", -20.8647, -142.6153),
-        ("waldhufen", 20.7151, -22.6459),
+        ("waldhufen", 20.7126, -22.6596),
         ("linear", -9.1620, 96.5530),
         ("kraal", -15.9711, 62.8364),
         ("perched", -38.7777, -166.8082),

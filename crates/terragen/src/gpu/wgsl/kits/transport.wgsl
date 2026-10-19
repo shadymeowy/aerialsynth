@@ -196,7 +196,7 @@ fn tr_lamps(f: TrFrame, s0: f32, sp: f32, off: f32, median: bool, seed: u64, fw:
     let d2 = dp * dp + da * da;
     let pool = 0.035 * exp(-(dp * dp) / (2.0 * 5.0 * 5.0) - (da * da) / (2.0 * 0.3 * sp * 0.3 * sp));
     let core = point_light(d2, 6.0, 0.4, fw);
-    let c = select(vec3<f32>(1.0, 0.48, 0.12), vec3<f32>(0.86, 0.92, 1.0), u01k(seed, 7lu) < 0.5);
+    let c = select(vec3<f32>(1.0, 0.68, 0.40), vec3<f32>(0.86, 0.92, 1.0), u01k(seed, 7lu) < 0.5);
     return c * ((pool + core) * m);
 }
 

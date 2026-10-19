@@ -342,6 +342,8 @@ struct TreeLayer {
     /// crown shape (SHAPE_*)
     shape: u32,
     scale: f32,
+    /// size factor of the crowns' resolution (`TreeLayer::resolve`)
+    resolve: f32,
 }
 
 /// (colour, canopy height, coverage)
@@ -367,8 +369,9 @@ fn trees(layers: array<TreeLayer, 6>, mask: u32, q: vec2<f32>, gsd: f32, fw: f32
         if (layer.density <= 1e-4) {
             continue;
         }
-        let expl = smoothstep1(1.2 * gsd, 3.0 * gsd, layer.cell);
-        let contrast = smoothstep1(2.5 * gsd, 6.0 * gsd, layer.cell);
+        let rc = layer.cell * layer.resolve;
+        let expl = smoothstep1(1.2 * gsd, 3.0 * gsd, rc);
+        let contrast = smoothstep1(2.5 * gsd, 6.0 * gsd, rc);
         // expected coverage when unresolved
         let mean_r = layer.cell * 0.48;
         let cov_mean = min(layer.density * PI * mean_r * mean_r / (layer.cell * layer.cell), 1.0);
@@ -516,7 +519,7 @@ fn farmstead(r: Region, agri: f32, q: vec2<f32>, gsd: f32, fw: f32) -> Built {
     let d2 = dot(lamp, lamp);
     var lamp_col = vec3<f32>(0.86, 0.92, 1.0);
     if (u01k(fid, 9lu) < 0.6) {
-        lamp_col = vec3<f32>(1.0, 0.72, 0.38);
+        lamp_col = vec3<f32>(1.0, 0.84, 0.64);
     }
     let res = band(10.0, gsd);
     let emission = lamp_col * (0.04 * exp(-d2 / (2.0 * 7.0 * 7.0)) + point_light(d2, 5.0, 0.4, fw)) * res
@@ -980,8 +983,8 @@ fn seg_here(h: u64, u: f32) -> f32 {
 
 fn lamp_kind(k: u32) -> vec3<f32> {
     switch k {
-        case 0u: { return vec3<f32>(1.0, 0.48, 0.12); }
-        case 1u: { return vec3<f32>(1.0, 0.72, 0.38); }
+        case 0u: { return vec3<f32>(1.0, 0.68, 0.40); }
+        case 1u: { return vec3<f32>(1.0, 0.84, 0.64); }
         default: { return vec3<f32>(0.86, 0.92, 1.0); }
     }
 }

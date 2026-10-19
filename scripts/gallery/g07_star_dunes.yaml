@@ -1,0 +1,80 @@
+# title: star dunes at golden hour
+# category: deserts
+# landcover: semi-arid shrub around a sand sea (erg)
+# look: star dunes with their arms in long shadows, low sun from the left
+# target: -31.15000 -166.35000
+# status: rendered OK (h13)
+# local solar time 18:15 on 2026-12-21
+world:
+  seed: 1
+  generator: next
+tiles:
+  file: out/world.h5
+  max_zoom: 18
+  margin: 0
+  plan_every: 5
+trajectory:
+  synth:
+    rate_hz: 400
+    speed_mps: 50.0
+    altitude_m: 800.0
+    heading_deg: 340.0
+    kind: line
+    lat: -31.16758
+    lon: -166.34252
+    duration_s: 3.0
+render:
+  supersample: 2
+  shading: relit
+  lighting:
+    mode: clock
+    date: '2026-12-22'
+    time_utc: '05:20:00'
+    time_scale: 1.0
+    sky_intensity: 0.55
+  atmosphere:
+    visibility_km: 40.0
+    inscatter: 1.0
+cameras:
+- path: /cam0
+  intrinsics:
+    model: pinhole
+    width: 1280
+    height: 720
+    intrinsics:
+    - 914.0
+    - 914.0
+    - 639.5
+    - 359.5
+  extrinsics:
+    mount: forward
+    pitch_deg: -22.0
+  frame_rate: 1.0
+  rgb:
+    sensor:
+      exposure:
+        mode: auto
+        tau_s: 0.4
+        target: 0.13
+      motion_blur:
+        enabled: true
+        max_samples: 24
+      optics:
+        defocus_px: 0.25
+        chromatic_aberration_px: 0.3
+        vignette: 0.25
+        bloom: 0.06
+      noise:
+        enabled: true
+        read: 0.08
+        shot: 0.1
+      tone:
+        curve: filmic
+        saturation: 0.92
+    supersample: 2
+output:
+  start: 2.0
+  end: 2.0
+  max_frames: 1
+  compression:
+    level: 1

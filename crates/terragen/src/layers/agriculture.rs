@@ -322,5 +322,9 @@ pub fn layer(s: &mut crate::stack::Stack) {
     // tilled fields are smoother than natural ground
     // (the field is the instance; not its hedges and tracks, nor the regional mean)
     let inst = if cls == lc::CROP && id != 0 { crate::stack::instance_id(id) } else { 0 };
+    // (round 13: soil moisture and crop vigour inside the fields too, at full strength, and over 70 m: flat fills
+    // with hard edges read as painted)
+    let ft = crate::layers::ground::macro_tone(p, gsd, t.gully) + 0.3 * crate::noise::perlin3(0x70E4, p / 70.0) * crate::noise::band(70.0, 2.0 * gsd);
+    let fcol = crate::layers::ground::toned(fcol, ft, 1.0);
     s.composite(Layer { cov: a, albedo: fcol, dh: fh - 0.6 * m.micro, hmode: hmode::ADD, cls, inst, ..Default::default() });
 }

@@ -108,7 +108,7 @@
     - slot: canopy
       kernel: scatter
       mask: { natural: [0.3, 0.6, 2, 3], veg: [0.3, 0.6, 2, 3], field: [-1, -1, 0.2, 0.5], moist: [0.1, 0.16, 0.3, 0.42] }
-      params: { cell: 6, density: 0.6, shape: cone, radius: [1.2, 2.1], height: [8, 16], jitter: 0.9, colour: [24, 38, 30], colour2: [40, 54, 36], second: 0.3, colour_var: 0.2, shade: 0.5 }
+      params: { clump: 0.8, cell: 6, density: 0.6, shape: cone, radius: [1.2, 2.1], height: [8, 16], jitter: 0.9, colour: [24, 38, 30], colour2: [40, 54, 36], second: 0.3, colour_var: 0.2, shade: 0.5 }
       class: needleleaf_forest
 
 # Lichen woodland: widely spaced spruce spires on cream-white reindeer lichen (the dry
@@ -139,7 +139,7 @@
     - slot: canopy
       kernel: scatter
       mask: { natural: [0.3, 0.6, 2, 3], veg: [0.3, 0.6, 2, 3], field: [-1, -1, 0.2, 0.5], moist: [0.05, 0.12, 0.3, 0.42] }
-      params: { cell: 8, density: 0.55, shape: cone, radius: [1.1, 2.0], height: [6, 12], jitter: 0.9, colour: [26, 40, 32], colour2: [40, 54, 36], second: 0.3, colour_var: 0.2, shade: 0.5 }
+      params: { clump: 0.8, cell: 8, density: 0.55, shape: cone, radius: [1.1, 2.0], height: [6, 12], jitter: 0.9, colour: [26, 40, 32], colour2: [40, 54, 36], second: 0.3, colour_var: 0.2, shade: 0.5 }
       class: needleleaf_forest
 
 # ------------------------------------------------------------------ Mediterranean scrub
@@ -244,7 +244,8 @@
     soil: [[72, 60, 50], [86, 70, 56], [98, 86, 72], [112, 96, 74]]
     grass_dry: [186, 178, 138]
     grass_wet: [128, 132, 80]
-  vegetation: { trees: 0.15, shrubs: 0.6, groves: 0.3, meadow: 1.4 }
+  # (round 13: few trees, in groves: the warm steppe's savanna share dotted it, a21)
+  vegetation: { trees: 0.15, shrubs: 0.6, groves: 0.3, meadow: 1.4, savanna: 0.2 }
   layers:
     - slot: zonal
       kernel: patches

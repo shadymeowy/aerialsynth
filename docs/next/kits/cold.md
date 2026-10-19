@@ -163,3 +163,9 @@ full at 2 °C: from 9 °C it whitened temperate highlands, a23); seasonal snow h
 erosion gullies and micro relief fill in by 60 % and 40 % (firn: ribbed grey faces, alpine_south@type). The polar
 biome has a moss and lichen mosaic over polygons with small ponds on the flats, the forest–tundra faint polygons on
 wet flats (plain brown tundra, a02 a30).
+
+Polish round 13: the spruce of the forest–tundra scatter in clumps (`clump` 0.8) and, as spires under 8 m across,
+drawn one by one only where they span ~4–10 pixels (`kernels::resolve_size`; lone dark spires dotted the tundra,
+audit a02 a17); the dwarf shrubs likewise their mean; polygon troughs shallower and closer to the moss (a crack net
+over the plain, a28); crevasses 0.35 m deep (dark dashes over snowed-in glaciers, a07); streams narrower than ~4–16
+m under the season's snow are snowed over (straight dark lines over the snowfields, gallery g02).

@@ -488,6 +488,9 @@ fn bl_apply(s: ptr<function, Stack>, li: u32, o: KOut) {
     ly.albedo = o.albedo;
     ly.dh = o.dh;
     ly.hmode = l.head.w & 0xffu;
+    if (ly.hmode == HM_MAX && l.head.y == 0u) {
+        ly.dh = o.dh * smoothstep1(0.0, 0.5, o.cov);
+    }
     ly.cls = l.head.z;
     ly.emit = l.col[2].xyz * o.emit;
     ly.clear = l.sz.y;
@@ -569,7 +572,25 @@ fn layer_zonal(s: ptr<function, Stack>) {
         col *= 1.0 + 0.06 * smoothstep1(0.2, 1.0, t.gully);
     }
     (*s).m.cover = cover;
+    col = toned(col, macro_tone(p, gsd, t.gully), (1.0 + 0.6 * (1.0 - cover)) * (1.0 - 0.8 * smoothstep1(0.25, 0.6, t.mountain)));
     composite(s, layer_paint(1.0, col, cls));
+}
+
+/// The land's macro tone (`layers::ground::macro_tone`).
+fn macro_tone(p: vec3<f64>, gsd: f32, gully: f32) -> f32 {
+    var v = 0.6 * perlin3(0x70E1lu, p * (1.0lf / 1500.0lf)) * band(1500.0, gsd);
+    let b2 = band(600.0, gsd);
+    if (b2 > 0.0) {
+        v += 0.55 * perlin3(0x70E2lu, p * (1.0lf / 600.0lf)) * b2;
+    }
+    return v - 0.12 * smoothstep1(0.1, 0.8, -gully) + 0.08 * smoothstep1(0.2, 0.8, gully);
+}
+
+/// `col` by the macro tone (`layers::ground::toned`).
+fn toned(col: vec3<f32>, v: f32, k: f32) -> vec3<f32> {
+    let l = dot(col, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let sat = 1.0 - 0.5 * k * v;
+    return max((vec3<f32>(l) + (col - vec3<f32>(l)) * sat) * (1.0 + 0.6 * k * v), vec3<f32>(0.0));
 }
 
 /// Slot 3 (`layers::azonal::layer`).
@@ -694,7 +715,12 @@ fn layer_agriculture(s: ptr<function, Stack>) {
     } else if (fr.kind == 2u) {
         cls = LC_TRACK;
     }
-    var ly = layer_paint(a, fr.col, cls);
+    var ft = macro_tone((*s).c.p, (*s).c.gsd, t.gully);
+    let b70 = band(70.0, 2.0 * (*s).c.gsd);
+    if (b70 > 0.0) {
+        ft += 0.3 * perlin3(0x70E4lu, (*s).c.p * (1.0lf / 70.0lf)) * b70;
+    }
+    var ly = layer_paint(a, toned(fr.col, ft, 1.0), cls);
     ly.dh = fr.h - 0.6 * m.micro;
     ly.hmode = HM_ADD;
     if (cls == LC_CROP && fr.id != 0lu) {
@@ -824,7 +850,7 @@ fn layer_built(s: ptr<function, Stack>) {
             let lh = hash2(town.seed ^ 0x40ADlu, i64(kq.x), i64(kq.y));
             var lamp_col = vec3<f32>(0.86, 0.92, 1.0);
             if (u01k(lh, 1lu) < 0.5) {
-                lamp_col = vec3<f32>(1.0, 0.48, 0.12);
+                lamp_col = vec3<f32>(1.0, 0.68, 0.40);
             }
             let pool = (0.04 * exp(-d2 / (2.0 * 6.0 * 6.0)) + point_light(d2, 6.0, 0.4, fw)) * res + 0.04 * (1.0 - res);
             composite(s, layer_emit(lamp_col * pool * near * m.road_major_cov));
@@ -872,7 +898,7 @@ fn layer_canopy(s: ptr<function, Stack>) {
     let cold = (1.0 - smoothstep1(0.0, 8.0, temp)) * (1.0 - smoothstep1(0.35, 0.7, t.mountain));
     let base_cover = smoothstep1(0.3 - 0.2 * cold, 0.68 - 0.36 * cold, wet) * smoothstep1(-6.0 - 3.0 * cold, 2.0 - 2.0 * cold, temp) * td * trees_mult;
     let fpu = 0.5 + 0.5 * (*s).pf.f[PF_FOREST];
-    let forest = max(smoothstep1(-0.09, 0.09, base_cover - fpu), m.woodlot * smoothstep1(0.05, 0.4, s_agri(s)));
+    let forest = max(smoothstep1(-0.06, 0.06, base_cover - fpu), m.woodlot * smoothstep1(0.05, 0.4, s_agri(s)));
     let savanna = smoothstep1(0.18, 0.35, wet) * (1.0 - smoothstep1(0.55, 0.7, wet)) * smoothstep1(12.0, 20.0, temp) * 0.12 * sveg(s, VEG_SAVANNA);
     let groves = 0.04 * smoothstep1(0.15, 0.3, wet) * sveg(s, VEG_GROVES);
     let base = m.natural_ok * (1.0 - m.field_cov) * td;
@@ -912,18 +938,29 @@ fn layer_canopy(s: ptr<function, Stack>) {
     let tropic = clamp(smoothstep1(19.0, 25.0, temp) * smoothstep1(0.55, 0.75, wet) + sveg(s, VEG_TROPIC), 0.0, 1.0);
     let dry = 1.0 - smoothstep1(0.3, 0.5, wet);
     let tall = 0.5 + 0.5 * st.w + sveg(s, VEG_TALL);
+    // (round 13) groves, clumps and closed stands (`clumped`)
+    let sav_biome = smoothstep1(1.05, 1.5, sveg(s, VEG_SAVANNA));
+    var sav_frac = 0.0;
+    if (dens > 0.0) {
+        sav_frac = min(dens_sav / dens, 1.0) * sav_biome;
+    }
+    let cf = clump_field(p, gsd);
+    let dens_c = clumped_at(dens, 0.9 * (1.0 - 0.7 * sav_frac) * (1.0 - smoothstep1(0.3, 0.75, dens)), cf);
+    let dens_sav_c = clumped_at(dens_sav, 0.9 - 0.6 * sav_biome, cf);
+    let shrub_c = clumped_at(shrub, 0.6, cf);
+    let conifer_c = clumped_at(conifer, 1.0, vec3<f32>(-cf.x, cf.y, cf.z));
     let bm = biomes[(*s).bio.a];
     let n = min(bm.r0.y, MAX_CROWNS);
     var layers: array<TreeLayer, 6>;
     for (var k = 0u; k < n; k++) {
         let cr = crowns[bm.r0.x + k];
-        var share = dens;
+        var share = dens_c;
         switch cr.share {
-            case 0u: { share = dens * conifer; }
-            case 1u: { share = dens * (1.0 - conifer) * (1.0 - tropic); }
-            case 2u: { share = dens * tropic; }
-            case 3u: { share = shrub; }
-            case 4u: { share = dens_sav; }
+            case 0u: { share = dens_c * conifer_c; }
+            case 1u: { share = dens_c * (1.0 - conifer_c) * (1.0 - tropic); }
+            case 2u: { share = dens_c * tropic; }
+            case 3u: { share = shrub_c; }
+            case 4u: { share = dens_sav_c; }
             default: {}
         }
         var colour = cr.colour.xyz;
@@ -940,18 +977,39 @@ fn layer_canopy(s: ptr<function, Stack>) {
             select(vec3<f32>(1.0), stand_tone, stand_ok),
             share * cr.density,
             u64(cr.seed_lo) | (u64(cr.seed_hi) << 32u),
-            select(0.0, dens, (cr.flags & 1u) != 0u),
+            select(0.0, dens_c, (cr.flags & 1u) != 0u),
             (cr.h0 + cr.h_tall * tall) * (cr.open_height + (1.0 - cr.open_height) * stand_d),
             cr.shape,
             select(1.0, scale, stand_ok),
+            select(1.0, 0.4, cr.share == 3u),
         );
     }
     let all = (1u << n) - 1u;
     if (m.riparian > 0.0) {
         composite(s, layer_paint(0.85 * m.riparian * limit, mixc(spal(s, BP_GRASS_WET), spal(s, BP_FLOOR), 0.4), 0u));
     }
-    let floor_ = smoothstep1(0.25, 0.8, dens);
+    let floor_ = smoothstep1(0.25, 0.8, dens_c);
     composite(s, layer_paint(floor_ * 0.85, spal(s, BP_FLOOR) * 0.7, 0u));
+    // closed stands where the crowns are drawn one by one: the gaps' shaded lower crowns
+    // (`layers::canopy::layer`)
+    var fill_w = 0.0;
+    var fill_col = vec3<f32>(0.0);
+    var fill_n = 0.0;
+    for (var k = 0u; k < n; k++) {
+        let ly = layers[k];
+        if (ly.density <= 1e-4) {
+            continue;
+        }
+        let fe = smoothstep1(0.55, 0.9, ly.closure) * smoothstep1(1.2 * gsd, 3.0 * gsd, ly.cell * ly.resolve);
+        if (fe > 0.0) {
+            fill_w = max(fill_w, fe);
+            fill_col += ly.color * ly.tone * (ly.density * fe);
+            fill_n += ly.density * fe;
+        }
+    }
+    if (fill_w > 0.0) {
+        composite(s, layer_paint(fill_w, fill_col / fill_n * (0.6 * (1.0 + 0.5 * (*s).pf.f[PF_DETAIL])), 0u));
+    }
     // the crowns (`it` 0), then each layer's crowns shifted towards the sun (their shadows): one
     // call site of `trees`
     let shadows = (cfg.flags & CF_SHADOWS) != 0u;
@@ -1287,6 +1345,40 @@ fn stack_surface(sp: ptr<function, Stack>) -> Surface {
 }
 
 /// `ground::semi_clumps`.
+/// Clumped density (`noise::clumped`).
+fn clumped(d: f32, c: f32, p: vec3<f64>, gsd: f32) -> f32 {
+    return clumped_at(d, c, clump_field(p, gsd));
+}
+
+/// The clump field (`noise::clump_field`): (z, u2, resolved).
+fn clump_field(p: vec3<f64>, gsd: f32) -> vec3<f32> {
+    let b1 = band(160.0, gsd);
+    let b2 = band(34.0, 2.0 * gsd);
+    if (b1 <= 0.0) {
+        return vec3<f32>(0.0);
+    }
+    var r = perlin3(0xC1A7lu, p * (1.0lf / 160.0lf)) * b1;
+    if (b2 > 0.0) {
+        r += 0.8 * perlin3(0xC1A8lu, p * (1.0lf / 34.0lf)) * b2;
+    }
+    return vec3<f32>(r / (0.211 * sqrt(1.64)), ((1.0 - b1 * b1) + 0.64 * (1.0 - b2 * b2)) / 1.64, 1.0);
+}
+
+/// `noise::clumped_at`.
+fn clumped_at(d: f32, c: f32, fz: vec3<f32>) -> f32 {
+    if (fz.z <= 0.0 || c <= 0.0 || d <= 0.0 || d >= 1.0) {
+        return d;
+    }
+    let z = fz.x;
+    let u2 = fz.y;
+    let w2 = 0.22 * 0.22;
+    let q = log(d / (1.0 - d)) / 1.702 * sqrt(1.0 + w2);
+    let sv0 = 1.0 / (1.0 + exp(-1.702 * (q - z) / sqrt(u2 + w2)));
+    let fl = 1.0 - smoothstep1(0.0, 0.4, u2);
+    let sv = sv0 * (1.0 - fl + fl * smoothstep1(0.03, 0.15, sv0));
+    return d + (sv - d) * c;
+}
+
 fn semi_clumps(p: vec3<f64>, gsd: f32) -> f32 {
     var v = 1.1 * perlin3(0x5B3lu, p * (1.0lf / 250.0lf)) * band(250.0, gsd) + 0.8 * perlin3(0x5B1lu, p * (1.0lf / 90.0lf)) * band(90.0, gsd);
     let b = band(34.0, gsd);

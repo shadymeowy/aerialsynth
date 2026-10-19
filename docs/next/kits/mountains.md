@@ -266,3 +266,6 @@ ochre, rust and dark red (v0.2.0's red badlands, canyon@type, which moved to suc
 rounds 5–11). Strata and badland bands fade to their mean colour where they are thinner than ~3 pixels across the
 slope, and the canyon walls' rills (45 and 18 m) and rough rock (13 and 5 m) are resolved from 5 pixels (at 2–4 pixels
 they drew the far walls hairy).
+
+Polish round 13: the steepest walls of tower karst are bare limestone (150/100 grey) in 24/9 m streaks around each
+tower and forest-clad between them (uniform pale rock walls read as smooth grey domes with banding, gallery g05).
