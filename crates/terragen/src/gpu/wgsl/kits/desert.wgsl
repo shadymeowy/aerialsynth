@@ -260,14 +260,14 @@ fn desert_slot_disturbance(s: ptr<function, Stack>) {
     }
     let c = (*s).c;
     let wd = desert_wind(c.p, c.lat, t.wind);
-    let zb = z0 * (0.35 + 0.65 * (1.0 - smoothstep1(0.35, 0.6, wd.rho)));
+    let zb = 0.6 * z0 * (0.35 + 0.65 * (1.0 - smoothstep1(0.35, 0.6, wd.rho)));
     let b = desert_barchans(c.p, c.east, c.north, wd.d, zb, c.gsd, (*s).l.fw);
     if (b.x > 0.0) {
         var cls = DS_LC_SAND;
         if ((*s).bio.st.litho == 3u) {
             cls = LC_VOLCANIC_ASH;
         }
-        var ly = layer_paint(b.x, mixc(desert_sand_colour(s), spal(s, BP_SOIL + 1u), 0.5) * 0.98, cls);
+        var ly = layer_paint(b.x, mixc(desert_sand_colour(s), spal(s, BP_SOIL + 1u), 0.3) * 0.98, cls);
         ly.dh = b.y;
         ly.hmode = HM_ADD;
         ly.clear = 1.0;
