@@ -83,8 +83,35 @@ pub fn zonal(s: &mut Stack) {
         col = mixc(col, mixc(col * 0.8, s.pal(pal::GRASS_WET) * 0.85, 0.5 * smoothstep(-6.0, 4.0, temp)), 0.6 * ch);
         col *= 1.0 + 0.06 * smoothstep(0.2, 1.0, t.gully);
     }
+    // (round 13) the land's tone over 600 m - 1.5 km (soil moisture, vigour): v0.2.0 varied
+    // continuously inside every kind of ground; next's were flat fills that read as painted
+    // (more on bare ground; less in the mountains, whose relief varies the tone: it moved the LOD
+    // of u_valley z11)
+    let col = toned(col, macro_tone(p, gsd, t.gully), (1.0 + 0.6 * (1.0 - cover)) * (1.0 - 0.8 * smoothstep(0.25, 0.6, t.mountain)));
     s.m.cover = cover;
     s.composite(Layer { cov: 1.0, albedo: col, cls: class, ..Default::default() });
+}
+
+/// The land's macro tone at `p` (zero mean, ~±0.4; WGSL `macro_tone`): noise at 1.5 km and
+/// 600 m, each faded to its mean where unresolved (`band`: mean-preserving; a 170 m octave,
+/// resolved at zoom 12 and not at 11, moved the LOD of u_valley z11 beyond its limit; the
+/// ground's own `detail` and `patch` fields vary it at finer scales), and the drainage: moister
+/// hollows (negative), drier spurs.
+pub(crate) fn macro_tone(p: DVec3, gsd: f64, gully: f64) -> f64 {
+    let mut v = 0.6 * perlin3(0x70E1, p / 1500.0) * band(1500.0, gsd);
+    let b2 = band(600.0, gsd);
+    if b2 > 0.0 {
+        v += 0.55 * perlin3(0x70E2, p / 600.0) * b2;
+    }
+    v - 0.12 * smoothstep(0.1, 0.8, -gully) + 0.08 * smoothstep(0.2, 0.8, gully)
+}
+
+/// `col` by the macro tone `v` at strength `k`: brighter and paler where dry (v > 0), darker and
+/// more saturated where moist (WGSL `toned`).
+pub(crate) fn toned(col: DVec3, v: f64, k: f64) -> DVec3 {
+    let l = col.dot(DVec3::new(0.2126, 0.7152, 0.0722));
+    let sat = 1.0 - 0.5 * k * v;
+    ((DVec3::splat(l) + (col - DVec3::splat(l)) * sat) * (1.0 + 0.6 * k * v)).max(DVec3::ZERO)
 }
 
 /// Clumps of the semi-arid ground cover (zero mean, ~[-1, 1], band-limited at 34, 90 and 250 m):

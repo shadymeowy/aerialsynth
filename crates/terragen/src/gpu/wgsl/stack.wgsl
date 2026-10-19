@@ -572,7 +572,25 @@ fn layer_zonal(s: ptr<function, Stack>) {
         col *= 1.0 + 0.06 * smoothstep1(0.2, 1.0, t.gully);
     }
     (*s).m.cover = cover;
+    col = toned(col, macro_tone(p, gsd, t.gully), (1.0 + 0.6 * (1.0 - cover)) * (1.0 - 0.8 * smoothstep1(0.25, 0.6, t.mountain)));
     composite(s, layer_paint(1.0, col, cls));
+}
+
+/// The land's macro tone (`layers::ground::macro_tone`).
+fn macro_tone(p: vec3<f64>, gsd: f32, gully: f32) -> f32 {
+    var v = 0.6 * perlin3(0x70E1lu, p * (1.0lf / 1500.0lf)) * band(1500.0, gsd);
+    let b2 = band(600.0, gsd);
+    if (b2 > 0.0) {
+        v += 0.55 * perlin3(0x70E2lu, p * (1.0lf / 600.0lf)) * b2;
+    }
+    return v - 0.12 * smoothstep1(0.1, 0.8, -gully) + 0.08 * smoothstep1(0.2, 0.8, gully);
+}
+
+/// `col` by the macro tone (`layers::ground::toned`).
+fn toned(col: vec3<f32>, v: f32, k: f32) -> vec3<f32> {
+    let l = dot(col, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let sat = 1.0 - 0.5 * k * v;
+    return max((vec3<f32>(l) + (col - vec3<f32>(l)) * sat) * (1.0 + 0.6 * k * v), vec3<f32>(0.0));
 }
 
 /// Slot 3 (`layers::azonal::layer`).
@@ -697,7 +715,12 @@ fn layer_agriculture(s: ptr<function, Stack>) {
     } else if (fr.kind == 2u) {
         cls = LC_TRACK;
     }
-    var ly = layer_paint(a, fr.col, cls);
+    var ft = macro_tone((*s).c.p, (*s).c.gsd, t.gully);
+    let b70 = band(70.0, 2.0 * (*s).c.gsd);
+    if (b70 > 0.0) {
+        ft += 0.3 * perlin3(0x70E4lu, (*s).c.p * (1.0lf / 70.0lf)) * b70;
+    }
+    var ly = layer_paint(a, toned(fr.col, ft, 0.6), cls);
     ly.dh = fr.h - 0.6 * m.micro;
     ly.hmode = HM_ADD;
     if (cls == LC_CROP && fr.id != 0lu) {
