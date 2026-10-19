@@ -42,8 +42,12 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
     let arid = 1.0 - smoothstep1(0.16, 0.34, t.moist);
     let soft = fl.w.x + fl.w.y;
     let clay = z.badland * 0.85;
+    let gsd = (*s).c.gsd;
+    let red = smoothstep1(11.0, 17.0, t.temp);
+    let pale = smoothstep1(0.2, 0.6, rn + 0.35 * perlin3(MT_SEED + 44lu, p / 240.0lf) * band(240.0, gsd)) * (1.0 - 0.6 * smoothstep1(0.25, 0.6, slope));
+    let warm_floor = mixc(mixc(srgb(172.0, 96.0, 64.0), srgb(150.0, 82.0, 58.0), 0.5 + 0.5 * rn), srgb(184.0, 160.0, 132.0), 0.6 * pale);
     if (clay > 0.0) {
-        let col = mixc(srgb(196.0, 184.0, 164.0), srgb(176.0, 160.0, 138.0), 0.5 + 0.5 * rn) * (1.0 + 0.05 * (*s).pf.f[PF_DETAIL]);
+        let col = mixc(mixc(srgb(196.0, 184.0, 164.0), srgb(176.0, 160.0, 138.0), 0.5 + 0.5 * rn), warm_floor, red) * (1.0 + 0.05 * (*s).pf.f[PF_DETAIL]);
         var ly = layer_paint(clay, col, LC_BADLANDS);
         ly.clear = 1.0;
         composite(s, ly);
@@ -62,25 +66,43 @@ fn mountains_slot_linear(s: ptr<function, Stack>) {
         var kb = floor(ground / bandh + 0.6 * rn);
         var off = 0u;
         var nc = 5.999;
-        var floor_col = srgb(190.0, 176.0, 150.0);
+        var floor_col = mixc(srgb(190.0, 176.0, 150.0), warm_floor, red);
+        var mean = vec3<f32>(188.0, 158.0, 132.0);
         if (z.badland <= 0.2) {
             kb = strata(ground - 3.0, MT_STRATUM).x;
             off = 9u;
+            mean = vec3<f32>(149.0, 81.0, 58.0);
             if (u01k(hash1(0xBE4Clu, i64(kb)), 2lu) < 0.55) {
                 off = 6u;
+                mean = vec3<f32>(187.0, 118.0, 79.0);
             }
             nc = 2.999;
             floor_col = srgb(172.0, 128.0, 96.0);
         }
         let h = hash1(MT_SEED + 40lu, i64(kb));
-        let col0 = mt_strata_col(off + u32(u01k(h, 1lu) * nc)) * (0.94 + 0.12 * u01k(h, 2lu));
+        var cs = mt_strata_col(off + u32(u01k(h, 1lu) * nc));
+        if (z.badland > 0.2 && red > 0.0) {
+            let wi = u32(u01k(h, 1lu) * 5.999);
+            var wk = 7u;
+            switch wi {
+                case 0u: { wk = 6u; }
+                case 1u: { wk = 7u; }
+                case 2u: { wk = 8u; }
+                case 3u: { wk = 9u; }
+                case 4u: { wk = 10u; }
+                default: { wk = 7u; }
+            }
+            cs = mixc(cs, mt_strata_col(wk), red);
+            mean = mix(mean, vec3<f32>(177.0, 107.0, 73.0), red);
+        }
+        let fine = smoothstep1(2.0 * gsd, 4.0 * gsd, bandh / max(slope, 0.05));
+        let col0 = mixc(srgb(mean.x, mean.y, mean.z), cs, fine) * (0.94 + 0.12 * u01k(h, 2lu));
         var cliff = smoothstep1(0.7, 1.3, slope);
         if (z.badland > 0.2) {
             cliff = 0.0;
         }
         var col = mixc(floor_col, col0, 0.8 * smoothstep1(0.25, 0.6, slope));
         if (z.badland <= 0.2) {
-            let gsd = (*s).c.gsd;
             let face = col0 * (1.0 - 0.2 * cliff) * (1.0 + 0.1 * perlin3(MT_SEED + 41lu, p / 7.0lf) * band(7.0, gsd));
             let tal = smoothstep1(0.3, 0.5, slope) * (1.0 - smoothstep1(0.75, 1.05, slope));
             let talus = srgb(176.0, 146.0, 118.0) * (1.0 + 0.16 * perlin3(MT_SEED + 42lu, p / 3.5lf) * band(3.5, gsd) + 0.1 * perlin3(MT_SEED + 43lu, p / 11.0lf) * band(11.0, gsd));

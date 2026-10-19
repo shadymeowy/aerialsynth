@@ -312,11 +312,18 @@ fn crease(n: f64) -> f64 {
 
 const CREASE_MEAN: f64 = 0.4097;
 
-/// Creased gullies (m per unit amplitude): 300, 130 and 60 m octaves (weights 1, 0.55, 0.25: the
-/// finer creases branch off the coarser ones), zero mean, band-limited.
+/// Creased gullies (m per unit amplitude): 300, 130, 60 and 26 m octaves (weights 1, 0.55, 0.25,
+/// 0.1: the finer creases branch off the coarser ones) on knife-edge ridges 900 m apart (weight
+/// 1.8), zero mean, band-limited.
 fn badlands(p: DVec3, gsd: f64) -> f64 {
     let mut v = 0.0;
-    for (k, (lam, wt)) in [(300.0, 1.0), (130.0, 0.55), (60.0, 0.25)].into_iter().enumerate() {
+    // (round 12: the ridges, the inverted crease, and rills: gullies alone between broad rounded
+    // divides read as a pale rippled plain from 1-5 km, canyon@type against v0.2.0's red badlands)
+    let b = band(900.0, gsd);
+    if b > 0.0 {
+        v += 1.8 * (CREASE_MEAN - crease(perlin3(SEED + 24, p / 900.0))) * b;
+    }
+    for (k, (lam, wt)) in [(300.0, 1.0), (130.0, 0.55), (60.0, 0.25), (26.0, 0.1)].into_iter().enumerate() {
         let b = band(lam, gsd);
         if b > 0.0 {
             v += wt * (crease(perlin3(SEED + 20 + k as u64, p / lam)) - CREASE_MEAN) * b;
@@ -443,7 +450,7 @@ pub fn relief(w: &World, r: &ReliefIn, h: &mut f64) {
     }
     // ---- badlands
     if z.badland > 0.0 {
-        *h += z.badland * (14.0 + 14.0 * smoothstep(-0.3, 0.5, n1)) * 2.4 * badlands(c.p, gsd);
+        *h += z.badland * (50.0 + 50.0 * smoothstep(-0.3, 0.5, n1)) * 2.4 * badlands(c.p, gsd);
     }
     // ---- alluvial fans
     for it in r.instances(w, fam_fans()).iter() {
@@ -567,9 +574,10 @@ pub fn carve(_w: &World, ci: &CarveIn, cv: &mut Carve) {
                 let spur = smoothstep(-0.3, 0.5, perlin3(SEED + 77, ci.ctx.p / 1300.0));
                 let g3 = (1.0 - smoothstep(0.0, 0.3, perlin3(SEED + 78, ci.ctx.p / 110.0).abs())) * band(110.0, gsd);
                 // (and rills down the walls at 45 m and 18 m: walls whose finest gullies were 110 m
-                // apart read as smooth, waxy and melted, canyon@type)
-                let g4 = (1.0 - smoothstep(0.0, 0.3, perlin3(SEED + 79, ci.ctx.p / 45.0).abs())) * band(45.0, gsd);
-                let g5 = (1.0 - smoothstep(0.0, 0.35, perlin3(SEED + 83, ci.ctx.p / 18.0).abs())) * band(18.0, gsd);
+                // apart read as smooth, waxy and melted, canyon@type; resolved by 5 pixels and more:
+                // at 2-4 they drew the far walls hairy, round 12)
+                let g4 = (1.0 - smoothstep(0.0, 0.3, perlin3(SEED + 79, ci.ctx.p / 45.0).abs())) * band(45.0, 2.5 * gsd);
+                let g5 = (1.0 - smoothstep(0.0, 0.35, perlin3(SEED + 83, ci.ctx.p / 18.0).abs())) * band(18.0, 2.5 * gsd);
                 cv.dad = gw * ext * (0.2 * spur - 0.2 * g1 - 0.08 * g2 - 0.035 * g3 - 0.018 * g4 - 0.007 * g5);
             }
             // (an entrenched river: the channel and the canyon meander together, the bed narrows
@@ -603,8 +611,16 @@ pub fn linear(s: &mut Stack) {
     let arid = 1.0 - smoothstep(0.16, 0.34, t.moist);
     let soft = lw.carb + lw.soft;
     let clay = z.badland * 0.85;
+    let gsd = s.ctx.gsd;
+    // (round 12: the badlands of warm deserts in rust and red with patches of pale clay, their
+    // gully walls banded in ochre, rust and cream (v0.2.0's red badlands, canyon@type); the cool
+    // ones pale clay as before)
+    let red = smoothstep(11.0, 17.0, t.temp);
+    // (pale clay on the gentler ground, not white blobs over the slopes)
+    let pale = smoothstep(0.2, 0.6, rn + 0.35 * perlin3(SEED + 44, p / 240.0) * band(240.0, gsd)) * (1.0 - 0.6 * smoothstep(0.25, 0.6, slope));
+    let warm_floor = mixc(mixc(srgb(172.0, 96.0, 64.0), srgb(150.0, 82.0, 58.0), 0.5 + 0.5 * rn), srgb(184.0, 160.0, 132.0), 0.6 * pale);
     if clay > 0.0 {
-        let col = mixc(srgb(196.0, 184.0, 164.0), srgb(176.0, 160.0, 138.0), 0.5 + 0.5 * rn) * (1.0 + 0.05 * s.pf.detail);
+        let col = mixc(mixc(srgb(196.0, 184.0, 164.0), srgb(176.0, 160.0, 138.0), 0.5 + 0.5 * rn), warm_floor, red) * (1.0 + 0.05 * s.pf.detail);
         s.composite(Layer { cov: clay, albedo: col, cls: cls::BADLANDS, clear: 1.0, ..Default::default() });
         s.m.natural_ok *= 1.0 - clay;
     }
@@ -642,8 +658,24 @@ pub fn linear(s: &mut Stack) {
         } else {
             (9, 2.999)
         };
-        let col = pal[off + (u01k(h, 1) * nc) as usize] * (0.94 + 0.12 * u01k(h, 2));
-        let floor_col = if z.badland > 0.2 { srgb(190.0, 176.0, 150.0) } else { srgb(172.0, 128.0, 96.0) };
+        let mut col = pal[off + (u01k(h, 1) * nc) as usize];
+        // (the bands' mean colour where they are thinner than ~3 pixels across the slope: bands of a
+        // few metres aliased into hairy streaks on the far walls, canyon@type)
+        let mut mean = if z.badland > 0.2 {
+            (188.0, 158.0, 132.0)
+        } else if hard {
+            (187.0, 118.0, 79.0)
+        } else {
+            (149.0, 81.0, 58.0)
+        };
+        if z.badland > 0.2 && red > 0.0 {
+            const WARM: [usize; 6] = [6, 7, 8, 9, 10, 7];
+            col = mixc(col, pal[WARM[(u01k(h, 1) * 5.999) as usize]], red);
+            mean = (lerp(mean.0, 177.0, red), lerp(mean.1, 107.0, red), lerp(mean.2, 73.0, red));
+        }
+        let fine = smoothstep(2.0 * gsd, 4.0 * gsd, bandh / slope.max(0.05));
+        let col = mixc(srgb(mean.0, mean.1, mean.2), col, fine) * (0.94 + 0.12 * u01k(h, 2));
+        let floor_col = if z.badland > 0.2 { mixc(srgb(190.0, 176.0, 150.0), warm_floor, red) } else { srgb(172.0, 128.0, 96.0) };
         // (cliff faces of the canyons darker than their ledges and talus: varnish and shade)
         let cliff = if z.badland > 0.2 { 0.0 } else { smoothstep(0.7, 1.3, slope) };
         let col = if z.badland > 0.2 {
@@ -651,7 +683,7 @@ pub fn linear(s: &mut Stack) {
         } else {
             // (rough rock on the faces, and aprons of paler, greyer talus with boulders below
             // them: walls of one smooth colour from the floor to the rim read as wax, canyon@type)
-            let face = col * (1.0 - 0.2 * cliff) * (1.0 + 0.1 * perlin3(SEED + 41, p / 7.0) * band(7.0, s.ctx.gsd));
+            let face = col * (1.0 - 0.2 * cliff) * (1.0 + 0.1 * perlin3(SEED + 41, p / 7.0) * band(7.0, gsd));
             let tal = smoothstep(0.3, 0.5, slope) * (1.0 - smoothstep(0.75, 1.05, slope));
             let talus = srgb(176.0, 146.0, 118.0)
                 * (1.0 + 0.16 * perlin3(SEED + 42, p / 3.5) * band(3.5, s.ctx.gsd) + 0.1 * perlin3(SEED + 43, p / 11.0) * band(11.0, s.ctx.gsd));

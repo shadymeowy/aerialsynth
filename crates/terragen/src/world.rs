@@ -1296,8 +1296,9 @@ impl World {
                     let mut carved = h0.min(lerp(target, h0, wall));
                     // (a kit's fine erosion texture on the walls: rills and rough rock)
                     if cv.rough > 0.0 && h0 > target {
-                        let r = (1.0 - perlin3(0x0C4A_9E01, p / 13.0).abs()) * band(13.0, gsd) * 0.65
-                            + (1.0 - perlin3(0x0C4A_9E02, p / 5.0).abs()) * band(5.0, gsd) * 0.35;
+                        // (resolved by 5 pixels: finer, it drew the far walls hairy, round 12)
+                        let r = (1.0 - perlin3(0x0C4A_9E01, p / 13.0).abs()) * band(13.0, 2.5 * gsd) * 0.65
+                            + (1.0 - perlin3(0x0C4A_9E02, p / 5.0).abs()) * band(5.0, 2.5 * gsd) * 0.35;
                         carved -= cv.rough * 4.0 * wall * (1.0 - wall) * r;
                     }
                     // limit the carve depth (small streams only notch the terrain)

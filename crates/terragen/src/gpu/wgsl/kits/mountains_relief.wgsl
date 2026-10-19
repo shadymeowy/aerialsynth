@@ -225,6 +225,10 @@ fn mt_crease(n: f32) -> f32 {
 /// `mountains::badlands`.
 fn mt_badlands(p: vec3<f64>, gsd: f32) -> f32 {
     var v = 0.0;
+    let br = band(900.0, gsd);
+    if (br > 0.0) {
+        v += 1.8 * (MT_CREASE_MEAN - mt_crease(perlin3(MT_SEED + 24lu, p / 900.0lf))) * br;
+    }
     let b0 = band(300.0, gsd);
     if (b0 > 0.0) {
         v += (mt_crease(perlin3(MT_SEED + 20lu, p / 300.0lf)) - MT_CREASE_MEAN) * b0;
@@ -236,6 +240,10 @@ fn mt_badlands(p: vec3<f64>, gsd: f32) -> f32 {
     let b2 = band(60.0, gsd);
     if (b2 > 0.0) {
         v += 0.25 * (mt_crease(perlin3(MT_SEED + 22lu, p / 60.0lf)) - MT_CREASE_MEAN) * b2;
+    }
+    let b3 = band(26.0, gsd);
+    if (b3 > 0.0) {
+        v += 0.1 * (mt_crease(perlin3(MT_SEED + 23lu, p / 26.0lf)) - MT_CREASE_MEAN) * b3;
     }
     return v;
 }
@@ -371,7 +379,7 @@ fn mountains_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
         }
     }
     if (z.badland > 0.0) {
-        *h += z.badland * (14.0 + 14.0 * smoothstep1(-0.3, 0.5, fl.n1)) * 2.4 * mt_badlands(c.p, gsd);
+        *h += z.badland * (50.0 + 50.0 * smoothstep1(-0.3, 0.5, fl.n1)) * 2.4 * mt_badlands(c.p, gsd);
     }
     for (var k = 0u; k < fans.n; k++) {
         let it = fans.items[k];
@@ -475,8 +483,8 @@ fn mountains_carve(c: Ctx, m: Macro, ci: CarveIn, cv: ptr<function, Carve>) {
                 let g2 = (1.0 - smoothstep1(0.0, 0.25, abs(perlin3(MT_SEED + 76lu, c.p / 260.0lf)))) * band(260.0, gsd);
                 let spur = smoothstep1(-0.3, 0.5, perlin3(MT_SEED + 77lu, c.p / 1300.0lf));
                 let g3 = (1.0 - smoothstep1(0.0, 0.3, abs(perlin3(MT_SEED + 78lu, c.p / 110.0lf)))) * band(110.0, gsd);
-                let g4 = (1.0 - smoothstep1(0.0, 0.3, abs(perlin3(MT_SEED + 79lu, c.p / 45.0lf)))) * band(45.0, gsd);
-                let g5 = (1.0 - smoothstep1(0.0, 0.35, abs(perlin3(MT_SEED + 83lu, c.p / 18.0lf)))) * band(18.0, gsd);
+                let g4 = (1.0 - smoothstep1(0.0, 0.3, abs(perlin3(MT_SEED + 79lu, c.p / 45.0lf)))) * band(45.0, 2.5 * gsd);
+                let g5 = (1.0 - smoothstep1(0.0, 0.35, abs(perlin3(MT_SEED + 83lu, c.p / 18.0lf)))) * band(18.0, 2.5 * gsd);
                 (*cv).dad = gw * ext * (0.2 * spur - 0.2 * g1 - 0.08 * g2 - 0.035 * g3 - 0.018 * g4 - 0.007 * g5);
             }
             let mb = band(1000.0, gsd);

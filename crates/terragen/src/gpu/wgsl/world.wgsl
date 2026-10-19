@@ -1184,7 +1184,7 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                 }
                 var carved = min(h0, lerp(tgt, h0, wall));
                 if (cv.rough > 0.0 && h0 > tgt) {
-                    let rr = (1.0 - abs(perlin3(0x0C4A9E01lu, p / 13.0lf))) * band(13.0, gsd) * 0.65 + (1.0 - abs(perlin3(0x0C4A9E02lu, p / 5.0lf))) * band(5.0, gsd) * 0.35;
+                    let rr = (1.0 - abs(perlin3(0x0C4A9E01lu, p / 13.0lf))) * band(13.0, 2.5 * gsd) * 0.65 + (1.0 - abs(perlin3(0x0C4A9E02lu, p / 5.0lf))) * band(5.0, 2.5 * gsd) * 0.35;
                     carved -= cv.rough * 4.0 * wall * (1.0 - wall) * rr;
                 }
                 carved = max(carved, h0 - cv.depth_cap * (1.0 - 0.3 * wall));
