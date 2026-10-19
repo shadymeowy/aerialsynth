@@ -361,7 +361,7 @@ const K_CONE: f64 = 0.008_581_6;
 const K_MAAR: f64 = -0.001_225_1;
 const MEAN_CINDER: f64 = 0.2190;
 /// mean lava tongue cover × cell (m)
-const MEAN_LAVA: f64 = 36.0;
+const MEAN_LAVA: f64 = 27.0;
 
 /// Profile of a cinder cone at ρ = d / R (1 at the crater rim's top).
 fn cone_profile(rho: f64) -> f64 {
@@ -398,17 +398,17 @@ fn ragged(qx: f64, qy: f64, r: f64, h: u64) -> f64 {
 }
 
 /// Half width of a lava tongue at the fraction `sg` of its length: narrow at the vent, widening
-/// downstream to a blunt toe (a lens of `sin(π sg)^0.6`, short and wide, drew round black discs
-/// in the cinder fields, braided).
-fn tongue_w(sg: f64, w0: f64) -> f64 {
-    w0 * (sg.max(0.0) * (1.0 - sg.powi(4)).max(0.0)).sqrt()
+/// downstream (as `sg^e`) to a blunt toe (a lens of `sin(π sg)^0.6`, short and wide, drew round
+/// black discs in the cinder fields, braided).
+fn tongue_w(sg: f64, w0: f64, e: f64) -> f64 {
+    w0 * sg.max(0.0).powf(e) * (1.0 - sg.powi(4)).max(0.0).sqrt()
 }
 
 /// A lava tongue from the origin along `dir` (rad) between `s0` and `len` (m): (cover, half
 /// width). The axis wanders, the margin is lobate (`nzv`: noise in the frame of the instance,
 /// ~[-1, 1], band-limited).
 #[allow(clippy::too_many_arguments)]
-fn tongue(x: f64, y: f64, dir: f64, s0: f64, len: f64, w0: f64, ph: f64, nzv: f64, fw: f64) -> (f64, f64) {
+fn tongue(x: f64, y: f64, dir: f64, s0: f64, len: f64, w0: f64, e: f64, ph: f64, nzv: f64, fw: f64) -> (f64, f64) {
     let (sn, cs) = dir.sin_cos();
     let s = x * cs + y * sn;
     let t = -x * sn + y * cs;
@@ -417,7 +417,7 @@ fn tongue(x: f64, y: f64, dir: f64, s0: f64, len: f64, w0: f64, ph: f64, nzv: f6
         return (0.0, 0.0);
     }
     let wander = 0.035 * len * (s / (0.22 * len) + ph).sin();
-    let w = tongue_w(sg, w0) * (1.0 + 0.4 * nzv);
+    let w = tongue_w(sg, w0, e) * (1.0 + 0.4 * nzv);
     (((w - (t - wander).abs()) / fw + 0.5).clamp(0.0, 1.0), w)
 }
 
@@ -507,10 +507,11 @@ pub(crate) fn field(it: &Instance, p: DVec3, gsd: f64, fw: f64, look: bool) -> F
                 }
                 if look && u01k(h, 8) < lshare {
                     let dir = std::f64::consts::TAU * u01k(h, 9);
-                    let len = cs * (0.55 + 0.45 * u01k(h, 10));
-                    // (narrow flows: 110-230 m wide paddles, braided)
-                    let w0 = 40.0 + 40.0 * u01k(h, 11);
-                    let (c, _) = tongue(qx, qy, dir, 0.8 * rc, len, w0, std::f64::consts::TAU * u01k(h, 12), nzv, fw);
+                    // (long narrow flows of even width, 45-85 m wide: tongues widening from the
+                    // vent to a blunt toe 80-160 m wide read as paddles, braided)
+                    let len = cs * (0.75 + 0.25 * u01k(h, 10));
+                    let w0 = 22.0 + 20.0 * u01k(h, 11);
+                    let (c, _) = tongue(qx, qy, dir, 0.8 * rc, len, w0, 0.25, std::f64::consts::TAU * u01k(h, 12), nzv, fw);
                     if c > lava {
                         lava = c;
                         // (the tongues of a cinder field mostly weathered: fresh black flows drew holes in the plain)
@@ -685,7 +686,7 @@ fn flows(s: &mut Stack, v: &Vol, k: &Cone) {
         // (only the tongues the sample is beside: the azimuth first)
         let d = (k.th - dir + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
         let (c, _) = if e > 0.0 && d.abs() < 1.5 && k.rr * d.sin().abs() < 1.3 * w0 + 0.04 * len + 2.0 * fw {
-            tongue(k.x, k.y, dir, s0, len, w0, ph, *nzv.get_or_insert_with(|| margin_noise(v.id, k.x, k.y, gsd)), fw)
+            tongue(k.x, k.y, dir, s0, len, w0, 0.5, ph, *nzv.get_or_insert_with(|| margin_noise(v.id, k.x, k.y, gsd)), fw)
         } else {
             (0.0, 0.0)
         };
@@ -695,7 +696,7 @@ fn flows(s: &mut Stack, v: &Vol, k: &Cone) {
         }
         // the mean over the azimuth at this radius
         if e < 1.0 && k.rr > s0 && k.rr < len {
-            let m = tongue_w((k.rr - s0) / (len - s0), w0) / (std::f64::consts::PI * k.rr);
+            let m = tongue_w((k.rr - s0) / (len - s0), w0, 0.5) / (std::f64::consts::PI * k.rr);
             if m > mean {
                 mean = m;
                 mage = a;
@@ -768,15 +769,22 @@ fn field_look(s: &mut Stack, it: &Instance) {
     if f.lava > 0.0 {
         let (col, cl, clear) = lava_look(f.age, p, gsd);
         // (rough blocky lava, a third of the way to the ground around it and some plants on it:
-        // dark smooth tongues read as paddles stamped on the plain, braided)
-        let col = mixc(col, s.col, 0.3) * (1.0 + 0.22 * nz(SEED_LAVA + 5, p, 6.0, gsd));
+        // dark smooth tongues read as paddles stamped on the plain, braided; round 11: old flows
+        // dark rough basalt with patches of soil and plants, grown over in humid climates —
+        // the pale olive of old flows drew smooth paddles)
+        let old = smoothstep(0.5, 0.9, f.age);
+        let col = mixc(mixc(col, srgb(74.0, 68.0, 62.0), 0.5 * old), s.col, 0.25)
+            * (1.0 + 0.25 * nz(SEED_LAVA + 5, p, 6.0, gsd) + 0.15 * nz(SEED_LAVA + 7, p, 16.0, gsd));
+        let soil = smoothstep(0.1, 0.6, nz(SEED_LAVA + 6, p, 28.0, gsd)) + 0.2 * (1.0 - band(28.0, gsd));
+        let cov = f.lava * (1.0 - 0.55 * soil * old) * (1.0 - 0.6 * humid);
         let clear = 0.85 * clear;
-        s.composite(Layer { cov: f.lava, albedo: col, cls: cl, clear, ..Default::default() });
-        s.m.natural_ok *= 1.0 - f.lava * clear;
+        s.composite(Layer { cov, albedo: col, cls: cl, clear, ..Default::default() });
+        s.m.natural_ok *= 1.0 - cov * clear;
     }
-    // (the share of young bare cones: all in dry climates, a tenth in humid ones; the others are
-    // under the vegetation around them, hills of the relief only)
-    let ys = 1.0 - 0.9 * humid;
+    // (the share of young bare cones: all in dry climates, 3 % in humid ones (a tenth left bare far
+    // cones, volcano@type); the others are under the vegetation around them, hills of the relief
+    // only)
+    let ys = 1.0 - 0.97 * humid;
     let (cs, mshare) = (it.v[1] as f64, it.v[6] as f64);
     let m0 = (1.0 - band(0.35 * cs, gsd)) * f.dens * (1.0 - mshare) * MEAN_CINDER;
     let young = if u01k(f.chash, 18) < ys { 1.0 } else { 0.0 };
