@@ -517,7 +517,14 @@ fn layer_zonal(s: ptr<function, Stack>) {
     grass = grass * vec3<f32>(1.0 + 0.10 * (st.y - 0.5), 1.0 + 0.06 * (st.w - 0.5), 1.0 - 0.08 * (st.y - 0.5));
     let land_n = (*s).pf.f[PF_LAND];
     let cover = smoothstep1(0.08, 0.45, wet + 0.25 * patchv + 0.2 * land_n) * smoothstep1(-9.0, -1.0, temp);
-    var col = mixc(soil, grass, cover) * (1.0 + 0.16 * land_n);
+    let semi = smoothstep1(0.02, 0.12, wet) * (1.0 - smoothstep1(0.3, 0.45, wet)) * smoothstep1(-1.0, 4.0, temp);
+    let b5 = band(8.0, gsd);
+    var cover_px = cover + 0.17 * semi * (1.0 - cover);
+    if (semi > 0.0 && b5 > 0.0) {
+        let n = perlin3(0x7C55lu, p * (1.0lf / 8.0lf)) + 0.5 * perlin3(0x7C56lu, p * (1.0lf / 3.0lf)) * band(3.0, gsd);
+        cover_px = clamp(cover + semi * (2.4 * cover * (1.0 - cover) * n + 0.6 * smoothstep1(-0.1, 0.6, n) * (1.0 - cover)) * b5 + 0.17 * semi * (1.0 - cover) * (1.0 - b5), 0.0, 1.0);
+    }
+    var col = mixc(soil, grass, cover_px) * (1.0 + 0.16 * land_n);
     var cls = select(LC_BARE, LC_GRASS, cover > 0.5);
     if (temp < 0.0 && cover > 0.3) {
         col = mixc(col, spal(s, BP_TUNDRA), smoothstep1(0.0, -6.0, temp));
@@ -575,7 +582,8 @@ fn layer_azonal(s: ptr<function, Stack>) {
     let slope_eff = lerp(exp_slope, max(slope, exp_slope * 0.6), resolve);
     let rock_n = 0.7 * patchv + 0.3 * (*s).pf.f[PF_LAND];
     let rock = smoothstep1(0.55, 0.85, slope_eff + 0.25 * detail + 0.25 * rock_n + 0.2 * (t.rock_expect - 0.4) + 0.15 * t.gully)
-        * (1.0 - 0.5 * smoothstep1(0.3, 0.8, (*s).m.cover) * (1.0 - t.mountain));
+        * (1.0 - 0.5 * smoothstep1(0.3, 0.8, (*s).m.cover) * (1.0 - t.mountain))
+        * (1.0 - 0.85 * smoothstep1(0.5, 0.65, t.moist) * smoothstep1(16.0, 21.0, t.temp) * (1.0 - smoothstep1(0.9, 1.5, slope_eff)));
     (*s).m.rock = rock;
     if (rock > 0.0) {
         let ri = st.z * 2.0;
@@ -585,6 +593,7 @@ fn layer_azonal(s: ptr<function, Stack>) {
         let strata = sin((*s).l.ground / strata_h + 3.0 * s_pf_lazy(s, PF_STRATA));
         let strata_w = TAU * strata_h / max(slope, 0.05);
         rc *= 1.0 + 0.06 * strata * band(strata_w, 1.5 * gsd) + 0.25 * detail + 0.12 * s_pf_lazy(s, PF_STRATA2);
+        rc = mixc(rc, vec3<f32>(dot(rc, vec3<f32>(0.3, 0.59, 0.11))), 0.55 * smoothstep1(3.0, -5.0, t.temp));
         composite(s, layer_paint(rock, rc, LC_ROCK));
     }
     (*s).m.sand = t.sand;

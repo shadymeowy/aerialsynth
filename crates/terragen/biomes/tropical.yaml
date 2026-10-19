@@ -16,7 +16,9 @@
   patch: true
   landuse: { agriculture: 0.2 }
   palette:
-    crown_tropic: [30, 66, 30]
+    # (round 11: a little lighter and less blue: the dark canopy under the haze drew volcano@type
+    # darker than v0.2.0)
+    crown_tropic: [37, 73, 32]
     crown_decid: [46, 78, 36]
     grass_wet: [70, 104, 40]
     laterite: [150, 74, 44]
@@ -25,7 +27,7 @@
   canopy:
     # the closed canopy: broad cauliflower crowns of a stand, flat-topped where they close
     - { share: tropical, shape: umbrella, cell: 15, height: [22, 8], colour: crown_tropic }
-    - { share: tropical, shape: umbrella, cell: 10, height: [18, 6], colour: [40, 74, 36], density: 0.6, seed: 0x7E01 }
+    - { share: tropical, shape: umbrella, cell: 10, height: [18, 6], colour: [47, 80, 38], density: 0.6, seed: 0x7E01 }
     - { share: broadleaf, shape: dome, cell: 8.5, height: [10, 10], open_height: 0.65, colour: crown_decid, colour_dry: crown_dry }
     - { share: shrub, shape: dome, cell: 3.2, height: [1.6, 0], colour: shrub, closure: false, stand: false }
   zonation:

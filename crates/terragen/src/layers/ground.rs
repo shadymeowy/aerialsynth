@@ -34,7 +34,18 @@ pub fn zonal(s: &mut Stack) {
     let grass = grass * DVec3::new(1.0 + 0.10 * (st[1] - 0.5), 1.0 + 0.06 * (st[3] - 0.5), 1.0 - 0.08 * (st[1] - 0.5));
     let land_n = pf.land;
     let cover = smoothstep(0.08, 0.45, wet + 0.25 * patch + 0.2 * land_n) * smoothstep(-9.0, -1.0, temp);
-    let mut col = mixc(soil, grass, cover) * (1.0 + 0.16 * land_n);
+    // (semi-arid grass in tussocks over the soil, 3-8 m: a uniform blend of soil and grass drew a
+    // blurred bare plain, audit a16)
+    let semi = smoothstep(0.02, 0.12, wet) * (1.0 - smoothstep(0.3, 0.45, wet)) * smoothstep(-1.0, 4.0, temp);
+    let b5 = band(8.0, gsd);
+    let cover_px = if semi > 0.0 && b5 > 0.0 {
+        let n = perlin3(0x7C55, p / 8.0) + 0.5 * perlin3(0x7C56, p / 3.0) * band(3.0, gsd);
+        (cover + semi * (2.4 * cover * (1.0 - cover) * n + 0.6 * smoothstep(-0.1, 0.6, n) * (1.0 - cover)) * b5 + 0.17 * semi * (1.0 - cover) * (1.0 - b5))
+            .clamp(0.0, 1.0)
+    } else {
+        cover + 0.17 * semi * (1.0 - cover)
+    };
+    let mut col = mixc(soil, grass, cover_px) * (1.0 + 0.16 * land_n);
     let mut class = if cover > 0.5 { lc::GRASS } else { lc::BARE };
     if temp < 0.0 && cover > 0.3 {
         col = mixc(col, s.pal(pal::TUNDRA), smoothstep(0.0, -6.0, temp));

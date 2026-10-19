@@ -6,6 +6,7 @@ use crate::noise::*;
 use crate::registry::pal;
 use crate::stack::{Layer, Stack};
 use crate::surface::{mixc, PF_STRATA, PF_STRATA2};
+use glam::DVec3;
 
 pub fn layer(s: &mut Stack) {
     let t = s.t;
@@ -24,7 +25,10 @@ pub fn layer(s: &mut Stack) {
     let slope_eff = lerp(exp_slope, slope.max(exp_slope * 0.6), resolve);
     let rock_n = 0.7 * patch + 0.3 * pf.land;
     let rock = smoothstep(0.55, 0.85, slope_eff + 0.25 * detail + 0.25 * rock_n + 0.2 * (t.rock_expect - 0.4) + 0.15 * t.gully)
-        * (1.0 - 0.5 * smoothstep(0.3, 0.8, s.m.cover) * (1.0 - t.mountain));
+        * (1.0 - 0.5 * smoothstep(0.3, 0.8, s.m.cover) * (1.0 - t.mountain))
+        // (the rainforest grows over steep slopes: rock on the rims of the stream valleys drew
+        // orange arcs through the forest, volcano@type)
+        * (1.0 - 0.85 * smoothstep(0.5, 0.65, t.moist) * smoothstep(16.0, 21.0, t.temp) * (1.0 - smoothstep(0.9, 1.5, slope_eff)));
     s.m.rock = rock;
     if rock > 0.0 {
         let ri = st[2] * 2.0;
@@ -36,6 +40,10 @@ pub fn layer(s: &mut Stack) {
         let strata = (s.l.ground / strata_h + 3.0 * s.sm.pf_lazy(pf, PF_STRATA)).sin();
         let strata_w = std::f64::consts::TAU * strata_h / slope.max(0.05);
         rc *= 1.0 + 0.06 * strata * band(strata_w, 1.5 * gsd) + 0.25 * detail + 0.12 * s.sm.pf_lazy(pf, PF_STRATA2);
+        // (frost-shattered rock in the cold greys: the warm rock colours drew rusty mottles between
+        // the snow patches, audit a07)
+        let cold = smoothstep(3.0, -5.0, t.temp);
+        let rc = mixc(rc, DVec3::splat(rc.dot(DVec3::new(0.3, 0.59, 0.11))), 0.55 * cold);
         s.composite(Layer::paint_cls(rock, rc, lc::ROCK));
     }
     // ---- sand seas
