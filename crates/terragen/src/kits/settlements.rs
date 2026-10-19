@@ -228,7 +228,15 @@ fn built(s: &mut Stack) {
                 }
                 continue;
             }
-            tpl::AIRPORT => sites::airport_px(st, p, ground, gsd, fw),
+            tpl::AIRPORT => {
+                let sp = sites::airport_px(st, p, ground, gsd, fw);
+                // (round 13: no tracks and minor roads across the airfield, only the network's
+                // motorways and trunk roads: tracks crossed the runways, gallery g33)
+                if sp.cov > 0.5 {
+                    s.no_town = true;
+                }
+                sp
+            }
             tpl::PORT => sites::port_px(st, p, false, 0.0, gsd, fw),
             tpl::QUARRY => sites::quarry_px(st, p, gsd, fw),
             tpl::SOLAR => sites::solar_px(st, p, gsd, fw),

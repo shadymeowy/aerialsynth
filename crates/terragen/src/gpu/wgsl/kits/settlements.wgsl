@@ -2993,6 +2993,9 @@ fn settlements_slot_built(s: ptr<function, Stack>) {
             continue;
         } else if (st.tmpl == ST_AIRPORT) {
             sp = st_airport_px(st, p, ground, gsd, fw);
+            if (sp.cov > 0.5) {
+                (*s).no_town = true;
+            }
         } else if (st.tmpl == ST_PORT) {
             sp = st_port_land_px(st, p, gsd, fw);
         } else if (st.tmpl == ST_QUARRY) {
