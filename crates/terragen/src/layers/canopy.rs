@@ -231,12 +231,14 @@ pub fn layer(s: &mut crate::stack::Stack) {
     let sav_frac = if dens > 0.0 { (dens_sav / dens).min(1.0) * sav_biome } else { 0.0 };
     // (dense forest keeps its canopy: clearings cut by the clumps read as moth-eaten; and the
     // heights of clumped closed stands, resolved or a mean, broke the LOD at the airport)
-    let dens_c = clumped(dens, 0.9 * (1.0 - 0.7 * sav_frac) * (1.0 - smoothstep(0.3, 0.75, dens)), p, gsd);
-    let dens_sav_c = clumped(dens_sav, 0.9 - 0.6 * sav_biome, p, gsd);
-    let shrub_c = clumped(shrub, 0.6, p, gsd);
+    let cf = clump_field(p, gsd);
+    let dens_c = clumped_at(dens, 0.9 * (1.0 - 0.7 * sav_frac) * (1.0 - smoothstep(0.3, 0.75, dens)), cf);
+    let dens_sav_c = clumped_at(dens_sav, 0.9 - 0.6 * sav_biome, cf);
+    let shrub_c = clumped_at(shrub, 0.6, cf);
     // (the species of a mixed stand in patches, not tree by tree: dark spruces dotted among pale
-    // broadleaves, audit a25; another part of the clump field)
-    let conifer_c = clumped(conifer, 1.0, p + DVec3::new(3.0e3, -2.0e3, 1.0e3), gsd);
+    // broadleaves, audit a25; conifers where the clump field is high, on the stands' sparser
+    // ground: one field, a second one grew the pass's compile time)
+    let conifer_c = clumped_at(conifer, 1.0, cf.map(|(z, u2)| (-z, u2)));
     let reg = &s.sm.registry;
     let crowns = &reg.biomes[s.bio.a as usize].crowns;
     let mut layers =
@@ -301,8 +303,7 @@ pub fn layer(s: &mut crate::stack::Stack) {
             }
         }
         if fill_w > 0.0 {
-            let ft = perlin3(0xF11, p / 9.0) * band(9.0, gsd) + 0.7 * perlin3(0xF12, p / 30.0) * band(30.0, gsd);
-            s.composite(Layer::paint(fill_w, fill_col / fill_n * (0.6 * (1.0 + 0.4 * ft))));
+            s.composite(Layer::paint(fill_w, fill_col / fill_n * (0.6 * (1.0 + 0.5 * s.pf.detail))));
         }
     }
     let (mut tc, th, tcov) = s.sm.trees(layers, s.q_loc, gsd, fw, p);

@@ -2320,22 +2320,14 @@ fn st_airport_px(st: FStamp, p: vec3<f64>, ground: f32, gsd: f32, fw: f32) -> St
     if (din <= 0.0) {
         return o;
     }
-    var en = din + 55.0 * perlin3(seed ^ 0xED1lu, p * (1.0lf / 170.0lf));
-    let b60 = band(60.0, gsd);
-    if (b60 > 0.0) {
-        en += 25.0 * perlin3(seed ^ 0xED2lu, p * (1.0lf / 60.0lf)) * b60;
-    }
-    let edge = smoothstep1(0.0, 0.8 * margin, en);
+    let wn = perlin3(seed ^ 0xED1lu, p * (1.0lf / 170.0lf));
+    let edge = smoothstep1(0.0, 0.8 * margin, din + 65.0 * wn);
     o.cov = edge;
     o.abs = true;
     o.clear = edge;
     o.cls = LC_GRASS;
     let stripe = f32(st_rem(i64(floor(q.x / 18.0)), 2li));
-    var tone = 1.0 + 0.10 * perlin3(seed ^ 0xED3lu, p * (1.0lf / 200.0lf)) * band(200.0, gsd);
-    let b45 = band(45.0, gsd);
-    if (b45 > 0.0) {
-        tone += 0.06 * perlin3(seed ^ 0xED4lu, p * (1.0lf / 45.0lf)) * b45;
-    }
+    let tone = 1.0 + 0.12 * wn * band(170.0, gsd);
     o.col = srgb(132.0, 146.0, 92.0) * (0.95 + 0.06 * stripe * band(18.0, gsd)) * tone;
     let wgt = smoothstep1(0.0, margin, din);
     o.dh = ground + (st.h - ground) * wgt;

@@ -265,20 +265,35 @@ pub fn strata(z: f64, t: f64) -> (i64, f64, f64, f64) {
 /// `perlin3` has a deviation of 0.211; the logistic approximation of the normal distribution).
 /// WGSL `clumped`.
 pub fn clumped(d: f64, c: f64, p: glam::DVec3, gsd: f64) -> f64 {
+    clumped_at(d, c, clump_field(p, gsd))
+}
+
+/// The clump field of `clumped` at `p`: the resolved field in units of the whole field's
+/// deviation and the unresolved variance (`None` where no octave is resolved). One field serves
+/// several densities (`clumped_at`; WGSL `clump_field`).
+pub fn clump_field(p: glam::DVec3, gsd: f64) -> Option<(f64, f64)> {
     // (the 34 m octave from ~8 pixels: resolved or not on both sides of zooms 13/14)
     let (b1, b2) = (band(160.0, gsd), band(34.0, 2.0 * gsd));
-    if c <= 0.0 || d <= 0.0 || d >= 1.0 || b1 <= 0.0 {
-        return d;
+    if b1 <= 0.0 {
+        return None;
     }
     // (a finer octave fading out at low densities, for larger groves, moved the LOD of u_valley z11)
-    let a2 = 0.8;
+    const A2: f64 = 0.8;
     let mut r = perlin3(0xC1A7, p / 160.0) * b1;
-    if b2 * a2 > 0.0 {
-        r += a2 * perlin3(0xC1A8, p / 34.0) * b2;
+    if b2 > 0.0 {
+        r += A2 * perlin3(0xC1A8, p / 34.0) * b2;
     }
-    // the resolved field in units of the whole field's deviation, the unresolved variance
-    let z = r / (0.211 * (1.0 + a2 * a2).sqrt());
-    let u2 = ((1.0 - b1 * b1) + a2 * a2 * (1.0 - b2 * b2)) / (1.0 + a2 * a2);
+    let z = r / (0.211 * (1.0 + A2 * A2).sqrt());
+    let u2 = ((1.0 - b1 * b1) + A2 * A2 * (1.0 - b2 * b2)) / (1.0 + A2 * A2);
+    Some((z, u2))
+}
+
+/// `clumped` with its field (`clump_field`; WGSL `clumped_at`).
+pub fn clumped_at(d: f64, c: f64, field: Option<(f64, f64)>) -> f64 {
+    let Some((z, u2)) = field else { return d };
+    if c <= 0.0 || d <= 0.0 || d >= 1.0 {
+        return d;
+    }
     // the edge's softness (deviations), the density's quantile
     const W2: f64 = 0.22 * 0.22;
     let q = (d / (1.0 - d)).ln() / 1.702 * (1.0 + W2).sqrt();

@@ -944,10 +944,11 @@ fn layer_canopy(s: ptr<function, Stack>) {
     if (dens > 0.0) {
         sav_frac = min(dens_sav / dens, 1.0) * sav_biome;
     }
-    let dens_c = clumped(dens, 0.9 * (1.0 - 0.7 * sav_frac) * (1.0 - smoothstep1(0.3, 0.75, dens)), p, gsd);
-    let dens_sav_c = clumped(dens_sav, 0.9 - 0.6 * sav_biome, p, gsd);
-    let shrub_c = clumped(shrub, 0.6, p, gsd);
-    let conifer_c = clumped(conifer, 1.0, p + vec3<f64>(3.0e3lf, -2.0e3lf, 1.0e3lf), gsd);
+    let cf = clump_field(p, gsd);
+    let dens_c = clumped_at(dens, 0.9 * (1.0 - 0.7 * sav_frac) * (1.0 - smoothstep1(0.3, 0.75, dens)), cf);
+    let dens_sav_c = clumped_at(dens_sav, 0.9 - 0.6 * sav_biome, cf);
+    let shrub_c = clumped_at(shrub, 0.6, cf);
+    let conifer_c = clumped_at(conifer, 1.0, vec3<f32>(-cf.x, cf.y, cf.z));
     let bm = biomes[(*s).bio.a];
     let n = min(bm.r0.y, MAX_CROWNS);
     var layers: array<TreeLayer, 6>;
@@ -1007,16 +1008,7 @@ fn layer_canopy(s: ptr<function, Stack>) {
         }
     }
     if (fill_w > 0.0) {
-        var ft = 0.0;
-        let b9 = band(9.0, gsd);
-        if (b9 > 0.0) {
-            ft = perlin3(0xF11lu, p * (1.0lf / 9.0lf)) * b9;
-        }
-        let b30 = band(30.0, gsd);
-        if (b30 > 0.0) {
-            ft += 0.7 * perlin3(0xF12lu, p * (1.0lf / 30.0lf)) * b30;
-        }
-        composite(s, layer_paint(fill_w, fill_col / fill_n * (0.6 * (1.0 + 0.4 * ft)), 0u));
+        composite(s, layer_paint(fill_w, fill_col / fill_n * (0.6 * (1.0 + 0.5 * (*s).pf.f[PF_DETAIL])), 0u));
     }
     // the crowns (`it` 0), then each layer's crowns shifted towards the sun (their shadows): one
     // call site of `trees`
@@ -1354,20 +1346,31 @@ fn stack_surface(sp: ptr<function, Stack>) -> Surface {
 
 /// `ground::semi_clumps`.
 /// Clumped density (`noise::clumped`).
-fn clumped(d: f32, c0: f32, p: vec3<f64>, gsd: f32) -> f32 {
+fn clumped(d: f32, c: f32, p: vec3<f64>, gsd: f32) -> f32 {
+    return clumped_at(d, c, clump_field(p, gsd));
+}
+
+/// The clump field (`noise::clump_field`): (z, u2, resolved).
+fn clump_field(p: vec3<f64>, gsd: f32) -> vec3<f32> {
     let b1 = band(160.0, gsd);
     let b2 = band(34.0, 2.0 * gsd);
-    let c = c0;
-    if (c <= 0.0 || d <= 0.0 || d >= 1.0 || b1 <= 0.0) {
+    if (b1 <= 0.0) {
+        return vec3<f32>(0.0);
+    }
+    var r = perlin3(0xC1A7lu, p * (1.0lf / 160.0lf)) * b1;
+    if (b2 > 0.0) {
+        r += 0.8 * perlin3(0xC1A8lu, p * (1.0lf / 34.0lf)) * b2;
+    }
+    return vec3<f32>(r / (0.211 * sqrt(1.64)), ((1.0 - b1 * b1) + 0.64 * (1.0 - b2 * b2)) / 1.64, 1.0);
+}
+
+/// `noise::clumped_at`.
+fn clumped_at(d: f32, c: f32, fz: vec3<f32>) -> f32 {
+    if (fz.z <= 0.0 || c <= 0.0 || d <= 0.0 || d >= 1.0) {
         return d;
     }
-    let a2 = 0.8;
-    var r = perlin3(0xC1A7lu, p * (1.0lf / 160.0lf)) * b1;
-    if (b2 * a2 > 0.0) {
-        r += a2 * perlin3(0xC1A8lu, p * (1.0lf / 34.0lf)) * b2;
-    }
-    let z = r / (0.211 * sqrt(1.0 + a2 * a2));
-    let u2 = ((1.0 - b1 * b1) + a2 * a2 * (1.0 - b2 * b2)) / (1.0 + a2 * a2);
+    let z = fz.x;
+    let u2 = fz.y;
     let w2 = 0.22 * 0.22;
     let q = log(d / (1.0 - d)) / 1.702 * sqrt(1.0 + w2);
     let sv0 = 1.0 / (1.0 + exp(-1.702 * (q - z) / sqrt(u2 + w2)));
