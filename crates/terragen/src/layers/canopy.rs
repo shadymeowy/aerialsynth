@@ -38,9 +38,10 @@ impl SurfaceModel {
                 continue;
             }
             // (round 11: crowns of 1-3 pixels drawn one by one, each with its tint and dark rim, were
-            // the scenes' main high-frequency clutter, audit a26 a20 a25: explicit from 1.6 pixels on, and
-            // their tints and rims fade in up to 6)
-            let explicit = smoothstep(1.6 * gsd, 4.0 * gsd, layer.cell);
+            // the scenes' main high-frequency clutter, audit a26 a20 a25: their tints and rims fade in
+            // up to 6 pixels; drawing them only from 1.6 pixels on moved the crossfade of the canopy's
+            // heights and classes between zooms beyond the LOD tests' limits)
+            let explicit = smoothstep(1.2 * gsd, 3.0 * gsd, layer.cell);
             let contrast = smoothstep(2.5 * gsd, 6.0 * gsd, layer.cell);
             // expected coverage when unresolved
             let mean_r = layer.cell * 0.48;
@@ -110,7 +111,8 @@ impl SurfaceModel {
                         // leafy mottling inside the crown (clumps of foliage, ~1 m)
                         let leaf = 0.82 + 0.36 * (0.5 + 0.5 * perlin3(h, p / 1.1)) * band(1.1, gsd);
                         // crowns are a bit darker at the rim (self-shading inside the crown)
-                        best_col = layer.color * layer.tone * mixc(DVec3::splat(0.92), tint * hue * leaf * (0.75 + 0.35 * (1.0 - x)), contrast);
+                        // (faded to their mean, 0.98 × 0.867: tint and rim over the crown's area)
+                        best_col = layer.color * layer.tone * leaf * mixc(DVec3::splat(0.85), tint * hue * (0.75 + 0.35 * (1.0 - x)), contrast);
                     }
                     cov_total = cov_total.max(cov);
                 }

@@ -367,7 +367,7 @@ fn trees(layers: array<TreeLayer, 6>, mask: u32, q: vec2<f32>, gsd: f32, fw: f32
         if (layer.density <= 1e-4) {
             continue;
         }
-        let expl = smoothstep1(1.6 * gsd, 4.0 * gsd, layer.cell);
+        let expl = smoothstep1(1.2 * gsd, 3.0 * gsd, layer.cell);
         let contrast = smoothstep1(2.5 * gsd, 6.0 * gsd, layer.cell);
         // expected coverage when unresolved
         let mean_r = layer.cell * 0.48;
@@ -446,7 +446,7 @@ fn trees(layers: array<TreeLayer, 6>, mask: u32, q: vec2<f32>, gsd: f32, fw: f32
                     if (b11 > 0.0) {
                         leaf += 0.36 * (0.5 + 0.5 * perlin3(h, p * (1.0lf / 1.1lf))) * b11;
                     }
-                    best_col = layer.color * layer.tone * mixc(vec3<f32>(0.92), tint * hue * leaf * (0.75 + 0.35 * (1.0 - x)), contrast);
+                    best_col = layer.color * layer.tone * leaf * mixc(vec3<f32>(0.85), tint * hue * (0.75 + 0.35 * (1.0 - x)), contrast);
                 }
                 cov_total = max(cov_total, cov);
             }
