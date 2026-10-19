@@ -43,7 +43,8 @@ pub fn zonal(s: &mut Stack) {
     let tm = 0.17 * if semi > 0.0 { 1.0 + 0.9 * semi_clumps(p, gsd) } else { 1.0 };
     let cover_px = if semi > 0.0 && b5 > 0.0 {
         let n = perlin3(0x7C55, p / 8.0) + 0.5 * perlin3(0x7C56, p / 3.0) * band(3.0, gsd);
-        (cover + semi * (2.4 * cover * (1.0 - cover) * n + 0.6 * smoothstep(-0.1, 0.6, n) * (1.0 - cover)) * b5 + tm * semi * (1.0 - cover) * (1.0 - b5)).clamp(0.0, 1.0)
+        (cover + semi * (2.4 * cover * (1.0 - cover) * n + 0.6 * smoothstep(-0.1, 0.6, n) * (1.0 - cover)) * b5 + tm * semi * (1.0 - cover) * (1.0 - b5))
+            .clamp(0.0, 1.0)
     } else {
         cover + tm * semi * (1.0 - cover)
     };

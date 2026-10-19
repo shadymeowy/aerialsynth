@@ -189,15 +189,14 @@ pub fn layer(s: &mut crate::stack::Stack) {
     let shrub_clim = smoothstep(0.04, 0.26, wet) * (1.0 - smoothstep(0.6, 0.8, wet)) * smoothstep(2.0, 10.0, temp);
     // (in dry land a sparse scatter between the patches too)
     let shrub_patch = smoothstep(-0.2, 0.5, pf.patch + 0.4 * pf.land).max(0.6 * (1.0 - smoothstep(0.2, 0.35, wet)));
-    let shrub =
-        ((0.45 * shrub_clim * shrub_patch * (1.0 - forest) * m.natural_ok.max(0.4 * m.rock) * (1.0 - m.field_cov) * s.veg(|v| v.shrubs) * style.shrubs
+    let shrub = ((0.45 * shrub_clim * shrub_patch * (1.0 - forest) * m.natural_ok.max(0.4 * m.rock) * (1.0 - m.field_cov) * s.veg(|v| v.shrubs) * style.shrubs
             + gully_scrub)
             * veg.tree_density
             * m.veg
             // (round 12: in clumps over tens to hundreds of metres in dry land: the far semi-arid
             // plain read as bare, a16)
             * (1.0 + 0.9 * (1.0 - smoothstep(0.3, 0.45, wet)) * crate::layers::ground::semi_clumps(p, gsd)))
-            .clamp(0.0, 0.7);
+    .clamp(0.0, 0.7);
     // forest stands (~240 m, irregular borders): each of its own age (crown size, height), tone
     // and conifer / broadleaf mix, with small canopy gaps
     let stand_id = pf.stand_id.unwrap_or_else(|| s.sm.stand_id(p, Some(pf.stand_warp)));

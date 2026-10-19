@@ -313,12 +313,7 @@ pub fn old_sub(blk: &Blk) -> OldSub {
     let (u0, u1) = (line(iu, nu, su, blk.bw, -1), line(iu + 1.0, nu, su, blk.bw, -1));
     let (v0, v1) = (line(iv, nv, sv, blk.bd, salt), line(iv + 1.0, nv, sv, blk.bd, salt));
     let lane = |k: f64, n: f64, salt: i64| if k > 0.0 && k < n && u01k(hash2(blk.id ^ 0x1A6, salt, k as i64), 1) < 0.6 { lane_hw } else { 0.0 };
-    let ds = [
-        blk.u - u0 - lane(iu, nu, -1),
-        u1 - blk.u - lane(iu + 1.0, nu, -1),
-        blk.v - v0 - lane(iv, nv, salt),
-        v1 - blk.v - lane(iv + 1.0, nv, salt),
-    ];
+    let ds = [blk.u - u0 - lane(iu, nu, -1), u1 - blk.u - lane(iu + 1.0, nu, -1), blk.v - v0 - lane(iv, nv, salt), v1 - blk.v - lane(iv + 1.0, nv, salt)];
     let mut side = 0;
     for k in 1..4 {
         if ds[k] < ds[side] {
