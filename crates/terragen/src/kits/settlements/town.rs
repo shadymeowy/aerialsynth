@@ -222,6 +222,16 @@ fn core_ring(pl: &Pl, q: DVec2) -> Option<(f64, f64)> {
     Some((qe.length(), rr))
 }
 
+/// The arc length (m, in the elongated place frame) along the ring boulevard at `q`.
+fn ring_along(pl: &Pl, q: DVec2) -> f64 {
+    let se = pl.elong.sqrt();
+    let qe = DVec2::new(q.x / se, q.y * se);
+    match core_ring(pl, q) {
+        Some((_, rr)) => qe.y.atan2(qe.x) * rr,
+        None => 0.0,
+    }
+}
+
 /// Signed distance (m, in the elongated place frame) from the ring boulevard around a big city's
 /// old core, positive outside (1e9: none).
 fn ring_signed(pl: &Pl, q: DVec2) -> f64 {
@@ -2254,6 +2264,22 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         if u01k(th, 3) < tk * (0.2 + 0.8 * wet) {
             tree = aa(3.0 + 1.5 * u01k(th, 4) - (ublk - tp).length(), fw);
             tree_h = 8.0 + 6.0 * u01k(th, 5);
+        }
+        // (round 15: the lots across the ring boulevard (no district edge there) its paved
+        // edge: a promenade with two rows of trees along the kerb, forecourts behind; a belt of
+        // park lots with tree clumps drew a green ring through the city, dusk@type)
+        if bd.ok && !bd.mixed && !bd.buf {
+            let kerb = ring_dist(pl, q) - ring_hw;
+            col = mixc(srgb(150.0, 146.0, 138.0), yard, 0.25) * (0.94 + 0.08 * e.detail);
+            cls = crate::landcover::PARKING;
+            tree = 0.0;
+            if kerb < 13.0 {
+                let dt = kerb - if kerb < 7.0 { 4.0 } else { 10.0 };
+                let al = ring_along(pl, q);
+                let da = al - (al / 9.0).round() * 9.0;
+                tree = aa(2.6 - (dt * dt + da * da).sqrt(), fw);
+                tree_h = 10.0;
+            }
         }
     }
     // ---- street trees (residential streets of tree-lined cultures; some of the streets: a

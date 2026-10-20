@@ -949,6 +949,17 @@ fn st_lattice_points(pl: StPl, cg: vec2<f32>, cb: vec2<f32>, theta: f32, warp: f
     return f;
 }
 
+/// `town::ring_along`.
+fn st_ring_along(pl: StPl, q: vec2<f32>) -> f32 {
+    let se = sqrt(pl.elong);
+    let qe = vec2<f32>(q.x / se, q.y * se);
+    let c = st_core_ring(pl, q);
+    if (c.y < 0.0) {
+        return 0.0;
+    }
+    return atan2(qe.y, qe.x) * c.y;
+}
+
 /// `town::ring_signed`.
 fn st_ring_signed(pl: StPl, q: vec2<f32>) -> f32 {
     let r = st_core_ring(pl, q);
@@ -2283,6 +2294,20 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         if (u01k(th, 3lu) < tk * (0.2 + 0.8 * wet)) {
             tree = st_aa(3.0 + 1.5 * u01k(th, 4lu) - length(ublk - tp), fw);
             tree_h = 8.0 + 6.0 * u01k(th, 5lu);
+        }
+        // (the ring boulevard's paved edge: `town::place_eval`)
+        if (bd.ok && !bd.mixed && !bd.buf) {
+            let kerb = st_ring_dist(pl, q) - (art_hw + 2.0);
+            col = mixc(srgb(150.0, 146.0, 138.0), yard, 0.25) * (0.94 + 0.08 * e.detail);
+            cls = LC_PARKING;
+            tree = 0.0;
+            if (kerb < 13.0) {
+                let dt = kerb - select(10.0, 4.0, kerb < 7.0);
+                let al = st_ring_along(pl, q);
+                let da = al - round(al / 9.0) * 9.0;
+                tree = st_aa(2.6 - sqrt(dt * dt + da * da), fw);
+                tree_h = 10.0;
+            }
         }
     }
     // ---- street trees
