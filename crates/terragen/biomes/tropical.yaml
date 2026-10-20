@@ -63,12 +63,14 @@
       params: { cell: 1700, density: 0.85, part: scroll, radius: [180, 420], width: 28, open: 0.7, bars: 42, height: 20, size: 200, colour: [62, 96, 44], colour2: [44, 74, 38], silt_colour: [96, 122, 56] }
       class: tropical_rainforest
       height: blend
-    # emergent giants above the canopy: pale crowns, some flowering yellow or pink-red
+    # emergent giants above the canopy: pale crowns, a few flowering yellow or pink-red
+    # (round 14: fewer, smaller and duller: saturated pink and yellow balls read as cartoonish,
+    # gallery g14)
     - &emergents
       slot: canopy
       kernel: tropical_crowns
       mask: { veg: [0.5, 0.8, null, null], natural: [0.5, 0.8, null, null], field: [null, null, 0.05, 0.2], moist: [0.5, 0.65, null, null] }
-      params: { cell: 34, density: 0.4, shape: umbrella, radius: [8, 13], height: [33, 42], colour: [70, 98, 50], colour2: [182, 160, 58], second: 0.1, flowering: 0.08, flower_colour: [158, 108, 106], colour_var: 0.3 }
+      params: { cell: 34, density: 0.4, shape: umbrella, radius: [7, 11], height: [31, 39], colour: [70, 98, 50], colour2: [132, 136, 76], second: 0.06, flowering: 0.03, flower_colour: [138, 112, 102], colour_var: 0.3 }
       class: tropical_rainforest
     # river-edge forest: a lower band of pale pioneer crowns (Cecropia) along the banks
     - slot: canopy
@@ -200,7 +202,7 @@
     - slot: canopy
       kernel: tropical_crowns
       mask: { veg: [0.5, 0.8, null, null], natural: [0.5, 0.8, null, null], field: [null, null, 0.05, 0.2], moist: [0.5, 0.65, null, null] }
-      params: { cell: 36, density: 0.35, shape: umbrella, radius: [7, 12], height: [28, 36], colour: [74, 96, 48], colour2: [138, 120, 92], second: 0.25, flowering: 0.12, flower_colour: [178, 118, 74], colour_var: 0.3 }
+      params: { cell: 36, density: 0.35, shape: umbrella, radius: [7, 12], height: [28, 36], colour: [74, 96, 48], colour2: [138, 120, 92], second: 0.25, flowering: 0.06, flower_colour: [156, 118, 86], colour_var: 0.3 }
       class: tropical_rainforest
     - slot: canopy
       kernel: tropical_crowns
