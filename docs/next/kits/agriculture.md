@@ -156,6 +156,6 @@ hedgerows 2.8–5.2 m wide (were 2–4 m: invisible at 900 m next to v0.2.0's tr
 Polish round 14 (gallery g24, "a little weird"): terraced paddies run along the hillside across the parcels. On
 terraced slopes the plots are the benches (their widths with the slope, as before) cut by cross-bunds every 25–60 m
 at an angle of their own per bench; each plot's stage is a 400 m patch field plus a little of its own (each parcel's
-benches in a stage of their own drew a quilt of rectangles with wavy stripes); no parcel bunds, canals, crop or idle
+benches in a stage of their own drew a quilt of rectangles with wavy stripes; the patch field is one across the plans, a plan's own drew its edge across the terraces, and their mean below the pixel has the plots' spread: paddy z15's |parent − mean(children)| 5.45 → 3.48 DN); no parcel bunds, canals, crop or idle
 parcels on terraced paddy slopes; the plots fade to the paddies' mean below the pixel. Flooded paddies take the
 sky's colour (silvery grey-blue, srgb 116/130/136; transplanted 98/118/104): the near black-blue water read as holes.

@@ -1068,10 +1068,10 @@ fn agri_paddy_state(ph: f32) -> u32 {
     return 4u;
 }
 
-fn agri_paddy_mean(season: f32) -> vec3<f32> {
+fn agri_paddy_mean(season: f32, spread: f32) -> vec3<f32> {
     var acc = vec3<f32>(0.0);
     for (var i = 0; i < 5; i++) {
-        acc += agri_paddy_col(agri_paddy_state(clamp(season + 0.1125 * (f32(i) - 2.0), 0.0, 1.0)));
+        acc += agri_paddy_col(agri_paddy_state(clamp(season + 0.5 * spread * (f32(i) - 2.0), 0.0, 1.0)));
     }
     return acc / 5.0;
 }
@@ -1098,7 +1098,7 @@ fn agri_kind_mean(pl: Plan, k: u32, px: AgPx) -> vec3<f32> {
         case 6u: { return mixc(px.soil * 1.2, agri_vine_col(px.season, 0.5), 0.35); }
         case 7u: { return mixc(srgb(92.0, 100.0, 60.0), srgb(58.0, 92.0, 44.0), 0.55); }
         case 8u: { return srgb(118.0, 156.0, 58.0) * 0.92; }
-        case 9u: { return agri_paddy_mean(px.season); }
+        case 9u: { return agri_paddy_mean(px.season, 0.225); }
         case 10u: { return srgb(214.0, 216.0, 212.0) * 0.9; }
         case 11u: { return srgb(52.0, 74.0, 76.0); }
         case 12u: { return srgb(172.0, 140.0, 108.0); }
@@ -1360,14 +1360,14 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
                 let si = floor(sa / len);
                 pid = mix64(bh ^ hash1(pl.seed ^ 0x9AD7lu, i64(si)));
                 cross = min(sa - si * len, (si + 1.0) * len - sa) / max(band(len, gsd), 1e-3);
-                zone = 0.32 * perlin3(pl.seed ^ 0x9A1lu, p * (1.0lf / 400.0lf)) * band(400.0, gsd);
+                zone = 0.32 * perlin3(0x9A17E5lu, p * (1.0lf / 400.0lf)) * band(400.0, gsd);
                 ex_p = band(min(wbench, len), gsd);
             }
             let ph = clamp(px.season + zone + select(0.45, 0.18, terr) * (u01k(pid, 31lu) - 0.5), 0.0, 1.0);
             let st = agri_paddy_state(ph);
             col = agri_paddy_col(st) * (0.94 + 0.12 * u01k(pid, 32lu));
             if (ex_p < 1.0) {
-                col = mixc(agri_paddy_mean(clamp(px.season + zone, 0.0, 1.0)), col, ex_p);
+                col = mixc(agri_paddy_mean(clamp(px.season + zone, 0.0, 1.0), 0.09), col, ex_p);
             }
             let fine = perlin3(pid ^ 0x9ADlu, p * (1.0lf / 7.0lf)) * band(7.0, gsd);
             col *= 1.0 + 0.06 * fine;

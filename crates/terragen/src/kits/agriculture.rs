@@ -1120,7 +1120,7 @@ fn kind_mean(pl: &Plan, k: u32, px: &Px) -> DVec3 {
         kind::VINE => mixc(px.soil * 1.2, vine_col(px.season, 0.5), 0.35),
         kind::PALM => mixc(srgb(92.0, 100.0, 60.0), srgb(58.0, 92.0, 44.0), 0.55),
         kind::TEA => srgb(118.0, 156.0, 58.0) * 0.92,
-        kind::PADDY => paddy_mean(px.season),
+        kind::PADDY => paddy_mean(px.season, 0.225),
         kind::GREENH => srgb(214.0, 216.0, 212.0) * 0.9,
         kind::POND => srgb(52.0, 74.0, 76.0),
         kind::YARD => srgb(172.0, 140.0, 108.0),
@@ -1179,11 +1179,11 @@ fn paddy_state(ph: f64) -> u32 {
     }
 }
 
-fn paddy_mean(season: f64) -> DVec3 {
-    // phases spread ±0.225 around the season: the mean of five draws
+fn paddy_mean(season: f64, spread: f64) -> DVec3 {
+    // phases spread ±`spread` around the season: the mean of five draws
     let mut acc = DVec3::ZERO;
     for i in 0..5 {
-        acc += paddy_col(paddy_state((season + 0.1125 * (i as f64 - 2.0)).clamp(0.0, 1.0)));
+        acc += paddy_col(paddy_state((season + 0.5 * spread * (i as f64 - 2.0)).clamp(0.0, 1.0)));
     }
     acc / 5.0
 }
@@ -1405,14 +1405,15 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
                 let si = (sa / len).floor();
                 pid = mix64(bh ^ hash1(pl.seed ^ 0x9AD7, si as i64));
                 cross = (sa - si * len).min((si + 1.0) * len - sa) / band(len, gsd).max(1e-3);
-                zone = 0.32 * perlin3(pl.seed ^ 0x9A1, p / 400.0) * band(400.0, gsd);
+                // (one field across the plans: a plan's own drew its edge across the terraces)
+                zone = 0.32 * perlin3(0x9A1_7E5, p / 400.0) * band(400.0, gsd);
                 ex_p = band(wbench.min(len), gsd);
             }
             let ph = (px.season + zone + if terr { 0.18 } else { 0.45 } * (u01k(pid, 31) - 0.5)).clamp(0.0, 1.0);
             let st = paddy_state(ph);
             col = paddy_col(st) * (0.94 + 0.12 * u01k(pid, 32));
             if ex_p < 1.0 {
-                col = mixc(paddy_mean((px.season + zone).clamp(0.0, 1.0)), col, ex_p);
+                col = mixc(paddy_mean((px.season + zone).clamp(0.0, 1.0), 0.09), col, ex_p);
             }
             let fine = perlin3(pid ^ 0x9AD, p / 7.0) * band(7.0, gsd);
             col *= 1.0 + 0.06 * fine;
