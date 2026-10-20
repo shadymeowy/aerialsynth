@@ -1057,7 +1057,10 @@ mod tests {
             let (eh, ea) = (eh / cnt, ea / (3.0 * cnt));
             eprintln!("{name} z{z}: |parent − mean(children)| elevation {eh:.2} m, albedo {ea:.2} DN");
             assert!(eh < 12.0, "{name}: elevation {eh}");
-            assert!(ea < 14.0, "{name}: albedo {ea}");
+            // (round 15: 18, was 14: the forests' mean darker by their crowns' shading and cover
+            // (`layers::canopy::crown_relief`, `mean_cover`), the U valley's forest edges and tree
+            // line at z11 13.8 -> 16.8 DN)
+            assert!(ea < 18.0, "{name}: albedo {ea}");
         }
     }
 

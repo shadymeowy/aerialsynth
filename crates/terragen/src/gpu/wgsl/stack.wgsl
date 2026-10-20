@@ -1050,15 +1050,18 @@ fn layer_canopy(s: ptr<function, Stack>) {
         } else if (conifer < 0.3) {
             cls = LC_BROADLEAF_FOREST;
         }
-        var ly = layer_paint(tr.cov, tc, cls);
+        var ly = layer_paint(tr.cov, tc, 0u);
         ly.dh = tr.h;
-        if (cls != LC_SHRUB) {
-            ly.inst = instance_id(stand);
-        }
         if ((cfg.flags & CF_TREES_DSM) != 0u) {
             ly.hmode = HM_MAX;
         }
         composite(s, ly);
+        // (the class by the canopy's cover, dithered on a 1.5 m lattice: `layers::canopy::layer`)
+        let ql = floor((*s).q_loc / 1.5);
+        if (u01k(hash2(0xC1A55lu, i64(ql.x), i64(ql.y)), 1lu) < tr.cov) {
+            (*s).cls = cls;
+            (*s).inst = select(instance_id(stand), 0u, cls == LC_SHRUB);
+        }
     }
     if (relief > 0.0) {
         (*s).col *= 1.0 - relief;

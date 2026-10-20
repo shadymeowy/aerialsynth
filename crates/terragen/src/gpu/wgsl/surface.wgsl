@@ -349,7 +349,7 @@ struct TreeLayer {
 /// `layers::canopy::mean_cover`.
 fn mean_cover(ly: TreeLayer) -> f32 {
     let grow = (1.0 + 0.55 * smoothstep1(0.35, 0.9, ly.closure)) * max(ly.scale, 0.0);
-    return 1.0 - exp(-ly.density * 0.739 * grow * grow);
+    return min(ly.density * min(0.739 * grow * grow, 1.11), 1.0);
 }
 
 /// The shading of a crown layer's relief where its crowns are their mean
@@ -367,14 +367,13 @@ fn crown_relief(share: u32, shape: u32, ly: TreeLayer, gsd: f32) -> f32 {
     if (mean <= 0.0) {
         return 0.0;
     }
-    var d = 0.3;
+    var d = 0.33;
     if (share == 2u) {
         d = 0.2;
     } else if (cone) {
-        d = 0.5;
+        d = 0.6;
     }
-    let c = min(mean_cover(ly) / 0.85, 1.0);
-    return d * c * (2.0 - c) * mean;
+    return d * mean_cover(ly) * mean;
 }
 
 /// (colour, canopy height, coverage)
@@ -491,7 +490,7 @@ fn trees(layers: array<TreeLayer, 6>, mask: u32, q: vec2<f32>, gsd: f32, fw: f32
     if (mean_w > 0.0) {
         mc = mean_col / mean_w;
     }
-    let cov = min(cov_total + mean_cov, 1.0);
+    let cov = min(cov_total + mean_cov * (1.0 - cov_total), 1.0);
     if (cov <= 0.0) {
         o.col = vec3<f32>(0.0);
         o.h = 0.0;

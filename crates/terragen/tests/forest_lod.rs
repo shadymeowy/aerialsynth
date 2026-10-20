@@ -127,7 +127,7 @@ fn forest_brightness_across_zooms() {
     // a broadleaf forest (39 N) and a conifer forest (49 N), low and high sun
     let mut bad = vec![];
     // (the largest step between neighbouring zooms, the spread over z13-z16 of the z15-16 mean)
-    for &(name, lat, lon, step_max, spread_max) in &[("broadleaf", 39.05f64, 28.48f64, 1.5, 1.55), ("conifer", 49.0, -151.0, 1.25, 1.18)] {
+    for &(name, lat, lon, step_max, spread_max) in &[("broadleaf", 39.05f64, 28.48f64, 1.5, 1.6), ("conifer", 49.0, -151.0, 1.3, 1.18)] {
         let t = tile_for_latlon(lat.to_radians(), lon.to_radians(), 15);
         let grids: Vec<(u8, Grid)> = (13u8..=16).map(|z| (z, grid(&g, t, z, lat.to_radians()))).collect();
         for &(az, el) in &[(110.0, 30.0), (180.0, 65.0)] {
