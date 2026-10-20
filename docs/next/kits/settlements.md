@@ -327,7 +327,8 @@ fall-off and the tower heights are read at the block's or the lot's centre, neve
 town's grid are whole groups of 2 × 2 or 3 × 3 grid blocks (`estate_m`, per town; by the district at the group's
 centre). Where a block's district borders on another street lattice (an arterial: an estate off the town's grid,
 curvilinear suburbs, informal fringes, superblocks) only lots wholly clear of the edge are built (their corners in the
-district map), the others are a green verge with clumps of trees (dusty with few trees in dry lands); an estate's lots
+district map), the others are a green verge with clumps of trees (dusty with few trees in dry lands; only
+lots with cover: unbuilt lots beyond the edge stay fields); an estate's lots
 within 28 m of its edge are its green buffer, whole; no lot crosses the ring boulevard; special parcels only on whole
 clear blocks; the old quarter by grid block. One copy each in the shader: the lot at the sample is tested once, after the block content (`lot_green`), and the four inverse lattice points (the group's and the block's centres, the block's axes) are one loop (`lattice_points`). Light industry beside an estate reads the block's W2 (`nbind_at` is
 gone) and the unused radial pattern is removed. `lots_whole_at_district_edges` (1 m windows across district edges of

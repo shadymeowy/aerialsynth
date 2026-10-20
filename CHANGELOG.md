@@ -104,7 +104,8 @@
   above the ground, sparse warm and cool lit windows varying by building, glass reflecting the
   ground below the horizon (no white towers at dusk, no grey ghosts at night; classic's renders
   unchanged); airfields culvert small streams; fewer, duller flowering crowns; tower glass in its
-  roof's tint.
+  roof's tint; a pixel's channel by its distance relative to the half width (a braided wash's band
+  ended square on a tributary's bisector); fainter creeks on arid flats, near the sea only.
 - **Optional tile layers** (tile store format 2; `next` only): `tiles.layers: [dtm, instance]`
   adds the bare ground and instance ids (building lots, fields, forest stands) to a new store;
   the viewer's map shadings *Height above ground* and *Instances* show them. Format-1 stores
