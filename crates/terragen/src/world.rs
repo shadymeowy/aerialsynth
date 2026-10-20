@@ -1339,8 +1339,12 @@ impl World {
                     }
                 }
             }
-            // channel attributes from the nearest channel
-            if let Some((rh, &(d, hw))) = hits.iter().zip(&adj).min_by(|a, b| (a.1 .0.abs() - a.1 .1).total_cmp(&(b.1 .0.abs() - b.1 .1))) {
+            // channel attributes from the nearest channel, relative to its half width (round 14:
+            // by |d| - hw, beyond a channel a tributary's edge was nearer than the main
+            // channel's band of 2.4 half widths, which ended square on the bisector: the braided
+            // wash's rectangular edges, gallery g18)
+            let rel = |a: &(f64, f64)| a.0.abs() / a.1.max(0.01);
+            if let Some((rh, &(d, hw))) = hits.iter().zip(&adj).min_by(|a, b| rel(a.1).total_cmp(&rel(b.1))) {
                 let lc = &self.cfg.hydro.levels[rh.level as usize];
                 let ad = d.abs();
                 let floor = rh.floor.max(1.0) - (1.0 + 0.04 * hw);

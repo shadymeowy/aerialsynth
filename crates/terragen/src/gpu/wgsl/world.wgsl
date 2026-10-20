@@ -1219,7 +1219,7 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                     t.water_kind = W_LAKE;
                 }
             }
-            let key = adc - hwc;
+            let key = adc / max(hwc, 0.01);
             if (key < best) {
                 best = key;
                 best_d = rds;
