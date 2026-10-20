@@ -1107,7 +1107,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         blk.bw = cl.size;
         blk.v = abs(q.y) - d.sw;
         blk.bd = 40.0 + 18.0 * u01k(blk.id, 2lu);
-        qbc = vec2<f32>(st_line(sdl, 0li, cl.i, b, jit) + 0.5 * blk.bw, f32(side) * (d.sw + 0.5 * blk.bd));
+        qbc = vec2<f32>(st_line(sdl, 0li, cl.i, b, jit) + 0.5 * blk.bw, 0.0);
         lay_ax = vec2<f32>(0.0, f32(side));
     }
     // ---- the cellular layouts (one W2 for all of them)
@@ -2279,7 +2279,8 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         let th = hash2(blk.id ^ 0xB0Flu, i64(tcl.x), i64(tcl.y));
         let tp = (tcl + 0.5 + 0.5 * (vec2<f32>(u01k(th, 1lu), u01k(th, 2lu)) - 0.5)) * 10.0;
         tree = 0.0;
-        if (u01k(th, 3lu) < 0.6 * (0.2 + 0.8 * wet)) {
+        let tk = select(0.6, 0.25, bd.buf && !bd.mixed);
+        if (u01k(th, 3lu) < tk * (0.2 + 0.8 * wet)) {
             tree = st_aa(3.0 + 1.5 * u01k(th, 4lu) - length(ublk - tp), fw);
             tree_h = 8.0 + 6.0 * u01k(th, 5lu);
         }

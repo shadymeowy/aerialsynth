@@ -1053,7 +1053,8 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         blk.bw = line(i + 1) - line(i);
         blk.v = q.y.abs() - sw;
         blk.bd = 40.0 + 18.0 * u01k(blk.id, 2);
-        qbc = DVec2::new(line(i) + 0.5 * blk.bw, side as f64 * (sw + 0.5 * blk.bd));
+        // (the farm's density on the street: off its axis the narrow village thinned out, a12)
+        qbc = DVec2::new(line(i) + 0.5 * blk.bw, 0.0);
         lay_ax = DVec2::new(0.0, side as f64);
     }
     // ---- the cellular layouts (one W2 for all of them)
@@ -2248,7 +2249,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         let th = hash2(blk.id ^ 0xB0F, tcl.x as i64, tcl.y as i64);
         let tp = (tcl + 0.5 + 0.5 * (DVec2::new(u01k(th, 1), u01k(th, 2)) - 0.5)) * 10.0;
         tree = 0.0;
-        if u01k(th, 3) < 0.6 * (0.2 + 0.8 * wet) {
+        // (an estate's buffer of whole lots mostly grass: square groves along it, alpine_south)
+        let tk = if bd.buf && !bd.mixed { 0.25 } else { 0.6 };
+        if u01k(th, 3) < tk * (0.2 + 0.8 * wet) {
             tree = aa(3.0 + 1.5 * u01k(th, 4) - (ublk - tp).length(), fw);
             tree_h = 8.0 + 6.0 * u01k(th, 5);
         }
