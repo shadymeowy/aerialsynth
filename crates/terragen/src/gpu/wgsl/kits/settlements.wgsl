@@ -3266,6 +3266,15 @@ fn st_place(s: ptr<function, Stack>, pl: StPl, rel: f32, n: f32, q: vec2<f32>, s
     if (dens0 <= 0.0 && !strips) {
         return;
     }
+    // (no burn scars in a settlement: `settlements::place`)
+    if ((*s).cls == LC_BURN_SCAR) {
+        let w = smoothstep1(0.0, 0.15, max(dens0, select(0.0, 0.15, strips)));
+        let unburnt = mixc(spal(s, BP_GRASS_DRY), spal(s, BP_GRASS_WET), smoothstep1(0.3, 0.6, t.moist));
+        (*s).col = mixc((*s).col, unburnt * (0.92 + 0.1 * (*s).pf.f[PF_DETAIL]), w);
+        if (w > 0.5) {
+            (*s).cls = LC_GRASS;
+        }
+    }
     var env: StEnv;
     env.gsd = gsd;
     env.fw = fw;

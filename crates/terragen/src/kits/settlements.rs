@@ -283,6 +283,17 @@ fn place(s: &mut Stack, pl: &town::Pl, rel: f64, n: f64, q: DVec2, sun: DVec3) {
     if dens <= 0.0 && !strips {
         return;
     }
+    // (round 15: no burn scars in a settlement: the charred ground showed between its lots as a
+    // dark lake under the houses, g32, audit a22; the biome's unburnt grass instead)
+    if s.class == crate::landcover::BURN_SCAR {
+        let w = smoothstep(0.0, 0.15, dens.max(if strips { 0.15 } else { 0.0 }));
+        use crate::registry::pal;
+        let unburnt = mixc3(s.pal(pal::GRASS_DRY), s.pal(pal::GRASS_WET), smoothstep(0.3, 0.6, t.moist));
+        s.col = mixc3(s.col, unburnt * (0.92 + 0.1 * s.pf.detail), w);
+        if w > 0.5 {
+            s.class = crate::landcover::GRASS;
+        }
+    }
     let env = Env { gsd, fw, n, moist: t.moist, detail: s.pf.detail, ground: s.col };
     let city = pl.form == crate::kits::settlements::places::form::CITY as u32;
     let block = if city { 90.0 } else { 40.0 };
