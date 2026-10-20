@@ -176,6 +176,15 @@ in forest (600 m, 20° down) whose reflection was the bright horizon and now sho
 night sources at 22:00 (airport lights, a port, a gas flare, lit CBD windows, wind-turbine
 beacons, lit greenhouses).
 
+Round 14 (`next` only, `RenderSettings::next_lights`, set from `world.generator`; classic's
+renders are v0.2.0's, bit for bit): street light on walls and roofs falls off with the height
+above the ground (a wall's foot; a roof's height above the DSM's mean over ~40 m), lit windows
+are sparse (5–56 % per building, keyed on its roof colour), warm, neutral or cool and dimmer,
+glass walls reflect the ground below the horizon and take more of their roof's tint, and water
+near lit banks reflects their lights. The CBD's towers were flat white blocks at dusk (the
+horizon's glow in their glass, street light to their tops) and pale grey ghosts at night
+(gallery g29, g34).
+
 ![walls: CBD](images/render_walls_cbd.jpg)
 ![walls: tower karst](images/render_walls_karst.jpg)
 ![river reflection](images/render_river_reflection.jpg)

@@ -317,3 +317,21 @@ hard edges and a track across it, gallery g33). Towers in six tints and tones (d
 glass, bronze, grey and pale concrete; one blue-grey ramp drew a uniform grey skyline, g30). Street lamps 38 % white
 LED (was 12 %), sodium (1, .68, .40) and amber (1, .84, .64) less saturated (an orange night, night@type). The kit's
 forest-strip village place is at (20.713, −22.660): the world drifted 1.4 km under the old one.
+
+Polish round 14 (whole lots; the user: "district boundaries cut buildings directly", gallery g28): a block's
+district is decided once, at the block's centre (`BDist`, `block_sites`): the lattice position of the centre is
+mapped back to the place frame by an inverse of the lattice's warps that is a pure function of the block (fixed-point
+iterations from the centre), and the W2 site nearest to it gives the block's zone, pattern and street width; the
+CBD, the lot densities (the footprint noise, now in the place frame, at the block's centre), the typology's
+fall-off and the tower heights are read at the block's or the lot's centre, never at the pixel. Estates on the
+town's grid are whole groups of 2 × 2 or 3 × 3 grid blocks (`estate_m`, per town; by the district at the group's
+centre). Where a block's district borders on another street lattice (an arterial: an estate off the town's grid,
+curvilinear suburbs, informal fringes, superblocks) only lots wholly clear of the edge are built (their corners in the
+district map), the others are a green verge with clumps of trees (dusty with few trees in dry lands); an estate's lots
+within 28 m of its edge are its green buffer, whole; no lot crosses the ring boulevard; special parcels only on whole
+clear blocks; the old quarter by grid block. Light industry beside an estate reads the block's W2 (`nbind_at` is
+gone) and the unused radial pattern is removed. `lots_whole_at_district_edges` (1 m windows across district edges of
+five cities and g28's town): 0 of 2207 lots split between districts (round 13: 185 of 2280), 1 of 804 box footprints
+cut (23 of 865). Airfields culvert the small streams (a stream crossed g33's airfield and apron), and their grass is
+mown in patches of ~260 m, each with its own stripe width, direction and contrast, a fifth unmown. Still open: rivers
+and steep ground still end lots per pixel, and the boundary between two overlapping places is per pixel.
