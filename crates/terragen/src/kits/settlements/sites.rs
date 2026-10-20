@@ -923,10 +923,17 @@ pub fn airport_px(st: &FStamp, p: DVec3, ground: f64, gsd: f64, fw: f64) -> Site
     let wn = perlin3(seed ^ 0xED1, p / 170.0);
     let edge = smoothstep(0.0, 0.8 * margin, din + 65.0 * wn);
     let mut o = SitePx { cov: edge, abs: true, clear: edge, cls: crate::landcover::GRASS, ..Default::default() };
-    // grass, mown in stripes
-    let stripe = ((q.x / 18.0).floor() as i64).rem_euclid(2) as f64;
-    let tone = 1.0 + 0.12 * wn * band(170.0, gsd);
-    o.col = srgb(132.0, 146.0, 92.0) * (0.95 + 0.06 * stripe * band(18.0, gsd)) * tone;
+    // grass, mown in stripes by patches of ~260 m (each its own width, direction and contrast;
+    // a fifth unmown, rough; round 14: one stripe pattern over the whole field read as a
+    // painted pad, gallery g33)
+    let mc = (q / 260.0).floor();
+    let mh = hash2(seed ^ 0x30A, mc.x as i64, mc.y as i64);
+    let sw = 9.0 + 12.0 * u01k(mh, 1);
+    let mq = if u01k(mh, 2) < 0.65 { q.x } else { q.y };
+    let stripe = ((mq / sw).floor() as i64).rem_euclid(2) as f64;
+    let mown = if u01k(mh, 3) < 0.8 { 0.02 + 0.05 * u01k(mh, 4) } else { 0.0 };
+    let tone = 1.0 + 0.12 * wn * band(170.0, gsd) + 0.06 * (u01k(mh, 5) - 0.5) * band(260.0, gsd);
+    o.col = srgb(132.0, 146.0, 92.0) * (0.97 + mown * (stripe - 0.5) * band(sw, gsd)) * tone;
     // graded plane, cut-and-fill margin to the ground
     let wgt = smoothstep(0.0, margin, din);
     o.dh = ground + (st.h as f64 - ground) * wgt;

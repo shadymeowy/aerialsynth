@@ -126,11 +126,11 @@ fn co_flats(s: ptr<function, Stack>, ty: CoTypes) {
     ly.clear = 1.0;
     composite(s, ly);
     (*s).m.natural_ok *= 1.0 - zone;
-    let win = 1.0 - smoothstep1(1.6, 3.2, ground);
+    let win = 1.0 - smoothstep1(1.6 - 0.8 * arid, 3.2 - 1.2 * arid, ground);
     if (win > 0.0) {
         let c = co_creek(p, gsd, max(fw, 0.3 * gsd)) * zone * win;
         if (c > 0.0) {
-            let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, max(0.7 * arid, 0.5 * high));
+            let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, max(0.88 * arid, 0.5 * high));
             var ly2 = layer_paint(c, cc, select(LC_TIDAL_FLAT, hcls, high > 0.5));
             ly2.clear = 1.0;
             composite(s, ly2);

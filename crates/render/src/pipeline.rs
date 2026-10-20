@@ -346,6 +346,7 @@ pub fn renderer(scn: &Scenario, model: Arc<dyn CameraModel>, supersample: u32, e
     rs.supersample = supersample.max(1);
     rs.min_zoom = scn.tiles.min_zoom;
     rs.max_zoom = scn.tiles.max_zoom;
+    rs.next_lights = scn.world.generator == terragen::GeneratorKind::Next;
     Renderer::new(model, rs, ell, cache)
 }
 

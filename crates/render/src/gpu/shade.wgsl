@@ -40,6 +40,8 @@ const F_FLICKER: u32 = 64u;
 const F_LIGHTS: u32 = 128u;
 const F_POLLUTION: u32 = 256u;
 const F_WALLS: u32 = 512u;
+// next's building lights (RenderSettings::next_lights)
+const F_NEXT: u32 = 1024u;
 // the wall shading is compiled in (a pipeline constant: false on DX12, gpu::walls_compiled; its
 // code is then dead and the backend's compiler drops it)
 override WALLS: bool = true;
@@ -547,8 +549,48 @@ fn wall_inside(f: f32, a: f32, b: f32) -> f32 {
     return select(0.0, 1.0, f >= a && f < b);
 }
 
+// next's lit windows (walls::next_window): lit (0/1), the window's emission, the building's lit
+// share, the mean emission of a lit window
+struct NW {
+    lit: f32,
+    e: vec3<f32>,
+    lit_p: f32,
+    mean: vec3<f32>,
+};
+
+fn wall_q(c: f32) -> i32 {
+    return i32(round(sqrt(clamp(c, 0.0, 1.0)) * 255.0));
+}
+
+fn wall_next_window(glass: bool, base: vec3<f32>, bi: f32, fi: f32) -> NW {
+    let qx = wall_q(base.x);
+    let qy = wall_q(base.y);
+    let qz = wall_q(base.z);
+    let hb = wall_hash(qx * 65536 + qy * 256 + qz, 0x5bd1);
+    let lit_p = select(0.05 + 0.35 * hb, 0.06 + 0.5 * hb, glass);
+    let bii = i32(bi);
+    let fii = i32(fi);
+    let lit = select(0.0, 1.0, wall_hash(bii ^ (qx * 977), fii ^ (qz * 131)) < lit_p);
+    let warm = vec3<f32>(1.0, 0.66, 0.36);
+    let neutral = vec3<f32>(1.0, 0.86, 0.68);
+    let cool = vec3<f32>(0.80, 0.88, 1.0);
+    let pw = select(0.65, 0.4, glass);
+    let pn = select(0.92, 0.75, glass);
+    let uu = wall_hash(bii + 7919, fii ^ 0x2c3);
+    var c = cool;
+    if uu < pn {
+        c = neutral;
+    }
+    if uu < pw {
+        c = warm;
+    }
+    let e = 0.08 * (0.5 + wall_hash(bii - 31, fii + 17));
+    let mean_c = (warm * pw + neutral * (pn - pw) + cool * (1.0 - pn)) * 0.08;
+    return NW(lit, c * e, lit_p, mean_c);
+}
+
 // colour and night emission of a wall sample (walls::texel)
-fn wall_texel(kind: u32, base: vec3<f32>, s: f32, h: f32, ground: f32, top: f32, foot: f32) -> TX {
+fn wall_texel(kind: u32, base: vec3<f32>, s: f32, h: f32, ground: f32, top: f32, foot: f32, next: bool) -> TX {
     if kind == WK_BUILT || kind == WK_GLASS {
         let glass = kind == WK_GLASS;
         let rel = h - ground;
@@ -569,7 +611,10 @@ fn wall_texel(kind: u32, base: vec3<f32>, s: f32, h: f32, ground: f32, top: f32,
         var wf: f32;
         var e_col: vec3<f32>;
         if glass {
-            let pane = mix(base, vec3<f32>(0.07, 0.09, 0.11), 0.75);
+            var pane = mix(base, vec3<f32>(0.07, 0.09, 0.11), 0.75);
+            if next {
+                pane = mix(base, vec3<f32>(0.07, 0.09, 0.11), 0.55);
+            }
             let mullion = vec3<f32>(0.30, 0.31, 0.33);
             let spandrel = pane * 0.6;
             let m = wall_inside(fx, 0.0, 0.07);
@@ -591,6 +636,10 @@ fn wall_texel(kind: u32, base: vec3<f32>, s: f32, h: f32, ground: f32, top: f32,
             e_col = vec3<f32>(1.0, 0.78, 0.5);
         }
         let k = clamp((1.4 - foot) / 0.7, 0.0, 1.0) * body;
+        if next {
+            let nw = wall_next_window(glass, base, bi, fi);
+            return TX(mix(mean, col, k), (nw.e * (win * nw.lit * k) + nw.mean * (wf * nw.lit_p * (1.0 - k))) * body);
+        }
         let e = e_col * (0.3 * (win * lit * k + wf * lit_p * (1.0 - k)) * body);
         return TX(mix(mean, col, k), e);
     }
@@ -886,7 +935,20 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32
         let k = min(i32(max(ceil(log2(25.0 / texel)), 0.0)), p.z);
         let e = sample3(gp_coarser(p, k), 2u);
         if e.w > 0.0 {
-            mul += e.xyz * (0.2 * u.sun.z);
+            if has(F_NEXT) {
+                // (next: street light falls off with the height above the ground, raster.rs)
+                var rel = hs - wground;
+                if ww <= 0.0 {
+                    let k2 = min(i32(max(ceil(log2(40.0 / texel)), 0.0)), p.z);
+                    let ea = elev(p);
+                    let eb = elev(gp_coarser(p, k2));
+                    rel = select(0.0, ea.x - eb.x, ea.y > 0.0 && eb.y > 0.0);
+                }
+                let r8 = max(rel, 0.0) / 8.0;
+                mul += e.xyz * (0.2 * u.sun.z / (1.0 + r8 * r8));
+            } else {
+                mul += e.xyz * (0.2 * u.sun.z);
+            }
         }
     }
     if mat.w > 0.0 && u.sun.z > 1e-3 {
@@ -904,13 +966,29 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32
         // the sun glint: normalized Blinn-Phong with the Fresnel term at the half vector, capped
         let glint = min(schlick(mat.y, dot(v, hv)) * (mat.z + 8.0) / 8.0 * pow(nh, mat.z) * max(dot(nm, sun), 0.0) * 1.25, GLINT_MAX);
         // the reflection: the sky, or the banks where they rise above the reflected ray
-        var env = sky(normalize(dir_w - nm * 2.0 * dot(dir_w, nm)), up);
+        let refl = normalize(dir_w - nm * 2.0 * dot(dir_w, nm));
+        var env = sky(refl, up);
+        if has(F_NEXT) && ww > 0.0 && dot(refl, up) < 0.05 {
+            // (next: a glass wall reflects the ground below the horizon, raster.rs)
+            let k = min(i32(max(ceil(log2(20.0 / texel)), 0.0)), p.z);
+            let b = sample3(gp_coarser(p, k), 0u);
+            let ground = select(vec3<f32>(0.1), b.xyz, b.w > 0.0) * mul;
+            let t = clamp((dot(refl, up) + 0.15) / 0.2, 0.0, 1.0);
+            env = ground + (env - ground) * (t * t * (3.0 - 2.0 * t));
+        }
         if ww <= 0.0 {
             let vis = reflection_visibility(p, hdir, v_enu.z, texel);
             if vis < 1.0 {
                 let k = min(i32(max(ceil(log2(20.0 / texel)), 0.0)), p.z);
                 let b = sample3(gp_coarser(p, k), 0u);
-                let bank = select(vec3<f32>(0.1), b.xyz, b.w > 0.0) * mul;
+                var bank = select(vec3<f32>(0.1), b.xyz, b.w > 0.0) * mul;
+                if has(F_NEXT) && has(F_LIGHTS) {
+                    // (next: the lights of the banks in the water, raster.rs)
+                    let eb = sample3(gp_coarser(p, k), 2u);
+                    if eb.w > 0.0 {
+                        bank += eb.xyz * u.sun.z;
+                    }
+                }
                 env = bank + (env - bank) * vis;
             }
         }
@@ -963,7 +1041,7 @@ fn texture_fetch(ps: PS, p: GP, hs: f32) -> TX {
         let ly = f32(p.iy & WALL_WRAP) + p.fy;
         let b = unpack4x8unorm(ps.wbase).xyz;
         let tan = unpack2x16snorm(ps.wtan);
-        wall = wall_texel(u32(ps.wkw), b * b, (lx * tan.x + ly * tan.y) * tz, hs, ps.wground, ps.wtop, 2.0 * minor);
+        wall = wall_texel(u32(ps.wkw), b * b, (lx * tan.x + ly * tan.y) * tz, hs, ps.wground, ps.wtop, 2.0 * minor, has(F_NEXT));
         if ww >= 1.0 {
             return TX(wall.col * ps.mul + ps.add, wall.emis * ps.emis);
         }

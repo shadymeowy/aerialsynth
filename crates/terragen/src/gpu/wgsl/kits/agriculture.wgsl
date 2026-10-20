@@ -603,7 +603,7 @@ fn agri_draw(s: ptr<function, Stack>, pl: Plan) {
         let c3 = r.center.xyz + vec3<f64>(ax * pc.fc.x + ay * pc.fc.y);
         let mask = cultivated_mask(c3, gsd);
         if (mask < cult) {
-            if (u01k(pc.id, 5lu) >= 0.04) {
+            if (u01k(pc.id, 5lu) >= 0.04 || (pl.sys == AG_PADDY && d.terraces > 0.0 && px.slope > 0.07)) {
                 let cluster = worley2(pl.seed ^ 0xC1Clu, pc.fc, 700.0, 1.0).id;
                 let sh = agri_explicit(pl, d, pc, px, q, cluster);
                 col = sh.col;
@@ -1047,8 +1047,8 @@ fn agri_vine_col(season: f32, u: f32) -> vec3<f32> {
 
 fn agri_paddy_col(st: u32) -> vec3<f32> {
     switch st {
-        case 0u: { return srgb(64.0, 84.0, 94.0); }
-        case 1u: { return srgb(76.0, 100.0, 86.0); }
+        case 0u: { return srgb(116.0, 130.0, 136.0); }
+        case 1u: { return srgb(98.0, 118.0, 104.0); }
         case 2u: { return srgb(88.0, 114.0, 62.0); }
         case 3u: { return srgb(188.0, 172.0, 92.0); }
         default: { return srgb(150.0, 128.0, 88.0); }
@@ -1068,10 +1068,10 @@ fn agri_paddy_state(ph: f32) -> u32 {
     return 4u;
 }
 
-fn agri_paddy_mean(season: f32) -> vec3<f32> {
+fn agri_paddy_mean(season: f32, spread: f32) -> vec3<f32> {
     var acc = vec3<f32>(0.0);
     for (var i = 0; i < 5; i++) {
-        acc += agri_paddy_col(agri_paddy_state(clamp(season + 0.1125 * (f32(i) - 2.0), 0.0, 1.0)));
+        acc += agri_paddy_col(agri_paddy_state(clamp(season + 0.5 * spread * (f32(i) - 2.0), 0.0, 1.0)));
     }
     return acc / 5.0;
 }
@@ -1098,7 +1098,7 @@ fn agri_kind_mean(pl: Plan, k: u32, px: AgPx) -> vec3<f32> {
         case 6u: { return mixc(px.soil * 1.2, agri_vine_col(px.season, 0.5), 0.35); }
         case 7u: { return mixc(srgb(92.0, 100.0, 60.0), srgb(58.0, 92.0, 44.0), 0.55); }
         case 8u: { return srgb(118.0, 156.0, 58.0) * 0.92; }
-        case 9u: { return agri_paddy_mean(px.season); }
+        case 9u: { return agri_paddy_mean(px.season, 0.225); }
         case 10u: { return srgb(214.0, 216.0, 212.0) * 0.9; }
         case 11u: { return srgb(52.0, 74.0, 76.0); }
         case 12u: { return srgb(172.0, 140.0, 108.0); }
@@ -1151,7 +1151,10 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
     var cls = agri_kind_class(k);
     var lip = 1e9;
     var t_dh = 0.0;
-    if (d.terraces > 0.0 && px.slope > 0.07) {
+    let terr = d.terraces > 0.0 && px.slope > 0.07;
+    var bench = 0.0;
+    var wbench = 1e9;
+    if (terr) {
         var dhs = 1.8 + 1.6 * u01k(pl.seed, 40lu);
         if (pl.sys == AG_PADDY) {
             dhs = 1.2 + 1.0 * u01k(pl.seed, 40lu);
@@ -1164,6 +1167,12 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
         lip = f * wb / max(ex, 1e-3) + (1.0 - ex) * 1e9;
         t_dh = (0.5 - f) * dhs * ex;
         id = mix64(id ^ bitcast<u64>(i64(ti)));
+        bench = ti;
+        wbench = wb;
+        if (pl.sys == AG_PADDY && k == AK_CROP) {
+            k = AK_PADDY;
+            cls = agri_kind_class(k);
+        }
     }
     let rot = u01k(id, 9lu) < 0.3;
     var ru = pc.fx;
@@ -1338,17 +1347,38 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
             dh = 1.0 * cv;
         }
         case 9u: {
-            let ph = clamp(px.season + 0.45 * (u01k(id, 31lu) - 0.5), 0.0, 1.0);
+            // (`agriculture::explicit`: terraced paddies along the benches)
+            var pid = id;
+            var cross = 1e9;
+            var zone = 0.0;
+            var ex_p = 1.0;
+            if (terr) {
+                let bh = hash1(pl.seed ^ 0x7E5lu, i64(bench));
+                let ang = TAU * u01k(bh, 1lu);
+                let len = 25.0 + 35.0 * u01k(bh, 2lu);
+                let sa = q.x * cos(ang) + q.y * sin(ang) + len * u01k(bh, 3lu);
+                let si = floor(sa / len);
+                pid = mix64(bh ^ hash1(pl.seed ^ 0x9AD7lu, i64(si)));
+                cross = min(sa - si * len, (si + 1.0) * len - sa) / max(band(len, gsd), 1e-3);
+                zone = 0.32 * perlin3(0x9A17E5lu, p * (1.0lf / 400.0lf)) * band(400.0, gsd);
+                ex_p = band(min(wbench, len), gsd);
+            }
+            let ph = clamp(px.season + zone + select(0.45, 0.18, terr) * (u01k(pid, 31lu) - 0.5), 0.0, 1.0);
             let st = agri_paddy_state(ph);
-            col = agri_paddy_col(st) * (0.94 + 0.12 * u01k(id, 32lu));
-            let fine = perlin3(id ^ 0x9ADlu, p * (1.0lf / 7.0lf)) * band(7.0, gsd);
+            col = agri_paddy_col(st) * (0.94 + 0.12 * u01k(pid, 32lu));
+            if (ex_p < 1.0) {
+                col = mixc(agri_paddy_mean(clamp(px.season + zone, 0.0, 1.0), 0.09), col, ex_p);
+            }
+            let fine = perlin3(pid ^ 0x9ADlu, p * (1.0lf / 7.0lf)) * band(7.0, gsd);
             col *= 1.0 + 0.06 * fine;
             if (st == 1u) {
                 let rr = sin(TAU * ru / 0.3) * band(0.3, gsd);
                 col = mixc(col, agri_paddy_col(2u), 0.25 + 0.2 * rr);
             }
             var bd = min(pc.edge, lip);
-            if (lip > 1e8) {
+            if (terr) {
+                bd = min(lip, cross);
+            } else {
                 let sx = 18.0 + 22.0 * u01k(id, 33lu);
                 let sy = sx * (1.2 + 0.6 * u01k(id, 35lu));
                 let mx = rem_euclid(pc.fx + 1000.0, sx);
@@ -1443,7 +1473,7 @@ fn agri_explicit(pl: Plan, d: AgSys, pc: Parcel, px: AgPx, q: vec2<f32>, cluster
     } else if (bsel < p0 + d.bp.y) {
         b = d.borders.y;
     }
-    if (b == AB_CANAL && lip < 1e8) {
+    if (b == AB_CANAL && terr) {
         b = AB_NONE;
     }
     var edge = pc.edge;

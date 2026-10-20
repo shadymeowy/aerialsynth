@@ -115,9 +115,12 @@ pub fn rel0(pl: &Pl, q: DVec2) -> f64 {
     DVec2::new(q.x / se, q.y * se).length() / pl.r
 }
 
-/// The footprint noise at `p` (relative radius change).
-pub fn foot_noise(pl: &Pl, p: DVec3, gsd: f64) -> f64 {
+/// The footprint noise at `q` (place frame; relative radius change). (Round 14: in the place
+/// frame, not at the ground's 3D point: a block takes it at its centre, the same at every
+/// height of the terrain.)
+pub fn foot_noise(pl: &Pl, q: DVec2, gsd: f64) -> f64 {
     let r = pl.r;
+    let p = DVec3::new(q.x, q.y, 0.37 * r);
     0.32 * perlin3(pl.seed ^ 0x71, p / (0.9 * r)) + 0.18 * perlin3(pl.seed ^ 0x72, p / (0.35 * r)) * band(0.35 * r, gsd)
 }
 
@@ -165,7 +168,7 @@ fn wrap_pi(a: f64) -> f64 {
 }
 
 #[inline]
-fn rot2(v: DVec2, a: f64) -> DVec2 {
+pub(crate) fn rot2(v: DVec2, a: f64) -> DVec2 {
     let (s, c) = a.sin_cos();
     DVec2::new(c * v.x + s * v.y, -s * v.x + c * v.y)
 }
@@ -219,6 +222,15 @@ fn core_ring(pl: &Pl, q: DVec2) -> Option<(f64, f64)> {
     Some((qe.length(), rr))
 }
 
+/// Signed distance (m, in the elongated place frame) from the ring boulevard around a big city's
+/// old core, positive outside (1e9: none).
+fn ring_signed(pl: &Pl, q: DVec2) -> f64 {
+    match core_ring(pl, q) {
+        Some((d, rr)) if pl.level >= 3 => d - rr,
+        _ => 1e9,
+    }
+}
+
 /// Distance (m, in the elongated place frame) to the ring boulevard around a big city's old core
 /// (1e9: none).
 pub fn ring_dist(pl: &Pl, q: DVec2) -> f64 {
@@ -262,11 +274,6 @@ pub fn old_core(pl: &Pl, q: DVec2) -> f64 {
     }
 }
 
-/// Can a small block of the old quarter reach `q` (within 70 m of its outline)?
-fn old_near(pl: &Pl, q: DVec2) -> bool {
-    matches!(old_quarter(pl, q), Some((d, ro)) if d < ro + 70.0)
-}
-
 /// A small block of an old quarter: the grid block cut by lanes (~30-44 m apart, the lanes across
 /// staggered from column to column, 6 in 10 of them open: houses back to back where none) into
 /// small blocks; its id, the distance to its edge (an open lane's half width off), its centre
@@ -278,6 +285,8 @@ pub struct OldSub {
     pub c: DVec2,
     pub side: i64,
     pub along: f64,
+    /// half sizes of the small block
+    pub h: DVec2,
 }
 
 pub fn old_sub(blk: &Blk) -> OldSub {
@@ -326,6 +335,7 @@ pub fn old_sub(blk: &Blk) -> OldSub {
         c: DVec2::new(0.5 * (u0 + u1), 0.5 * (v0 + v1)),
         side: side as i64,
         along: if side < 2 { blk.v } else { blk.u },
+        h: DVec2::new(0.5 * (u1 - u0), 0.5 * (v1 - v0)),
     }
 }
 
@@ -383,6 +393,10 @@ pub struct Ev {
     pub pattern: u32,
     /// lamp spacing (m), 0: no lamps
     pub lamp_sp: f64,
+    /// the district site of the block (decided once per block) and the building's typology
+    /// (lots by BSP; 0: other) (CPU only: the tests)
+    pub did: u64,
+    pub typ: u32,
 }
 
 /// Inputs of a place evaluation that do not depend on the position.
@@ -602,12 +616,8 @@ pub struct Dist {
     pub jit: f64,
     pub warp: f64,
     pub w2cell: f64,
-    /// industrial estates on the town's grid: blocks of `mg` grid blocks (0: an estate's own grid),
-    /// and the distance to the estate's edge (its green buffer; 1e9: none)
+    /// industrial estates on the town's grid: blocks of `mg` grid blocks (0: an estate's own grid)
     pub mg: i64,
-    pub buf: f64,
-    /// beside an estate on the town's grid: the distance to its edge (1e9: none)
-    pub nbind: f64,
 }
 
 /// The pattern of the district of site `point` (place frame) and id `id`, the zone at its site
@@ -642,24 +652,172 @@ pub fn district_pattern(pl: &Pl, point: DVec2, id: u64) -> (u32, u32, bool) {
     (pattern, zd, ind)
 }
 
-/// The distance from `q` to the edge of an industrial estate on the town's grid where `q` lies
-/// beside one (1e9: none): `Dist::nbind` without the rest of the district (round 12: the whole
-/// district evaluated again at each block's centre cost ~2 s of pass B's compile time).
-pub fn nbind_at(pl: &Pl, q: DVec2) -> f64 {
-    if pl.form != form::CITY as u32 || pl.level < 2 || !shared_industry(pl) {
-        return 1e9;
-    }
-    let dcell = [400.0, 400.0, 600.0, 1000.0, 1400.0][pl.level as usize];
-    let wl = 0.3 * dcell;
-    let qd = q
-        + DVec2::new((q.y / wl + 6.0 * u01k(pl.seed, 51)).sin(), (q.x / (1.17 * wl) + 6.0 * u01k(pl.seed, 52)).sin()) * (0.16 * dcell)
-        + DVec2::new((q.y / (0.4 * wl) + 6.0 * u01k(pl.seed, 54)).sin(), (q.x / (0.43 * wl) + 6.0 * u01k(pl.seed, 55)).sin()) * (0.045 * dcell);
-    let dc = worley2(pl.seed ^ 0xD15, qd, dcell, 0.85);
-    if district_pattern(pl, dc.point, dc.id).0 == pat::GRID && district_pattern(pl, dc.point2, dc.id2).0 == pat::INDUSTRIAL {
-        worley2_edge_dist(&dc, qd)
+/// The district cell (m) of a city of `pl`'s level.
+pub fn dcell(pl: &Pl) -> f64 {
+    [400.0, 400.0, 600.0, 1000.0, 1400.0][pl.level as usize]
+}
+
+/// The position at which the district map is looked up for `q` (the district borders wander:
+/// the cells are looked up at a warped position, so the districts are not hexagons).
+pub fn dist_q(pl: &Pl, q: DVec2) -> DVec2 {
+    let dc = dcell(pl);
+    let wl = 0.3 * dc;
+    q + DVec2::new((q.y / wl + 6.0 * u01k(pl.seed, 51)).sin(), (q.x / (1.17 * wl) + 6.0 * u01k(pl.seed, 52)).sin()) * (0.16 * dc)
+        + DVec2::new((q.y / (0.4 * wl) + 6.0 * u01k(pl.seed, 54)).sin(), (q.x / (0.43 * wl) + 6.0 * u01k(pl.seed, 55)).sin()) * (0.045 * dc)
+}
+
+/// Blocks of an industrial estate on the town's grid: groups of `estate_m` × `estate_m` of its
+/// blocks (per town: the estates are whole groups, `place_eval`).
+pub fn estate_m(pl: &Pl) -> i64 {
+    2 + (u01k(pl.seed ^ 0x3A6, 14) < 0.5) as i64
+}
+
+/// The street lattice of a district of `pattern` (site `id`): one per pattern and town (its
+/// districts share one street layout), an industrial estate off the town's grid its own.
+fn lattice_of(pattern: u32, id: u64, shared: bool) -> u64 {
+    if pattern == pat::INDUSTRIAL {
+        if shared {
+            pat::GRID as u64
+        } else {
+            id
+        }
     } else {
-        1e9
+        pattern as u64
     }
+}
+
+/// The district of a block, decided once at its centre (its lots are never split between
+/// districts, round 14: districts by the pixel cut halls and houses along the district edge,
+/// gallery g28): the two district sites nearest to the centre of the block's group (in the
+/// district map's frame), the one the block belongs to and its zone and pattern.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BDist {
+    pub a: DVec2,
+    pub b: DVec2,
+    /// the block belongs to site a (else b)
+    pub own_a: bool,
+    /// a site of the pixel's street lattice (else the block is not the pixel's layout's)
+    pub ok: bool,
+    /// the two sites are of different lattices (an arterial or an estate's edge between
+    /// them): lots keep clear of the edge
+    pub mixed: bool,
+    /// the block's district is an industrial estate beside other districts (a green buffer)
+    pub buf: bool,
+    /// the site a is an estate on the town's grid
+    pub a_ind: bool,
+    /// the other site is an estate on the town's grid and the block's is not (light industry
+    /// beside it)
+    pub near_ind: bool,
+    pub zone: u32,
+    pub pattern: u32,
+    pub id: u64,
+}
+
+impl BDist {
+    /// Signed distance (m, district map) of `q` (place frame) from the edge between the two
+    /// sites, positive on the block's side.
+    pub fn side(&self, pl: &Pl, q: DVec2) -> f64 {
+        let d = self.b - self.a;
+        let len = d.length().max(1e-9);
+        let s = ((self.a + self.b) * 0.5 - dist_q(pl, q)).dot(d / len);
+        if self.own_a {
+            s
+        } else {
+            -s
+        }
+    }
+
+    /// The block's district for a block of centre `bc` (on the side of `bc`; a site of the
+    /// pixel's lattice).
+    fn pick(&mut self, pl: &Pl, bc: DVec2, st: &Sites, lat: u64) {
+        let Sites { la, lb, sa, sb, ida, idb, .. } = *st;
+        self.own_a = true;
+        let near_a = self.side(pl, bc) >= 0.0;
+        self.own_a = if la == lat && lb == lat { near_a } else { la == lat };
+        self.ok = la == lat || lb == lat;
+        self.mixed = la != lb;
+        let (s, o) = if self.own_a { (sa, sb) } else { (sb, sa) };
+        self.pattern = s.0;
+        self.id = if self.own_a { ida } else { idb };
+        self.buf = s.0 == pat::INDUSTRIAL && o.0 != pat::INDUSTRIAL;
+        self.near_ind = s.0 != pat::INDUSTRIAL && o.0 == pat::INDUSTRIAL && !self.mixed;
+        self.zone = if s.2 { zone::OUTER } else { s.1 };
+    }
+}
+
+/// The two district sites nearest to a block's centre: their lattices, (pattern, zone,
+/// industrial) and ids, and the `BDist` before `pick`.
+#[derive(Clone, Copy)]
+struct Sites {
+    bd: BDist,
+    la: u64,
+    lb: u64,
+    sa: (u32, u32, bool),
+    sb: (u32, u32, bool),
+    ida: u64,
+    idb: u64,
+}
+
+/// The two district sites nearest to `qc` (place frame).
+fn block_sites(pl: &Pl, qc: DVec2, shared: bool) -> Sites {
+    let dc = worley2(pl.seed ^ 0xD15, dist_q(pl, qc), dcell(pl), 0.85);
+    let sa = district_pattern(pl, dc.point, dc.id);
+    let sb = district_pattern(pl, dc.point2, dc.id2);
+    let (la, lb) = (lattice_of(sa.0, dc.id, shared), lattice_of(sb.0, dc.id2, shared));
+    let bd = BDist { a: dc.point, b: dc.point2, a_ind: sa.0 == pat::INDUSTRIAL, ..Default::default() };
+    Sites { bd, la, lb, sa, sb, ida: dc.id, idb: dc.id2 }
+}
+
+/// The inverse of a warp `y + amp (sin(y.y / l1 + s1), sin(y.x / l2 + s2))` at `x` (fixed-point
+/// iterations from `x`: a pure function of `x`, so a block takes its decisions at one point
+/// whichever of its pixels asks).
+fn unwarp(x: DVec2, amp: f64, l1: f64, l2: f64, s1: f64, s2: f64) -> DVec2 {
+    let mut y = x;
+    for _ in 0..2 {
+        y = x - DVec2::new((y.y / l1 + s1).sin(), (y.x / l2 + s2).sin()) * amp;
+    }
+    y
+}
+
+/// The place frame position of lattice position `x` of a grid-like layout (the inverse of its
+/// rotation, warp and a city's large-scale bend; the old core's bend left out).
+fn lattice_q(pl: &Pl, x: DVec2, theta: f64, warp: f64, did: u64, big: bool) -> DVec2 {
+    let mut y = x;
+    if big {
+        for _ in 0..3 {
+            y = x - (big_grid_warp(y, pl.seed) - y);
+        }
+    }
+    if warp > 0.0 {
+        let l = 230.0 * warp / 42.0;
+        y = unwarp(x, warp, l, 1.13 * l, 6.0 * u01k(did, 9), 6.0 * u01k(did, 10));
+    }
+    rot2(y, -theta)
+}
+
+/// The place frame positions of lattice points `cg` (a block group's centre) and `cb` (a
+/// block's centre) and the place frame steps of a metre along the lattice's axes at `cb`
+/// (`lattice_q`'s local map: a block's frame; one loop, one copy of the inverse in the shader).
+fn lattice_points(pl: &Pl, cg: DVec2, cb: DVec2, theta: f64, warp: f64, did: u64, big: bool) -> (DVec2, DVec2, DVec2, DVec2) {
+    let mut qs = [DVec2::ZERO; 4];
+    for (k, q) in qs.iter_mut().enumerate() {
+        let x = [cg, cb, cb + DVec2::new(8.0, 0.0), cb + DVec2::new(0.0, 8.0)][k];
+        *q = lattice_q(pl, x, theta, warp, did, big);
+    }
+    (qs[0], qs[1], (qs[2] - qs[1]) / 8.0, (qs[3] - qs[1]) / 8.0)
+}
+
+/// The least distance (district map, m) of a rectangle (centre `c`, half sizes `h` along the
+/// unit axes `ax`, `ay`; place frame) from its block's district edge, less `slack` × its half
+/// diagonal (the lattice's bend between the corners).
+fn rect_clear(pl: &Pl, bd: &BDist, c: DVec2, h: DVec2, ax: DVec2, ay: DVec2, slack: f64) -> f64 {
+    let mut m = f64::MAX;
+    for k in 0..4 {
+        let sx = if k % 2 == 0 { -1.0 } else { 1.0 };
+        let sy = if k < 2 { -1.0 } else { 1.0 };
+        m = m.min(bd.side(pl, c + ax * (sx * h.x) + ay * (sy * h.y)));
+    }
+    m - slack * h.length()
 }
 
 /// The district at `q` (relative distance `rel_here` at the sample).
@@ -677,36 +835,22 @@ pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
     let mut warp = 0.0;
     let mut w2cell = 0.0;
     let mut mg = 0i64;
-    let mut buf = 1e9;
-    let mut nbind = 1e9;
     if fm == form::CITY as u32 {
-        let dcell = [400.0, 400.0, 600.0, 1000.0, 1400.0][pl.level as usize];
-        // (the district borders wander: the cells are looked up at a warped position, so the
-        // districts are not hexagons; and only some of the edges are arterials, the rest are
-        // ordinary streets)
-        let wl = 0.3 * dcell;
-        let qd = q
-            + DVec2::new((q.y / wl + 6.0 * u01k(pl.seed, 51)).sin(), (q.x / (1.17 * wl) + 6.0 * u01k(pl.seed, 52)).sin()) * (0.16 * dcell)
-            + DVec2::new((q.y / (0.4 * wl) + 6.0 * u01k(pl.seed, 54)).sin(), (q.x / (0.43 * wl) + 6.0 * u01k(pl.seed, 55)).sin()) * (0.045 * dcell);
-        let dc = worley2(pl.seed ^ 0xD15, qd, dcell, 0.85);
+        // (only some of the district edges are arterials, the rest are ordinary streets)
+        let qd = dist_q(pl, q);
+        let dc = worley2(pl.seed ^ 0xD15, qd, dcell(pl), 0.85);
         did = dc.id;
         let (pt, zd, ind) = district_pattern(pl, dc.point, dc.id);
         pattern = pt;
         // arterials only between districts of different layouts (a town's districts of one
         // pattern share one street layout: no seams through its blocks; estates on the town's
-        // grid share it); a green buffer along the edge of an estate
+        // grid share it)
         let shared = shared_industry(pl);
         let net = |p: u32| if shared && p == pat::INDUSTRIAL { pat::GRID } else { p };
         if pl.level >= 2 {
             let (pt2, _, _) = district_pattern(pl, dc.point2, dc.id2);
             if net(pt2) != net(pt) || (pt == pat::INDUSTRIAL && !shared) {
                 art = worley2_edge_dist(&dc, qd);
-            }
-            if pt == pat::INDUSTRIAL && pt2 != pat::INDUSTRIAL {
-                buf = worley2_edge_dist(&dc, qd);
-            }
-            if shared && pt == pat::GRID && pt2 == pat::INDUSTRIAL {
-                nbind = worley2_edge_dist(&dc, qd);
             }
         }
         z = if ind { zone::OUTER } else { zd.max(z.min(zone::INNER)).min(zone::PERI) };
@@ -715,7 +859,7 @@ pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
             did = mix64(pl.seed ^ 0x1A70 ^ net(pt) as u64);
         }
         if pt == pat::INDUSTRIAL && shared {
-            mg = 2 + (u01k(dc.id, 14) < 0.5) as i64;
+            mg = estate_m(pl);
         }
         let survey = pl.arch == 7;
         // (one street orientation per town: districts turned against each other read as pieces
@@ -728,10 +872,6 @@ pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
                 b = (70.0 + 60.0 * u2) * bf;
                 asp = if survey { 2.2 } else { 1.0 + 0.6 * u01k(did, 7) };
                 sw = if z == zone::CBD { 7.0 } else { 4.5 + 2.5 * u01k(did, 8) };
-            }
-            pat::RADIAL => {
-                b = 80.0 + 40.0 * u2;
-                sw = 5.0;
             }
             pat::CURVI => {
                 // (crescents and loops: long blocks, the streets bent by a warp of 190 m)
@@ -800,7 +940,7 @@ pub fn district(pl: &Pl, q: DVec2, rel_here: f64) -> Dist {
         }
     }
     let dmul = if fm == form::CITY as u32 && pl.level >= 2 { (0.8 + 0.4 * u01k(did, 13)).min(1.0) } else { 1.0 };
-    Dist { did, zone: z, pattern, theta, art, dmul, b, asp, sw, jit, warp, w2cell, mg, buf, nbind }
+    Dist { did, zone: z, pattern, theta, art, dmul, b, asp, sw, jit, warp, w2cell, mg }
 }
 
 /// The large-scale bend and stretch of a city's grid (WGSL `st_big_grid_warp`): ±105 m of bend at
@@ -821,24 +961,59 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     let rel_here = rel0(pl, q) / (1.0 + e.n);
     let dens_here = density(pl, rel_here) * d.dmul;
     let fm = pl.form;
-    let Dist { did, zone: z, pattern, theta, art, dmul, b, asp, sw, jit, warp, w2cell, mg, buf, nbind } = *d;
-    // (the old core of a city of an old culture: its grid bent, its streets narrower, lanes in
-    // its blocks; fading into the grid over a band)
-    let oldk = if pattern == pat::GRID { old_core(pl, q) } else { 0.0 };
-    let oldg = pattern == pat::GRID && old_near(pl, q);
-    let sw = sw * (1.0 - 0.4 * oldk);
-    o.zone = z;
-    o.pattern = pattern;
-    // ---- the block
+    let Dist { did, zone: z0, pattern: lay, theta, art, dmul, b, asp, sw, jit, warp, w2cell, mg } = *d;
+    let city = fm == form::CITY as u32;
+    let shared = city && shared_industry(pl);
+    // the pixel's street layout: the town's grid (with the estates on it) or another lattice
+    let grid_net = lay == pat::GRID || (lay == pat::INDUSTRIAL && shared);
+    let lat = lattice_of(lay, did, shared);
+    // (the old core of a city of an old culture: its grid bent (a continuous warp, per pixel),
+    // its streets narrower and its blocks cut by lanes (per block); fading into the grid)
+    let oldk = if grid_net { old_core(pl, q) } else { 0.0 };
+    // ---- the block and its district, decided once per block at its centre `qbc` (place frame;
+    // round 14: districts, zones, the town's edge and the old quarter decided per pixel cut
+    // houses and halls along their outlines, gallery g28)
+    let mut bd = BDist { ok: true, own_a: true, zone: z0, pattern: lay, id: did, ..Default::default() };
+    let mut qbc = q;
+    // the block's axes in the place frame (block coordinates u, v about its centre) and the
+    // lattice's bend over a lot (relative)
+    let (mut lax, mut lay_ax) = (DVec2::X, DVec2::Y);
+    let mut slack = 0.0;
     let mut blk = Blk { id: did, ds: 1e9, sw, ..Default::default() };
-    let gridlike = matches!(pattern, pat::GRID | pat::CURVI | pat::SUPER | pat::INFORMAL | pat::INDUSTRIAL);
+    let gridlike = matches!(lay, pat::GRID | pat::CURVI | pat::SUPER | pat::INFORMAL | pat::INDUSTRIAL);
+    // the grid-like lattices: jittered lines, cells of `m` lines, the place frame of a lattice point
+    let big = (grid_net || mg > 0) && pl.level >= 3;
+    let (bx, by) = (b, b * asp);
+    let sd = did ^ 0x5EE7;
+    let line = |axis: i64, i: i64, bb: f64| (i as f64 + jit * (u01(hash2(sd ^ axis as u64, axis, i)) - 0.5)) * bb;
+    let cell = |axis: i64, x: f64, bb: f64, m: i64| -> (i64, f64, f64) {
+        let mut i = (x / bb).floor() as i64;
+        if x < line(axis, i, bb) {
+            i -= 1;
+        } else if x >= line(axis, i + 1, bb) {
+            i += 1;
+        }
+        let i = i.div_euclid(m) * m;
+        let (a0, a1) = (line(axis, i, bb), line(axis, i + m, bb));
+        (i, x - a0, a1 - a0)
+    };
+    let centre = |ix: i64, iy: i64, m: i64| DVec2::new(0.5 * (line(0, ix, bx) + line(0, ix + m, bx)), 0.5 * (line(1, iy, by) + line(1, iy + m, by)));
+    // (estates on the town's grid: whole groups of `estate_m` × `estate_m` of its blocks, by the
+    // district at the group's centre; the other blocks by the district at their own)
+    let ms = if grid_net && shared { estate_m(pl) } else { 1 };
+    let mut m = ms;
+    let mut qr = q;
+    let (mut bix, mut bqx, mut bsx, mut biy, mut bqy, mut bsy) = (0i64, 0.0, 0.0, 0i64, 0.0, 0.0);
+    // (the single blocks of the lattice and their centre, beside the group's)
+    let (mut cx1, mut cy1) = ((0i64, 0.0, 0.0), (0i64, 0.0, 0.0));
+    let mut qbase = q;
     if gridlike {
-        let mut qr = rot2(q, theta);
+        qr = rot2(q, theta);
         if warp > 0.0 {
             let l = 230.0 * warp / 42.0;
             qr += DVec2::new((qr.y / l + 6.0 * u01k(did, 9)).sin(), (qr.x / (1.13 * l) + 6.0 * u01k(did, 10)).sin()) * warp;
         }
-        if (pattern == pat::GRID || mg > 0) && pl.level >= 3 {
+        if big {
             // (a city's grid bends gently and its blocks grow and shrink over kilometres: one straight
             // grid of one block size to the horizon read as a pattern, metro)
             qr = big_grid_warp(qr, pl.seed);
@@ -850,31 +1025,129 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                 (qr.x / 190.0 + 6.0 * u01k(s, 3)).sin() + 0.4 * (qr.x / 67.0 + 6.0 * u01k(s, 4)).sin(),
             ) * (16.0 * oldk);
         }
-        let bx = b;
-        let by = b * asp;
-        let sd = did ^ 0x5EE7;
-        let line = |axis: i64, i: i64, bb: f64| (i as f64 + jit * (u01(hash2(sd ^ axis as u64, axis, i)) - 0.5)) * bb;
-        // (an estate on the town's grid: blocks of `mg` of its blocks)
-        let m = mg.max(1);
-        let cell = |axis: i64, x: f64, bb: f64| -> (i64, f64, f64) {
-            let mut i = (x / bb).floor() as i64;
-            if x < line(axis, i, bb) {
-                i -= 1;
-            } else if x >= line(axis, i + 1, bb) {
-                i += 1;
+        // (the block's frame from the lattice's local map: its second order and the old core's
+        // bend left)
+        slack = 0.02 + if oldk > 0.0 { 0.1 } else { 0.0 };
+        (bix, bqx, bsx) = cell(0, qr.x, bx, ms);
+        (biy, bqy, bsy) = cell(1, qr.y, by, ms);
+        cx1 = cell(0, qr.x, bx, 1);
+        cy1 = cell(1, qr.y, by, 1);
+        (qbc, qbase, lax, lay_ax) = lattice_points(pl, centre(bix, biy, ms), centre(cx1.0, cy1.0, 1), theta, warp, did, big);
+    } else if lay == pat::LINEAR {
+        // the street along the place axis; farm lots along it on both sides
+        let sd = pl.seed ^ 0x11E;
+        let line = |i: i64| (i as f64 + jit * (u01(hash2(sd, 0, i)) - 0.5)) * b;
+        let mut i = (q.x / b).floor() as i64;
+        if q.x < line(i) {
+            i -= 1;
+        } else if q.x >= line(i + 1) {
+            i += 1;
+        }
+        let side = if q.y < 0.0 { -1i64 } else { 1 };
+        blk.ds = q.y.abs();
+        blk.along = q.x;
+        blk.sid = hash1(sd, 1);
+        blk.major = true;
+        blk.id = hash3(sd, i, side, 3);
+        blk.u = q.x - line(i);
+        blk.bw = line(i + 1) - line(i);
+        blk.v = q.y.abs() - sw;
+        blk.bd = 40.0 + 18.0 * u01k(blk.id, 2);
+        // (the farm's density on the street: off its axis the narrow village thinned out, a12)
+        qbc = DVec2::new(line(i) + 0.5 * blk.bw, 0.0);
+        lay_ax = DVec2::new(0.0, side as f64);
+    }
+    // ---- the cellular layouts (one W2 for all of them)
+    let mut wc = Cell2 { id: 0, point: DVec2::ZERO, f1: 0.0, f2: 0.0, id2: 0, point2: DVec2::ZERO };
+    let mut qw = q;
+    if w2cell > 0.0 {
+        let (wa, wl1, wl2, ws1, ws2) = (0.22 * w2cell, 1.7 * w2cell, 1.9 * w2cell, 6.0 * u01k(did, 11), 6.0 * u01k(did, 12));
+        if lay == pat::ORGANIC {
+            qw = q + DVec2::new((q.y / wl1 + ws1).sin(), (q.x / wl2 + ws2).sin()) * wa;
+        }
+        wc = worley2(did ^ 0x0A6, qw, w2cell, 0.9);
+        if lay == pat::ORGANIC {
+            let ed = worley2_edge_dist(&wc, qw);
+            let dv = (wc.point2 - wc.point).normalize_or_zero();
+            blk.ds = ed;
+            blk.along = qw.dot(DVec2::new(-dv.y, dv.x));
+            blk.sid = wc.id ^ wc.id2;
+            blk.id = wc.id;
+            let ang = u01k(wc.id, 1) * std::f64::consts::FRAC_PI_2;
+            let rel = rot2(qw - wc.point, ang);
+            let half = 0.45 * w2cell;
+            blk.bw = 2.0 * (half - sw);
+            blk.bd = blk.bw;
+            blk.u = (rel.x + half - sw).clamp(0.0, blk.bw);
+            blk.v = (rel.y + half - sw).clamp(0.0, blk.bd);
+            // (the cell's site in the warped frame: within ~0.2 cells of its centre)
+            qbc = wc.point;
+            lax = rot2(DVec2::X, -ang);
+            lay_ax = rot2(DVec2::Y, -ang);
+            slack = 0.5;
+        } else if matches!(lay, pat::DISPERSED | pat::KRAAL) {
+            qbc = if lay == pat::KRAAL && pl.level == 0 { DVec2::ZERO } else { wc.point };
+        }
+    }
+    // the block's district: the sites nearest to its centre (to its group's: an estate on the
+    // town's grid is a whole group)
+    let mut merged = false;
+    if city {
+        let st = block_sites(pl, qbc, shared);
+        let mut b0 = st.bd;
+        merged = ms > 1 && b0.a_ind && st.la == lat;
+        if !merged {
+            m = 1;
+            if gridlike {
+                (bix, bqx, bsx, biy, bqy, bsy) = (cx1.0, cx1.1, cx1.2, cy1.0, cy1.1, cy1.2);
+                qbc = qbase;
             }
-            let i = i.div_euclid(m) * m;
-            let (a0, a1) = (line(axis, i, bb), line(axis, i + m, bb));
-            (i, x - a0, a1 - a0)
-        };
-        let (bix, bqx, bsx) = cell(0, qr.x, bx);
-        let (biy, bqy, bsy) = cell(1, qr.y, by);
+        }
+        b0.pick(pl, qbc, &st, lat);
+        bd = b0;
+        if !bd.ok {
+            bd.pattern = lay;
+            bd.zone = z0;
+        }
+    } else {
+        m = 1;
+    }
+    // the footprint noise and relative distance at the block's centre (the lots' densities: the
+    // town's edge along whole lots), the block's zone (the CBD by its centre)
+    let nb = foot_noise(pl, qbc, e.gsd);
+    let rel_b = rel0(pl, qbc) / (1.0 + nb);
+    let z = if !city {
+        if rel_b < 0.35 {
+            zone::INNER
+        } else {
+            zone::SUBURB
+        }
+    } else if bd.pattern == pat::INDUSTRIAL || !bd.ok {
+        bd.zone
+    } else {
+        bd.zone.max(zone_of(pl, rel_b).min(zone::INNER)).min(zone::PERI)
+    };
+    let pattern = bd.pattern;
+    let oldb = if grid_net && pattern == pat::GRID { old_core(pl, qbc) } else { 0.0 };
+    if gridlike {
+        // the block's street width (a city's CBD wider streets, an estate's; the old core's narrower)
+        let mut sw = sw;
+        if grid_net {
+            let ug = 4.5 + 2.5 * u01k(did, 8);
+            sw = if merged {
+                1.3 * ug
+            } else if pattern == pat::GRID && z == zone::CBD {
+                7.0
+            } else {
+                ug
+            } * (1.0 - 0.4 * oldb);
+        }
         let near_x = bix + if bqx > bsx - bqx { m } else { 0 };
         let near_y = biy + if bqy > bsy - bqy { m } else { 0 };
         let dx = bqx.min(bsx - bqx);
         let dy = bqy.min(bsy - bqy);
-        let main_x = near_x.rem_euclid(4) == 0 && pattern == pat::GRID;
-        let main_y = near_y.rem_euclid(4) == 0 && pattern == pat::GRID;
+        let main_x = near_x.rem_euclid(4) == 0 && grid_net;
+        let main_y = near_y.rem_euclid(4) == 0 && grid_net;
         let (swx, swy) = (if main_x { sw * 1.5 } else { sw }, if main_y { sw * 1.5 } else { sw });
         // (the street's segment between two crossings: streets end at crossings, all or nothing;
         // decided per block they ended mid-block in empty stubs, or one half of their width, fp_town)
@@ -897,84 +1170,46 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         };
         blk.smid = rot2(mid, -theta);
         blk.id = hash3(sd, bix, biy, 7);
-        let mjl = |i: i64| (pattern == pat::GRID && i.rem_euclid(4) == 0) as u32;
+        let mjl = |i: i64| (grid_net && i.rem_euclid(4) == 0) as u32;
         blk.mj = mjl(bix) | mjl(bix + m) << 1 | mjl(biy) << 2 | mjl(biy + m) << 3;
         blk.u = bqx - sw;
         blk.v = bqy - sw;
         blk.bw = bsx - 2.0 * sw;
         blk.bd = bsy - 2.0 * sw;
-    } else if pattern == pat::RADIAL {
-        let r = q.length();
-        let phi = q.y.atan2(q.x) + std::f64::consts::PI;
-        let dr = b;
-        let i = (r / dr).floor();
-        let v = r - i * dr;
-        let nsp = (std::f64::consts::TAU * (i + 0.5) * dr / (1.6 * dr)).max(4.0).log2().ceil().exp2();
-        let dphi = std::f64::consts::TAU / nsp;
-        let j = (phi / dphi).floor();
-        let arc = (phi - j * dphi) * r;
-        let bwr = dphi * r;
-        let (d_ring, d_rad) = (v.min(dr - v), arc.min(bwr - arc));
-        if d_ring < d_rad {
-            blk.ds = d_ring;
-            blk.along = phi * r;
-            blk.sid = hash2(pl.seed ^ 0x2A, i as i64 + (v > 0.5 * dr) as i64, 0);
-            blk.major = (i as i64).rem_euclid(3) == 0;
-        } else {
-            blk.ds = d_rad;
-            blk.along = r;
-            blk.sid = hash2(pl.seed ^ 0x2B, i as i64, j as i64);
-            blk.major = false;
-        }
-        blk.id = hash2(pl.seed ^ 0x2C, i as i64, j as i64);
-        blk.u = arc - sw;
-        blk.v = v - sw;
-        blk.bw = bwr - 2.0 * sw;
-        blk.bd = dr - 2.0 * sw;
-    } else if pattern == pat::LINEAR {
-        // the street along the place axis; farm lots along it on both sides
-        let sd = pl.seed ^ 0x11E;
-        let line = |i: i64| (i as f64 + jit * (u01(hash2(sd, 0, i)) - 0.5)) * b;
-        let mut i = (q.x / b).floor() as i64;
-        if q.x < line(i) {
-            i -= 1;
-        } else if q.x >= line(i + 1) {
-            i += 1;
-        }
-        let side = if q.y < 0.0 { -1i64 } else { 1 };
-        blk.ds = q.y.abs();
-        blk.along = q.x;
-        blk.sid = hash1(sd, 1);
-        blk.major = true;
-        blk.id = hash3(sd, i, side, 3);
-        blk.u = q.x - line(i);
-        blk.bw = line(i + 1) - line(i);
-        blk.v = q.y.abs() - sw;
-        blk.bd = 40.0 + 18.0 * u01k(blk.id, 2);
     }
-    // ---- the cellular layouts (one W2 for all of them)
-    let mut wc = Cell2 { id: 0, point: DVec2::ZERO, f1: 0.0, f2: 0.0, id2: 0, point2: DVec2::ZERO };
-    let mut qw = q;
-    if w2cell > 0.0 {
-        if pattern == pat::ORGANIC {
-            qw = q + DVec2::new((q.y / (1.7 * w2cell) + 6.0 * u01k(did, 11)).sin(), (q.x / (1.9 * w2cell) + 6.0 * u01k(did, 12)).sin()) * (0.22 * w2cell);
+    o.zone = z;
+    o.pattern = pattern;
+    // the place frame position of block coordinates (u, v); a lot (its rectangle u0 v0 u1 v1)
+    // drawn wholly or not at all: where the block's district borders on another lattice (an
+    // arterial) only lots clear of the edge, an estate's lots within 28 m of its edge a green
+    // buffer, none across the ring boulevard (else the green verge)
+    let q_of = |u: f64, v: f64| qbc + lax * (u - 0.5 * blk.bw) + lay_ax * (v - 0.5 * blk.bd);
+    let art_hw = [3.5, 3.5, 5.0, 6.0, 7.5][pl.level as usize];
+    let ring_hw = art_hw + 2.0;
+    let lot_green = |r: [f64; 4]| -> bool {
+        if !bd.ok {
+            return true;
         }
-        wc = worley2(did ^ 0x0A6, qw, w2cell, 0.9);
-        if pattern == pat::ORGANIC {
-            let ed = worley2_edge_dist(&wc, qw);
-            let dv = (wc.point2 - wc.point).normalize_or_zero();
-            blk.ds = ed;
-            blk.along = qw.dot(DVec2::new(-dv.y, dv.x));
-            blk.sid = wc.id ^ wc.id2;
-            blk.id = wc.id;
-            let rel = rot2(qw - wc.point, u01k(wc.id, 1) * std::f64::consts::FRAC_PI_2);
-            let half = 0.45 * w2cell;
-            blk.bw = 2.0 * (half - sw);
-            blk.bd = blk.bw;
-            blk.u = (rel.x + half - sw).clamp(0.0, blk.bw);
-            blk.v = (rel.y + half - sw).clamp(0.0, blk.bd);
+        let c = q_of(0.5 * (r[0] + r[2]), 0.5 * (r[1] + r[3]));
+        let h = DVec2::new(0.5 * (r[2] - r[0]), 0.5 * (r[3] - r[1]));
+        if bd.mixed || bd.buf {
+            let cl = rect_clear(pl, &bd, c, h, lax, lay_ax, 1.91 * slack);
+            if (bd.mixed && cl < art_hw + 2.0 * fw + 1.5) || (bd.buf && cl < 28.0) {
+                return true;
+            }
         }
-    }
+        // (across the ring: corners on both sides of it, or within its band)
+        let band = ring_hw + 2.0 * fw + 1.0 + slack * h.length();
+        let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+        for k in 0..4 {
+            let sx = if k % 2 == 0 { -1.0 } else { 1.0 };
+            let sy = if k < 2 { -1.0 } else { 1.0 };
+            let r = ring_signed(pl, c + lax * (sx * h.x) + lay_ax * (sy * h.y));
+            lo = lo.min(r);
+            hi = hi.max(r);
+        }
+        lo < band && hi > -band
+    };
     o.ds = blk.ds;
     o.sw = blk.sw;
     o.along = blk.along;
@@ -994,8 +1229,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     } else {
         dens_here > edge_thr - if blk.major { 0.18 } else { 0.0 }
     };
-    let art_hw = [3.5, 3.5, 5.0, 6.0, 7.5][pl.level as usize];
-    let has_streets = !matches!(pattern, pat::DISPERSED | pat::KRAAL);
+    let has_streets = !matches!(lay, pat::DISPERSED | pat::KRAAL);
     if art < art_hw + 2.0 * fw && dens_here > 0.35 {
         let c = band_cov(art, art_hw, fw);
         if c > 0.0 {
@@ -1011,7 +1245,6 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     }
     // (the ring boulevard around a big city's old core)
     let rd = ring_dist(pl, q);
-    let ring_hw = art_hw + 2.0;
     if rd < ring_hw + 2.0 * fw && dens_here > 0.35 {
         let c = band_cov(rd, ring_hw, fw);
         if c > o.street {
@@ -1023,7 +1256,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         }
     }
     o.lamp_sp = if has_streets {
-        if pattern == pat::LINEAR || fm != form::CITY as u32 {
+        if lay == pat::LINEAR || !city {
             34.0
         } else {
             18.0 + 6.0 * (z as f64).min(3.0)
@@ -1031,8 +1264,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     } else {
         0.0
     };
-    let walk =
-        if has_streets && street_ok && pattern != pat::INFORMAL && pattern != pat::LINEAR { band_cov(blk.ds, blk.sw + 0.2 * blk.sw + 0.6, fw) } else { 0.0 };
+    let walk = if has_streets && street_ok && lay != pat::INFORMAL && lay != pat::LINEAR { band_cov(blk.ds, blk.sw + 0.2 * blk.sw + 0.6, fw) } else { 0.0 };
     // ---- block content
     let mut cov_lot: f64 = 0.0;
     let mut col = c_asphalt();
@@ -1040,11 +1272,14 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     let mut cls = crate::landcover::URBAN;
     // the building's lot (the instance; whole blocks where there is no finer lot)
     let mut lot_id = blk.id;
-    let inside = blk.u >= 0.0 && blk.v >= 0.0 && blk.u < blk.bw && (blk.v < blk.bd || pattern == pat::LINEAR);
+    let inside = blk.u >= 0.0 && blk.v >= 0.0 && blk.u < blk.bw && (blk.v < blk.bd || lay == pat::LINEAR);
     let ublk = DVec2::new(blk.u, blk.v);
     // the lot density at the block centre / lot centre (not per pixel: lots stay whole)
-    let rel_at = |dq: DVec2| rel0(pl, q + dq) / (1.0 + e.n);
-    let dens_at = |dq: DVec2| density(pl, rel_at(dq)) * dmul;
+    let rel_q = |qq: DVec2| rel0(pl, qq) / (1.0 + nb);
+    let dens_q = |qq: DVec2| density(pl, rel_q(qq)) * dmul;
+    // the lot at the sample (block coordinates), tested once against the district edge and the
+    // ring at the end (`lot_green`: one call, one copy of the test in the shader)
+    let mut lot_r: Option<[f64; 4]> = None;
     let mut roof = 0.0;
     let mut rim = 0.0;
     let mut win = DVec3::new(1.0, 0.72, 0.42);
@@ -1068,7 +1303,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     };
     // special parcels: whole blocks
     let mut special = parcel::NONE;
-    if inside && fm == form::CITY as u32 && pattern != pat::INFORMAL {
+    if inside && city && lay != pat::INFORMAL {
         let us = u01k(blk.id, 20);
         let zi = z as usize;
         let p_park = [0.05, 0.07, 0.07, 0.05, 0.02][zi];
@@ -1102,11 +1337,13 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         } else {
             parcel::NONE
         };
-        // the block exists by the density at its centre
-        let bc = DVec2::new(0.5 * blk.bw - blk.u, 0.5 * blk.bd - blk.v);
-        let dbc = dens_at(rot2(bc, -theta));
-        if dbc < 0.3 {
+        // the block exists by the density at its centre; whole blocks, clear of any district
+        // edge or ring
+        if dens_q(qbc) < 0.3 {
             special = parcel::NONE;
+        }
+        if special != parcel::NONE {
+            lot_r = Some([0.0, 0.0, blk.bw, blk.bd]);
         }
     }
     if inside && special != parcel::NONE {
@@ -1245,7 +1482,10 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                 let ar = a - (si + 0.5) * seg;
                 let sh = hash2(rh, si as i64, 1);
                 lot_id = sh;
-                let dbc = dens_at(DVec2::ZERO);
+                let dbc = dens_q(qbc);
+                let (s0, s1) = ((si * seg).max(0.0), ((si + 1.0) * seg).min(if long_x { blk.bw } else { blk.bd }));
+                let (c0, c1) = (ri * pitch, (ri + 1.0) * pitch);
+                lot_r = Some(if long_x { [s0, c0, s1, c1] } else { [c0, s0, c1, s1] });
                 cov_lot = 1.0;
                 col = mixc(yard, c_asphalt() * 1.15, 0.3 * u01k(sh, 4));
                 cls = crate::landcover::RESIDENTIAL;
@@ -1278,9 +1518,18 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                 }
             }
             pat::INFORMAL => {
-                // dense tiny roofs in alleys, thinning out with the footprint (per roof cell)
-                let dbc = dens_at(wc.point - q);
-                if u01k(wc.id, 7) < dbc.powf(0.8) * 1.15 {
+                // dense tiny roofs in alleys, thinning out with the footprint (per roof cell; only
+                // whole roofs: within the block, clear of a district edge)
+                let dbc = dens_q(wc.point);
+                let r0 = rot2(wc.point, theta);
+                let rs = r0
+                    + DVec2::new((r0.y / (230.0 * warp / 42.0) + 6.0 * u01k(did, 9)).sin(), (r0.x / (1.13 * 230.0 * warp / 42.0) + 6.0 * u01k(did, 10)).sin())
+                        * warp
+                    - qr;
+                let (us, vs) = (blk.u + rs.x, blk.v + rs.y);
+                let whole = us > 4.5 && vs > 4.5 && us < blk.bw - 4.5 && vs < blk.bd - 4.5;
+                if whole && u01k(wc.id, 7) < dbc.powf(0.8) * 1.15 {
+                    lot_r = Some([us - 4.5, vs - 4.5, us + 4.5, vs + 4.5]);
                     lot_id = wc.id;
                     cov_lot = 1.0;
                     col = srgb(128.0, 110.0, 90.0);
@@ -1301,8 +1550,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
             }
             pat::LINEAR => {
                 // a farm: house by the street, barn behind, yard; strips beyond (forest-strip)
-                let lc = DVec2::new(0.5 * blk.bw - blk.u, -q.y);
-                let dl = dens_at(lc);
+                let dl = dens_q(qbc);
                 let farm = u01k(blk.id, 3) < dl.powf(0.6) * 1.1;
                 if farm && blk.v < blk.bd {
                     cov_lot = 1.0;
@@ -1370,12 +1618,11 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
             _ => {
                 if matches!(pattern, pat::DISPERSED | pat::KRAAL) {
                     // handled below (W2 units)
-                } else if let Some(os) = if oldg {
-                    // (by small block, from the share at its centre: the quarter fades into the grid
-                    // over a band, its outline irregular; whole blocks drew a hard star of
-                    // W2 cells, town@type)
-                    let os = old_sub(&blk);
-                    (u01k(os.id, 77) < old_core(pl, q + rot2(os.c - ublk, -theta))).then_some(os)
+                } else if let Some(os) = if oldb > 0.0 && u01k(blk.id, 77) < oldb {
+                    // (by grid block, from the share at its centre: the quarter fades into the grid
+                    // over a band of whole blocks; round 11's small blocks by their own share cut
+                    // the grid's lots along the quarter's outline, gallery g28)
+                    Some(old_sub(&blk))
                 } else {
                     None
                 } {
@@ -1390,6 +1637,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     let uw = 6.0 + 5.0 * u01k(sh, 12);
                     let hu = hash3(sh ^ 0x40F, os.side, (os.along / uw).floor() as i64, 1);
                     lot_id = hu;
+                    lot_r = Some([os.c.x - os.h.x, os.c.y - os.h.y, os.c.x + os.h.x, os.c.y + os.h.y]);
                     cov_lot = 1.0;
                     // (courtyards of gardens and trees, not pale paving)
                     col = mixc(mixc(yard, c_paving(), 0.3), srgb(70.0, 96.0, 52.0), 0.35 + 0.3 * e.moist.clamp(0.0, 1.0));
@@ -1441,10 +1689,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     // (blocks of light industry beside an estate on the town's grid, fewer with the
                     // distance to it (by the district at the block's centre: whole blocks): the
                     // estates read as separate patches, town@type, fp_town)
-                    let lind = pattern == pat::GRID && nbind < 260.0 && {
-                        let qc = q + rot2(DVec2::new(0.5 * blk.bw - blk.u, 0.5 * blk.bd - blk.v), -theta);
-                        u01k(blk.id, 79) < 0.6 * (1.0 - smoothstep(30.0, 230.0, nbind_at(pl, qc)))
-                    };
+                    let lind = pattern == pat::GRID && bd.near_ind && u01k(blk.id, 79) < 0.6 * (1.0 - smoothstep(30.0, 230.0, bd.side(pl, qbc).abs()));
                     let ind = pattern == pat::INDUSTRIAL || lind;
                     // (estates: lots of 30-150 m, halls, yards and car parks; lots of 45 m and up
                     // on blocks merged from the town's drew one sheet of roof, town@type)
@@ -1461,8 +1706,10 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     let (lh, lr) = bsp(blk.id, blk.u, blk.v, blk.bw, blk.bd, depth, min_side);
                     lot_id = lh;
                     let lc = DVec2::new(0.5 * (lr[0] + lr[2]), 0.5 * (lr[1] + lr[3]));
-                    let lot_dq = rot2(lc - ublk, -theta);
-                    let dl = dens_at(lot_dq);
+                    let q_lc = q_of(lc.x, lc.y);
+                    let rel_lc = rel_q(q_lc);
+                    let dl = dens_q(q_lc);
+                    lot_r = Some(lr);
                     // (a town's lots end where its streets do (above their density 0.42): houses strewn over the fields
                     // beyond read as a broken town)
                     // (the threshold of each lot its own: lots ending along the blocks drew the town's edge
@@ -1504,7 +1751,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     } else {
                         // (the skyline thins and falls off from the centre, and towers stand beyond the
                         // CBD near it: a round cake of towers with a hard edge read as stamped on)
-                        let fall = smoothstep(0.0, 0.14, rel_here);
+                        let fall = smoothstep(0.0, 0.14, rel_lc);
                         match z {
                             zone::CBD => {
                                 if pl.level >= 3 && ut < 0.75 * (1.0 - 0.5 * fall) {
@@ -1513,13 +1760,13 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                                     typ::MIDRISE
                                 }
                             }
-                            zone::INNER if pl.level >= 3 && u01k(lh, 21) < 0.12 * (1.0 - smoothstep(0.1, 0.2, rel_here)) => typ::TOWER,
+                            zone::INNER if pl.level >= 3 && u01k(lh, 21) < 0.12 * (1.0 - smoothstep(0.1, 0.2, rel_lc)) => typ::TOWER,
                             zone::INNER => {
                                 // (towns: mostly detached blocks of flats on lawns, v0.2.0's
                                 // boxes; perimeter blocks are the cities' (they filled every
                                 // block of a town centre))
                                 let (perim, mid) = if pl.level >= 3 { (0.8, 0.6) } else { (0.25, 0.75) };
-                                if euro && pattern != pat::RADIAL && ut < perim || pattern == pat::ORGANIC {
+                                if euro && ut < perim || pattern == pat::ORGANIC {
                                     typ::PERIM
                                 } else if ut < mid {
                                     typ::MIDRISE
@@ -1546,6 +1793,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                         }
                     };
                     let town_box = t == typ::MIDRISE && core;
+                    o.typ = t;
                     // an estate's lot: a hall, a car park, a storage yard or vacant
                     let wuse = if t == typ::WAREHOUSE {
                         let lu = u01k(lh, 40);
@@ -1593,7 +1841,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                             typ::TOWER => {
                                 let s = (0.5 * lw.min(ld) - 4.0).clamp(6.0, 24.0);
                                 let ps = smoothstep(1e5, 1.5e7, pl.pop);
-                                let fall = smoothstep(0.0, 0.2, rel_here);
+                                let fall = smoothstep(0.0, 0.2, rel_lc);
                                 (DVec2::splat(s), (40.0 + 360.0 * ps * u01k(lh, 4).powi(3) + 40.0 * u01k(lh, 5)) * (1.0 - 0.6 * fall), true)
                             }
                             typ::MIDRISE => {
@@ -1841,7 +2089,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     // ---- farms and kraals (cellular)
     if pattern == pat::DISPERSED || pattern == pat::KRAAL {
         let pc = wc.point;
-        let dl = if pattern == pat::KRAAL && pl.level == 0 { 1.0 } else { dens_at(pc - q) };
+        let dl = if pattern == pat::KRAAL && pl.level == 0 { 1.0 } else { dens_q(pc) };
         let unit_c = if pattern == pat::KRAAL && pl.level == 0 { DVec2::ZERO } else { pc };
         let ok = pattern == pat::KRAAL && pl.level == 0 || u01k(wc.id, 3) < dl * 0.9;
         let r = q - unit_c;
@@ -1982,35 +2230,37 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
             rim *= el;
         }
     }
-    // ---- the green buffer along an estate's edge: grass and clumps of trees over its outer lots
-    // (estates of grey roofs to their polygon's edge read as stamped on, metro)
-    if pattern == pat::INDUSTRIAL && buf < 30.0 && inside {
-        let k = smoothstep(30.0, 22.0, buf);
-        cov_lot = cov_lot.max(k);
-        let g = mixc(yard, srgb(84.0, 112.0, 56.0), 0.5) * (0.95 + 0.1 * e.detail);
-        col = mixc(col, g, k);
-        h *= 1.0 - k;
-        roof *= 1.0 - k;
-        rim *= 1.0 - k;
-        if k > 0.5 {
-            cls = crate::landcover::PARK;
-        }
+    // ---- the green verge: grass and clumps of trees over the lots along a district edge (whole
+    // lots; the green buffer along an estate's edge: estates of grey roofs to their polygon's edge
+    // read as stamped on, metro)
+    // (only lots of the town: unbuilt lots beyond its edge stay fields, not groves)
+    if inside && cov_lot > 0.0 && lot_r.is_some_and(lot_green) {
+        // (in dry lands a dusty verge with few trees: a green ring of trees drew the estate's
+        // polygon in the desert, gallery g09)
+        let wet = smoothstep(0.15, 0.5, e.moist);
+        cov_lot = 1.0;
+        col = mixc(yard, srgb(84.0, 112.0, 56.0), 0.5 * wet) * (0.95 + 0.1 * e.detail);
+        h = 0.0;
+        roof = 0.0;
+        rim = 0.0;
+        em = DVec3::ZERO;
+        cls = crate::landcover::PARK;
         let tcl = (ublk / 10.0).floor();
         let th = hash2(blk.id ^ 0xB0F, tcl.x as i64, tcl.y as i64);
         let tp = (tcl + 0.5 + 0.5 * (DVec2::new(u01k(th, 1), u01k(th, 2)) - 0.5)) * 10.0;
-        if u01k(th, 3) < 0.6 * k {
-            let tc = aa(3.0 + 1.5 * u01k(th, 4) - (ublk - tp).length(), fw);
-            if tc > tree {
-                tree = tc;
-                tree_h = 8.0 + 6.0 * u01k(th, 5);
-            }
+        tree = 0.0;
+        // (an estate's buffer of whole lots mostly grass: square groves along it, alpine_south)
+        let tk = if bd.buf && !bd.mixed { 0.25 } else { 0.6 };
+        if u01k(th, 3) < tk * (0.2 + 0.8 * wet) {
+            tree = aa(3.0 + 1.5 * u01k(th, 4) - (ublk - tp).length(), fw);
+            tree_h = 8.0 + 6.0 * u01k(th, 5);
         }
     }
     // ---- street trees (residential streets of tree-lined cultures; some of the streets: a
     // crown every 11 m along every street drew a busy sawtooth around every block, v0.2.0's towns
     // have none)
     let treed = matches!(pl.arch, 5 | 6 | 7 | 9 | 4) && (z == zone::INNER || z == zone::OUTER || z == zone::SUBURB) && u01k(blk.sid, 31) < 0.4;
-    if treed && has_streets && street_ok && pattern != pat::INFORMAL && pattern != pat::LINEAR {
+    if treed && has_streets && street_ok && lay != pat::INFORMAL && lay != pat::LINEAR {
         let off = blk.sw + 1.6;
         let dt = (blk.ds - off).abs();
         if dt < 4.5 {
@@ -2033,7 +2283,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         col = mixc(col, c_concrete() * 0.92, (walk - street).max(0.0) * (1.0 - cov_lot) / cov);
         let asph = if o.major {
             c_asphalt() * 0.92
-        } else if fm != form::CITY as u32 || (pattern == pat::ORGANIC && pl.level < 3) || pattern == pat::INFORMAL {
+        } else if !city || (lay == pat::ORGANIC && pl.level < 3) || lay == pat::INFORMAL {
             // lanes: stone paving, dirt where poor
             mixc(srgb(150.0, 128.0, 100.0), c_paving() * 0.9, smoothstep(0.35, 0.6, pl.dev))
         } else {
@@ -2062,6 +2312,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     o.h = h;
     o.cls = cls;
     o.bid = if cls == crate::landcover::BUILDING || cls == crate::landcover::BUILDING_TALL { lot_id } else { 0 };
+    o.did = bd.id;
     o.roof = roof;
     o.rim = rim;
     o.win = win;

@@ -176,6 +176,15 @@ in forest (600 m, 20° down) whose reflection was the bright horizon and now sho
 night sources at 22:00 (airport lights, a port, a gas flare, lit CBD windows, wind-turbine
 beacons, lit greenhouses).
 
+Round 14 (`next` only, `RenderSettings::next_lights`, set from `world.generator`; classic's
+renders are v0.2.0's, bit for bit): street light on walls and roofs falls off with the height
+above the ground (a wall's foot; a roof's height above the DSM's mean over ~40 m), lit windows
+are sparse (5–56 % per building, keyed on its roof colour), warm, neutral or cool and dimmer,
+glass walls reflect the ground below the horizon and take more of their roof's tint, and water
+near lit banks reflects their lights. The CBD's towers were flat white blocks at dusk (the
+horizon's glow in their glass, street light to their tops) and pale grey ghosts at night
+(gallery g29, g34).
+
 ![walls: CBD](images/render_walls_cbd.jpg)
 ![walls: tower karst](images/render_walls_karst.jpg)
 ![river reflection](images/render_river_reflection.jpg)
@@ -196,7 +205,7 @@ fields at 53° N, and a hard, circular biome border in the oblique view (one of 
 `scripts/ab_v020/<scene>.yaml` are the same scenes with `generator: next`, and
 `<scene>@type.yaml` the same camera at a place of the same landscape type in next's world.
 [`ab/next_quality/`](ab/next_quality/) has the sheets of the latest comparison (columns:
-v0.2.0, round 12, round 13) and their image statistics (`stats.md`). Scenes whose pose shows
+v0.2.0, round 13, round 14) and their image statistics (`stats.md`). Scenes whose pose shows
 another landscape in next's world (sea at `bank` and `coast`, farmland at `night` and `dusk`)
 have an `@type` twin at a place of v0.2.0's landscape; `probe_px towns LAT LON R_KM` lists the
 settlements near a point to find one.
@@ -208,7 +217,7 @@ hand picking) with the nearest land point of the classic world (the same point a
 `scripts/ab_v020.py audit` renders them with the `farmland` still's camera (700 m above the
 ground, 42° down, 640 × 360, the still's local solar time 10:41, June; December south of the
 equator) with either generator, and `sheet --audit` puts classic | next side by side
-([`ab/next_quality/audit*.jpg`](ab/next_quality/): classic, round 12, round 13; `audit_stats.md`).
+([`ab/next_quality/audit*.jpg`](ab/next_quality/): classic, round 13, round 14; `audit_stats.md`).
 In round 7, 6 of the 30 places looked clearly worse than classic's typical quality (13 in
 round 6), 5 of them cold (frozen lakes in snow-free forest, glacier stripes, snow nets over
 tundra), 6 more borderline (ecotone patchworks, autumn and burn colours, paddy terraces). In
@@ -237,7 +246,10 @@ groves and clumps, shrubs in the ground's texture; isolated dark dots 0.92× cla
 13.8, was 20.8, classic 12.1); the land has a macro tone over
 600 m – 1.5 km (soil moisture, vigour, drainage) on the ground and inside fields, and the night's
 lamps are less orange (part C of round 13; the tonal contrast of the like-for-like scenes moved
-little: it is set by what the scenes show).
+little: it is set by what the scenes show). Round 14 changed the audit only where it shows towns or terraced
+paddies (a12: terraces along the hillside, no parcel rectangles; a22: a different town outline):
+dots 0.92× classic's (12 places above twice, were 13), high-frequency energy 13.8 as before; no
+place is clearly worse than classic or than round 13.
 
 ```sh
 scripts/ab_v020.py audit --terrain target/release/terrain --generator classic --out /tmp/audit_c

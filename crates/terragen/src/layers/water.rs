@@ -49,7 +49,7 @@ pub fn standing(s: &mut Stack) {
 pub fn rivers(s: &mut Stack) {
     let l = s.l;
     let t = s.t;
-    if l.river_hw <= 0.0 {
+    if l.river_hw <= 0.0 || (s.culvert && l.river_hw < 12.0) {
         return;
     }
     let gsd = s.ctx.gsd;

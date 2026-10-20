@@ -95,6 +95,17 @@
   bare in streaks between vegetation; airports graded over 220 m and fading into the land, no tracks
   across them; drained mires in farmland; towers in six tints; the kit places of the forest-strip
   village and the rice paddies moved to where the world now has them.
+- `next` polish round 14: whole buildings at district edges (a block's district, zone and street
+  width decided at its centre; estates as whole groups of grid blocks; lots along an arterial or
+  the ring boulevard built only where wholly clear of it, else a green verge; the old quarter by
+  block: no lot split between districts, 185 of 2280 before); rice terraces along the hillside
+  (plots on the benches with cross-bunds, stages in patches, no parcel rectangles; flooded paddies
+  sky-coloured); `next`'s buildings at dusk and night: street light falling off with the height
+  above the ground, sparse warm and cool lit windows varying by building, glass reflecting the
+  ground below the horizon (no white towers at dusk, no grey ghosts at night; classic's renders
+  unchanged); airfields culvert small streams; fewer, duller flowering crowns; tower glass in its
+  roof's tint; a pixel's channel by its distance relative to the half width (a braided wash's band
+  ended square on a tributary's bisector); fainter creeks on arid flats, near the sea only.
 - **Optional tile layers** (tile store format 2; `next` only): `tiles.layers: [dtm, instance]`
   adds the bare ground and instance ids (building lots, fields, forest stands) to a new store;
   the viewer's map shadings *Height above ground* and *Instances* show them. Format-1 stores

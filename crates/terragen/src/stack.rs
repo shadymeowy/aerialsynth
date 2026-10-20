@@ -229,6 +229,8 @@ pub struct Stack<'a> {
     /// set by a kit before the towns are selected (slots 1–5): no town here (volcanic craters,
     /// ash and lava)
     pub no_town: bool,
+    /// set by a site in slot 7 (an airfield): the small streams run in culverts below it
+    pub culvert: bool,
     /// layers 6–7: evaluated before the canopy, composited after it
     deferring: bool,
     deferred: Deferred,
@@ -471,6 +473,7 @@ pub fn eval(sm: &SurfaceModel, world: &World, cache: &mut Caches, ctx: &Ctx, l: 
         is_water: false,
         done: false,
         no_town: false,
+        culvert: false,
         deferring: false,
         deferred: Deferred::default(),
     };

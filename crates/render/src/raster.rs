@@ -66,6 +66,12 @@ pub struct RenderSettings {
     pub backend: Backend,
     /// Catalogue stars (on with `lighting.stars`).
     pub stars: crate::stars::StarsConfig,
+    /// The lighting of `world.generator: next`'s buildings (set by the pipeline from the
+    /// world, not a setting; classic's renders are v0.2.0's): street light on walls and roofs
+    /// falling off with the height above the ground, lit windows varying by building (sparse,
+    /// warm and cool), glass walls reflecting the ground below the horizon.
+    #[serde(skip)]
+    pub next_lights: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -116,6 +122,7 @@ impl Default for RenderSettings {
             walls: true,
             backend: Backend::Auto,
             stars: Default::default(),
+            next_lights: false,
         }
     }
 }
@@ -1323,7 +1330,25 @@ impl Renderer {
             let k = ((25.0 / texel).log2().ceil().max(0.0) as u8).min(z);
             let s = 0.5f64.powi(k as i32);
             if let Some(e) = view.sample3(z - k, gx * s, gy * s, Which::Emission) {
-                mul += e * (0.2 * sun_state.lights);
+                if self.settings.next_lights {
+                    // (next: street light falls off with the height above the ground (a wall's
+                    // foot; a roof's height above its surroundings, the DSM's mean over ~40 m):
+                    // the CBD's towers were lit white to their tops at dusk, grey at night)
+                    let rel = if w.weight > 0.0 {
+                        hs - w.ground
+                    } else {
+                        let k2 = ((40.0 / texel).log2().ceil().max(0.0) as u8).min(z);
+                        let s2 = 0.5f64.powi(k2 as i32);
+                        match (view.elev(z, gx, gy), view.elev(z - k2, gx * s2, gy * s2)) {
+                            (Some(a), Some(b)) => a - b,
+                            _ => 0.0,
+                        }
+                    };
+                    let f = 1.0 / (1.0 + (rel.max(0.0) / 8.0).powi(2));
+                    mul += e * (0.2 * sun_state.lights * f);
+                } else {
+                    mul += e * (0.2 * sun_state.lights);
+                }
             }
         }
         if mat.emissive > 0.0 && sun_state.lights > 1e-3 {
@@ -1343,14 +1368,31 @@ impl Renderer {
             let glint = (schlick(v.dot(hv)) * (n_exp + 8.0) / 8.0 * nh.powf(n_exp) * nm.dot(sun).max(0.0) * 1.25).min(GLINT_MAX);
             // the reflection: the sky, or the banks where they rise above the reflected ray
             // (narrow rivers in forest reflected the bright horizon: silvery lines)
-            let mut env = atmo.sky((dir_w - nm * 2.0 * dir_w.dot(nm)).normalize(), up);
+            let refl = (dir_w - nm * 2.0 * dir_w.dot(nm)).normalize();
+            let mut env = atmo.sky(refl, up);
+            if self.settings.next_lights && w.weight > 0.0 && refl.dot(up) < 0.05 {
+                // (next: a glass wall reflects the ground below the horizon, not the horizon's
+                // glow: the towers glowed white against the dusk)
+                let k = ((20.0 / texel).log2().ceil().max(0.0) as u8).min(z);
+                let s = 0.5f64.powi(k as i32);
+                let which = if relit { Which::Albedo } else { Which::Rgb };
+                let ground = view.sample3(z - k, gx * s, gy * s, which).unwrap_or(DVec3::splat(0.1)) * mul;
+                let t = ((refl.dot(up) + 0.15) / 0.2).clamp(0.0, 1.0);
+                env = ground + (env - ground) * (t * t * (3.0 - 2.0 * t));
+            }
             if w.weight <= 0.0 {
                 let vis = reflection_visibility(view, z, gx, gy, hdir, v_enu.z, texel);
                 if vis < 1.0 {
                     let k = ((20.0 / texel).log2().ceil().max(0.0) as u8).min(z);
                     let s = 0.5f64.powi(k as i32);
                     let which = if relit { Which::Albedo } else { Which::Rgb };
-                    let bank = view.sample3(z - k, gx * s, gy * s, which).unwrap_or(DVec3::splat(0.1)) * mul;
+                    let mut bank = view.sample3(z - k, gx * s, gy * s, which).unwrap_or(DVec3::splat(0.1)) * mul;
+                    if self.settings.next_lights && sun_state.lights > 1e-3 {
+                        // (next: the lights of the banks in the water: night harbours were black)
+                        if let Some(e) = view.sample3(z - k, gx * s, gy * s, Which::Emission) {
+                            bank += e * sun_state.lights;
+                        }
+                    }
                     env = bank + (env - bank) * vis;
                 }
             }
@@ -1407,7 +1449,7 @@ impl Renderer {
         if w.weight > 0.0 {
             let tz = ps.texel * 2f64.powi(ps.z as i32 - z as i32);
             let s = (gx.rem_euclid(walls::WRAP) * w.tan.x + gy.rem_euclid(walls::WRAP) * w.tan.y) * tz;
-            (wc, we) = walls::texel(w.kind, w.base, s, hs, w.ground, w.top, ps.foot);
+            (wc, we) = walls::texel(w.kind, w.base, s, hs, w.ground, w.top, ps.foot, self.settings.next_lights);
             if w.weight >= 1.0 {
                 return (wc * ps.mul + ps.add, we * ps.emis);
             }

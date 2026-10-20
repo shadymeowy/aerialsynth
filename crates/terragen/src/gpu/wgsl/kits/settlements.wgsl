@@ -99,8 +99,9 @@ fn st_rel0(pl: StPl, q: vec2<f32>) -> f32 {
     return length(vec2<f32>(q.x / se, q.y * se)) / pl.r;
 }
 
-fn st_foot_noise(pl: StPl, p: vec3<f64>, gsd: f32) -> f32 {
+fn st_foot_noise(pl: StPl, q: vec2<f32>, gsd: f32) -> f32 {
     let r = pl.r;
+    let p = vec3<f64>(f64(q.x), f64(q.y), 0.37lf * f64(r));
     return 0.32 * perlin3(pl.seed ^ 0x71lu, p * (1.0lf / (0.9lf * f64(r)))) + 0.18 * perlin3(pl.seed ^ 0x72lu, p * (1.0lf / (0.35lf * f64(r)))) * band(0.35 * r, gsd);
 }
 
@@ -226,12 +227,6 @@ fn st_old_core(pl: StPl, q: vec2<f32>) -> f32 {
     return 1.0 - smoothstep1(0.45 * c.y, c.y, c.x);
 }
 
-/// `town::old_near`.
-fn st_old_near(pl: StPl, q: vec2<f32>) -> bool {
-    let c = st_old_quarter(pl, q);
-    return c.y >= 0.0 && c.x < c.y + 70.0;
-}
-
 /// `town::Blk`.
 struct StBlk {
     id: u64,
@@ -256,6 +251,7 @@ struct StOldSub {
     c: vec2<f32>,
     side: i64,
     along: f32,
+    h: vec2<f32>,
 }
 
 /// `town::old_sub`'s open lanes.
@@ -322,6 +318,7 @@ fn st_old_sub(blk: StBlk) -> StOldSub {
     o.c = vec2<f32>(0.5 * (u0 + u1), 0.5 * (v0 + v1));
     o.side = i64(side);
     o.along = select(blk.u, blk.v, side < 2u);
+    o.h = vec2<f32>(0.5 * (u1 - u0), 0.5 * (v1 - v0));
     return o;
 }
 
@@ -600,8 +597,6 @@ struct StDist {
     warp: f32,
     w2cell: f32,
     mg: i64,
-    buf: f32,
-    nbind: f32,
 }
 
 /// `town::district`.
@@ -636,26 +631,97 @@ fn st_district_pattern(pl: StPl, point: vec2<f32>, id: u64) -> vec3<u32> {
     return vec3<u32>(pattern, zd, select(0u, 1u, ind));
 }
 
-/// `town::nbind_at`.
-fn st_nbind_at(pl: StPl, q: vec2<f32>) -> f32 {
-    if (pl.form != SF_CITY || pl.level < 2u || !st_shared_industry(pl)) {
-        return 1e9;
-    }
-    var dcell = 600.0;
-    if (pl.level == 3u) {
+/// `town::dcell`.
+fn st_dcell(pl: StPl) -> f32 {
+    var dcell = 400.0;
+    if (pl.level == 2u) {
+        dcell = 600.0;
+    } else if (pl.level == 3u) {
         dcell = 1000.0;
     } else if (pl.level >= 4u) {
         dcell = 1400.0;
     }
-    let wl = 0.3 * dcell;
-    let qd = q
-        + vec2<f32>(sin(q.y / wl + 6.0 * u01k(pl.seed, 51lu)), sin(q.x / (1.17 * wl) + 6.0 * u01k(pl.seed, 52lu))) * (0.16 * dcell)
-        + vec2<f32>(sin(q.y / (0.4 * wl) + 6.0 * u01k(pl.seed, 54lu)), sin(q.x / (0.43 * wl) + 6.0 * u01k(pl.seed, 55lu))) * (0.045 * dcell);
-    let dc = worley2(pl.seed ^ 0xD15lu, qd, dcell, 0.85);
-    if (st_district_pattern(pl, dc.point, dc.id).x == SP_GRID && st_district_pattern(pl, dc.point2, dc.id2).x == SP_INDUSTRIAL) {
-        return worley2_edge_dist(dc, qd);
+    return dcell;
+}
+
+/// `town::dist_q`.
+fn st_dist_q(pl: StPl, q: vec2<f32>) -> vec2<f32> {
+    let dc = st_dcell(pl);
+    let wl = 0.3 * dc;
+    return q
+        + vec2<f32>(sin(q.y / wl + 6.0 * u01k(pl.seed, 51lu)), sin(q.x / (1.17 * wl) + 6.0 * u01k(pl.seed, 52lu))) * (0.16 * dc)
+        + vec2<f32>(sin(q.y / (0.4 * wl) + 6.0 * u01k(pl.seed, 54lu)), sin(q.x / (0.43 * wl) + 6.0 * u01k(pl.seed, 55lu))) * (0.045 * dc);
+}
+
+/// `town::estate_m`.
+fn st_estate_m(pl: StPl) -> i64 {
+    return select(2li, 3li, u01k(pl.seed ^ 0x3A6lu, 14lu) < 0.5);
+}
+
+/// `town::lattice_of`.
+fn st_lattice_of(pattern: u32, id: u64, shr: bool) -> u64 {
+    if (pattern == SP_INDUSTRIAL) {
+        return select(id, u64(SP_GRID), shr);
     }
-    return 1e9;
+    return u64(pattern);
+}
+
+/// `town::BDist`.
+struct StBDist {
+    a: vec2<f32>,
+    b: vec2<f32>,
+    own_a: bool,
+    ok: bool,
+    mixed: bool,
+    buf: bool,
+    a_ind: bool,
+    near_ind: bool,
+    zone: u32,
+    pattern: u32,
+    id: u64,
+}
+
+/// `BDist::side`.
+fn st_bd_side(pl: StPl, bd: StBDist, q: vec2<f32>) -> f32 {
+    let d = bd.b - bd.a;
+    let len = max(length(d), 1e-6);
+    let s = dot((bd.a + bd.b) * 0.5 - st_dist_q(pl, q), d / len);
+    return select(-s, s, bd.own_a);
+}
+
+/// `town::unwarp`.
+fn st_unwarp(x: vec2<f32>, amp: f32, l1: f32, l2: f32, s1: f32, s2: f32) -> vec2<f32> {
+    var y = x;
+    for (var k = 0u; k < 2u; k++) {
+        y = x - vec2<f32>(sin(y.y / l1 + s1), sin(y.x / l2 + s2)) * amp;
+    }
+    return y;
+}
+
+/// `town::lattice_q`.
+fn st_lattice_q(pl: StPl, x: vec2<f32>, theta: f32, warp: f32, did: u64, big: bool) -> vec2<f32> {
+    var y = x;
+    if (big) {
+        for (var k = 0u; k < 3u; k++) {
+            y = x - (st_big_grid_warp(y, pl.seed) - y);
+        }
+    }
+    if (warp > 0.0) {
+        let l = 230.0 * warp / 42.0;
+        y = st_unwarp(x, warp, l, 1.13 * l, 6.0 * u01k(did, 9lu), 6.0 * u01k(did, 10lu));
+    }
+    return st_rot2(y, -theta);
+}
+
+/// `town::rect_clear`.
+fn st_rect_clear(pl: StPl, bd: StBDist, c: vec2<f32>, h: vec2<f32>, ax: vec2<f32>, ay: vec2<f32>, slack: f32) -> f32 {
+    var m = 3.0e38;
+    for (var k = 0u; k < 4u; k++) {
+        let sx = select(1.0, -1.0, k % 2u == 0u);
+        let sy = select(1.0, -1.0, k < 2u);
+        m = min(m, st_bd_side(pl, bd, c + ax * (sx * h.x) + ay * (sy * h.y)));
+    }
+    return m - slack * length(h);
 }
 
 fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
@@ -672,39 +738,25 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
     var warp = 0.0;
     var w2cell = 0.0;
     var mg = 0li;
-    var buf = 1e9;
-    var nbind = 1e9;
     if (fm == SF_CITY) {
-        var dcell = 400.0;
-        if (pl.level == 2u) {
-            dcell = 600.0;
-        } else if (pl.level == 3u) {
-            dcell = 1000.0;
-        } else if (pl.level >= 4u) {
-            dcell = 1400.0;
-        }
-        let wl = 0.3 * dcell;
-        let qd = q
-            + vec2<f32>(sin(q.y / wl + 6.0 * u01k(pl.seed, 51lu)), sin(q.x / (1.17 * wl) + 6.0 * u01k(pl.seed, 52lu))) * (0.16 * dcell)
-            + vec2<f32>(sin(q.y / (0.4 * wl) + 6.0 * u01k(pl.seed, 54lu)), sin(q.x / (0.43 * wl) + 6.0 * u01k(pl.seed, 55lu))) * (0.045 * dcell);
-        let dc = worley2(pl.seed ^ 0xD15lu, qd, dcell, 0.85);
+        let qd = st_dist_q(pl, q);
+        let dc = worley2(pl.seed ^ 0xD15lu, qd, st_dcell(pl), 0.85);
         did = dc.id;
-        let dp = st_district_pattern(pl, dc.point, dc.id);
+        // (both sites' patterns in one loop: one copy of `st_district_pattern`)
+        var dps: array<vec3<u32>, 2>;
+        for (var k = 0u; k < 2u; k++) {
+            dps[k] = st_district_pattern(pl, select(dc.point2, dc.point, k == 0u), select(dc.id2, dc.id, k == 0u));
+        }
+        let dp = dps[0];
         pattern = dp.x;
         let zd = dp.y;
         let shr = st_shared_industry(pl);
         let net1 = select(pattern, SP_GRID, shr && pattern == SP_INDUSTRIAL);
         if (pl.level >= 2u) {
-            let pt2 = st_district_pattern(pl, dc.point2, dc.id2).x;
+            let pt2 = dps[1].x;
             let net2 = select(pt2, SP_GRID, shr && pt2 == SP_INDUSTRIAL);
             if (net2 != net1 || (pattern == SP_INDUSTRIAL && !shr)) {
                 art = worley2_edge_dist(dc, qd);
-            }
-            if (pattern == SP_INDUSTRIAL && pt2 != SP_INDUSTRIAL) {
-                buf = worley2_edge_dist(dc, qd);
-            }
-            if (shr && pattern == SP_GRID && pt2 == SP_INDUSTRIAL) {
-                nbind = worley2_edge_dist(dc, qd);
             }
         }
         if (dp.z != 0u) {
@@ -716,7 +768,7 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
             did = mix64(pl.seed ^ 0x1A70lu ^ u64(net1));
         }
         if (pattern == SP_INDUSTRIAL && shr) {
-            mg = select(2li, 3li, u01k(dc.id, 14lu) < 0.5);
+            mg = st_estate_m(pl);
         }
         let survey = pl.arch == 7u;
         if (survey) {
@@ -742,9 +794,6 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
             b = (70.0 + 60.0 * u2) * bf;
             asp = select(1.0 + 0.6 * u01k(did, 7lu), 2.2, survey);
             sw = select(4.5 + 2.5 * u01k(did, 8lu), 7.0, z == SZ_CBD);
-        } else if (pattern == SP_RADIAL) {
-            b = 80.0 + 40.0 * u2;
-            sw = 5.0;
         } else if (pattern == SP_CURVI) {
             b = (80.0 + 40.0 * u2) * bf;
             asp = 1.8 + 0.6 * u01k(did, 7lu);
@@ -815,8 +864,6 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
     o.warp = warp;
     o.w2cell = w2cell;
     o.mg = mg;
-    o.buf = buf;
-    o.nbind = nbind;
     return o;
 }
 
@@ -849,9 +896,9 @@ fn st_cell(sd: u64, axis: i64, x: f32, bb: f32, jit: f32, m: i64) -> StCell {
     return o;
 }
 
-/// The lot density at offset `dq` from `q` (`dens_at` of `place_eval`).
-fn st_dens_at(pl: StPl, q: vec2<f32>, dq: vec2<f32>, n: f32, dmul: f32) -> f32 {
-    return st_density(pl, st_rel0(pl, q + dq) / (1.0 + n)) * dmul;
+/// The lot density at `qq` (footprint noise `n`; `dens_q` of `place_eval`).
+fn st_dens_n(pl: StPl, qq: vec2<f32>, n: f32, dmul: f32) -> f32 {
+    return st_density(pl, st_rel0(pl, qq) / (1.0 + n)) * dmul;
 }
 
 /// `town::place_eval`.
@@ -866,6 +913,96 @@ fn st_big_grid_warp(qr: vec2<f32>, seed: u64) -> vec2<f32> {
     return qr + b + st;
 }
 
+/// `town::place_eval`'s `centre`: the lattice position of the centre of cells (ix, iy) of `m`
+/// lines.
+fn st_pe_centre(sd: u64, ix: i64, iy: i64, m: i64, bx: f32, by: f32, jit: f32) -> vec2<f32> {
+    return vec2<f32>(0.5 * (st_line(sd, 0li, ix, bx, jit) + st_line(sd, 0li, ix + m, bx, jit)), 0.5 * (st_line(sd, 1li, iy, by, jit) + st_line(sd, 1li, iy + m, by, jit)));
+}
+
+/// `town::lattice_points`: the place frame positions of a group's centre `cg` and a block's
+/// centre `cb`, and the steps of a metre along the lattice's axes at `cb`.
+struct StFrame {
+    qg: vec2<f32>,
+    qb: vec2<f32>,
+    ax: vec2<f32>,
+    ay: vec2<f32>,
+}
+
+fn st_lattice_points(pl: StPl, cg: vec2<f32>, cb: vec2<f32>, theta: f32, warp: f32, did: u64, big: bool) -> StFrame {
+    var qs: array<vec2<f32>, 4>;
+    for (var k = 0u; k < 4u; k++) {
+        var x = cb;
+        if (k == 0u) {
+            x = cg;
+        } else if (k == 2u) {
+            x = cb + vec2<f32>(8.0, 0.0);
+        } else if (k == 3u) {
+            x = cb + vec2<f32>(0.0, 8.0);
+        }
+        qs[k] = st_lattice_q(pl, x, theta, warp, did, big);
+    }
+    var f: StFrame;
+    f.qg = qs[0];
+    f.qb = qs[1];
+    f.ax = (qs[2] - qs[1]) / 8.0;
+    f.ay = (qs[3] - qs[1]) / 8.0;
+    return f;
+}
+
+/// `town::ring_signed`.
+fn st_ring_signed(pl: StPl, q: vec2<f32>) -> f32 {
+    let r = st_core_ring(pl, q);
+    if (pl.level >= 3u && r.y > 0.0) {
+        return r.x - r.y;
+    }
+    return 1e9;
+}
+
+/// `BDist::pick`.
+fn st_bd_pick(pl: StPl, b0: StBDist, bc: vec2<f32>, la: u64, lb: u64, lat: u64, sa: vec3<u32>, sb: vec3<u32>, ida: u64, idb: u64) -> StBDist {
+    var bd = b0;
+    bd.own_a = true;
+    let near_a = st_bd_side(pl, bd, bc) >= 0.0;
+    bd.own_a = select(la == lat, near_a, la == lat && lb == lat);
+    bd.ok = la == lat || lb == lat;
+    bd.mixed = la != lb;
+    let sp = select(sb, sa, bd.own_a);
+    let so = select(sa, sb, bd.own_a);
+    bd.pattern = sp.x;
+    bd.id = select(idb, ida, bd.own_a);
+    bd.buf = sp.x == SP_INDUSTRIAL && so.x != SP_INDUSTRIAL;
+    bd.near_ind = sp.x != SP_INDUSTRIAL && so.x == SP_INDUSTRIAL && !bd.mixed;
+    bd.zone = select(sp.y, SZ_OUTER, sp.z != 0u);
+    return bd;
+}
+
+/// `town::place_eval`'s `lot_green`: is a lot (rectangle u0 v0 u1 v1 of block coordinates) a
+/// green verge?
+fn st_lot_green(pl: StPl, bd: StBDist, r: vec4<f32>, qbc: vec2<f32>, lax: vec2<f32>, lay: vec2<f32>, bw: f32, bdp: f32, slack: f32, art_hw: f32, fw: f32) -> bool {
+    if (!bd.ok) {
+        return true;
+    }
+    let c = qbc + lax * (0.5 * (r.x + r.z) - 0.5 * bw) + lay * (0.5 * (r.y + r.w) - 0.5 * bdp);
+    let h = vec2<f32>(0.5 * (r.z - r.x), 0.5 * (r.w - r.y));
+    if (bd.mixed || bd.buf) {
+        let cl = st_rect_clear(pl, bd, c, h, lax, lay, 1.91 * slack);
+        if ((bd.mixed && cl < art_hw + 2.0 * fw + 1.5) || (bd.buf && cl < 28.0)) {
+            return true;
+        }
+    }
+    let band = art_hw + 2.0 + 2.0 * fw + 1.0 + slack * length(h);
+    var lo = 3.0e38;
+    var hi = -3.0e38;
+    for (var k = 0u; k < 4u; k++) {
+        let sx = select(1.0, -1.0, k % 2u == 0u);
+        let sy = select(1.0, -1.0, k < 2u);
+        let r = st_ring_signed(pl, c + lax * (sx * h.x) + lay * (sy * h.y));
+        lo = min(lo, r);
+        hi = max(hi, r);
+    }
+    return lo < band && hi > -band;
+}
+
 fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     var o = st_ev_none();
     let fw = e.fw;
@@ -873,22 +1010,37 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     let dens_here = st_density(pl, rel_here) * d.dmul;
     let fm = pl.form;
     let did = d.did;
-    let z = d.zone;
-    let pattern = d.pattern;
+    let lay = d.pattern;
     let theta = d.theta;
     let art = d.art;
     let dmul = d.dmul;
     let b = d.b;
     let asp = d.asp;
-    let oldk = select(0.0, st_old_core(pl, q), pattern == SP_GRID);
-    let oldg = pattern == SP_GRID && st_old_near(pl, q);
-    let sw = d.sw * (1.0 - 0.4 * oldk);
     let jit = d.jit;
     let warp = d.warp;
     let w2cell = d.w2cell;
-    o.zone = z;
-    o.pattern = pattern;
-    // ---- the block
+    let city = fm == SF_CITY;
+    let shr_i = city && st_shared_industry(pl);
+    let grid_net = lay == SP_GRID || (lay == SP_INDUSTRIAL && shr_i);
+    let lat = st_lattice_of(lay, did, shr_i);
+    let oldk = select(0.0, st_old_core(pl, q), grid_net);
+    // ---- the block and its district, decided once per block at its centre (`town::place_eval`)
+    var bd: StBDist;
+    bd.a = vec2<f32>(0.0);
+    bd.b = vec2<f32>(1.0, 0.0);
+    bd.own_a = true;
+    bd.ok = true;
+    bd.mixed = false;
+    bd.buf = false;
+    bd.a_ind = false;
+    bd.near_ind = false;
+    bd.zone = d.zone;
+    bd.pattern = lay;
+    bd.id = did;
+    var qbc = q;
+    var lax = vec2<f32>(1.0, 0.0);
+    var lay_ax = vec2<f32>(0.0, 1.0);
+    var slack = 0.0;
     var blk: StBlk;
     blk.id = did;
     blk.u = 0.0;
@@ -896,21 +1048,33 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     blk.bw = 0.0;
     blk.bd = 0.0;
     blk.ds = 1e9;
-    blk.sw = sw;
+    blk.sw = d.sw;
     blk.along = 0.0;
     blk.sid = 0lu;
     blk.major = false;
     blk.mj = 0u;
     blk.seg = 0lu;
     blk.smid = vec2<f32>(0.0);
-    let gridlike = pattern == SP_GRID || pattern == SP_CURVI || pattern == SP_SUPER || pattern == SP_INFORMAL || pattern == SP_INDUSTRIAL;
+    let gridlike = lay == SP_GRID || lay == SP_CURVI || lay == SP_SUPER || lay == SP_INFORMAL || lay == SP_INDUSTRIAL;
+    let big = (grid_net || d.mg > 0li) && pl.level >= 3u;
+    let bx = b;
+    let by = b * asp;
+    let sd = did ^ 0x5EE7lu;
+    let ms = select(1li, st_estate_m(pl), grid_net && shr_i);
+    var m = ms;
+    var qr = q;
+    var cx: StCell;
+    var cy: StCell;
+    var cx1: StCell;
+    var cy1: StCell;
+    var qbase = q;
     if (gridlike) {
-        var qr = st_rot2(q, theta);
+        qr = st_rot2(q, theta);
         if (warp > 0.0) {
             let l = 230.0 * warp / 42.0;
             qr += vec2<f32>(sin(qr.y / l + 6.0 * u01k(did, 9lu)), sin(qr.x / (1.13 * l) + 6.0 * u01k(did, 10lu))) * warp;
         }
-        if ((pattern == SP_GRID || d.mg > 0li) && pl.level >= 3u) {
+        if (big) {
             qr = st_big_grid_warp(qr, pl.seed);
         }
         if (oldk > 0.0) {
@@ -920,18 +1084,135 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                 sin(qr.x / 190.0 + 6.0 * u01k(s, 3lu)) + 0.4 * sin(qr.x / 67.0 + 6.0 * u01k(s, 4lu)),
             ) * (16.0 * oldk);
         }
-        let bx = b;
-        let by = b * asp;
-        let sd = did ^ 0x5EE7lu;
-        let m = max(d.mg, 1li);
-        let cx = st_cell(sd, 0li, qr.x, bx, jit, m);
-        let cy = st_cell(sd, 1li, qr.y, by, jit, m);
+        slack = 0.02 + select(0.0, 0.1, oldk > 0.0);
+        cx = st_cell(sd, 0li, qr.x, bx, jit, ms);
+        cy = st_cell(sd, 1li, qr.y, by, jit, ms);
+        cx1 = st_cell(sd, 0li, qr.x, bx, jit, 1li);
+        cy1 = st_cell(sd, 1li, qr.y, by, jit, 1li);
+        let fr = st_lattice_points(pl, st_pe_centre(sd, cx.i, cy.i, ms, bx, by, jit), st_pe_centre(sd, cx1.i, cy1.i, 1li, bx, by, jit), theta, warp, did, big);
+        qbc = fr.qg;
+        qbase = fr.qb;
+        lax = fr.ax;
+        lay_ax = fr.ay;
+    } else if (lay == SP_LINEAR) {
+        let sdl = pl.seed ^ 0x11Elu;
+        let cl = st_cell(sdl, 0li, q.x, b, jit, 1li);
+        let side = select(1li, -1li, q.y < 0.0);
+        blk.ds = abs(q.y);
+        blk.along = q.x;
+        blk.sid = hash1(sdl, 1li);
+        blk.major = true;
+        blk.id = hash3(sdl, cl.i, side, 3li);
+        blk.u = cl.off;
+        blk.bw = cl.size;
+        blk.v = abs(q.y) - d.sw;
+        blk.bd = 40.0 + 18.0 * u01k(blk.id, 2lu);
+        qbc = vec2<f32>(st_line(sdl, 0li, cl.i, b, jit) + 0.5 * blk.bw, 0.0);
+        lay_ax = vec2<f32>(0.0, f32(side));
+    }
+    // ---- the cellular layouts (one W2 for all of them)
+    var wc: Cell2;
+    wc.id = 0lu;
+    wc.id2 = 0lu;
+    wc.point = vec2<f32>(0.0);
+    wc.point2 = vec2<f32>(0.0);
+    wc.f1 = 0.0;
+    wc.f2 = 0.0;
+    var qw = q;
+    if (w2cell > 0.0) {
+        let wa = 0.22 * w2cell;
+        let wl1 = 1.7 * w2cell;
+        let wl2 = 1.9 * w2cell;
+        let ws1 = 6.0 * u01k(did, 11lu);
+        let ws2 = 6.0 * u01k(did, 12lu);
+        if (lay == SP_ORGANIC) {
+            qw = q + vec2<f32>(sin(q.y / wl1 + ws1), sin(q.x / wl2 + ws2)) * wa;
+        }
+        wc = worley2(did ^ 0x0A6lu, qw, w2cell, 0.9);
+        if (lay == SP_ORGANIC) {
+            let ed = worley2_edge_dist(wc, qw);
+            let dv = st_normalize2(wc.point2 - wc.point);
+            blk.ds = ed;
+            blk.along = dot(qw, vec2<f32>(-dv.y, dv.x));
+            blk.sid = wc.id ^ wc.id2;
+            blk.id = wc.id;
+            let ang = u01k(wc.id, 1lu) * (0.5 * ST_PI);
+            let rel = st_rot2(qw - wc.point, ang);
+            let half = 0.45 * w2cell;
+            blk.bw = 2.0 * (half - d.sw);
+            blk.bd = blk.bw;
+            blk.u = clamp(rel.x + half - d.sw, 0.0, blk.bw);
+            blk.v = clamp(rel.y + half - d.sw, 0.0, blk.bd);
+            qbc = wc.point;
+            lax = st_rot2(vec2<f32>(1.0, 0.0), -ang);
+            lay_ax = st_rot2(vec2<f32>(0.0, 1.0), -ang);
+            slack = 0.5;
+        } else if (lay == SP_DISPERSED || lay == SP_KRAAL) {
+            qbc = select(wc.point, vec2<f32>(0.0), lay == SP_KRAAL && pl.level == 0u);
+        }
+    }
+    // the block's district: the sites nearest to its centre (to its group's)
+    var merged = false;
+    if (city) {
+        let dc = worley2(pl.seed ^ 0xD15lu, st_dist_q(pl, qbc), st_dcell(pl), 0.85);
+        var sab: array<vec3<u32>, 2>;
+        for (var k = 0u; k < 2u; k++) {
+            sab[k] = st_district_pattern(pl, select(dc.point2, dc.point, k == 0u), select(dc.id2, dc.id, k == 0u));
+        }
+        let sa = sab[0];
+        let sb = sab[1];
+        let la = st_lattice_of(sa.x, dc.id, shr_i);
+        let lb = st_lattice_of(sb.x, dc.id2, shr_i);
+        var b0 = bd;
+        b0.a = dc.point;
+        b0.b = dc.point2;
+        b0.a_ind = sa.x == SP_INDUSTRIAL;
+        merged = ms > 1li && b0.a_ind && la == lat;
+        if (!merged) {
+            m = 1li;
+            if (gridlike) {
+                cx = cx1;
+                cy = cy1;
+                qbc = qbase;
+            }
+        }
+        bd = st_bd_pick(pl, b0, qbc, la, lb, lat, sa, sb, dc.id, dc.id2);
+        if (!bd.ok) {
+            bd.pattern = lay;
+            bd.zone = d.zone;
+        }
+    } else {
+        m = 1li;
+    }
+    // the footprint noise and relative distance at the block's centre, the block's zone
+    let nb = st_foot_noise(pl, qbc, e.gsd);
+    let rel_b = st_rel0(pl, qbc) / (1.0 + nb);
+    var z = bd.zone;
+    if (!city) {
+        z = select(SZ_SUBURB, SZ_INNER, rel_b < 0.35);
+    } else if (bd.pattern != SP_INDUSTRIAL && bd.ok) {
+        z = min(max(bd.zone, min(st_zone_of(pl, rel_b), SZ_INNER)), SZ_PERI);
+    }
+    let pattern = bd.pattern;
+    let oldb = select(0.0, st_old_core(pl, qbc), grid_net && pattern == SP_GRID);
+    if (gridlike) {
+        var sw = d.sw;
+        if (grid_net) {
+            let ug = 4.5 + 2.5 * u01k(did, 8lu);
+            sw = ug;
+            if (merged) {
+                sw = 1.3 * ug;
+            } else if (pattern == SP_GRID && z == SZ_CBD) {
+                sw = 7.0;
+            }
+            sw *= 1.0 - 0.4 * oldb;
+        }
         let near_x = cx.i + select(0li, m, cx.off > cx.size - cx.off);
         let near_y = cy.i + select(0li, m, cy.off > cy.size - cy.off);
         let dx = min(cx.off, cx.size - cx.off);
         let dy = min(cy.off, cy.size - cy.off);
-        let main_x = st_rem(near_x, 4li) == 0li && pattern == SP_GRID;
-        let main_y = st_rem(near_y, 4li) == 0li && pattern == SP_GRID;
+        let main_x = st_rem(near_x, 4li) == 0li && grid_net;
+        let main_y = st_rem(near_y, 4li) == 0li && grid_net;
         let swx = select(sw, sw * 1.5, main_x);
         let swy = select(sw, sw * 1.5, main_y);
         var mid = vec2<f32>(0.0);
@@ -954,85 +1235,26 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         }
         blk.smid = st_rot2(mid, -theta);
         blk.id = hash3(sd, cx.i, cy.i, 7li);
-        if (pattern == SP_GRID) {
+        if (grid_net) {
             blk.mj = select(0u, 1u, st_rem(cx.i, 4li) == 0li) | select(0u, 2u, st_rem(cx.i + m, 4li) == 0li) | select(0u, 4u, st_rem(cy.i, 4li) == 0li) | select(0u, 8u, st_rem(cy.i + m, 4li) == 0li);
         }
         blk.u = cx.off - sw;
         blk.v = cy.off - sw;
         blk.bw = cx.size - 2.0 * sw;
         blk.bd = cy.size - 2.0 * sw;
-    } else if (pattern == SP_RADIAL) {
-        let r = length(q);
-        let phi = atan2(q.y, q.x) + ST_PI;
-        let dr = b;
-        let i = floor(r / dr);
-        let v = r - i * dr;
-        let nsp = exp2(ceil(log2(max(ST_TAU * (i + 0.5) * dr / (1.6 * dr), 4.0))));
-        let dphi = ST_TAU / nsp;
-        let j = floor(phi / dphi);
-        let arc = (phi - j * dphi) * r;
-        let bwr = dphi * r;
-        let d_ring = min(v, dr - v);
-        let d_rad = min(arc, bwr - arc);
-        if (d_ring < d_rad) {
-            blk.ds = d_ring;
-            blk.along = phi * r;
-            blk.sid = hash2(pl.seed ^ 0x2Alu, i64(i) + select(0li, 1li, v > 0.5 * dr), 0li);
-            blk.major = st_rem(i64(i), 3li) == 0li;
-        } else {
-            blk.ds = d_rad;
-            blk.along = r;
-            blk.sid = hash2(pl.seed ^ 0x2Blu, i64(i), i64(j));
-            blk.major = false;
-        }
-        blk.id = hash2(pl.seed ^ 0x2Clu, i64(i), i64(j));
-        blk.u = arc - sw;
-        blk.v = v - sw;
-        blk.bw = bwr - 2.0 * sw;
-        blk.bd = dr - 2.0 * sw;
-    } else if (pattern == SP_LINEAR) {
-        let sd = pl.seed ^ 0x11Elu;
-        let cl = st_cell(sd, 0li, q.x, b, jit, 1li);
-        let side = select(1li, -1li, q.y < 0.0);
-        blk.ds = abs(q.y);
-        blk.along = q.x;
-        blk.sid = hash1(sd, 1li);
-        blk.major = true;
-        blk.id = hash3(sd, cl.i, side, 3li);
-        blk.u = cl.off;
-        blk.bw = cl.size;
-        blk.v = abs(q.y) - sw;
-        blk.bd = 40.0 + 18.0 * u01k(blk.id, 2lu);
     }
-    // ---- the cellular layouts (one W2 for all of them)
-    var wc: Cell2;
-    wc.id = 0lu;
-    wc.id2 = 0lu;
-    wc.point = vec2<f32>(0.0);
-    wc.point2 = vec2<f32>(0.0);
-    wc.f1 = 0.0;
-    wc.f2 = 0.0;
-    var qw = q;
-    if (w2cell > 0.0) {
-        if (pattern == SP_ORGANIC) {
-            qw = q + vec2<f32>(sin(q.y / (1.7 * w2cell) + 6.0 * u01k(did, 11lu)), sin(q.x / (1.9 * w2cell) + 6.0 * u01k(did, 12lu))) * (0.22 * w2cell);
-        }
-        wc = worley2(did ^ 0x0A6lu, qw, w2cell, 0.9);
-        if (pattern == SP_ORGANIC) {
-            let ed = worley2_edge_dist(wc, qw);
-            let dv = st_normalize2(wc.point2 - wc.point);
-            blk.ds = ed;
-            blk.along = dot(qw, vec2<f32>(-dv.y, dv.x));
-            blk.sid = wc.id ^ wc.id2;
-            blk.id = wc.id;
-            let rel = st_rot2(qw - wc.point, u01k(wc.id, 1lu) * (0.5 * ST_PI));
-            let half = 0.45 * w2cell;
-            blk.bw = 2.0 * (half - sw);
-            blk.bd = blk.bw;
-            blk.u = clamp(rel.x + half - sw, 0.0, blk.bw);
-            blk.v = clamp(rel.y + half - sw, 0.0, blk.bd);
-        }
+    o.zone = z;
+    o.pattern = pattern;
+    var art_hw = 3.5;
+    if (pl.level == 2u) {
+        art_hw = 5.0;
+    } else if (pl.level == 3u) {
+        art_hw = 6.0;
+    } else if (pl.level >= 4u) {
+        art_hw = 7.5;
     }
+    var lot_r = vec4<f32>(0.0);
+    var has_lot = false;
     o.ds = blk.ds;
     o.sw = blk.sw;
     o.along = blk.along;
@@ -1045,15 +1267,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         let dsg = st_density(pl, st_rel0(pl, q + blk.smid) / (1.0 + e.n)) * dmul;
         street_ok = dsg > 0.42 + 0.1 * (u01k(blk.seg, 31lu) - 0.5) - select(0.0, 0.04, blk.major);
     }
-    var art_hw = 3.5;
-    if (pl.level == 2u) {
-        art_hw = 5.0;
-    } else if (pl.level == 3u) {
-        art_hw = 6.0;
-    } else if (pl.level >= 4u) {
-        art_hw = 7.5;
-    }
-    let has_streets = !(pattern == SP_DISPERSED || pattern == SP_KRAAL);
+    let has_streets = !(lay == SP_DISPERSED || lay == SP_KRAAL);
     if (art < art_hw + 2.0 * fw && dens_here > 0.35) {
         let c = band_cov(art, art_hw, fw);
         if (c > 0.0) {
@@ -1081,14 +1295,14 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     }
     o.lamp_sp = 0.0;
     if (has_streets) {
-        if (pattern == SP_LINEAR || fm != SF_CITY) {
+        if (lay == SP_LINEAR || !city) {
             o.lamp_sp = 34.0;
         } else {
             o.lamp_sp = 18.0 + 6.0 * min(f32(z), 3.0);
         }
     }
     var walk = 0.0;
-    if (has_streets && street_ok && pattern != SP_INFORMAL && pattern != SP_LINEAR) {
+    if (has_streets && street_ok && lay != SP_INFORMAL && lay != SP_LINEAR) {
         walk = band_cov(blk.ds, blk.sw + 0.2 * blk.sw + 0.6, fw);
     }
     // ---- block content
@@ -1097,7 +1311,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     var h = 0.0;
     var cls = LC_URBAN;
     var lot_id = blk.id;
-    let inside = blk.u >= 0.0 && blk.v >= 0.0 && blk.u < blk.bw && (blk.v < blk.bd || pattern == SP_LINEAR);
+    let inside = blk.u >= 0.0 && blk.v >= 0.0 && blk.u < blk.bw && (blk.v < blk.bd || lay == SP_LINEAR);
     let ublk = vec2<f32>(blk.u, blk.v);
     var roof = 0.0;
     var rim = 0.0;
@@ -1126,7 +1340,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     }
     // special parcels: whole blocks
     var special = 0u;
-    if (inside && fm == SF_CITY && pattern != SP_INFORMAL) {
+    if (inside && city && lay != SP_INFORMAL) {
         let us = u01k(blk.id, 20lu);
         var p_park = 0.05;
         var p_plaza = 0.06;
@@ -1184,18 +1398,20 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         } else if (us < p_site) {
             special = 7u;
         }
-        let bc = vec2<f32>(0.5 * blk.bw - blk.u, 0.5 * blk.bd - blk.v);
-        let dbc = st_dens_at(pl, q, st_rot2(bc, -theta), e.n, dmul);
-        if (dbc < 0.3) {
+        if (st_dens_n(pl, qbc, nb, dmul) < 0.3) {
             special = 0u;
+        }
+        if (special != 0u) {
+            lot_r = vec4<f32>(0.0, 0.0, blk.bw, blk.bd);
+            has_lot = true;
         }
     }
     // (the old quarter's small blocks, `town::place_eval`)
     var os: StOldSub;
     var old_in = false;
-    if (oldg && inside && special == 0u) {
+    if (oldb > 0.0 && inside && special == 0u) {
         os = st_old_sub(blk);
-        old_in = u01k(os.id, 77lu) < st_old_core(pl, q + st_rot2(os.c - ublk, -theta));
+        old_in = u01k(blk.id, 77lu) < oldb;
     }
     if (inside && special != 0u) {
         cov_lot = 1.0;
@@ -1315,7 +1531,13 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             let ar = a - (si + 0.5) * seg;
             let sh = hash2(rh, i64(si), 1li);
             lot_id = sh;
-            let dbc = st_dens_at(pl, q, vec2<f32>(0.0), e.n, dmul);
+            let dbc = st_dens_n(pl, qbc, nb, dmul);
+            let s0 = max(si * seg, 0.0);
+            let s1 = min((si + 1.0) * seg, select(blk.bd, blk.bw, long_x));
+            let c0 = ri * pitch;
+            let c1 = (ri + 1.0) * pitch;
+            lot_r = select(vec4<f32>(c0, s0, c1, s1), vec4<f32>(s0, c0, s1, c1), long_x);
+            has_lot = true;
             cov_lot = 1.0;
             col = mixc(yard, st_asphalt() * 1.15, 0.3 * u01k(sh, 4lu));
             cls = LC_RESIDENTIAL;
@@ -1353,8 +1575,16 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                 tree_h = 10.0;
             }
         } else if (pattern == SP_INFORMAL) {
-            let dbc = st_dens_at(pl, q, wc.point - q, e.n, dmul);
-            if (u01k(wc.id, 7lu) < pow(dbc, 0.8) * 1.15) {
+            let dbc = st_dens_n(pl, wc.point, nb, dmul);
+            let r0 = st_rot2(wc.point, theta);
+            let lw = 230.0 * warp / 42.0;
+            let rs = r0 + vec2<f32>(sin(r0.y / lw + 6.0 * u01k(did, 9lu)), sin(r0.x / (1.13 * lw) + 6.0 * u01k(did, 10lu))) * warp - qr;
+            let us = blk.u + rs.x;
+            let vs = blk.v + rs.y;
+            let whole = us > 4.5 && vs > 4.5 && us < blk.bw - 4.5 && vs < blk.bd - 4.5;
+            if (whole && u01k(wc.id, 7lu) < pow(dbc, 0.8) * 1.15) {
+                lot_r = vec4<f32>(us - 4.5, vs - 4.5, us + 4.5, vs + 4.5);
+                has_lot = true;
                 lot_id = wc.id;
                 cov_lot = 1.0;
                 col = srgb(128.0, 110.0, 90.0);
@@ -1379,8 +1609,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                 }
             }
         } else if (pattern == SP_LINEAR) {
-            let lc = vec2<f32>(0.5 * blk.bw - blk.u, -q.y);
-            let dl = st_dens_at(pl, q, lc, e.n, dmul);
+            let dl = st_dens_n(pl, qbc, nb, dmul);
             let farm = u01k(blk.id, 3lu) < pow(dl, 0.6) * 1.1;
             if (farm && blk.v < blk.bd) {
                 cov_lot = 1.0;
@@ -1462,6 +1691,8 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             let uw = 6.0 + 5.0 * u01k(sh, 12lu);
             let hu = hash3(sh ^ 0x40Flu, os.side, i64(floor(os.along / uw)), 1li);
             lot_id = hu;
+            lot_r = vec4<f32>(os.c - os.h, os.c + os.h);
+            has_lot = true;
             cov_lot = 1.0;
             col = mixc(mixc(yard, st_paving(), 0.3), srgb(70.0, 96.0, 52.0), 0.35 + 0.3 * clamp(e.moist, 0.0, 1.0));
             cls = select(LC_RESIDENTIAL, LC_COMMERCIAL, z == SZ_CBD);
@@ -1515,11 +1746,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             } else if (z == SZ_INNER) {
                 depth = 2u;
             }
-            var lind = false;
-            if (pattern == SP_GRID && d.nbind < 260.0) {
-                let qc = q + st_rot2(vec2<f32>(0.5 * blk.bw - blk.u, 0.5 * blk.bd - blk.v), -theta);
-                lind = u01k(blk.id, 79lu) < 0.6 * (1.0 - smoothstep1(30.0, 230.0, st_nbind_at(pl, qc)));
-            }
+            let lind = pattern == SP_GRID && bd.near_ind && u01k(blk.id, 79lu) < 0.6 * (1.0 - smoothstep1(30.0, 230.0, abs(st_bd_side(pl, bd, qbc))));
             let ind = pattern == SP_INDUSTRIAL || lind;
             if (ind) {
                 depth = 3u;
@@ -1537,8 +1764,11 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             lot_id = lh;
             let lr = lot.r;
             let lc = vec2<f32>(0.5 * (lr.x + lr.z), 0.5 * (lr.y + lr.w));
-            let lot_dq = st_rot2(lc - ublk, -theta);
-            let dl = st_dens_at(pl, q, lot_dq, e.n, dmul);
+            let q_lc = qbc + lax * (lc.x - 0.5 * blk.bw) + lay_ax * (lc.y - 0.5 * blk.bd);
+            let rel_lc = st_rel0(pl, q_lc) / (1.0 + nb);
+            let dl = st_density(pl, rel_lc) * dmul;
+            lot_r = lr;
+            has_lot = true;
             var edge = 1.0;
             var occ = mix(pow(dl, 0.7) * 1.05, pow(dl, 0.35) * 1.1, smoothstep1(0.35, 0.5, dl));
             if (fm == SF_CITY) {
@@ -1564,14 +1794,14 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     t = STY_ROW;
                 }
             } else if (z == SZ_CBD) {
-                t = select(STY_MIDRISE, STY_TOWER, pl.level >= 3u && ut < 0.75 * (1.0 - 0.5 * smoothstep1(0.0, 0.14, rel_here)));
-            } else if (z == SZ_INNER && pl.level >= 3u && u01k(lh, 21lu) < 0.12 * (1.0 - smoothstep1(0.1, 0.2, rel_here))) {
+                t = select(STY_MIDRISE, STY_TOWER, pl.level >= 3u && ut < 0.75 * (1.0 - 0.5 * smoothstep1(0.0, 0.14, rel_lc)));
+            } else if (z == SZ_INNER && pl.level >= 3u && u01k(lh, 21lu) < 0.12 * (1.0 - smoothstep1(0.1, 0.2, rel_lc))) {
                 t = STY_TOWER;
             } else if (z == SZ_INNER) {
-                let big = pl.level >= 3u;
-                if ((euro && pattern != SP_RADIAL && ut < select(0.25, 0.8, big)) || pattern == SP_ORGANIC) {
+                let big3 = pl.level >= 3u;
+                if ((euro && ut < select(0.25, 0.8, big3)) || pattern == SP_ORGANIC) {
                     t = STY_PERIM;
-                } else if (ut < select(0.75, 0.6, big)) {
+                } else if (ut < select(0.75, 0.6, big3)) {
                     t = STY_MIDRISE;
                 } else {
                     t = STY_ROW;
@@ -1632,7 +1862,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     let ps = smoothstep1(1e5, 1.5e7, pl.pop);
                     let u4 = u01k(lh, 4lu);
                     half = vec2<f32>(s2);
-                    hb = (40.0 + 360.0 * ps * (u4 * u4 * u4) + 40.0 * u01k(lh, 5lu)) * (1.0 - 0.6 * smoothstep1(0.0, 0.2, rel_here));
+                    hb = (40.0 + 360.0 * ps * (u4 * u4 * u4) + 40.0 * u01k(lh, 5lu)) * (1.0 - 0.6 * smoothstep1(0.0, 0.2, rel_lc));
                 } else if (t == STY_MIDRISE && town_box) {
                     let sb = 1.5 + 2.5 * u01k(lh, 1lu);
                     let u5 = u01k(lh, 5lu);
@@ -1877,7 +2107,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         let one = pattern == SP_KRAAL && pl.level == 0u;
         var dl = 1.0;
         if (!one) {
-            dl = st_dens_at(pl, q, pc - q, e.n, dmul);
+            dl = st_dens_n(pl, pc, nb, dmul);
         }
         let unit_c = select(pc, vec2<f32>(0.0), one);
         let ok = one || u01k(wc.id, 3lu) < dl * 0.9;
@@ -2035,33 +2265,30 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             rim *= el;
         }
     }
-    // ---- the green buffer along an estate's edge
-    if (pattern == SP_INDUSTRIAL && d.buf < 30.0 && inside) {
-        let k = smoothstep1(30.0, 22.0, d.buf);
-        cov_lot = max(cov_lot, k);
-        let g = mixc(yard, srgb(84.0, 112.0, 56.0), 0.5) * (0.95 + 0.1 * e.detail);
-        col = mixc(col, g, k);
-        h *= 1.0 - k;
-        roof *= 1.0 - k;
-        rim *= 1.0 - k;
-        if (k > 0.5) {
-            cls = LC_PARK;
-        }
+    // ---- the green verge (`town::place_eval`)
+    if (inside && cov_lot > 0.0 && has_lot && st_lot_green(pl, bd, lot_r, qbc, lax, lay_ax, blk.bw, blk.bd, slack, art_hw, fw)) {
+        let wet = smoothstep1(0.15, 0.5, e.moist);
+        cov_lot = 1.0;
+        col = mixc(yard, srgb(84.0, 112.0, 56.0), 0.5 * wet) * (0.95 + 0.1 * e.detail);
+        h = 0.0;
+        roof = 0.0;
+        rim = 0.0;
+        em = vec3<f32>(0.0);
+        cls = LC_PARK;
         let tcl = floor(ublk / 10.0);
         let th = hash2(blk.id ^ 0xB0Flu, i64(tcl.x), i64(tcl.y));
         let tp = (tcl + 0.5 + 0.5 * (vec2<f32>(u01k(th, 1lu), u01k(th, 2lu)) - 0.5)) * 10.0;
-        if (u01k(th, 3lu) < 0.6 * k) {
-            let tc = st_aa(3.0 + 1.5 * u01k(th, 4lu) - length(ublk - tp), fw);
-            if (tc > tree) {
-                tree = tc;
-                tree_h = 8.0 + 6.0 * u01k(th, 5lu);
-            }
+        tree = 0.0;
+        let tk = select(0.6, 0.25, bd.buf && !bd.mixed);
+        if (u01k(th, 3lu) < tk * (0.2 + 0.8 * wet)) {
+            tree = st_aa(3.0 + 1.5 * u01k(th, 4lu) - length(ublk - tp), fw);
+            tree_h = 8.0 + 6.0 * u01k(th, 5lu);
         }
     }
     // ---- street trees
     let ar = pl.arch;
     let treed = (ar == 5u || ar == 6u || ar == 7u || ar == 9u || ar == 4u) && (z == SZ_INNER || z == SZ_OUTER || z == SZ_SUBURB) && u01k(blk.sid, 31lu) < 0.4;
-    if (treed && has_streets && street_ok && pattern != SP_INFORMAL && pattern != SP_LINEAR) {
+    if (treed && has_streets && street_ok && lay != SP_INFORMAL && lay != SP_LINEAR) {
         let off = blk.sw + 1.6;
         let dt = abs(blk.ds - off);
         if (dt < 4.5) {
@@ -2088,7 +2315,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         var asph = srgb(76.0, 76.0, 80.0) * (1.0 + 0.05 * e.detail);
         if (o.major) {
             asph = st_asphalt() * 0.92;
-        } else if (fm != SF_CITY || (pattern == SP_ORGANIC && pl.level < 3u) || pattern == SP_INFORMAL) {
+        } else if (!city || (lay == SP_ORGANIC && pl.level < 3u) || lay == SP_INFORMAL) {
             asph = mixc(srgb(150.0, 128.0, 100.0), st_paving() * 0.9, smoothstep1(0.35, 0.6, pl.dev));
         } else {
             asph = mixc(asph, st_paving() * 0.8, 0.6 * smoothstep1(0.3, 0.8, oldk));
@@ -2326,9 +2553,14 @@ fn st_airport_px(st: FStamp, p: vec3<f64>, ground: f32, gsd: f32, fw: f32) -> St
     o.abs = true;
     o.clear = edge;
     o.cls = LC_GRASS;
-    let stripe = f32(st_rem(i64(floor(q.x / 18.0)), 2li));
+    let mc = floor(q / 260.0);
+    let mh = hash2(seed ^ 0x30Alu, i64(mc.x), i64(mc.y));
+    let msw = 9.0 + 12.0 * u01k(mh, 1lu);
+    let mq = select(q.y, q.x, u01k(mh, 2lu) < 0.65);
+    let stripe = f32(st_rem(i64(floor(mq / msw)), 2li));
+    let mown = select(0.0, 0.02 + 0.05 * u01k(mh, 4lu), u01k(mh, 3lu) < 0.8);
     let tone = 1.0 + 0.12 * wn * band(170.0, gsd);
-    o.col = srgb(132.0, 146.0, 92.0) * (0.95 + 0.06 * stripe * band(18.0, gsd)) * tone;
+    o.col = srgb(132.0, 146.0, 92.0) * (0.97 + mown * (stripe - 0.5) * band(msw, gsd)) * (tone + 0.06 * (u01k(mh, 5lu) - 0.5) * band(260.0, gsd));
     let wgt = smoothstep1(0.0, margin, din);
     o.dh = ground + (st.h - ground) * wgt;
     let wr = select(22.5, 30.0, lay == 2u);
@@ -2965,7 +3197,7 @@ fn settlements_slot_built(s: ptr<function, Stack>) {
             let r0 = st_rel0(pl, q);
             let strips = st_in_strips(pl, q);
             if (r0 < 1.62 || strips) {
-                let n = st_foot_noise(pl, p, gsd);
+                let n = st_foot_noise(pl, q, gsd);
                 let rel = r0 / (1.0 + n);
                 var score = -1.0;
                 if (rel < 1.0) {
@@ -2987,6 +3219,7 @@ fn settlements_slot_built(s: ptr<function, Stack>) {
             sp = st_airport_px(st, p, ground, gsd, fw);
             if (sp.cov > 0.5) {
                 (*s).no_town = true;
+                (*s).culvert = true;
             }
         } else if (st.tmpl == ST_PORT) {
             sp = st_port_land_px(st, p, gsd, fw);
@@ -3083,7 +3316,7 @@ fn st_place(s: ptr<function, Stack>, pl: StPl, rel: f32, n: f32, q: vec2<f32>, s
     }
     let dev = 0.55 + 0.9 * pl.dev;
     let lamp = st_lamps(pl, ev, dens, gsd, fw, block, e_blk);
-    let win_lit = 0.1 + select(0.0, 0.25, z == SZ_CBD);
+    let win_lit = 0.1 + select(0.0, 0.25, ev.zone == SZ_CBD);
     let windows = ev.win * (0.55 * ev.rim * win_lit * band(2.6, gsd));
     let emit = (lamp * (1.0 - ev.roof) + windows + ev.em * e_blk) * dev;
     var ly = layer_paint(cov, col, cls);
