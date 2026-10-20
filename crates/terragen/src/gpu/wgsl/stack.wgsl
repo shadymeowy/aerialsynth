@@ -953,6 +953,7 @@ fn layer_canopy(s: ptr<function, Stack>) {
     let bm = biomes[(*s).bio.a];
     let n = min(bm.r0.y, MAX_CROWNS);
     var layers: array<TreeLayer, 6>;
+    var relief = 0.0;
     for (var k = 0u; k < n; k++) {
         let cr = crowns[bm.r0.x + k];
         var share = dens_c;
@@ -984,7 +985,9 @@ fn layer_canopy(s: ptr<function, Stack>) {
             select(1.0, scale, stand_ok),
             select(1.0, 0.4, cr.share == 3u),
         );
+        relief += crown_relief(cr.share, cr.shape, layers[k], gsd);
     }
+    relief = min(relief, 0.65);
     let all = (1u << n) - 1u;
     if (m.riparian > 0.0) {
         composite(s, layer_paint(0.85 * m.riparian * limit, mixc(spal(s, BP_GRASS_WET), spal(s, BP_FLOOR), 0.4), 0u));
@@ -1001,7 +1004,7 @@ fn layer_canopy(s: ptr<function, Stack>) {
         if (ly.density <= 1e-4) {
             continue;
         }
-        let fe = smoothstep1(0.55, 0.9, ly.closure) * smoothstep1(1.2 * gsd, 3.0 * gsd, ly.cell * ly.resolve);
+        let fe = smoothstep1(0.55, 0.9, ly.closure);
         if (fe > 0.0) {
             fill_w = max(fill_w, fe);
             fill_col += ly.color * ly.tone * (ly.density * fe);
@@ -1056,6 +1059,9 @@ fn layer_canopy(s: ptr<function, Stack>) {
             ly.hmode = HM_MAX;
         }
         composite(s, ly);
+    }
+    if (relief > 0.0) {
+        (*s).col *= 1.0 - relief;
     }
     if (shadows && tr.cov < 0.99) {
         (*s).lit = min((*s).lit, 1.0 - 0.9 * shadow * (1.0 - tr.cov));

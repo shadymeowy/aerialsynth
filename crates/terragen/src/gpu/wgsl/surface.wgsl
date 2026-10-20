@@ -346,6 +346,37 @@ struct TreeLayer {
     resolve: f32,
 }
 
+/// `layers::canopy::mean_cover`.
+fn mean_cover(ly: TreeLayer) -> f32 {
+    let grow = (1.0 + 0.55 * smoothstep1(0.35, 0.9, ly.closure)) * max(ly.scale, 0.0);
+    return 1.0 - exp(-ly.density * 0.739 * grow * grow);
+}
+
+/// The shading of a crown layer's relief where its crowns are their mean
+/// (`layers::canopy::crown_relief`).
+fn crown_relief(share: u32, shape: u32, ly: TreeLayer, gsd: f32) -> f32 {
+    if (ly.density <= 1e-4 || share == 3u) {
+        return 0.0;
+    }
+    let x = ly.cell * ly.resolve / gsd;
+    let cone = shape == SHAPE_CONE;
+    var mean = 1.0 - smoothstep1(1.5, 4.5, x);
+    if (share == 2u) {
+        mean = 0.85 * (1.0 - smoothstep1(1.2, 3.0, x)) + 0.15 * (1.0 - smoothstep1(2.0, 8.0, x));
+    }
+    if (mean <= 0.0) {
+        return 0.0;
+    }
+    var d = 0.3;
+    if (share == 2u) {
+        d = 0.2;
+    } else if (cone) {
+        d = 0.5;
+    }
+    let c = min(mean_cover(ly) / 0.85, 1.0);
+    return d * c * (2.0 - c) * mean;
+}
+
 /// (colour, canopy height, coverage)
 struct Trees {
     col: vec3<f32>,
@@ -373,8 +404,7 @@ fn trees(layers: array<TreeLayer, 6>, mask: u32, q: vec2<f32>, gsd: f32, fw: f32
         let expl = smoothstep1(1.2 * gsd, 3.0 * gsd, rc);
         let contrast = smoothstep1(2.5 * gsd, 6.0 * gsd, rc);
         // expected coverage when unresolved
-        let mean_r = layer.cell * 0.48;
-        let cov_mean = min(layer.density * PI * mean_r * mean_r / (layer.cell * layer.cell), 1.0);
+        let cov_mean = mean_cover(layer);
         if (expl < 1.0) {
             let w = cov_mean * (1.0 - expl);
             let l3 = layer.cell * 3.0;
@@ -461,7 +491,7 @@ fn trees(layers: array<TreeLayer, 6>, mask: u32, q: vec2<f32>, gsd: f32, fw: f32
     if (mean_w > 0.0) {
         mc = mean_col / mean_w;
     }
-    let cov = min(cov_total + mean_cov * (1.0 - cov_total), 1.0);
+    let cov = min(cov_total + mean_cov, 1.0);
     if (cov <= 0.0) {
         o.col = vec3<f32>(0.0);
         o.h = 0.0;
