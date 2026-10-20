@@ -935,8 +935,10 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32
         let k = min(i32(max(ceil(log2(25.0 / texel)), 0.0)), p.z);
         let e = sample3(gp_coarser(p, k), 2u);
         if e.w > 0.0 {
-            if has(F_NEXT) {
-                // (next: street light falls off with the height above the ground, raster.rs)
+            if WALLS && has(F_NEXT) {
+                // (next: street light falls off with the height above the ground, raster.rs; WALLS:
+                // compiled out with the walls where they are off, as on DX12, whose WARP miscompiles
+                // pixel_shade with these extra coarser-tile lookups)
                 var rel = hs - wground;
                 if ww <= 0.0 {
                     let k2 = min(i32(max(ceil(log2(40.0 / texel)), 0.0)), p.z);
@@ -968,7 +970,7 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32
         // the reflection: the sky, or the banks where they rise above the reflected ray
         let refl = normalize(dir_w - nm * 2.0 * dot(dir_w, nm));
         var env = sky(refl, up);
-        if has(F_NEXT) && ww > 0.0 && dot(refl, up) < 0.05 {
+        if WALLS && has(F_NEXT) && ww > 0.0 && dot(refl, up) < 0.05 {
             // (next: a glass wall reflects the ground below the horizon, raster.rs)
             let k = min(i32(max(ceil(log2(20.0 / texel)), 0.0)), p.z);
             let b = sample3(gp_coarser(p, k), 0u);
@@ -982,7 +984,7 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32
                 let k = min(i32(max(ceil(log2(20.0 / texel)), 0.0)), p.z);
                 let b = sample3(gp_coarser(p, k), 0u);
                 var bank = select(vec3<f32>(0.1), b.xyz, b.w > 0.0) * mul;
-                if has(F_NEXT) && has(F_LIGHTS) {
+                if WALLS && has(F_NEXT) && has(F_LIGHTS) {
                     // (next: the lights of the banks in the water, raster.rs)
                     let eb = sample3(gp_coarser(p, k), 2u);
                     if eb.w > 0.0 {
