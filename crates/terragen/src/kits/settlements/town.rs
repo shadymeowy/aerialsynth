@@ -2232,7 +2232,8 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     // ---- the green verge: grass and clumps of trees over the lots along a district edge (whole
     // lots; the green buffer along an estate's edge: estates of grey roofs to their polygon's edge
     // read as stamped on, metro)
-    if inside && lot_r.is_some_and(lot_green) {
+    // (only lots of the town: unbuilt lots beyond its edge stay fields, not groves)
+    if inside && cov_lot > 0.0 && lot_r.is_some_and(lot_green) {
         // (in dry lands a dusty verge with few trees: a green ring of trees drew the estate's
         // polygon in the desert, gallery g09)
         let wet = smoothstep(0.15, 0.5, e.moist);

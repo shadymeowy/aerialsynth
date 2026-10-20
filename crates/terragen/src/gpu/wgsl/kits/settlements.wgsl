@@ -2266,7 +2266,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         }
     }
     // ---- the green verge (`town::place_eval`)
-    if (inside && has_lot && st_lot_green(pl, bd, lot_r, qbc, lax, lay_ax, blk.bw, blk.bd, slack, art_hw, fw)) {
+    if (inside && cov_lot > 0.0 && has_lot && st_lot_green(pl, bd, lot_r, qbc, lax, lay_ax, blk.bw, blk.bd, slack, art_hw, fw)) {
         let wet = smoothstep1(0.15, 0.5, e.moist);
         cov_lot = 1.0;
         col = mixc(yard, srgb(84.0, 112.0, 56.0), 0.5 * wet) * (0.95 + 0.1 * e.detail);
