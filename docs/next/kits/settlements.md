@@ -329,7 +329,7 @@ centre). Where a block's district borders on another street lattice (an arterial
 curvilinear suburbs, informal fringes, superblocks) only lots wholly clear of the edge are built (their corners in the
 district map), the others are a green verge with clumps of trees (dusty with few trees in dry lands); an estate's lots
 within 28 m of its edge are its green buffer, whole; no lot crosses the ring boulevard; special parcels only on whole
-clear blocks; the old quarter by grid block. Light industry beside an estate reads the block's W2 (`nbind_at` is
+clear blocks; the old quarter by grid block. One copy each in the shader: the lot at the sample is tested once, after the block content (`lot_green`), and the four inverse lattice points (the group's and the block's centres, the block's axes) are one loop (`lattice_points`). Light industry beside an estate reads the block's W2 (`nbind_at` is
 gone) and the unused radial pattern is removed. `lots_whole_at_district_edges` (1 m windows across district edges of
 five cities and g28's town): 0 of 2207 lots split between districts (round 13: 185 of 2280), 1 of 804 box footprints
 cut (23 of 865). Airfields culvert the small streams (a stream crossed g33's airfield and apron), and their grass is

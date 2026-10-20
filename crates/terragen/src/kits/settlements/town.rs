@@ -773,7 +773,7 @@ fn block_sites(pl: &Pl, qc: DVec2, shared: bool) -> Sites {
 /// whichever of its pixels asks).
 fn unwarp(x: DVec2, amp: f64, l1: f64, l2: f64, s1: f64, s2: f64) -> DVec2 {
     let mut y = x;
-    for _ in 0..3 {
+    for _ in 0..2 {
         y = x - DVec2::new((y.y / l1 + s1).sin(), (y.x / l2 + s2).sin()) * amp;
     }
     y
@@ -784,7 +784,7 @@ fn unwarp(x: DVec2, amp: f64, l1: f64, l2: f64, s1: f64, s2: f64) -> DVec2 {
 fn lattice_q(pl: &Pl, x: DVec2, theta: f64, warp: f64, did: u64, big: bool) -> DVec2 {
     let mut y = x;
     if big {
-        for _ in 0..4 {
+        for _ in 0..3 {
             y = x - (big_grid_warp(y, pl.seed) - y);
         }
     }
@@ -795,15 +795,16 @@ fn lattice_q(pl: &Pl, x: DVec2, theta: f64, warp: f64, did: u64, big: bool) -> D
     rot2(y, -theta)
 }
 
-/// The place frame position of lattice point `c` and the place frame steps of a metre along the
-/// lattice's axes there (`lattice_q`'s local map: a block's frame).
-fn lattice_frame(pl: &Pl, c: DVec2, theta: f64, warp: f64, did: u64, big: bool) -> (DVec2, DVec2, DVec2) {
-    let mut qs = [DVec2::ZERO; 3];
+/// The place frame positions of lattice points `cg` (a block group's centre) and `cb` (a
+/// block's centre) and the place frame steps of a metre along the lattice's axes at `cb`
+/// (`lattice_q`'s local map: a block's frame; one loop, one copy of the inverse in the shader).
+fn lattice_points(pl: &Pl, cg: DVec2, cb: DVec2, theta: f64, warp: f64, did: u64, big: bool) -> (DVec2, DVec2, DVec2, DVec2) {
+    let mut qs = [DVec2::ZERO; 4];
     for (k, q) in qs.iter_mut().enumerate() {
-        let d = [DVec2::ZERO, DVec2::new(8.0, 0.0), DVec2::new(0.0, 8.0)][k];
-        *q = lattice_q(pl, c + d, theta, warp, did, big);
+        let x = [cg, cb, cb + DVec2::new(8.0, 0.0), cb + DVec2::new(0.0, 8.0)][k];
+        *q = lattice_q(pl, x, theta, warp, did, big);
     }
-    (qs[0], (qs[1] - qs[0]) / 8.0, (qs[2] - qs[0]) / 8.0)
+    (qs[0], qs[1], (qs[2] - qs[1]) / 8.0, (qs[3] - qs[1]) / 8.0)
 }
 
 /// The least distance (district map, m) of a rectangle (centre `c`, half sizes `h` along the
@@ -1003,6 +1004,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     let mut m = ms;
     let mut qr = q;
     let (mut bix, mut bqx, mut bsx, mut biy, mut bqy, mut bsy) = (0i64, 0.0, 0.0, 0i64, 0.0, 0.0);
+    // (the single blocks of the lattice and their centre, beside the group's)
+    let (mut cx1, mut cy1) = ((0i64, 0.0, 0.0), (0i64, 0.0, 0.0));
+    let mut qbase = q;
     if gridlike {
         qr = rot2(q, theta);
         if warp > 0.0 {
@@ -1026,7 +1030,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         slack = 0.02 + if oldk > 0.0 { 0.1 } else { 0.0 };
         (bix, bqx, bsx) = cell(0, qr.x, bx, ms);
         (biy, bqy, bsy) = cell(1, qr.y, by, ms);
-        qbc = lattice_q(pl, centre(bix, biy, ms), theta, warp, did, big);
+        cx1 = cell(0, qr.x, bx, 1);
+        cy1 = cell(1, qr.y, by, 1);
+        (qbc, qbase, lax, lay_ax) = lattice_points(pl, centre(bix, biy, ms), centre(cx1.0, cy1.0, 1), theta, warp, did, big);
     } else if lay == pat::LINEAR {
         // the street along the place axis; farm lots along it on both sides
         let sd = pl.seed ^ 0x11E;
@@ -1073,10 +1079,11 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
             blk.bd = blk.bw;
             blk.u = (rel.x + half - sw).clamp(0.0, blk.bw);
             blk.v = (rel.y + half - sw).clamp(0.0, blk.bd);
-            qbc = unwarp(wc.point, wa, wl1, wl2, ws1, ws2);
+            // (the cell's site in the warped frame: within ~0.2 cells of its centre)
+            qbc = wc.point;
             lax = rot2(DVec2::X, -ang);
             lay_ax = rot2(DVec2::Y, -ang);
-            slack = 0.15;
+            slack = 0.5;
         } else if matches!(lay, pat::DISPERSED | pat::KRAAL) {
             qbc = if lay == pat::KRAAL && pl.level == 0 { DVec2::ZERO } else { wc.point };
         }
@@ -1088,15 +1095,12 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         let st = block_sites(pl, qbc, shared);
         let mut b0 = st.bd;
         merged = ms > 1 && b0.a_ind && st.la == lat;
-        if gridlike && ms > 1 && !merged {
-            (bix, bqx, bsx) = cell(0, qr.x, bx, 1);
-            (biy, bqy, bsy) = cell(1, qr.y, by, 1);
-        }
         if !merged {
             m = 1;
-        }
-        if gridlike {
-            (qbc, lax, lay_ax) = lattice_frame(pl, centre(bix, biy, m), theta, warp, did, big);
+            if gridlike {
+                (bix, bqx, bsx, biy, bqy, bsy) = (cx1.0, cx1.1, cx1.2, cy1.0, cy1.1, cy1.2);
+                qbc = qbase;
+            }
         }
         b0.pick(pl, qbc, &st, lat);
         bd = b0;
@@ -1272,8 +1276,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     // the lot density at the block centre / lot centre (not per pixel: lots stay whole)
     let rel_q = |qq: DVec2| rel0(pl, qq) / (1.0 + nb);
     let dens_q = |qq: DVec2| density(pl, rel_q(qq)) * dmul;
-    // the lot of a building drawn as green verge (`lot_green`)
-    let mut green = false;
+    // the lot at the sample (block coordinates), tested once against the district edge and the
+    // ring at the end (`lot_green`: one call, one copy of the test in the shader)
+    let mut lot_r: Option<[f64; 4]> = None;
     let mut roof = 0.0;
     let mut rim = 0.0;
     let mut win = DVec3::new(1.0, 0.72, 0.42);
@@ -1333,8 +1338,11 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         };
         // the block exists by the density at its centre; whole blocks, clear of any district
         // edge or ring
-        if dens_q(qbc) < 0.3 || (special != parcel::NONE && lot_green([0.0, 0.0, blk.bw, blk.bd])) {
+        if dens_q(qbc) < 0.3 {
             special = parcel::NONE;
+        }
+        if special != parcel::NONE {
+            lot_r = Some([0.0, 0.0, blk.bw, blk.bd]);
         }
     }
     if inside && special != parcel::NONE {
@@ -1476,13 +1484,13 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                 let dbc = dens_q(qbc);
                 let (s0, s1) = ((si * seg).max(0.0), ((si + 1.0) * seg).min(if long_x { blk.bw } else { blk.bd }));
                 let (c0, c1) = (ri * pitch, (ri + 1.0) * pitch);
-                green = lot_green(if long_x { [s0, c0, s1, c1] } else { [c0, s0, c1, s1] });
+                lot_r = Some(if long_x { [s0, c0, s1, c1] } else { [c0, s0, c1, s1] });
                 cov_lot = 1.0;
                 col = mixc(yard, c_asphalt() * 1.15, 0.3 * u01k(sh, 4));
                 cls = crate::landcover::RESIDENTIAL;
                 lot_mean = Some((col, 0.3, 6.0));
                 rf = (pl.arch, u01k(sh, 6), true, 1.0);
-                if ri < nrow && u01k(sh, 2) < 0.85 && dbc > 0.25 && !green {
+                if ri < nrow && u01k(sh, 2) < 0.85 && dbc > 0.25 {
                     let point = u01k(sh, 3) < 0.25;
                     let half = if point { DVec2::new(11.0, 11.0) } else { DVec2::new(0.5 * seg - 6.0, 6.5) };
                     let dd = boxd(DVec2::new(ar, cr), DVec2::ZERO, half);
@@ -1519,8 +1527,8 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     - qr;
                 let (us, vs) = (blk.u + rs.x, blk.v + rs.y);
                 let whole = us > 4.5 && vs > 4.5 && us < blk.bw - 4.5 && vs < blk.bd - 4.5;
-                let clear = bd.ok && (!bd.mixed || rect_clear(pl, &bd, wc.point, DVec2::splat(4.5), DVec2::X, DVec2::Y, 0.0) > art_hw + 2.0 * fw + 1.0);
-                if whole && clear && u01k(wc.id, 7) < dbc.powf(0.8) * 1.15 {
+                if whole && u01k(wc.id, 7) < dbc.powf(0.8) * 1.15 {
+                    lot_r = Some([us - 4.5, vs - 4.5, us + 4.5, vs + 4.5]);
                     lot_id = wc.id;
                     cov_lot = 1.0;
                     col = srgb(128.0, 110.0, 90.0);
@@ -1628,7 +1636,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     let uw = 6.0 + 5.0 * u01k(sh, 12);
                     let hu = hash3(sh ^ 0x40F, os.side, (os.along / uw).floor() as i64, 1);
                     lot_id = hu;
-                    green = lot_green([os.c.x - os.h.x, os.c.y - os.h.y, os.c.x + os.h.x, os.c.y + os.h.y]);
+                    lot_r = Some([os.c.x - os.h.x, os.c.y - os.h.y, os.c.x + os.h.x, os.c.y + os.h.y]);
                     cov_lot = 1.0;
                     // (courtyards of gardens and trees, not pale paving)
                     col = mixc(mixc(yard, c_paving(), 0.3), srgb(70.0, 96.0, 52.0), 0.35 + 0.3 * e.moist.clamp(0.0, 1.0));
@@ -1644,7 +1652,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     // (the warm middle of the culture's pitched roofs: tiles, not the dark slates)
                     rf = (pl.arch, 0.2 + 0.6 * u01k(hu, 9), flat, 0.86 + 0.28 * u01k(hu, 11));
                     let dr = dsub.min(depthb - dsub);
-                    let ins = if square || green { 0.0 } else { aa(dr, fw) };
+                    let ins = if square { 0.0 } else { aa(dr, fw) };
                     if ins > 0.0 {
                         let hh = if flat { hb } else { hb + 0.5 * dr };
                         if flat {
@@ -1700,7 +1708,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     let q_lc = q_of(lc.x, lc.y);
                     let rel_lc = rel_q(q_lc);
                     let dl = dens_q(q_lc);
-                    green = lot_green(lr);
+                    lot_r = Some(lr);
                     // (a town's lots end where its streets do (above their density 0.42): houses strewn over the fields
                     // beyond read as a broken town)
                     // (the threshold of each lot its own: lots ending along the blocks drew the town's edge
@@ -1724,7 +1732,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                     } else {
                         occ
                     };
-                    let built = u01k(lh, 3) < occ * edge && !green;
+                    let built = u01k(lh, 3) < occ * edge;
                     // typology
                     let a = pl.arch;
                     let ut = u01k(lh, 12);
@@ -2224,7 +2232,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     // ---- the green verge: grass and clumps of trees over the lots along a district edge (whole
     // lots; the green buffer along an estate's edge: estates of grey roofs to their polygon's edge
     // read as stamped on, metro)
-    if green && inside {
+    if inside && lot_r.is_some_and(lot_green) {
         // (in dry lands a dusty verge with few trees: a green ring of trees drew the estate's
         // polygon in the desert, gallery g09)
         let wet = smoothstep(0.15, 0.5, e.moist);

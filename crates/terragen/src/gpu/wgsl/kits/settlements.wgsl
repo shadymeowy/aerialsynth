@@ -692,7 +692,7 @@ fn st_bd_side(pl: StPl, bd: StBDist, q: vec2<f32>) -> f32 {
 /// `town::unwarp`.
 fn st_unwarp(x: vec2<f32>, amp: f32, l1: f32, l2: f32, s1: f32, s2: f32) -> vec2<f32> {
     var y = x;
-    for (var k = 0u; k < 3u; k++) {
+    for (var k = 0u; k < 2u; k++) {
         y = x - vec2<f32>(sin(y.y / l1 + s1), sin(y.x / l2 + s2)) * amp;
     }
     return y;
@@ -702,7 +702,7 @@ fn st_unwarp(x: vec2<f32>, amp: f32, l1: f32, l2: f32, s1: f32, s2: f32) -> vec2
 fn st_lattice_q(pl: StPl, x: vec2<f32>, theta: f32, warp: f32, did: u64, big: bool) -> vec2<f32> {
     var y = x;
     if (big) {
-        for (var k = 0u; k < 4u; k++) {
+        for (var k = 0u; k < 3u; k++) {
             y = x - (st_big_grid_warp(y, pl.seed) - y);
         }
     }
@@ -742,13 +742,18 @@ fn st_district(pl: StPl, q: vec2<f32>, rel_here: f32) -> StDist {
         let qd = st_dist_q(pl, q);
         let dc = worley2(pl.seed ^ 0xD15lu, qd, st_dcell(pl), 0.85);
         did = dc.id;
-        let dp = st_district_pattern(pl, dc.point, dc.id);
+        // (both sites' patterns in one loop: one copy of `st_district_pattern`)
+        var dps: array<vec3<u32>, 2>;
+        for (var k = 0u; k < 2u; k++) {
+            dps[k] = st_district_pattern(pl, select(dc.point2, dc.point, k == 0u), select(dc.id2, dc.id, k == 0u));
+        }
+        let dp = dps[0];
         pattern = dp.x;
         let zd = dp.y;
         let shr = st_shared_industry(pl);
         let net1 = select(pattern, SP_GRID, shr && pattern == SP_INDUSTRIAL);
         if (pl.level >= 2u) {
-            let pt2 = st_district_pattern(pl, dc.point2, dc.id2).x;
+            let pt2 = dps[1].x;
             let net2 = select(pt2, SP_GRID, shr && pt2 == SP_INDUSTRIAL);
             if (net2 != net1 || (pattern == SP_INDUSTRIAL && !shr)) {
                 art = worley2_edge_dist(dc, qd);
@@ -914,24 +919,33 @@ fn st_pe_centre(sd: u64, ix: i64, iy: i64, m: i64, bx: f32, by: f32, jit: f32) -
     return vec2<f32>(0.5 * (st_line(sd, 0li, ix, bx, jit) + st_line(sd, 0li, ix + m, bx, jit)), 0.5 * (st_line(sd, 1li, iy, by, jit) + st_line(sd, 1li, iy + m, by, jit)));
 }
 
-/// `town::lattice_frame`: the place frame position of lattice point `c` and the steps of a
-/// metre along the lattice's axes (x, y: position; z, w: x axis; returned with the y axis).
+/// `town::lattice_points`: the place frame positions of a group's centre `cg` and a block's
+/// centre `cb`, and the steps of a metre along the lattice's axes at `cb`.
 struct StFrame {
-    q: vec2<f32>,
+    qg: vec2<f32>,
+    qb: vec2<f32>,
     ax: vec2<f32>,
     ay: vec2<f32>,
 }
 
-fn st_lattice_frame(pl: StPl, c: vec2<f32>, theta: f32, warp: f32, did: u64, big: bool) -> StFrame {
-    var qs: array<vec2<f32>, 3>;
-    for (var k = 0u; k < 3u; k++) {
-        let d = select(select(vec2<f32>(0.0), vec2<f32>(8.0, 0.0), k == 1u), vec2<f32>(0.0, 8.0), k == 2u);
-        qs[k] = st_lattice_q(pl, c + d, theta, warp, did, big);
+fn st_lattice_points(pl: StPl, cg: vec2<f32>, cb: vec2<f32>, theta: f32, warp: f32, did: u64, big: bool) -> StFrame {
+    var qs: array<vec2<f32>, 4>;
+    for (var k = 0u; k < 4u; k++) {
+        var x = cb;
+        if (k == 0u) {
+            x = cg;
+        } else if (k == 2u) {
+            x = cb + vec2<f32>(8.0, 0.0);
+        } else if (k == 3u) {
+            x = cb + vec2<f32>(0.0, 8.0);
+        }
+        qs[k] = st_lattice_q(pl, x, theta, warp, did, big);
     }
     var f: StFrame;
-    f.q = qs[0];
-    f.ax = (qs[1] - qs[0]) / 8.0;
-    f.ay = (qs[2] - qs[0]) / 8.0;
+    f.qg = qs[0];
+    f.qb = qs[1];
+    f.ax = (qs[2] - qs[1]) / 8.0;
+    f.ay = (qs[3] - qs[1]) / 8.0;
     return f;
 }
 
@@ -1051,6 +1065,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     var qr = q;
     var cx: StCell;
     var cy: StCell;
+    var cx1: StCell;
+    var cy1: StCell;
+    var qbase = q;
     if (gridlike) {
         qr = st_rot2(q, theta);
         if (warp > 0.0) {
@@ -1070,7 +1087,13 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         slack = 0.02 + select(0.0, 0.1, oldk > 0.0);
         cx = st_cell(sd, 0li, qr.x, bx, jit, ms);
         cy = st_cell(sd, 1li, qr.y, by, jit, ms);
-        qbc = st_lattice_q(pl, st_pe_centre(sd, cx.i, cy.i, ms, bx, by, jit), theta, warp, did, big);
+        cx1 = st_cell(sd, 0li, qr.x, bx, jit, 1li);
+        cy1 = st_cell(sd, 1li, qr.y, by, jit, 1li);
+        let fr = st_lattice_points(pl, st_pe_centre(sd, cx.i, cy.i, ms, bx, by, jit), st_pe_centre(sd, cx1.i, cy1.i, 1li, bx, by, jit), theta, warp, did, big);
+        qbc = fr.qg;
+        qbase = fr.qb;
+        lax = fr.ax;
+        lay_ax = fr.ay;
     } else if (lay == SP_LINEAR) {
         let sdl = pl.seed ^ 0x11Elu;
         let cl = st_cell(sdl, 0li, q.x, b, jit, 1li);
@@ -1120,10 +1143,10 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             blk.bd = blk.bw;
             blk.u = clamp(rel.x + half - d.sw, 0.0, blk.bw);
             blk.v = clamp(rel.y + half - d.sw, 0.0, blk.bd);
-            qbc = st_unwarp(wc.point, wa, wl1, wl2, ws1, ws2);
+            qbc = wc.point;
             lax = st_rot2(vec2<f32>(1.0, 0.0), -ang);
             lay_ax = st_rot2(vec2<f32>(0.0, 1.0), -ang);
-            slack = 0.15;
+            slack = 0.5;
         } else if (lay == SP_DISPERSED || lay == SP_KRAAL) {
             qbc = select(wc.point, vec2<f32>(0.0), lay == SP_KRAAL && pl.level == 0u);
         }
@@ -1132,8 +1155,12 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     var merged = false;
     if (city) {
         let dc = worley2(pl.seed ^ 0xD15lu, st_dist_q(pl, qbc), st_dcell(pl), 0.85);
-        let sa = st_district_pattern(pl, dc.point, dc.id);
-        let sb = st_district_pattern(pl, dc.point2, dc.id2);
+        var sab: array<vec3<u32>, 2>;
+        for (var k = 0u; k < 2u; k++) {
+            sab[k] = st_district_pattern(pl, select(dc.point2, dc.point, k == 0u), select(dc.id2, dc.id, k == 0u));
+        }
+        let sa = sab[0];
+        let sb = sab[1];
         let la = st_lattice_of(sa.x, dc.id, shr_i);
         let lb = st_lattice_of(sb.x, dc.id2, shr_i);
         var b0 = bd;
@@ -1141,18 +1168,13 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         b0.b = dc.point2;
         b0.a_ind = sa.x == SP_INDUSTRIAL;
         merged = ms > 1li && b0.a_ind && la == lat;
-        if (gridlike && ms > 1li && !merged) {
-            cx = st_cell(sd, 0li, qr.x, bx, jit, 1li);
-            cy = st_cell(sd, 1li, qr.y, by, jit, 1li);
-        }
         if (!merged) {
             m = 1li;
-        }
-        if (gridlike) {
-            let fr = st_lattice_frame(pl, st_pe_centre(sd, cx.i, cy.i, m, bx, by, jit), theta, warp, did, big);
-            qbc = fr.q;
-            lax = fr.ax;
-            lay_ax = fr.ay;
+            if (gridlike) {
+                cx = cx1;
+                cy = cy1;
+                qbc = qbase;
+            }
         }
         bd = st_bd_pick(pl, b0, qbc, la, lb, lat, sa, sb, dc.id, dc.id2);
         if (!bd.ok) {
@@ -1231,7 +1253,8 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     } else if (pl.level >= 4u) {
         art_hw = 7.5;
     }
-    var green = false;
+    var lot_r = vec4<f32>(0.0);
+    var has_lot = false;
     o.ds = blk.ds;
     o.sw = blk.sw;
     o.along = blk.along;
@@ -1375,8 +1398,12 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         } else if (us < p_site) {
             special = 7u;
         }
-        if (st_dens_n(pl, qbc, nb, dmul) < 0.3 || (special != 0u && st_lot_green(pl, bd, vec4<f32>(0.0, 0.0, blk.bw, blk.bd), qbc, lax, lay_ax, blk.bw, blk.bd, slack, art_hw, fw))) {
+        if (st_dens_n(pl, qbc, nb, dmul) < 0.3) {
             special = 0u;
+        }
+        if (special != 0u) {
+            lot_r = vec4<f32>(0.0, 0.0, blk.bw, blk.bd);
+            has_lot = true;
         }
     }
     // (the old quarter's small blocks, `town::place_eval`)
@@ -1509,7 +1536,8 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             let s1 = min((si + 1.0) * seg, select(blk.bd, blk.bw, long_x));
             let c0 = ri * pitch;
             let c1 = (ri + 1.0) * pitch;
-            green = st_lot_green(pl, bd, select(vec4<f32>(c0, s0, c1, s1), vec4<f32>(s0, c0, s1, c1), long_x), qbc, lax, lay_ax, blk.bw, blk.bd, slack, art_hw, fw);
+            lot_r = select(vec4<f32>(c0, s0, c1, s1), vec4<f32>(s0, c0, s1, c1), long_x);
+            has_lot = true;
             cov_lot = 1.0;
             col = mixc(yard, st_asphalt() * 1.15, 0.3 * u01k(sh, 4lu));
             cls = LC_RESIDENTIAL;
@@ -1521,7 +1549,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             rf_u = u01k(sh, 6lu);
             rf_flat = true;
             rf_mul = 1.0;
-            if (ri < nrow && u01k(sh, 2lu) < 0.85 && dbc > 0.25 && !green) {
+            if (ri < nrow && u01k(sh, 2lu) < 0.85 && dbc > 0.25) {
                 let point = u01k(sh, 3lu) < 0.25;
                 let half = select(vec2<f32>(0.5 * seg - 6.0, 6.5), vec2<f32>(11.0, 11.0), point);
                 let dd = st_boxd(vec2<f32>(ar, cr), vec2<f32>(0.0), half);
@@ -1554,8 +1582,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             let us = blk.u + rs.x;
             let vs = blk.v + rs.y;
             let whole = us > 4.5 && vs > 4.5 && us < blk.bw - 4.5 && vs < blk.bd - 4.5;
-            let clear = bd.ok && (!bd.mixed || st_rect_clear(pl, bd, wc.point, vec2<f32>(4.5), vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0), 0.0) > art_hw + 2.0 * fw + 1.0);
-            if (whole && clear && u01k(wc.id, 7lu) < pow(dbc, 0.8) * 1.15) {
+            if (whole && u01k(wc.id, 7lu) < pow(dbc, 0.8) * 1.15) {
+                lot_r = vec4<f32>(us - 4.5, vs - 4.5, us + 4.5, vs + 4.5);
+                has_lot = true;
                 lot_id = wc.id;
                 cov_lot = 1.0;
                 col = srgb(128.0, 110.0, 90.0);
@@ -1662,7 +1691,8 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             let uw = 6.0 + 5.0 * u01k(sh, 12lu);
             let hu = hash3(sh ^ 0x40Flu, os.side, i64(floor(os.along / uw)), 1li);
             lot_id = hu;
-            green = st_lot_green(pl, bd, vec4<f32>(os.c - os.h, os.c + os.h), qbc, lax, lay_ax, blk.bw, blk.bd, slack, art_hw, fw);
+            lot_r = vec4<f32>(os.c - os.h, os.c + os.h);
+            has_lot = true;
             cov_lot = 1.0;
             col = mixc(mixc(yard, st_paving(), 0.3), srgb(70.0, 96.0, 52.0), 0.35 + 0.3 * clamp(e.moist, 0.0, 1.0));
             cls = select(LC_RESIDENTIAL, LC_COMMERCIAL, z == SZ_CBD);
@@ -1681,7 +1711,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             rf_flat = flat;
             rf_mul = 0.86 + 0.28 * u01k(hu, 11lu);
             let dr = min(dsub, depthb - dsub);
-            let ins = select(st_aa(dr, fw), 0.0, square || green);
+            let ins = select(st_aa(dr, fw), 0.0, square);
             if (ins > 0.0) {
                 var hh = hb;
                 if (flat) {
@@ -1737,7 +1767,8 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             let q_lc = qbc + lax * (lc.x - 0.5 * blk.bw) + lay_ax * (lc.y - 0.5 * blk.bd);
             let rel_lc = st_rel0(pl, q_lc) / (1.0 + nb);
             let dl = st_density(pl, rel_lc) * dmul;
-            green = st_lot_green(pl, bd, lr, qbc, lax, lay_ax, blk.bw, blk.bd, slack, art_hw, fw);
+            lot_r = lr;
+            has_lot = true;
             var edge = 1.0;
             var occ = mix(pow(dl, 0.7) * 1.05, pow(dl, 0.35) * 1.1, smoothstep1(0.35, 0.5, dl));
             if (fm == SF_CITY) {
@@ -1749,7 +1780,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                     occ = max(occ, 0.85 * smoothstep1(thr, thr + 0.06, dl));
                 }
             }
-            let built = u01k(lh, 3lu) < occ * edge && !green;
+            let built = u01k(lh, 3lu) < occ * edge;
             let a = pl.arch;
             let ut = u01k(lh, 12lu);
             let euro = a == 3u || a == 5u || a == 6u || a == 8u || a == 9u || a == 11u || a == 4u;
@@ -2235,7 +2266,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         }
     }
     // ---- the green verge (`town::place_eval`)
-    if (green && inside) {
+    if (inside && has_lot && st_lot_green(pl, bd, lot_r, qbc, lax, lay_ax, blk.bw, blk.bd, slack, art_hw, fw)) {
         let wet = smoothstep1(0.15, 0.5, e.moist);
         cov_lot = 1.0;
         col = mixc(yard, srgb(84.0, 112.0, 56.0), 0.5 * wet) * (0.95 + 0.1 * e.detail);
