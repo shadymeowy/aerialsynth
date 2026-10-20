@@ -1339,11 +1339,13 @@ impl World {
                     }
                 }
             }
-            // channel attributes from the nearest channel, relative to its half width (round 14:
-            // by |d| - hw, beyond a channel a tributary's edge was nearer than the main
-            // channel's band of 2.4 half widths, which ended square on the bisector: the braided
-            // wash's rectangular edges, gallery g18)
-            let rel = |a: &(f64, f64)| a.0.abs() / a.1.max(0.01);
+            // channel attributes from the nearest channel: the distance beyond its edge relative to
+            // its half width, at least 25 m (round 14: by |d| - hw, beyond a wide channel a
+            // tributary's edge was nearer than the main channel's band of 2.4 half widths, which
+            // ended square on the bisector: the braided wash's rectangular edges, gallery g18;
+            // relative to the half width alone, a big river 400 m away took the small streams'
+            // riparian bands)
+            let rel = |a: &(f64, f64)| (a.0.abs() - a.1) / a.1.max(25.0);
             if let Some((rh, &(d, hw))) = hits.iter().zip(&adj).min_by(|a, b| rel(a.1).total_cmp(&rel(b.1))) {
                 let lc = &self.cfg.hydro.levels[rh.level as usize];
                 let ad = d.abs();
