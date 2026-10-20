@@ -7,9 +7,9 @@
 //! and descendants (z16), compared with the mean of z15 and z16, where most crowns are drawn one
 //! by one. The unresolved crowns' shading (`layers::canopy::crown_relief`) is a compromise
 //! between nadir and oblique views (where resolved crowns hide their shadows and look less
-//! dark), so a broadleaf forest's coarse zooms stay ~1.35x as bright as its fine ones from
-//! nadir (round 14: 1.9x, with a step of 1.8x from z14 to z15), a conifer forest's within
-//! ~12 % (round 14: 1.45x).
+//! dark), so from nadir a broadleaf forest's coarse zooms stay ~1.4-1.5x as bright as its fine
+//! ones (round 14: 1.9-2.0x, with a step of 1.8x from z14 to z15), a conifer forest's within
+//! ~16 % (round 14: 1.45x).
 use geodesy::tiles::{gsd_ew, tile_for_latlon, TileId};
 use terragen::{Config, NextGenerator, TileData, TILE_SIZE};
 
