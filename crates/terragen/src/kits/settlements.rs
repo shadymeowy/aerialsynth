@@ -213,7 +213,7 @@ fn built(s: &mut Stack) {
                 let r0 = town::rel0(&pl, q);
                 let strips = town::in_strips(&pl, q);
                 if r0 < 1.62 || strips {
-                    let n = town::foot_noise(&pl, p, gsd);
+                    let n = town::foot_noise(&pl, q, gsd);
                     let rel = r0 / (1.0 + n);
                     let score = if rel < 1.0 {
                         (1.0 - rel) * if pl.sub { 1.15 } else { 1.0 }
@@ -321,7 +321,7 @@ fn place(s: &mut Stack, pl: &town::Pl, rel: f64, n: f64, q: DVec2, sun: DVec3) {
     let cls = if e_blk >= 0.5 { ev.cls } else { mean_class(pl, &d, q) };
     let dev = 0.55 + 0.9 * pl.dev;
     let lamp = lamps(pl, &ev, dens, gsd, fw, block, e_blk);
-    let win_lit = 0.1 + if z == zone::CBD { 0.25 } else { 0.0 };
+    let win_lit = 0.1 + if ev.zone == zone::CBD { 0.25 } else { 0.0 };
     let windows = ev.win * (0.55 * ev.rim * win_lit * band(2.6, gsd));
     let emit = (lamp * (1.0 - ev.roof) + windows + ev.em * e_blk) * dev;
     let in_dsm = if world.cfg.landuse.buildings_in_dsm { hmode::BLEND } else { hmode::NONE };
@@ -1026,6 +1026,123 @@ mod tests {
         assert_eq!(d.seed, mix64((pl.id & 0xFF_FFFF) | (((pl.id >> 24) & 0xFF_FFFF) << 24)));
         assert!((d.r - 8000.0).abs() < 1e-3);
         assert!((d.ex.length() - 1.0).abs() < 1e-6 && d.ex.dot(d.ey).abs() < 1e-6);
+    }
+
+    /// Lots are whole (round 14): a building's lot belongs to one district (its pixels' block
+    /// district and zone are one), and footprints of box typologies are not cut by district
+    /// edges, the town's edge, arterials or the ring boulevard (their pixels fill the box), at
+    /// windows across district edges of the kit's cities and gallery g28's town.
+    #[test]
+    fn lots_whole_at_district_edges() {
+        use std::collections::HashMap;
+        let w = crate::world::World::new(crate::Config::default());
+        let at = |lat: f64, lon: f64| geodesy::geodetic2ecef(geodesy::Geodetic::new(f64::to_radians(lat), f64::to_radians(lon), 0.0), &w.ell);
+        let mut towns = Vec::new();
+        for &(name, lat, lon) in &[
+            ("metro", 30.35, 128.8487),
+            ("survey_city", -6.1773, -114.2395),
+            ("poor_city", -20.8647, -142.6153),
+            ("desert_town", -12.198, -21.4536),
+            ("g28", 41.528, 33.168),
+            ("g29", 39.25, 34.08),
+        ] {
+            let p = at(lat, lon);
+            let pl = (places::TOWN as usize..places::NLEVELS)
+                .rev()
+                .flat_map(|l| places::places_near(&w, l, p, 30_000.0))
+                .filter(|pl| pl.form == places::form::CITY && (pl.center - p).length() < pl.radius)
+                .min_by(|a, b| (a.center - p).length().total_cmp(&(b.center - p).length()));
+            if let Some(pl) = pl {
+                towns.push((name, town::decode(&place_stamp(&w, &pl))));
+            }
+        }
+        assert!(towns.len() >= 5, "{} towns", towns.len());
+        let (mut n_lots, mut n_split, mut n_box, mut n_cut) = (0usize, 0usize, 0usize, 0usize);
+        for (name, tp) in &towns {
+            // windows of 240 m at 1 m centred near district edges, within the built-up area (lots
+            // touching a window's border left out)
+            let (mut wins, mut nl, mut sp, mut bx, mut cut) = (0usize, 0usize, 0usize, 0usize, 0usize);
+            for k in 0..4000u64 {
+                if wins >= 10 {
+                    break;
+                }
+                let h = mix64(k ^ tp.seed);
+                let c = DVec2::new(u01k(h, 1) - 0.5, u01k(h, 2) - 0.5) * (1.4 * tp.r);
+                let qd = town::dist_q(tp, c);
+                let dc = worley2(tp.seed ^ 0xD15, qd, town::dcell(tp), 0.85);
+                if town::rel0(tp, c) > 0.75 || worley2_edge_dist(&dc, qd) > 60.0 {
+                    continue;
+                }
+                wins += 1;
+                let mut lots: HashMap<u64, (u64, u32, u32, Vec<DVec2>, bool)> = HashMap::new();
+                for j in 0..240 {
+                    for i in 0..240 {
+                        let q = c + DVec2::new(i as f64 - 120.0, j as f64 - 120.0);
+                        let n = town::foot_noise(tp, q, 1.0);
+                        let rel = town::rel0(tp, q) / (1.0 + n);
+                        if town::density(tp, rel) <= 0.0 {
+                            continue;
+                        }
+                        let d = town::district(tp, q, rel);
+                        let env = town::Env { gsd: 1.0, fw: 0.5, n, moist: 0.5, detail: 0.0, ground: DVec3::splat(0.3) };
+                        let ev = town::place_eval(tp, q, &d, &env);
+                        if ev.bid == 0 {
+                            continue;
+                        }
+                        // (organic layouts: footprints follow the lanes, cut by them)
+                        let t = if ev.pattern == town::pat::ORGANIC { 0 } else { ev.typ };
+                        let e = lots.entry(ev.bid).or_insert((ev.did, ev.zone, t, Vec::new(), false));
+                        if e.0 != ev.did || e.1 != ev.zone {
+                            e.0 = u64::MAX;
+                        }
+                        e.3.push(q);
+                        e.4 |= i == 0 || j == 0 || i == 239 || j == 239;
+                    }
+                }
+                for (did, _, t, px, border) in lots.values() {
+                    if *border {
+                        continue;
+                    }
+                    nl += 1;
+                    if *did == u64::MAX {
+                        sp += 1;
+                    }
+                    // (box typologies: the pixels' share of their least bounding rectangle)
+                    let cnt = px.len();
+                    let fill = (0..45)
+                        .map(|k| {
+                            let a = k as f64 * 2f64.to_radians();
+                            let (mut lo, mut hi) = (DVec2::splat(f64::MAX), DVec2::splat(f64::MIN));
+                            for &q in px {
+                                let r = town::rot2(q, a);
+                                lo = lo.min(r);
+                                hi = hi.max(r);
+                            }
+                            cnt as f64 / ((hi.x - lo.x + 1.0) * (hi.y - lo.y + 1.0))
+                        })
+                        .fold(0.0, f64::max);
+                    if matches!(*t, town::typ::HOUSE | town::typ::ROW | town::typ::MIDRISE | town::typ::TOWER | town::typ::WAREHOUSE) && cnt >= 40 {
+                        bx += 1;
+                        if fill < 0.7 {
+                            cut += 1;
+                            if std::env::var("LOTS_DEBUG").is_ok() && cut < 6 {
+                                let m = px.iter().fold(DVec2::ZERO, |a, &b| a + b) / cnt as f64;
+                                let d = town::district(tp, m, town::rel0(tp, m));
+                                eprintln!("  cut: typ {t} {cnt} px fill {fill:.2} at {m:.0} pattern {} zone {} art {:.0}", d.pattern, d.zone, d.art);
+                            }
+                        }
+                    }
+                }
+            }
+            eprintln!("{name}: {wins} windows, {nl} lots, {sp} split between districts, {bx} box footprints, {cut} cut (fill < 0.7)");
+            n_lots += nl;
+            n_split += sp;
+            n_box += bx;
+            n_cut += cut;
+        }
+        eprintln!("all: {n_lots} lots, {n_split} split, {n_box} box footprints, {n_cut} cut");
+        assert!(n_lots > 2000 && n_split == 0, "{n_split} of {n_lots} lots split between districts");
+        assert!((n_cut as f64) < 0.02 * n_box as f64, "{n_cut} of {n_box} box footprints cut");
     }
 
     /// The BSP partitions a block: every point lies in its lot, lots are within the block.
