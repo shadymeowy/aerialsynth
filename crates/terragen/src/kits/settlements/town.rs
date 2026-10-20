@@ -222,6 +222,15 @@ fn core_ring(pl: &Pl, q: DVec2) -> Option<(f64, f64)> {
     Some((qe.length(), rr))
 }
 
+/// Signed distance (m, in the elongated place frame) from the ring boulevard around a big city's
+/// old core, positive outside (1e9: none).
+fn ring_signed(pl: &Pl, q: DVec2) -> f64 {
+    match core_ring(pl, q) {
+        Some((d, rr)) if pl.level >= 3 => d - rr,
+        _ => 1e9,
+    }
+}
+
 /// Distance (m, in the elongated place frame) to the ring boulevard around a big city's old core
 /// (1e9: none).
 pub fn ring_dist(pl: &Pl, q: DVec2) -> f64 {
@@ -786,6 +795,17 @@ fn lattice_q(pl: &Pl, x: DVec2, theta: f64, warp: f64, did: u64, big: bool) -> D
     rot2(y, -theta)
 }
 
+/// The place frame position of lattice point `c` and the place frame steps of a metre along the
+/// lattice's axes there (`lattice_q`'s local map: a block's frame).
+fn lattice_frame(pl: &Pl, c: DVec2, theta: f64, warp: f64, did: u64, big: bool) -> (DVec2, DVec2, DVec2) {
+    let mut qs = [DVec2::ZERO; 3];
+    for (k, q) in qs.iter_mut().enumerate() {
+        let d = [DVec2::ZERO, DVec2::new(8.0, 0.0), DVec2::new(0.0, 8.0)][k];
+        *q = lattice_q(pl, c + d, theta, warp, did, big);
+    }
+    (qs[0], (qs[1] - qs[0]) / 8.0, (qs[2] - qs[0]) / 8.0)
+}
+
 /// The least distance (district map, m) of a rectangle (centre `c`, half sizes `h` along the
 /// unit axes `ax`, `ay`; place frame) from its block's district edge, less `slack` × its half
 /// diagonal (the lattice's bend between the corners).
@@ -976,10 +996,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         let (a0, a1) = (line(axis, i, bb), line(axis, i + m, bb));
         (i, x - a0, a1 - a0)
     };
-    let centre = |ix: i64, iy: i64, m: i64| {
-        let c = DVec2::new(0.5 * (line(0, ix, bx) + line(0, ix + m, bx)), 0.5 * (line(1, iy, by) + line(1, iy + m, by)));
-        lattice_q(pl, c, theta, warp, did, big)
-    };
+    let centre = |ix: i64, iy: i64, m: i64| DVec2::new(0.5 * (line(0, ix, bx) + line(0, ix + m, bx)), 0.5 * (line(1, iy, by) + line(1, iy + m, by)));
     // (estates on the town's grid: whole groups of `estate_m` × `estate_m` of its blocks, by the
     // district at the group's centre; the other blocks by the district at their own)
     let ms = if grid_net && shared { estate_m(pl) } else { 1 };
@@ -1004,18 +1021,12 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                 (qr.x / 190.0 + 6.0 * u01k(s, 3)).sin() + 0.4 * (qr.x / 67.0 + 6.0 * u01k(s, 4)).sin(),
             ) * (16.0 * oldk);
         }
-        slack = if big {
-            0.3
-        } else if warp > 0.0 {
-            0.2
-        } else {
-            0.0
-        } + if oldk > 0.0 { 0.1 } else { 0.0 };
+        // (the block's frame from the lattice's local map: its second order and the old core's
+        // bend left)
+        slack = 0.02 + if oldk > 0.0 { 0.1 } else { 0.0 };
         (bix, bqx, bsx) = cell(0, qr.x, bx, ms);
         (biy, bqy, bsy) = cell(1, qr.y, by, ms);
-        qbc = centre(bix, biy, ms);
-        lax = rot2(DVec2::X, -theta);
-        lay_ax = rot2(DVec2::Y, -theta);
+        qbc = lattice_q(pl, centre(bix, biy, ms), theta, warp, did, big);
     } else if lay == pat::LINEAR {
         // the street along the place axis; farm lots along it on both sides
         let sd = pl.seed ^ 0x11E;
@@ -1080,10 +1091,12 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         if gridlike && ms > 1 && !merged {
             (bix, bqx, bsx) = cell(0, qr.x, bx, 1);
             (biy, bqy, bsy) = cell(1, qr.y, by, 1);
-            qbc = centre(bix, biy, 1);
         }
         if !merged {
             m = 1;
+        }
+        if gridlike {
+            (qbc, lax, lay_ax) = lattice_frame(pl, centre(bix, biy, m), theta, warp, did, big);
         }
         b0.pick(pl, qbc, &st, lat);
         bd = b0;
@@ -1180,7 +1193,17 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
                 return true;
             }
         }
-        ring_dist(pl, c) < ring_hw + 2.0 * fw + 1.0 + (1.2 + slack) * h.length()
+        // (across the ring: corners on both sides of it, or within its band)
+        let band = ring_hw + 2.0 * fw + 1.0 + slack * h.length();
+        let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+        for k in 0..4 {
+            let sx = if k % 2 == 0 { -1.0 } else { 1.0 };
+            let sy = if k < 2 { -1.0 } else { 1.0 };
+            let r = ring_signed(pl, c + lax * (sx * h.x) + lay_ax * (sy * h.y));
+            lo = lo.min(r);
+            hi = hi.max(r);
+        }
+        lo < band && hi > -band
     };
     o.ds = blk.ds;
     o.sw = blk.sw;

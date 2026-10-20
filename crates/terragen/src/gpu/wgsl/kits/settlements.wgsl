@@ -908,11 +908,40 @@ fn st_big_grid_warp(qr: vec2<f32>, seed: u64) -> vec2<f32> {
     return qr + b + st;
 }
 
-/// `town::place_eval`'s `centre`: the place frame position of the centre of cells (ix, iy) of
-/// `m` lines.
-fn st_pe_centre(pl: StPl, sd: u64, ix: i64, iy: i64, m: i64, bx: f32, by: f32, jit: f32, theta: f32, warp: f32, did: u64, big: bool) -> vec2<f32> {
-    let c = vec2<f32>(0.5 * (st_line(sd, 0li, ix, bx, jit) + st_line(sd, 0li, ix + m, bx, jit)), 0.5 * (st_line(sd, 1li, iy, by, jit) + st_line(sd, 1li, iy + m, by, jit)));
-    return st_lattice_q(pl, c, theta, warp, did, big);
+/// `town::place_eval`'s `centre`: the lattice position of the centre of cells (ix, iy) of `m`
+/// lines.
+fn st_pe_centre(sd: u64, ix: i64, iy: i64, m: i64, bx: f32, by: f32, jit: f32) -> vec2<f32> {
+    return vec2<f32>(0.5 * (st_line(sd, 0li, ix, bx, jit) + st_line(sd, 0li, ix + m, bx, jit)), 0.5 * (st_line(sd, 1li, iy, by, jit) + st_line(sd, 1li, iy + m, by, jit)));
+}
+
+/// `town::lattice_frame`: the place frame position of lattice point `c` and the steps of a
+/// metre along the lattice's axes (x, y: position; z, w: x axis; returned with the y axis).
+struct StFrame {
+    q: vec2<f32>,
+    ax: vec2<f32>,
+    ay: vec2<f32>,
+}
+
+fn st_lattice_frame(pl: StPl, c: vec2<f32>, theta: f32, warp: f32, did: u64, big: bool) -> StFrame {
+    var qs: array<vec2<f32>, 3>;
+    for (var k = 0u; k < 3u; k++) {
+        let d = select(select(vec2<f32>(0.0), vec2<f32>(8.0, 0.0), k == 1u), vec2<f32>(0.0, 8.0), k == 2u);
+        qs[k] = st_lattice_q(pl, c + d, theta, warp, did, big);
+    }
+    var f: StFrame;
+    f.q = qs[0];
+    f.ax = (qs[1] - qs[0]) / 8.0;
+    f.ay = (qs[2] - qs[0]) / 8.0;
+    return f;
+}
+
+/// `town::ring_signed`.
+fn st_ring_signed(pl: StPl, q: vec2<f32>) -> f32 {
+    let r = st_core_ring(pl, q);
+    if (pl.level >= 3u && r.y > 0.0) {
+        return r.x - r.y;
+    }
+    return 1e9;
 }
 
 /// `BDist::pick`.
@@ -947,7 +976,17 @@ fn st_lot_green(pl: StPl, bd: StBDist, r: vec4<f32>, qbc: vec2<f32>, lax: vec2<f
             return true;
         }
     }
-    return st_ring_dist(pl, c) < art_hw + 2.0 + 2.0 * fw + 1.0 + (1.2 + slack) * length(h);
+    let band = art_hw + 2.0 + 2.0 * fw + 1.0 + slack * length(h);
+    var lo = 3.0e38;
+    var hi = -3.0e38;
+    for (var k = 0u; k < 4u; k++) {
+        let sx = select(1.0, -1.0, k % 2u == 0u);
+        let sy = select(1.0, -1.0, k < 2u);
+        let r = st_ring_signed(pl, c + lax * (sx * h.x) + lay * (sy * h.y));
+        lo = min(lo, r);
+        hi = max(hi, r);
+    }
+    return lo < band && hi > -band;
 }
 
 fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
@@ -1028,12 +1067,10 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
                 sin(qr.x / 190.0 + 6.0 * u01k(s, 3lu)) + 0.4 * sin(qr.x / 67.0 + 6.0 * u01k(s, 4lu)),
             ) * (16.0 * oldk);
         }
-        slack = select(select(0.0, 0.2, warp > 0.0), 0.3, big) + select(0.0, 0.1, oldk > 0.0);
+        slack = 0.02 + select(0.0, 0.1, oldk > 0.0);
         cx = st_cell(sd, 0li, qr.x, bx, jit, ms);
         cy = st_cell(sd, 1li, qr.y, by, jit, ms);
-        qbc = st_pe_centre(pl, sd, cx.i, cy.i, ms, bx, by, jit, theta, warp, did, big);
-        lax = st_rot2(vec2<f32>(1.0, 0.0), -theta);
-        lay_ax = st_rot2(vec2<f32>(0.0, 1.0), -theta);
+        qbc = st_lattice_q(pl, st_pe_centre(sd, cx.i, cy.i, ms, bx, by, jit), theta, warp, did, big);
     } else if (lay == SP_LINEAR) {
         let sdl = pl.seed ^ 0x11Elu;
         let cl = st_cell(sdl, 0li, q.x, b, jit, 1li);
@@ -1107,10 +1144,15 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         if (gridlike && ms > 1li && !merged) {
             cx = st_cell(sd, 0li, qr.x, bx, jit, 1li);
             cy = st_cell(sd, 1li, qr.y, by, jit, 1li);
-            qbc = st_pe_centre(pl, sd, cx.i, cy.i, 1li, bx, by, jit, theta, warp, did, big);
         }
         if (!merged) {
             m = 1li;
+        }
+        if (gridlike) {
+            let fr = st_lattice_frame(pl, st_pe_centre(sd, cx.i, cy.i, m, bx, by, jit), theta, warp, did, big);
+            qbc = fr.q;
+            lax = fr.ax;
+            lay_ax = fr.ay;
         }
         bd = st_bd_pick(pl, b0, qbc, la, lb, lat, sa, sb, dc.id, dc.id2);
         if (!bd.ok) {
