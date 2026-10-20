@@ -2438,7 +2438,8 @@ fn st_zone_mean(pl: StPl, d: StDist, moist: f32) -> vec4<f32> {
 fn st_lamps(pl: StPl, o: StEv, dens: f32, gsd: f32, fw: f32, block: f32, resolved: f32) -> vec3<f32> {
     let l0 = vec3<f32>(1.0, 0.68, 0.40);
     let l1 = vec3<f32>(1.0, 0.84, 0.64);
-    let l2 = vec3<f32>(0.86, 0.92, 1.0);
+    // (`town::LED_MEAN`; a street's LED: `LED_WARM` / `LED_COOL`)
+    let l2 = vec3<f32>(0.97, 0.9225, 0.85);
     let sodium = 0.25 + 0.5 * (1.0 - pl.dev) * u01k(pl.seed, 20lu);
     let sp = o.lamp_sp;
     if (sp <= 0.0) {
@@ -2458,12 +2459,15 @@ fn st_lamps(pl: StPl, o: StEv, dens: f32, gsd: f32, fw: f32, block: f32, resolve
         let lh = hash2(o.sid ^ 0x1A3Blu, i64(k), 0li);
         if (u01k(lh, 1lu) < present) {
             let sa = 0.28 * sp;
-            let pool = 0.03 * exp(-(dp * dp) / (2.0 * 3.5 * 3.5) - (da * da) / (2.0 * sa * sa));
-            let core = point_light(d2, 6.0, 0.4, fwl);
-            let u = u01k(hash1(o.sid, 3li), 1lu);
-            var lc = l2;
+            // (`town::LAMP_CORE`, `LAMP_POOL_K`)
+            let pool = (0.03 + 0.65306122 / sp) * exp(-(dp * dp) / (2.0 * 3.5 * 3.5) - (da * da) / (2.0 * sa * sa));
+            let core = point_light(d2, 2.0, 0.4, fwl);
+            let hs = hash1(o.sid, 3li);
+            let u = u01k(hs, 1lu);
+            let led = select(vec3<f32>(0.88, 0.93, 1.0), vec3<f32>(1.0, 0.92, 0.80), u01k(hs, 2lu) < 0.75);
+            var lc = led;
             if (o.zone == SZ_CBD || (o.major && u < 0.45)) {
-                lc = l2;
+                lc = led;
             } else if (o.pattern == SP_INDUSTRIAL || u < sodium) {
                 lc = l0;
             } else if (u < 0.62) {
@@ -3128,7 +3132,7 @@ fn st_glow(s: ptr<function, Stack>) {
     var aw_t = array<f32, 12>(1.0, 0.85, 0.7, 0.8, 0.6, 1.2, 1.05, 0.9, 1.25, 0.6, 0.25, 0.85);
     var spr = array<f32, 12>(0.95, 0.9, 0.9, 0.8, 0.95, 0.82, 0.92, 1.3, 0.85, 1.05, 0.85, 0.85);
     let sodium = 0.25 + 0.25 * (1.0 - dev);
-    let lamp = mixc(mixc(vec3<f32>(1.0, 0.84, 0.64), vec3<f32>(0.86, 0.92, 1.0), 0.4), vec3<f32>(1.0, 0.68, 0.40), sodium);
+    let lamp = mixc(mixc(vec3<f32>(1.0, 0.84, 0.64), vec3<f32>(0.97, 0.9225, 0.85), 0.4), vec3<f32>(1.0, 0.68, 0.40), sodium);
     let devm = (0.5 + 0.45 * min(dev, 1.0)) * (0.55 + 0.9 * dev);
     let sprawl2 = pow(spr[arch] * (0.85 + 0.3 * dev), 2.0) * (1.0 + 0.04 / 12.0);
     var cover = 0.0;
@@ -3155,7 +3159,7 @@ fn st_glow(s: ptr<function, Stack>) {
         let r2 = r0[l] * r0[l] * c1[l] * exp(0.27 * a * sv) * g * sprawl2;
         let ar = n * r2 * cal[l] * habitable;
         cover += ar * kj[l];
-        emit += (vec3<f32>(0.86, 0.92, 1.0) * kc[l] + lamp * kr[l]) * (ar * devm);
+        emit += (vec3<f32>(0.97, 0.9225, 0.85) * kc[l] + lamp * kr[l]) * (ar * devm);
     }
     if (cover <= 0.0) {
         return;

@@ -167,7 +167,7 @@ fn glow(s: &mut Stack) {
     }
     let (pop, dev) = (t.population, t.development);
     let arch = s.bio.style.archetype as usize;
-    const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.68, 0.40), DVec3::new(1.0, 0.84, 0.64), DVec3::new(0.86, 0.92, 1.0)];
+    const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.68, 0.40), DVec3::new(1.0, 0.84, 0.64), town::LED_MEAN];
     let sodium = 0.25 + 0.25 * (1.0 - dev);
     // (round 13: a share of white LED, as the towns' streets)
     let lamp = mixc3(mixc3(LAMPS[1], LAMPS[2], 0.4), LAMPS[0], sodium);

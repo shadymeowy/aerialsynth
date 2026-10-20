@@ -55,7 +55,7 @@ cameras:
       exposure:
         mode: auto
         tau_s: 0.4
-        target: 0.02
+        target: 0.03
         max_gain: 64
         max_time_s: 0.008
       motion_blur:

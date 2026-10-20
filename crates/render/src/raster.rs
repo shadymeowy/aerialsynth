@@ -561,6 +561,14 @@ pub struct Renderer {
     star_field: std::sync::OnceLock<crate::stars::StarField>,
 }
 
+/// The share of the street lights at a sun elevation (degrees) for next's worlds
+/// (`RenderSettings::next_lights`): 30 % at -3°, ramping to full at -12° (the end of nautical
+/// twilight).
+pub fn next_dusk_lights(el_deg: f64) -> f64 {
+    let x = ((-3.0 - el_deg) / 9.0).clamp(0.0, 1.0);
+    0.3 + 0.7 * x * x * (3.0 - 2.0 * x)
+}
+
 impl Renderer {
     pub fn new(model: Arc<dyn CameraModel>, mut settings: RenderSettings, ell: Ellipsoid, cache: Arc<TileCache>) -> Self {
         settings.backend = settings.backend.resolve();
@@ -836,6 +844,16 @@ impl Renderer {
     /// Render one frame for camera pose `cam` under the given sun / light state; fails when the
     /// GPU backend does (device lost, out of memory).
     pub fn try_render(&self, cam: &CamPose, sun_state: &SunState) -> anyhow::Result<FrameOut> {
+        // (next: street lights come on through the twilight, at 30 % while the sky still lights
+        // the land (sun above -3°), in full below -12°: at dusk they burnt as a field of bright
+        // dots over the twilit town, g29)
+        let dusk;
+        let sun_state = if self.settings.next_lights {
+            dusk = SunState { lights: sun_state.lights * next_dusk_lights(sun_state.elevation.to_degrees()), ..*sun_state };
+            &dusk
+        } else {
+            sun_state
+        };
         let mut frame = self.render_terrain(cam, sun_state)?;
         if sun_state.stars && !self.geometry_only && self.stars_in_render {
             self.stars().render(&mut frame, self.model.as_ref(), cam, sun_state.unix, &self.ell, &self.settings.atmosphere);
@@ -1400,7 +1418,9 @@ impl Renderer {
                         }
                     };
                     let f = 1.0 / (1.0 + (rel.max(0.0) / 8.0).powi(2));
-                    mul += e * (0.2 * sun_state.lights * f);
+                    // (round 15: 0.3, was 0.2 as classic's: the night town dark between its
+                    // lamps, g34, night@type)
+                    mul += e * (0.3 * sun_state.lights * f);
                 } else {
                     mul += e * (0.2 * sun_state.lights);
                 }

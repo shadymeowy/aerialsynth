@@ -153,7 +153,8 @@ pub fn frame(sg: &FSeg, p: DVec3, sun: DVec3) -> Frame {
 }
 
 const LAMP_SODIUM: DVec3 = DVec3::new(1.0, 0.68, 0.40);
-const LAMP_LED: DVec3 = DVec3::new(0.86, 0.92, 1.0);
+const LAMP_LED: DVec3 = crate::kits::settlements::town::LED_COOL;
+const LAMP_CORE: f64 = crate::kits::settlements::town::LAMP_CORE;
 
 /// Street lamps every `sp` m on the segment's own stretch (heads at lateral `off`, both sides
 /// alternating unless `median`), thinned with their energy kept where they would merge.
@@ -170,9 +171,18 @@ fn lamps(f: &Frame, s0: f64, sp: f64, off: f64, median: bool, seed: u64, fw: f64
     let dp = f.dl - if median { 0.0 } else { side * off };
     let da = f.ar - sk;
     let d2 = dp * dp + da * da;
-    let pool = 0.035 * (-(dp * dp) / (2.0 * 5.0 * 5.0) - (da * da) / (2.0 * 0.3 * sp * 0.3 * sp)).exp();
-    let core = point_light(d2, 6.0, 0.4, fw);
-    let c = if u01k(seed, 7) < 0.5 { LAMP_LED } else { LAMP_SODIUM };
+    // (round 15: as the towns' lamps, two thirds of the head's light in its pool, the energy kept)
+    let pool = (0.035 + (6.0 - LAMP_CORE) * 0.16 / (5.0 * 0.3 * sp)) * (-(dp * dp) / (2.0 * 5.0 * 5.0) - (da * da) / (2.0 * 0.3 * sp * 0.3 * sp)).exp();
+    let core = point_light(d2, LAMP_CORE, 0.4, fw);
+    let c = if u01k(seed, 7) < 0.5 {
+        if u01k(seed, 8) < crate::kits::settlements::town::LED_NEUTRAL {
+            crate::kits::settlements::town::LED_WARM
+        } else {
+            LAMP_LED
+        }
+    } else {
+        LAMP_SODIUM
+    };
     c * ((pool + core) * m)
 }
 

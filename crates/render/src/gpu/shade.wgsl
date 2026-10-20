@@ -976,7 +976,8 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32
                     rel = select(0.0, ea.x - eb.x, ea.y > 0.0 && eb.y > 0.0);
                 }
                 let r8 = max(rel, 0.0) / 8.0;
-                mul += e.xyz * (0.2 * u.sun.z / (1.0 + r8 * r8));
+                // (round 15: 0.3, raster.rs)
+                mul += e.xyz * (0.3 * u.sun.z / (1.0 + r8 * r8));
             } else {
                 mul += e.xyz * (0.2 * u.sun.z);
             }
