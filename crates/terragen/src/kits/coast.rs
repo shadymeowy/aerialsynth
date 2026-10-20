@@ -427,13 +427,15 @@ fn flats(s: &mut Stack, ty: &Types) {
     s.m.natural_ok *= 1.0 - zone;
     // creeks: dark wet channels (the pixel's own carving shows as shallow water); dry and only a
     // little darker on the arid flats (a net of black lines over the desert coasts)
-    let win = 1.0 - smoothstep(1.6, 3.2, ground);
+    // (round 14: on arid flats only near the sea and fainter: dark worm-like channels over the
+    // whole sabkha, gallery g08)
+    let win = 1.0 - smoothstep(1.6 - 0.8 * arid, 3.2 - 1.2 * arid, ground);
     if win > 0.0 {
         let c = creek(p, gsd, fw.max(0.3 * gsd)) * zone * win;
         if c > 0.0 {
             // (fainter in the high marsh, and of the marsh's class there: a dense net of dark,
             // glossy tidal-flat lines over the marsh, desert_coast@type)
-            let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, (0.7 * arid).max(0.5 * high));
+            let cc = mixc(mixc(srgb(62.0, 58.0, 48.0), srgb(52.0, 56.0, 40.0), high), col, (0.88 * arid).max(0.5 * high));
             s.composite(Layer { cov: c, albedo: cc, cls: if high > 0.5 { hcls } else { cls::TIDAL_FLAT }, clear: 1.0, ..Default::default() });
         }
     }
