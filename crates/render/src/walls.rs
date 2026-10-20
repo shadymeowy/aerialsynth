@@ -114,11 +114,38 @@ fn inside(f: f64, a: f64, b: f64) -> f64 {
     }
 }
 
+/// Lit windows of `next`'s buildings (`texel` with `next`): the share of lit windows of a building
+/// (keyed on its roof colour, quantized as the GPU's packed base: one value per building) and
+/// the window's colour (warm, neutral, cool) and brightness; their mean where the windows are
+/// not resolved. Round 14: one lit share and colour for every tower (40 %, blue-white, 0.3)
+/// drew the CBD as flat white blocks at dusk and grey ghosts at night (gallery g29, g34).
+pub(crate) fn next_window(glass: bool, base: DVec3, bi: f64, fi: f64) -> (f64, DVec3, f64, DVec3) {
+    let q = |c: f64| (c.clamp(0.0, 1.0).sqrt() * 255.0).round() as i32;
+    let hb = hash(q(base.x) * 65_536 + q(base.y) * 256 + q(base.z), 0x5bd1);
+    let lit_p = if glass { 0.06 + 0.5 * hb } else { 0.05 + 0.35 * hb };
+    let (bi, fi) = (bi as i32, fi as i32);
+    let lit = if hash(bi ^ (q(base.x) * 977), fi ^ (q(base.z) * 131)) < lit_p { 1.0 } else { 0.0 };
+    let (warm, neutral, cool) = (DVec3::new(1.0, 0.66, 0.36), DVec3::new(1.0, 0.86, 0.68), DVec3::new(0.80, 0.88, 1.0));
+    let (pw, pn) = if glass { (0.4, 0.75) } else { (0.65, 0.92) };
+    let u = hash(bi + 7919, fi ^ 0x2c3);
+    let c = if u < pw {
+        warm
+    } else if u < pn {
+        neutral
+    } else {
+        cool
+    };
+    let e = 0.08 * (0.5 + hash(bi - 31, fi + 17));
+    let mean_c = (warm * pw + neutral * (pn - pw) + cool * (1.0 - pn)) * 0.08;
+    (lit, c * e, lit_p, mean_c)
+}
+
 /// Colour (linear albedo) and night emission of a wall sample: `kind`, the base colour (the
 /// top's for buildings and vegetation, the local mean for rock and snow), `s` metres along the wall, height `h` (m
-/// above the ellipsoid), the ground and top heights at the wall, the pixel footprint `foot` (m).
+/// above the ellipsoid), the ground and top heights at the wall, the pixel footprint `foot` (m),
+/// `next`'s lit windows (`next_window`).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn texel(kind: u32, base: DVec3, s: f64, h: f64, ground: f64, top: f64, foot: f64) -> (DVec3, DVec3) {
+pub(crate) fn texel(kind: u32, base: DVec3, s: f64, h: f64, ground: f64, top: f64, foot: f64, next: bool) -> (DVec3, DVec3) {
     match kind {
         BUILT | GLASS => {
             let glass = kind == GLASS;
@@ -135,7 +162,9 @@ pub(crate) fn texel(kind: u32, base: DVec3, s: f64, h: f64, ground: f64, top: f6
             let lit_p = if glass { 0.4 } else { 0.28 };
             let lit = if hash(bi as i32, fi as i32) < lit_p { 1.0 } else { 0.0 };
             let (col, mean, win, wf, e_col) = if glass {
-                let pane = mix(base, DVec3::new(0.07, 0.09, 0.11), 0.75);
+                // (next: the glass takes more of its roof's tint (six tints and tones, round 13):
+                // a quarter drew one uniform grey skyline, gallery g30)
+                let pane = mix(base, DVec3::new(0.07, 0.09, 0.11), if next { 0.55 } else { 0.75 });
                 let mullion = DVec3::new(0.30, 0.31, 0.33);
                 let spandrel = pane * 0.6;
                 let m = inside(fx, 0.0, 0.07);
@@ -157,6 +186,11 @@ pub(crate) fn texel(kind: u32, base: DVec3, s: f64, h: f64, ground: f64, top: f6
             };
             // fade the pattern where the footprint cannot resolve the windows
             let k = ((1.4 - foot) / 0.7).clamp(0.0, 1.0) * body;
+            if next {
+                let (lit_n, e_win, lit_pn, e_mean) = next_window(glass, base, bi, fi);
+                let e = (e_win * (win * lit_n * k) + e_mean * (wf * lit_pn * (1.0 - k))) * body;
+                return (mix(mean, col, k), e);
+            }
             let e = e_col * (0.3 * (win * lit * k + wf * lit_p * (1.0 - k)) * body);
             (mix(mean, col, k), e)
         }
@@ -214,21 +248,28 @@ mod tests {
         for kind in [BUILT, GLASS, ROCK, VEG] {
             let (mut near, mut far) = (DVec3::ZERO, DVec3::ZERO);
             let (mut en, mut ef) = (DVec3::ZERO, DVec3::ZERO);
+            let (mut enn, mut efn) = (DVec3::ZERO, DVec3::ZERO);
             let n = 400;
             for i in 0..n {
                 for j in 0..n {
                     let (s, h) = (i as f64 * 0.511, 100.0 + j as f64 * 0.253);
-                    let (c, e) = texel(kind, base, s, h, 100.0, 300.0, 0.1);
+                    let (c, e) = texel(kind, base, s, h, 100.0, 300.0, 0.1, false);
                     near += c;
                     en += e;
-                    let (c, e) = texel(kind, base, s, h, 100.0, 300.0, 50.0);
+                    let (c, e) = texel(kind, base, s, h, 100.0, 300.0, 50.0, false);
                     far += c;
                     ef += e;
+                    let (_, e) = texel(kind, base, s, h, 100.0, 300.0, 0.1, true);
+                    enn += e;
+                    let (_, e) = texel(kind, base, s, h, 100.0, 300.0, 50.0, true);
+                    efn += e;
                 }
             }
             let r = near / far;
             assert!(r.max_element() < 1.08 && r.min_element() > 0.92, "kind {kind}: {r}");
             assert!((en - ef).abs().max_element() <= 0.08 * ef.max_element() + 1e-9, "kind {kind}: {en} vs {ef}");
+            // (next's windows: their mean likewise)
+            assert!((enn - efn).abs().max_element() <= 0.08 * efn.max_element() + 1e-9, "kind {kind} (next): {enn} vs {efn}");
         }
     }
 

@@ -129,6 +129,7 @@ const F_FLICKER: u32 = 64;
 const F_LIGHTS: u32 = 128;
 const F_POLLUTION: u32 = 256;
 const F_WALLS: u32 = 512;
+const F_NEXT: u32 = 1024;
 
 /// Render targets and read-back buffers of one resolution.
 struct Targets {
@@ -516,6 +517,7 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
         (split, F_SPLIT),
         (atmo.p.enabled, F_ATMO),
         (r.settings.walls && c.walls, F_WALLS),
+        (r.settings.next_lights, F_NEXT),
     ] {
         if on {
             flags |= f;

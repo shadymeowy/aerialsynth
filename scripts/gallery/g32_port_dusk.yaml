@@ -1,10 +1,9 @@
 # title: port city at dusk
 # category: settlements
 # landcover: savanna coast, port city of 321 000
-# look: the city along the shore after sunset seen from the sea, lights coming on
+# look: the city along the shore after sunset, lights coming on
 # target: -11.88400 -173.49000
-# status: UNRENDERED time (18:20; the 18:00 render had the city before its lights came on); no port piers seen at 18:00
-# local solar time 18:20 on 2026-07-15
+# local solar time 18:20 on 2026-07-16
 world:
   seed: 1
   generator: next
@@ -17,18 +16,18 @@ trajectory:
   synth:
     rate_hz: 400
     speed_mps: 50.0
-    altitude_m: 1500.0
+    altitude_m: 800.0
     heading_deg: 270.0
     kind: line
     lat: -11.88400
-    lon: -173.45121
+    lon: -173.47257
     duration_s: 3.0
 render:
   supersample: 2
   shading: relit
   lighting:
     mode: clock
-    date: '2026-07-16'
+    date: '2026-07-17'
     time_utc: '05:54:00'
     time_scale: 1.0
     sky_intensity: 0.55
@@ -48,14 +47,14 @@ cameras:
     - 359.5
   extrinsics:
     mount: forward
-    pitch_deg: -20.0
+    pitch_deg: -24.0
   frame_rate: 1.0
   rgb:
     sensor:
       exposure:
         mode: auto
         tau_s: 0.25
-        target: 0.13
+        target: 0.10
         max_gain: 160
         max_time_s: 0.04
       motion_blur:

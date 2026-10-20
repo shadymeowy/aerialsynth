@@ -567,6 +567,7 @@ pub fn simulate(
     rs.supersample = ec.supersample.max(1);
     rs.min_zoom = scn.tiles.min_zoom;
     rs.max_zoom = scn.tiles.max_zoom;
+    rs.next_lights = scn.world.generator == terragen::GeneratorKind::Next;
     let backend = rs.backend.resolve();
     let mut renderer = Renderer::new(model.clone(), rs, ell, cache);
     renderer.split_flicker = true;
