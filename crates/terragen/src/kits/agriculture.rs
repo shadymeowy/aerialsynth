@@ -723,7 +723,9 @@ fn draw(s: &mut Stack, pl: &Plan) {
         if mask < cult {
             // (a few parcels lie idle: rough grass; left to the canopy they became dark squares
             // of forest in the paddies)
-            let sh = if u01k(pc.id, 5) >= 0.04 { explicit(pl, &d, &pc, &px, q, cluster) } else { (pasture_col(&px) * 0.92, 0.2, CLS_PASTURE) };
+            // (none on terraced paddy slopes: idle rectangles in the terraces, gallery g24)
+            let idle = u01k(pc.id, 5) < 0.04 && !(pl.sys == sys::PADDY && d.terraces > 0.0 && slope > 0.07);
+            let sh = if !idle { explicit(pl, &d, &pc, &px, q, cluster) } else { (pasture_col(&px) * 0.92, 0.2, CLS_PASTURE) };
             col = sh.0;
             dh = sh.1;
             cls = sh.2;
@@ -1150,10 +1152,12 @@ fn vine_col(season: f64, u: f64) -> DVec3 {
 }
 
 /// Paddy colour by state: 0 flooded, 1 transplanted, 2 green, 3 ripe, 4 harvested.
+/// (round 14: flooded paddies take the sky's colour, silvery grey-blue: the near black-blue
+/// water read as holes, gallery g24)
 fn paddy_col(st: u32) -> DVec3 {
     match st {
-        0 => srgb(64.0, 84.0, 94.0),
-        1 => srgb(76.0, 100.0, 86.0),
+        0 => srgb(116.0, 130.0, 136.0),
+        1 => srgb(98.0, 118.0, 104.0),
         2 => srgb(88.0, 114.0, 62.0),
         3 => srgb(188.0, 172.0, 92.0),
         _ => srgb(150.0, 128.0, 88.0),
@@ -1210,12 +1214,20 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
     // terraces on slopes (benches: a parcel within a parcel)
     let mut lip = 1e9;
     let mut t_dh = 0.0;
-    if d.terraces > 0.0 && px.slope > 0.07 {
+    let terr = d.terraces > 0.0 && px.slope > 0.07;
+    let (mut bench, mut wbench) = (0.0, 1e9);
+    if terr {
         let dhs = if pl.sys == sys::PADDY { 1.2 + 1.0 * u01k(pl.seed, 40) } else { 1.8 + 1.6 * u01k(pl.seed, 40) };
         let (i, f, wb, ex) = terrace(px, dhs, u01k(pl.seed, 41));
         lip = f * wb / ex.max(1e-3) + (1.0 - ex) * 1e9;
         t_dh = (0.5 - f) * dhs * ex;
         id = mix64(id ^ (i as i64 as u64));
+        (bench, wbench) = (i, wb);
+        // (terraced paddies: paddies along the hillside, not the parcels' crops and plots)
+        if pl.sys == sys::PADDY && k == kind::CROP {
+            k = kind::PADDY;
+            cls = kind_class(k);
+        }
     }
     // rows across the parcel's long axis or along it
     let rot = u01k(id, 9) < 0.3;
@@ -1377,19 +1389,41 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
         }
         kind::PADDY => {
             // (paddies of different stages side by side: one vivid green over whole valleys read as paint)
-            let ph = (px.season + 0.45 * (u01k(id, 31) - 0.5)).clamp(0.0, 1.0);
+            // (round 14: on terraces the plots run along the benches across the parcels, cut by
+            // cross-bunds every 25-60 m (at an angle of their own per bench), their stages
+            // varying in patches of hundreds of metres: each parcel's benches in a stage of their
+            // own drew a quilt of rectangles with wavy stripes, gallery g24)
+            let mut pid = id;
+            let mut cross = 1e9;
+            let mut zone = 0.0;
+            let mut ex_p = 1.0;
+            if terr {
+                let bh = hash1(pl.seed ^ 0x7E5, bench as i64);
+                let ang = std::f64::consts::TAU * u01k(bh, 1);
+                let len = 25.0 + 35.0 * u01k(bh, 2);
+                let sa = q.x * ang.cos() + q.y * ang.sin() + len * u01k(bh, 3);
+                let si = (sa / len).floor();
+                pid = mix64(bh ^ hash1(pl.seed ^ 0x9AD7, si as i64));
+                cross = (sa - si * len).min((si + 1.0) * len - sa) / band(len, gsd).max(1e-3);
+                zone = 0.32 * perlin3(pl.seed ^ 0x9A1, p / 400.0) * band(400.0, gsd);
+                ex_p = band(wbench.min(len), gsd);
+            }
+            let ph = (px.season + zone + if terr { 0.18 } else { 0.45 } * (u01k(pid, 31) - 0.5)).clamp(0.0, 1.0);
             let st = paddy_state(ph);
-            col = paddy_col(st) * (0.94 + 0.12 * u01k(id, 32));
-            let fine = perlin3(id ^ 0x9AD, p / 7.0) * band(7.0, gsd);
+            col = paddy_col(st) * (0.94 + 0.12 * u01k(pid, 32));
+            if ex_p < 1.0 {
+                col = mixc(paddy_mean((px.season + zone).clamp(0.0, 1.0)), col, ex_p);
+            }
+            let fine = perlin3(pid ^ 0x9AD, p / 7.0) * band(7.0, gsd);
             col *= 1.0 + 0.06 * fine;
             if st == 1 {
                 // seedling rows over the water
                 let r = (std::f64::consts::TAU * ru / 0.3).sin() * band(0.3, gsd);
                 col = mixc(col, paddy_col(2), 0.25 + 0.2 * r);
             }
-            // plots cut by bunds (on terraces: the benches)
-            let mut bd = pc.edge.min(lip);
-            if lip > 1e8 {
+            // plots cut by bunds (on terraces: the benches and the cross-bunds)
+            let mut bd = if terr { lip.min(cross) } else { pc.edge.min(lip) };
+            if !terr {
                 let sx = 18.0 + 22.0 * u01k(id, 33);
                 let sy = sx * (1.2 + 0.6 * u01k(id, 35));
                 let (mx, my) = ((pc.fx + 1000.0).rem_euclid(sx), (pc.fy + 1000.0).rem_euclid(sy));
@@ -1483,7 +1517,7 @@ fn explicit(pl: &Plan, d: &SysDef, pc: &Parcel, px: &Px, q: DVec2, cluster: u64)
     };
     // (no straight canals down the terraced slopes: each bench's lip broke them into a dotted
     // pale line across the contours)
-    if b == border::CANAL && lip < 1e8 {
+    if b == border::CANAL && terr {
         b = border::NONE;
     }
     // canals along the blocks of paddies, the border of the block
