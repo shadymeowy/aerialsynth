@@ -39,7 +39,8 @@ pub enum Shading {
 pub struct RenderSettings {
     /// Supersampling per axis (odd values make the GT sample coincide with the pixel centre).
     pub supersample: u32,
-    /// LOD: refine until a texel covers at most this many output pixels.
+    /// LOD: refine until a texel covers at most this many output pixels (> 0, fractional values
+    /// allowed). Lower is finer: 0.5 is about one zoom level finer everywhere (~4x the tiles).
     pub texel_px: f64,
     /// Target mesh edge length in output pixels (vertex stride is chosen per tile).
     pub mesh_px: f64,

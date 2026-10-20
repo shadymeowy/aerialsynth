@@ -27,8 +27,10 @@ output       the sequence file: body pose rate, time window, PNG export, compres
   `visibility_km`, `sun_elevation_deg`, … The exceptions are `lat` / `lon` (degrees) and
   dimensionless factors.
 - **Zoom range:** `tiles.min_zoom` / `max_zoom` is the zoom range of everything (planning,
-  generation, rendering). `render.texel_px` sets the level of detail within it; planning
-  refines to 0.8× that. `min_zoom` is at most 6 (the tile selection tests every tile of that
+  generation, rendering). `render.texel_px` sets the level of detail within it: a tile is
+  refined while one of its texels covers more than `texel_px` image pixels (default 1; any
+  value > 0; 0.5 is about one zoom level finer everywhere for ~4× the tiles, 0.7 about half a
+  level). Planning refines to 0.8× that. `min_zoom` is at most 6 (the tile selection tests every tile of that
   level for every frame).
 - **Generation:** `tiles.generator: auto` (default) generates tiles on the GPU when it can, else
   on the CPU; `gpu` / `cpu` force one. Both build the same world ([`gpu.md`](gpu.md)).

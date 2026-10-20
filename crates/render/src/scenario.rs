@@ -418,6 +418,10 @@ impl Scenario {
         if z0 > MAX_MIN_ZOOM {
             bail!("tiles.min_zoom {z0} > {MAX_MIN_ZOOM}: the tile selection tests every tile of min_zoom (4^{z0}) for every frame");
         }
+        let tp = self.render.texel_px;
+        if !(tp.is_finite() && tp > 0.0) {
+            bail!("render.texel_px {tp}: the image pixels a tile texel may cover before a finer tile is used must be > 0 (1 = default; 0.5 = about one zoom level finer, ~4x the tiles)");
+        }
         let m = &self.render.lighting.time_map;
         if m.iter().any(|p| !p[0].is_finite() || !p[1].is_finite()) || m.windows(2).any(|w| w[1][0] <= w[0][0]) {
             bail!("render.lighting.time_map: [trajectory time, clock] pairs with finite values and increasing times");
@@ -524,6 +528,10 @@ mod tests {
         }
         assert!(check(&|s| s.cameras[0].time_offset = f64::NAN).is_err());
         assert!(check(&|s| s.output.start = f64::INFINITY).is_err());
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(check(&|s| s.render.texel_px = bad).is_err(), "texel_px {bad}");
+        }
+        assert!(check(&|s| s.render.texel_px = 0.5).is_ok());
         assert!(check(&|s| s.trajectory.synth.duration = 1e9).is_err());
         let e = check(&|s| s.world.planet.a = 0.0).unwrap_err().to_string();
         assert!(e.contains("world.planet.a"), "{e}");
