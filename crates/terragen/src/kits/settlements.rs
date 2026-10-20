@@ -234,6 +234,9 @@ fn built(s: &mut Stack) {
                 // motorways and trunk roads: tracks crossed the runways, gallery g33)
                 if sp.cov > 0.5 {
                     s.no_town = true;
+                    // (round 14: and the small streams in culverts: a stream crossed the
+                    // airfield and its apron, gallery g33)
+                    s.culvert = true;
                 }
                 sp
             }

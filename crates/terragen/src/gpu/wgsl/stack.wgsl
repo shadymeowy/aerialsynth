@@ -132,6 +132,7 @@ struct Stack {
     is_water: bool,
     done: bool,
     no_town: bool,
+    culvert: bool,
     deferring: bool,
     def: Deferred,
 }
@@ -1105,7 +1106,7 @@ fn layer_standing(s: ptr<function, Stack>) {
 fn layer_rivers(s: ptr<function, Stack>) {
     let l = (*s).l;
     let t = (*s).t;
-    if (l.river_hw <= 0.0) {
+    if (l.river_hw <= 0.0 || ((*s).culvert && l.river_hw < 12.0)) {
         return;
     }
     let gsd = (*s).c.gsd;
@@ -1247,6 +1248,7 @@ fn stack_new(c: Ctx, t: Terrain, l: Local, pf: PixFields, bio: Bio) -> Stack {
     s.is_water = false;
     s.done = false;
     s.no_town = false;
+    s.culvert = false;
     s.deferring = false;
     s.def = deferred_none();
     return s;

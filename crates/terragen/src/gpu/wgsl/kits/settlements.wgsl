@@ -2194,8 +2194,9 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
     }
     // ---- the green verge (`town::place_eval`)
     if (green && inside) {
+        let wet = smoothstep1(0.15, 0.5, e.moist);
         cov_lot = 1.0;
-        col = mixc(yard, srgb(84.0, 112.0, 56.0), 0.5) * (0.95 + 0.1 * e.detail);
+        col = mixc(yard, srgb(84.0, 112.0, 56.0), 0.5 * wet) * (0.95 + 0.1 * e.detail);
         h = 0.0;
         roof = 0.0;
         rim = 0.0;
@@ -2205,7 +2206,7 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
         let th = hash2(blk.id ^ 0xB0Flu, i64(tcl.x), i64(tcl.y));
         let tp = (tcl + 0.5 + 0.5 * (vec2<f32>(u01k(th, 1lu), u01k(th, 2lu)) - 0.5)) * 10.0;
         tree = 0.0;
-        if (u01k(th, 3lu) < 0.6) {
+        if (u01k(th, 3lu) < 0.6 * (0.2 + 0.8 * wet)) {
             tree = st_aa(3.0 + 1.5 * u01k(th, 4lu) - length(ublk - tp), fw);
             tree_h = 8.0 + 6.0 * u01k(th, 5lu);
         }
@@ -2478,9 +2479,14 @@ fn st_airport_px(st: FStamp, p: vec3<f64>, ground: f32, gsd: f32, fw: f32) -> St
     o.abs = true;
     o.clear = edge;
     o.cls = LC_GRASS;
-    let stripe = f32(st_rem(i64(floor(q.x / 18.0)), 2li));
+    let mc = floor(q / 260.0);
+    let mh = hash2(seed ^ 0x30Alu, i64(mc.x), i64(mc.y));
+    let msw = 9.0 + 12.0 * u01k(mh, 1lu);
+    let mq = select(q.y, q.x, u01k(mh, 2lu) < 0.65);
+    let stripe = f32(st_rem(i64(floor(mq / msw)), 2li));
+    let mown = select(0.0, 0.02 + 0.05 * u01k(mh, 4lu), u01k(mh, 3lu) < 0.8);
     let tone = 1.0 + 0.12 * wn * band(170.0, gsd);
-    o.col = srgb(132.0, 146.0, 92.0) * (0.95 + 0.06 * stripe * band(18.0, gsd)) * tone;
+    o.col = srgb(132.0, 146.0, 92.0) * (0.97 + mown * (stripe - 0.5) * band(msw, gsd)) * (tone + 0.06 * (u01k(mh, 5lu) - 0.5) * band(260.0, gsd));
     let wgt = smoothstep1(0.0, margin, din);
     o.dh = ground + (st.h - ground) * wgt;
     let wr = select(22.5, 30.0, lay == 2u);
@@ -3139,6 +3145,7 @@ fn settlements_slot_built(s: ptr<function, Stack>) {
             sp = st_airport_px(st, p, ground, gsd, fw);
             if (sp.cov > 0.5) {
                 (*s).no_town = true;
+                (*s).culvert = true;
             }
         } else if (st.tmpl == ST_PORT) {
             sp = st_port_land_px(st, p, gsd, fw);

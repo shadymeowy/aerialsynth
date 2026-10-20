@@ -720,7 +720,8 @@ impl BDist {
 
     /// The block's district for a block of centre `bc` (on the side of `bc`; a site of the
     /// pixel's lattice).
-    fn pick(&mut self, pl: &Pl, bc: DVec2, la: u64, lb: u64, lat: u64, sa: (u32, u32, bool), sb: (u32, u32, bool), ida: u64, idb: u64) {
+    fn pick(&mut self, pl: &Pl, bc: DVec2, st: &Sites, lat: u64) {
+        let Sites { la, lb, sa, sb, ida, idb, .. } = *st;
         self.own_a = true;
         let near_a = self.side(pl, bc) >= 0.0;
         self.own_a = if la == lat && lb == lat { near_a } else { la == lat };
@@ -735,15 +736,27 @@ impl BDist {
     }
 }
 
-/// The two district sites nearest to `qc` (place frame) and their lattices (`BDist` before
-/// `pick`).
-fn block_sites(pl: &Pl, qc: DVec2, shared: bool) -> (BDist, u64, u64, (u32, u32, bool), (u32, u32, bool), u64, u64) {
+/// The two district sites nearest to a block's centre: their lattices, (pattern, zone,
+/// industrial) and ids, and the `BDist` before `pick`.
+#[derive(Clone, Copy)]
+struct Sites {
+    bd: BDist,
+    la: u64,
+    lb: u64,
+    sa: (u32, u32, bool),
+    sb: (u32, u32, bool),
+    ida: u64,
+    idb: u64,
+}
+
+/// The two district sites nearest to `qc` (place frame).
+fn block_sites(pl: &Pl, qc: DVec2, shared: bool) -> Sites {
     let dc = worley2(pl.seed ^ 0xD15, dist_q(pl, qc), dcell(pl), 0.85);
     let sa = district_pattern(pl, dc.point, dc.id);
     let sb = district_pattern(pl, dc.point2, dc.id2);
     let (la, lb) = (lattice_of(sa.0, dc.id, shared), lattice_of(sb.0, dc.id2, shared));
     let bd = BDist { a: dc.point, b: dc.point2, a_ind: sa.0 == pat::INDUSTRIAL, ..Default::default() };
-    (bd, la, lb, sa, sb, dc.id, dc.id2)
+    Sites { bd, la, lb, sa, sb, ida: dc.id, idb: dc.id2 }
 }
 
 /// The inverse of a warp `y + amp (sin(y.y / l1 + s1), sin(y.x / l2 + s2))` at `x` (fixed-point
@@ -1061,8 +1074,9 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     // town's grid is a whole group)
     let mut merged = false;
     if city {
-        let (mut b0, la, lb, sa, sb, ida, idb) = block_sites(pl, qbc, shared);
-        merged = ms > 1 && b0.a_ind && la == lat;
+        let st = block_sites(pl, qbc, shared);
+        let mut b0 = st.bd;
+        merged = ms > 1 && b0.a_ind && st.la == lat;
         if gridlike && ms > 1 && !merged {
             (bix, bqx, bsx) = cell(0, qr.x, bx, 1);
             (biy, bqy, bsy) = cell(1, qr.y, by, 1);
@@ -1071,7 +1085,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         if !merged {
             m = 1;
         }
-        b0.pick(pl, qbc, la, lb, lat, sa, sb, ida, idb);
+        b0.pick(pl, qbc, &st, lat);
         bd = b0;
         if !bd.ok {
             bd.pattern = lay;
@@ -2188,8 +2202,11 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
     // lots; the green buffer along an estate's edge: estates of grey roofs to their polygon's edge
     // read as stamped on, metro)
     if green && inside {
+        // (in dry lands a dusty verge with few trees: a green ring of trees drew the estate's
+        // polygon in the desert, gallery g09)
+        let wet = smoothstep(0.15, 0.5, e.moist);
         cov_lot = 1.0;
-        col = mixc(yard, srgb(84.0, 112.0, 56.0), 0.5) * (0.95 + 0.1 * e.detail);
+        col = mixc(yard, srgb(84.0, 112.0, 56.0), 0.5 * wet) * (0.95 + 0.1 * e.detail);
         h = 0.0;
         roof = 0.0;
         rim = 0.0;
@@ -2199,7 +2216,7 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
         let th = hash2(blk.id ^ 0xB0F, tcl.x as i64, tcl.y as i64);
         let tp = (tcl + 0.5 + 0.5 * (DVec2::new(u01k(th, 1), u01k(th, 2)) - 0.5)) * 10.0;
         tree = 0.0;
-        if u01k(th, 3) < 0.6 {
+        if u01k(th, 3) < 0.6 * (0.2 + 0.8 * wet) {
             tree = aa(3.0 + 1.5 * u01k(th, 4) - (ublk - tp).length(), fw);
             tree_h = 8.0 + 6.0 * u01k(th, 5);
         }

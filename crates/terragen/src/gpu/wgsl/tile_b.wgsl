@@ -417,7 +417,7 @@ fn st_save(sp: ptr<function, Stack>, b: u32, full: bool) {
     pbw[b + 3u] = vec4<u32>(bitcast<u32>(m.town_urban), bitcast<u32>(m.town_cov), bitcast<u32>(m.river_clear), bitcast<u32>(m.road_major_cov));
     pbw[b + 4u] = vec4<u32>(bitcast<u32>(m.road_cov), bitcast<u32>(m.river_cov), bitcast<u32>(m.veg), bitcast<u32>((*sp).col.x));
     pbw[b + 5u] = vec4<u32>(bitcast<u32>((*sp).col.y), bitcast<u32>((*sp).col.z), bitcast<u32>((*sp).height), bitcast<u32>((*sp).emission.x));
-    pbw[b + 6u] = vec4<u32>(bitcast<u32>((*sp).emission.y), bitcast<u32>((*sp).emission.z), bitcast<u32>((*sp).lit), ((*sp).cls & 0xffffu) | select(0u, 0x10000u, (*sp).is_water) | select(0u, 0x20000u, (*sp).done) | select(0u, 0x40000u, (*sp).deferring) | select(0u, 0x80000u, (*sp).no_town));
+    pbw[b + 6u] = vec4<u32>(bitcast<u32>((*sp).emission.y), bitcast<u32>((*sp).emission.z), bitcast<u32>((*sp).lit), ((*sp).cls & 0xffffu) | select(0u, 0x10000u, (*sp).is_water) | select(0u, 0x20000u, (*sp).done) | select(0u, 0x40000u, (*sp).deferring) | select(0u, 0x80000u, (*sp).no_town) | select(0u, 0x100000u, (*sp).culvert));
     pbw[b + 7u] = vec4<u32>(bio.a, bio.b | (bio.c << 16u), bitcast<u32>(bio.w), bitcast<u32>(bio.k1));
     pbw[b + 8u] = vec4<u32>(bitcast<u32>(bio.k2), bitcast<u32>(bio.wst), bitcast<u32>((*sp).ri), (*sp).inst);
     if (full) {
@@ -472,6 +472,7 @@ fn st_load(sp: ptr<function, Stack>, b: u32, full: bool) {
     (*sp).done = (w & 0x20000u) != 0u;
     (*sp).deferring = (w & 0x40000u) != 0u;
     (*sp).no_town = (w & 0x80000u) != 0u;
+    (*sp).culvert = (w & 0x100000u) != 0u;
     (*sp).inst = pbw[b + 8u].w;
     if (full) {
         let v0 = pbw[b + 9u];
