@@ -351,17 +351,10 @@ pub fn compute(w: &World, reg: &Registry, id: u64, site: DVec3) -> EcoParams {
     // cold continental interiors, Yakutia, interior Alaska, "arid"): their biome is the
     // subarctic forest's
     let kb = if matches!(k, atlas::Koppen::BSk | atlas::Koppen::BWk) && temp < 3.0 && s.precip_mm > 150.0 { atlas::Koppen::Dfc } else { k };
-    let biome = reg.pick(
-        kb as u32,
-        temp,
-        s.precip_mm,
-        dry,
-        s.regime,
-        s.temp_range_c,
-        s.litho as u8,
-        |i| coherent_u(w.seed(), site, 0xB100 + i as u64, 0.0, id),
-        |_| 1.0,
-    );
+    // (the ecoregion's own draw, as before round 16: a smooth draw across the ecoregions
+    // made neighbours in a similar climate alike, but changed the biome of two thirds of the
+    // gallery's places; the styles and the field systems' weights are the smooth draws)
+    let biome = reg.pick(kb as u32, temp, s.precip_mm, dry, s.regime, s.temp_range_c, s.litho as u8, u01k(id, 0xB10), |_| 1.0);
     let style = draw_style(w.seed(), id, site, &s, arch, temp);
     let agri_w = std::array::from_fn(|i| {
         let u = coherent_u(w.seed(), site, if i < 15 { 0xA600 + i as u64 } else { 0xA6FF }, 0.0, id);
@@ -379,11 +372,43 @@ pub fn compute(w: &World, reg: &Registry, id: u64, site: DVec3) -> EcoParams {
 /// ecoregion's own hash: neighbouring ecoregions draw alike, so their biomes and styles do not
 /// jump from cell to cell (round 16: a camouflage of polygonal cells seen from orbit).
 pub fn coherent_u(seed: u64, site: DVec3, key: u64, own: f64, id: u64) -> f64 {
-    let n = perlin3(seed ^ 0xC0E0 ^ key.rotate_left(17), site / 600_000.0) + 0.35 * perlin3(seed ^ 0xC0E1 ^ key.rotate_left(23), site / 250_000.0);
-    let n = n / (0.3504 * (1.0f64 + 0.35 * 0.35).sqrt());
-    let n = (1.0 - own) * n + own * 1.7 * (u01k(id, key) - 0.5) * 2.0;
-    let sd = ((1.0 - own) * (1.0 - own) + own * own * 0.96).sqrt();
-    1.0 / (1.0 + (-1.7 * n / sd).exp())
+    let n = coherent_n(seed, site, key);
+    // uniform by the noise's own distribution (its spread is narrower and its tails lighter than
+    // a normal's: a logistic map drew the draws to the middle, so the biomes of small weight
+    // lost to the large ones everywhere and vanished)
+    let cdf = noise_cdf();
+    let k = cdf.partition_point(|&x| x < n);
+    let u = if k == 0 {
+        0.5 / cdf.len() as f64
+    } else if k >= cdf.len() {
+        1.0 - 0.5 / cdf.len() as f64
+    } else {
+        let (a, b) = (cdf[k - 1], cdf[k]);
+        (k as f64 - 0.5 + if b > a { (n - a) / (b - a) } else { 0.5 }) / cdf.len() as f64
+    };
+    (1.0 - own) * u + own * u01k(id, key)
+}
+
+/// The noise behind [`coherent_u`] (two octaves of the site's position).
+fn coherent_n(seed: u64, site: DVec3, key: u64) -> f64 {
+    perlin3(seed ^ 0xC0E0 ^ key.rotate_left(17), site / 600_000.0) + 0.35 * perlin3(seed ^ 0xC0E1 ^ key.rotate_left(23), site / 250_000.0)
+}
+
+/// The sorted values of [`coherent_n`] over 8192 fixed points of the globe and keys (its
+/// distribution, the same for every seed).
+fn noise_cdf() -> &'static [f64] {
+    static CDF: std::sync::OnceLock<Vec<f64>> = std::sync::OnceLock::new();
+    CDF.get_or_init(|| {
+        let mut v: Vec<f64> = (0..8192u64)
+            .map(|i| {
+                let h = mix64(0xCDF0 ^ i);
+                let d = DVec3::new(u01k(h, 1) - 0.5, u01k(h, 2) - 0.5, u01k(h, 3) - 0.5).normalize_or(DVec3::X);
+                coherent_n(0x5EED_CDF, d * 6_371_000.0, h)
+            })
+            .collect();
+        v.sort_by(|a, b| a.total_cmp(b));
+        v
+    })
 }
 
 /// The style of an ecoregion: lithology colours, tints and its culture's draws.

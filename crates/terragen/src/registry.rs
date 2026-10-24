@@ -968,42 +968,24 @@ impl Registry {
     /// The biome picked for an ecoregion: those whose Köppen classes, envelope and lithology
     /// fit, drawn by weight (× `pref`) with `u` ∈ [0, 1); none fitting: the nearest envelope.
     #[allow(clippy::too_many_arguments)]
-    /// `u(i)`: a draw 0..1 per biome (the Gumbel-max choice: each fitting biome wins with the
-    /// probability of its weight; with draws that vary smoothly over the ecoregions, neighbours
-    /// in a similar climate pick the same biome, and a biome that stops fitting changes only the
-    /// ecoregions it had won).
-    #[allow(clippy::too_many_arguments)]
-    pub fn pick(
-        &self,
-        k: u32,
-        temp: f64,
-        precip: f64,
-        dry: f64,
-        regime: f64,
-        trange: f64,
-        litho: u8,
-        u: impl Fn(usize) -> f64,
-        pref: impl Fn(&Biome) -> f64,
-    ) -> u16 {
+    pub fn pick(&self, k: u32, temp: f64, precip: f64, dry: f64, regime: f64, trange: f64, litho: u8, u: f64, pref: impl Fn(&Biome) -> f64) -> u16 {
         let x = [temp, precip, dry, regime, trange];
         let fits = |b: &Biome| {
             (b.koppen == 0 || b.koppen & (1 << k) != 0)
                 && (b.litho == 0 || b.litho & (1 << litho) != 0)
                 && (0..5).all(|i| (b.env[i][0]..=b.env[i][1]).contains(&x[i]))
         };
-        let mut best: Option<(f64, usize)> = None;
-        for (i, b) in self.biomes.iter().enumerate() {
-            let wi = if fits(b) { b.weight * pref(b) } else { 0.0 };
-            if wi <= 0.0 {
-                continue;
+        let w: Vec<f64> = self.biomes.iter().map(|b| if fits(b) { b.weight * pref(b) } else { 0.0 }).collect();
+        let total: f64 = w.iter().sum();
+        if total > 0.0 {
+            let mut acc = 0.0;
+            for (i, wi) in w.iter().enumerate() {
+                acc += wi / total;
+                if u < acc && *wi > 0.0 {
+                    return i as u16;
+                }
             }
-            let g = wi.ln() - (-(u(i).clamp(1e-12, 1.0 - 1e-12)).ln()).ln();
-            if best.is_none_or(|(bg, _)| g > bg) {
-                best = Some((g, i));
-            }
-        }
-        if let Some((_, i)) = best {
-            return i as u16;
+            return w.iter().rposition(|x| *x > 0.0).unwrap_or(0) as u16;
         }
         // nearest envelope (normalized distance), Köppen-matching first
         let dist = |b: &Biome| {
