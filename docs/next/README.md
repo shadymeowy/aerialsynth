@@ -96,8 +96,9 @@ landscapes but looks worse in places, which is why it is not the default:
   from orbit, the user's "huge problem": a camouflage of polygonal cells, one ecoregion each):
   the styles, palettes, vegetation densities and site climates of the three nearest
   ecoregions blend over ~¼ cell on each side of a border at every zoom, neighbouring
-  ecoregions draw alike styles and field-system mixes (draws that vary smoothly over
-  250–600 km; each ecoregion keeps its own biome, as before), and the crowns' colours blend
+  ecoregions draw alike soil, rock and tint colours (draws that vary smoothly over
+  250–600 km; each ecoregion keeps its own biome, tree density, agriculture and season, as
+  before), and the crowns' colours blend
   where two biomes do. What remains of an ecoregion's outline is a 50 km soft band where its
   biome differs from its neighbour's (crowns and kernel layers of two biomes cannot blend;
   their mosaic does): soft blotches, no polygons of their own tone.
@@ -166,8 +167,8 @@ river network, lakes filled to their spill level, tree crowns, towns, night ligh
   climates, palettes, vegetation densities and agriculture of the **three nearest
   ecoregions** blend wider (round 16, `eco::wide_weights`: ½ / ½ on a border, the nearest
   alone from ~¼ cell inside it, continuous where the second nearest changes), and an
-  ecoregion's style and field-system weights are draws that vary smoothly across the
-  ecoregions (`eco::coherent_u`), so neighbours look alike unless their biomes differ.
+  ecoregion's soil, rock and tint colours are draws that vary smoothly across the ecoregions
+  (`eco::coherent_u`).
 - **Composite stack:** pass B is a fixed stack of layers (zonal ground, altitudinal zone,
   azonal overrides, disturbance, agriculture, canopy, linear infrastructure, built, water,
   seasonal). **Biomes are data** (`crates/terragen/biomes/*.yaml`) over a **kernel library**

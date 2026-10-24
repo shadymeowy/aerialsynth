@@ -122,8 +122,7 @@ kit's `KITS` entry commented out (mean of two runs, tiles/s; shared machine, +-3
   from a quarter their fields hand over to their expected look (every system by its weight, with
   its mean colour and cover, the core's fields, the three nearest ecoregions by their wide
   weights), so farmland keeps its tone at planet zooms (it was gone beyond, a step along the
-  parallel where the pixel crosses half a region). The systems' weights per ecoregion are
-  draws that vary smoothly across the ecoregions. Section-line tracks cover their share of a
+  parallel where the pixel crosses half a region). Section-line tracks cover their share of a
   coarse pixel (`surface::line_cov`): with an edge's antialiasing they covered a tenth of the
   land and cleared its forest at z5-z8.
 * Irregular systems (bocage, smallholder plots, terraces, groves, the core's irregular style)

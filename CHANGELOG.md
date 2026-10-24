@@ -8,8 +8,9 @@
   version) seen from orbit (round 16):
   - no camouflage of ecoregion cells: the ecoregions' styles, palettes and vegetation blend
     over tens of km (the three nearest by smooth weights), neighbouring ecoregions draw alike
-    styles and field-system mixes (each keeps its own biome), the crowns' colours blend where
-    two biomes do, and the ecotone mosaic is 25 km wide (`world.ecoregions.ecotone_km`, was 10);
+    soil and tint colours (each keeps its own biome and what its land holds), the crowns'
+    colours blend where two biomes do, and the ecotone mosaic is 25 km wide
+    (`world.ecoregions.ecotone_km`, was 10);
   - coarse tiles (zooms 3–9) agree with their children: the ridged mountains keep the mean of
     their octaves below the pixel (the ranges were up to 3 km low), the fields of the land-use
     regions hand over to their expected look where the regions end, managed forest stands
