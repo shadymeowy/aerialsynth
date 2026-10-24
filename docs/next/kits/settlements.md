@@ -336,3 +336,11 @@ five cities and g28's town): 0 of 2207 lots split between districts (round 13: 1
 cut (23 of 865). Airfields culvert the small streams (a stream crossed g33's airfield and apron), and their grass is
 mown in patches of ~260 m, each with its own stripe width, direction and contrast, a fifth unmown. Still open: rivers
 and steep ground still end lots per pixel, and the boundary between two overlapping places is per pixel.
+
+Polish round 15: a town's ground has no burn scars (a biome's fire scars showed between the lots as a dark lake
+under the houses, gallery g32, audit a22: within the place's density their ground is the biome's unburnt grass); lots
+across the ring boulevard are its paved edge (forecourts, a promenade and two rows of trees along the kerb; a belt of
+park lots drew a green ring through the CBD, dusk@type); street lamps have small heads (point light 6 → 2, the rest
+of their energy in the pool along the street, so streets read as soft lines of light, not fields of dots) and their
+white LEDs are three quarters neutral (4000 K) and a quarter cool (all cool before). Still open: rivers, steep ground
+and overlapping places end lots per pixel.
