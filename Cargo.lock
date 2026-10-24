@@ -19,7 +19,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "aerialsynth-capi"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "aerialsynth-core",
  "cbindgen",
@@ -28,7 +28,7 @@ dependencies = [
 
 [[package]]
 name = "aerialsynth-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "geodesy",
@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "aerialsynth-python"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "aerialsynth-core",
  "pyo3",
@@ -354,7 +354,7 @@ dependencies = [
 
 [[package]]
 name = "camera-footprint"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "aerialsynth-core",
  "anyhow",
@@ -976,7 +976,7 @@ dependencies = [
 
 [[package]]
 name = "geodesy"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "glam",
  "serde",
@@ -1154,7 +1154,7 @@ dependencies = [
 
 [[package]]
 name = "h5"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "flate2",
  "hdf5-metno-sys",
@@ -2377,7 +2377,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "render"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -2495,7 +2495,7 @@ checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "seqview"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2779,7 +2779,7 @@ dependencies = [
 
 [[package]]
 name = "terragen"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -2798,7 +2798,7 @@ dependencies = [
 
 [[package]]
 name = "terrain"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2872,7 +2872,7 @@ dependencies = [
 
 [[package]]
 name = "tilestore"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "flate2",
@@ -3060,7 +3060,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "viewer"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bytemuck",

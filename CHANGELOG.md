@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-10-24
 
 ### Highlights
 
@@ -28,92 +28,25 @@
   landscape kits (agriculture, coast, cold, desert, mountains, settlements, temperate,
   transport, tropical, volcanic). Its settings: `world.atlas`, `world.ecoregions`,
   `world.biomes`, `world.relief.tectonic_mountains` / `belt_mountains`.
-- `next` closer to v0.2.0's look: larger, softer fields with more woodlots; one street pattern
-  per town; irregular dune fields; deltas that open from the river; mixed paddies; denser taiga.
-- `next` polish round 4: organic deltas (lobate, wandering distributaries, silt blended into the
-  land; no pale wedge); tree lines along the streams of dry farmland; closed lowland taiga, no
-  clear-cuts in empty land; volcano ash without the dark star of rays; darker, smaller cloud-forest
-  crowns; fewer big survey sections in wet climates; denser suburbs; red canyon walls.
-- `next` polish round 5: temperate broadleaf forests with v0.2.0's crowns and gaps; canyon walls
-  with side canyons, spurs and thick strata; houses of v0.2.0's size; delta silt in the land's
-  hue; mixed farms and mown hay in pasture regions; softer desert varnish; A/B places of the
-  same landscape for every v0.2.0 scene.
-- `next` polish round 6: even desert floors (soft varnish and mottling) and calm arid deltas;
-  town centres of detached boxes on lawns, fewer street trees; smaller, more varied parcels
-  in wet climates, hedged mixed farms; no fishbone clearings over farmland; greenhouse seas
-  only in warm climates; snow on steep high-mountain slopes.
-- `next` polish round 7, from an audit at 30 random land places (`scripts/ab_v020.py audit`):
-  ecotones blend their palettes and styles (no camouflage of two biomes' soils), barchans only
-  near hyper-arid ergs, soft steppe and savanna mosaics, feathered forest edges, muted cold
-  colours (glacier ice, crevasses, polar soils, snow nets) and autumn crowns; dense town centres
-  of small lots with varied roofs; less steep 5–7 km ranges; irregular canyon benches, narrow
-  road cuttings, muted salt pans, hedged pastures, grey-brown boreal heath.
-- `next` polish round 8, against the audit's worst places: glaciers without contour stripes and
-  only in mountain valleys, no snow nets, open (not frozen) lakes in summer datasets and no
-  snowed-in ecoregion borders, maars without pale halos; vegetation and kernel layers blend over
-  ecotones (no forest/steppe patchwork); shrubs and textured soil in semi-arid land; no canals
-  or ripe crescents on paddy terraces; dirt roads and desert washes in the ground's colour (no
-  pale ribbons up canyon walls); calmer deltas, burn scars, savanna grass and shrub speckle;
-  autumn colours only with frost; hedged core farmland; like-for-like volcano and boreal places.
-- `next` polish round 9, against the reviewer's worst like-for-like scenes: canyon walls of strata at
-  absolute elevations with spurs, gullies and a narrow floor (no layer cake), rivers of dry lands as a
-  low-water channel between bars, patchy washes; no straight karst cliffs at lithology texel borders; calm
-  flat lakes and ponds without islet speckle or pale halos; lava tongues instead of black discs, cinder
-  cones with scoria aprons; boreal heath and lichen openings; sabkha on arid tidal flats; even desert floors;
-  softer power corridors; cities whose grid bends, skyline fades and estates are grey (no ring city, no tower
-  cake), trees on car parks, frayed town edges; a desert coast and a volcanic valley as like-for-like places.
-- `next` polish round 10: eroded canyon walls (rills, rough rock, talus aprons) over a river that meanders
-  with its canyon, no stream trenches or pale beds on the canyon plateaus, sunken faint dry beds, silty
-  desert rivers; no comb of ribs along high-mountain valleys (gullies per pixel, not from the tile grid);
-  glaciers without contour arcs; one flat level per thermokarst and kettle lake (no tilted sheets) and
-  lighter dark lakes; grown-over cinder cones and lobate lava flows in humid fields; boreal openings on the
-  hills, calmer taiga floors and steppe crowns; lower barchans; cleaner lake shores on flat plains; routes off
-  high-mountain ice; organic old city cores with one ring boulevard, curvilinear suburbs, estates on the town
-  grid with green buffers, frayed town edges.
-- `next` polish round 11: industrial estates of matte halls (skylights, HVAC, loading aprons), yards
-  and car parks with light industry beside them (no glassy sheets of roof); old city cores on the
-  town's grid, bent, cut by lanes into small blocks of terraced houses and fading into the grid (no
-  crisp patch of rubble), an old quarter off the CBD's centre in big cities; ribbons along main streets
-  and scattered houses at town edges; snowbeds and late snow where summers are cold (snowfields on
-  high mountains, glaciers under the season's snow); cinder cones kept on fault-block uplands; long
-  narrow rough lava flows; plants over steep rainforest slopes and a lighter rainforest canopy;
-  semi-arid tussocks and larger shrubs; fewer, sandier barchans; calmer barely resolved crowns.
-- `next` polish round 12: old quarters of small blocks and single houses with an irregular outline
-  fading into the town's grid (no stamped star), beside the CBD in big cities (no pale disc among the
-  towers); grid streets that end at crossings and built edge lots (no empty stubs); a town's grid turned
-  to its relief; red, deep, dissected badlands where warm (`canyon@type` now shows them); far canyon
-  walls without hairy rills; capped valley carves that taper off (no scarps along forest streams);
-  volcanic relief kept in big valleys; firn-filled gullies under perennial snow and snow on steeper
-  slopes; polar moss and lichen over polygons with later snowbeds; fewer barchans; semi-arid ground
-  in clumps; a lighter pass-B stage (light industry beside estates no longer re-evaluates the district).
-- `next` polish round 13: no "bunch of small trees scattered" over open land: trees in groves, clumps
-  and closed stands (a pixel-filtered clump density, `noise::clumped`), lone trees only in savannas,
-  shrubs, tussocks, stones and spires drawn one by one only from ~4–10 pixels (their mean below),
-  shaded gaps in closed canopies (isolated dark dots of the audit 2.24× classic's → 0.92×); a macro
-  tone over 600 m – 1.5 km on the ground and in fields; less orange night lamps (38 % white LED);
-  softer polygon troughs, shallower crevasses, small streams snowed over in winter; tower karst walls
-  bare in streaks between vegetation; airports graded over 220 m and fading into the land, no tracks
-  across them; drained mires in farmland; towers in six tints; the kit places of the forest-strip
-  village and the rice paddies moved to where the world now has them.
-- `next` polish round 14: whole buildings at district edges (a block's district, zone and street
-  width decided at its centre; estates as whole groups of grid blocks; lots along an arterial or
-  the ring boulevard built only where wholly clear of it, else a green verge; the old quarter by
-  block: no lot split between districts, 185 of 2280 before); rice terraces along the hillside
-  (plots on the benches with cross-bunds, stages in patches, no parcel rectangles; flooded paddies
-  sky-coloured); `next`'s buildings at dusk and night: street light falling off with the height
-  above the ground, sparse warm and cool lit windows varying by building, glass reflecting the
-  ground below the horizon (no white towers at dusk, no grey ghosts at night; classic's renders
-  unchanged); airfields culvert small streams; fewer, duller flowering crowns; tower glass in its
-  roof's tint; a pixel's channel by its distance relative to the half width (a braided wash's band
-  ended square on a tributary's bisector); fainter creeks on arid flats, near the sea only.
-- `next` polish round 15: forests keep their brightness where a view passes from one zoom to
-  the next ("light to dark at z14 / z15": unresolved crowns cover a closed stand as their grown
-  crowns do, with shaded gaps and the shading of their relief; next's renders shade from the
-  same mip levels as the colour; a broadleaf forest's z14 2.3x -> 1.4x as bright as its z16 from
-  nadir, far and near halves within 5 % in oblique views); street lamps with small heads and
-  most of their light along the street, mostly neutral LEDs, coming on through the twilight; a
-  little more light on a night town; no burn scars under towns; the ring boulevard's edge a
-  paved promenade with trees instead of a belt of park lots.
+- `next`'s look, tuned over many rounds against v0.2.0 at like-for-like places and an audit of
+  30 random land places (`scripts/ab_v020.py`): organic deltas, coasts and lakes with one flat
+  level and crisp shores; canyons and red badlands with strata, gullies and talus; glaciers,
+  snowfields and late snow where summers are cold; volcanic fields with grown-over cones and
+  lobate lava; ecotones that blend two biomes; forests as groves and closed stands (no
+  scattered single trees over open land, lone trees only in savannas) that keep their brightness
+  across zoom levels; towns and cities whose buildings are never cut by district edges, with old
+  quarters, estates with yards, frayed edges and a fading skyline; continuous rice terraces;
+  airfields, washes and routes that follow the land; next-only dusk and night lighting (no white
+  towers, sparse warm windows, small street lamps, lights reflected in water).
+- **Known limits of `next`** (details in [`docs/next/`](docs/next/README.md)): a few like-for-like
+  scenes are still slightly behind v0.2.0 (a forested volcanic valley is darker and hazier, a high
+  snowfield greyer) and some scenes have less tonal contrast; a forest's brightness still changes
+  a little at the zoom where crowns become explicit (broadleaf ~1.4× between z14 and z16 from
+  nadir, was 2.3×), and sparse conifers over pale lichen lighten into the distance; rivers, steep
+  ground and overlapping towns can still end building lots mid-footprint; a few artefacts remain
+  (dark lines and a rock pit on glaciers, smooth tower-karst domes, a creek pattern over mangrove
+  water, a lake above its shore in the tundra); on DX12 (Windows) the renderer's building walls
+  and next's building lights are compiled out (the WARP software rasterizer miscompiles them).
 - **Optional tile layers** (tile store format 2; `next` only): `tiles.layers: [dtm, instance]`
   adds the bare ground and instance ids (building lots, fields, forest stands) to a new store;
   the viewer's map shadings *Height above ground* and *Instances* show them. Format-1 stores
