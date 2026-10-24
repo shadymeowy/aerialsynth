@@ -134,6 +134,33 @@ pub struct Terrain {
     /// The micro relief's part of `ground` (m): the ground less it is smooth at the scale of a
     /// pond (the kits' pass-B lakes keep their water level flat over it)
     pub micro: f64,
+    /// Ice sheet and perennial snowfield cover 0..1 (`World::ice_sheet`: no valleys or gullies
+    /// under it; the snow models whiten it)
+    pub sheet: f64,
+}
+
+/// The mean of a ridged octave `(1 − |n|)^sharp` over the noise (perlin, spread ~0.35).
+#[inline]
+pub(crate) fn ridged_mean(sharp: f64) -> f64 {
+    1.0 / (1.0 + 0.389 * sharp)
+}
+
+/// The expected sum (and the part of wavelengths over 6 km) of the `k` octaves of the ridged
+/// mountains from wavelength `lam` (amplitude `amp`, cascade weight `weight`) on, below the
+/// pixel (the weights' cascade by its mean, ~5 % low for its spread).
+pub(crate) fn ridged_tail(k: usize, mut lam: f64, mut amp: f64, mut weight: f64, m: f64, fine: f64) -> (f64, f64) {
+    let (mut s, mut l) = (0.0, 0.0);
+    for _ in 0..k {
+        let e = weight * m * amp;
+        s += e * if lam < 1.8 * KM { fine } else { 1.0 };
+        if lam > 6.0 * KM {
+            l += e;
+        }
+        weight = (0.95 * 1.8 * m * weight).min(1.0);
+        lam *= 0.5;
+        amp *= if lam > 1.0 * KM { 0.58 } else { 0.42 };
+    }
+    (s, l)
 }
 
 /// The share of the ridged mountains' fine octaves (wavelengths below 1.8 km) at mountain
@@ -811,6 +838,29 @@ impl World {
     /// Climate (temperature °C, moisture 0..1) from macro fields at a given elevation: the
     /// atlas' sea-level temperature lowered by the lapse rate, its moisture index (rain shadows,
     /// coasts, continentality and `climate.moisture_bias` are in the atlas' precipitation).
+    /// Ice sheet and perennial snowfield cover 0..1 of the land (no valleys, rivers or gullies are
+    /// carved into it; rivers start at its margin): the summer temperature at the smooth elevation
+    /// `temp0` against the equilibrium line (the cold kit's snow model, `kits::cold::ice`, without
+    /// its local terms), or a very cold year with cool summers; in mountains only polar ones.
+    pub(crate) fn ice_sheet(&self, m: &Macro, temp0: f64, moist: f64, mountain: f64) -> f64 {
+        let tela = -2.0 + 5.0 * smoothstep(0.15, 0.85, moist);
+        let half = 0.475 * m.temp_range;
+        // perennial snow by the summer, or the dry polar interiors' ice sheets by a very cold
+        // year with cool summers (their snow index sits near the snow line: valleys carved into
+        // them, a few degrees warmer, drew snow-free dendritic streaks over the ice)
+        let ice = |t: f64| smoothstep(-0.5, -3.0, t + half - tela).max(smoothstep(-8.0, -12.0, t) * smoothstep(8.0, 3.0, t + half - tela));
+        let ice_s = ice(temp0);
+        if ice_s <= 0.0 {
+            return 0.0;
+        }
+        // (in mountains only polar ones, by the sea-level year: alpine ranges keep their valleys
+        // and valley glaciers; polar ranges are buried to their summits, outlet glaciers in
+        // their valleys)
+        let polar = smoothstep(0.0, -6.0, m.temp);
+        // (saturating: the ice is clean up to near its margin)
+        smoothstep(0.0, 0.5, ice_s * (1.0 - smoothstep(0.3, 0.7, mountain) * (1.0 - polar)))
+    }
+
     pub fn climate(&self, m: &Macro, _lat: f64, elev: f64) -> (f64, f64) {
         let c = &self.cfg.climate;
         let t = m.temp - c.lapse_rate_c_per_km * elev.max(0.0) / KM;
@@ -1152,8 +1202,12 @@ impl World {
         // (round 12: firn and perennial snow fill the gullies and the micro relief of the highest
         // ranges: ribbed grey faces where v0.2.0 shows smooth snowfields, alpine_south@type)
         let firn = smoothstep(-4.0, -10.0, temp0);
-        if firn > 0.0 {
-            h -= firn * (0.6 * gully + 0.4 * micro);
+        // (round 16: ice sheets and perennial snowfields bury the gullies and the valleys of
+        // the land under them: brown dendritic streaks and herringbone ran over the polar ice)
+        let sheet = self.ice_sheet(m, temp0, moist, mountain);
+        let gfill = (0.6 * firn).max(sheet);
+        if gfill > 0.0 {
+            h -= gfill * gully + 0.4 * firn * micro;
         }
 
         // ---- mesas (arid terraces)
@@ -1287,7 +1341,10 @@ impl World {
                 let ds = rh.d - cv.shift;
                 let ad = ds.abs();
                 let hw = hw * cv.hw_k;
-                adj.push((ds, hw));
+                // (none under ice sheets and snowfields, the kits' glacial troughs neither: the
+                // ice fills them)
+                let icef = 1.0 - sheet;
+                adj.push((ds, hw * icef));
                 let vnat = fp_w + wall_k * (h0 - floor);
                 let valley = lerp(rh.valley.max(vnat), vnat, cv.narrow).min(rh.reach);
                 // no carving of the deeper seabed; floodplains stay above the sea (near the coast they were
@@ -1350,8 +1407,8 @@ impl World {
                     // the cut fades out across the shallow shelf (a channel continuing into the sea
                     // drew a dark band that ended square)
                     let shelf = smoothstep(-4.0, 0.5, h0);
-                    h = h.min(h0 + (carved - h0) * fade * land_fade * shelf);
-                    floodplain = floodplain.max((1.0 - wall) * land_fade * smoothstep(20.0, 120.0, width) * fade);
+                    h = h.min(h0 + (carved - h0) * fade * land_fade * shelf * icef);
+                    floodplain = floodplain.max((1.0 - wall) * land_fade * smoothstep(20.0, 120.0, width) * fade * icef);
                 }
                 // a kit's small lake in the channel's head (a tarn): a bowl and a water level
                 if cv.lake_r > 0.0 && ad < cv.lake_r && h0 > cv.lake_level {
@@ -1577,7 +1634,7 @@ impl World {
         let rock_expect = (mountain * smoothstep(0.15, 0.6, ridged) + 0.25 * mesa).clamp(0.0, 1.0);
 
         t.ground = h;
-        t.gully = gully_n;
+        t.gully = gully_n * (1.0 - sheet);
         t.temp = temp;
         t.moist = moist;
         t.mountain = mountain;
@@ -1599,6 +1656,7 @@ impl World {
         t.temp_range = m.temp_range;
         t.regime = m.regime;
         t.micro = micro;
+        t.sheet = sheet;
         t
     }
 }

@@ -529,6 +529,22 @@ fn hill_amplitude(m: Macro) -> f32 {
 }
 
 /// Climate (temperature °C, moisture 0..1) at a given elevation.
+/// `World::ice_sheet`: ice sheet and perennial snowfield cover of the land.
+fn ice_sheet(m: Macro, temp0: f32, moist: f32, mountain: f32) -> f32 {
+    let tela = -2.0 + 5.0 * smoothstep1(0.15, 0.85, moist);
+    let half = 0.475 * m.temp_range;
+    let ice_s = ice_index(temp0, half, tela);
+    if (ice_s <= 0.0) {
+        return 0.0;
+    }
+    let polar = smoothstep1(0.0, -6.0, m.temp);
+    return smoothstep1(0.0, 0.5, ice_s * (1.0 - smoothstep1(0.3, 0.7, mountain) * (1.0 - polar)));
+}
+
+fn ice_index(t: f32, half: f32, tela: f32) -> f32 {
+    return max(smoothstep1(-0.5, -3.0, t + half - tela), smoothstep1(-8.0, -12.0, t) * smoothstep1(8.0, 3.0, t + half - tela));
+}
+
 /// Climate at an elevation (`World::climate`): the atlas' sea-level temperature by the lapse
 /// rate, its moisture index.
 fn climate(m: Macro, lat: f32, elev: f32) -> vec2<f32> {
@@ -767,8 +783,10 @@ fn relief_core(c: Ctx, m: Macro, pre: Pre, fill: bool) -> Relief {
     let temp0 = cl.x;
     let moist = cl.y;
     let firn = smoothstep1(-4.0, -10.0, temp0);
-    if (firn > 0.0) {
-        h -= firn * (0.6 * gully + 0.4 * micro);
+    let sheet = ice_sheet(m, temp0, moist, mountain);
+    let gfill = max(0.6 * firn, sheet);
+    if (gfill > 0.0) {
+        h -= gfill * gully + 0.4 * firn * micro;
     }
 
     // mesas (arid terraces)
@@ -807,6 +825,7 @@ fn relief_core(c: Ctx, m: Macro, pre: Pre, fill: bool) -> Relief {
     o.mesa = mesa;
     o.sand = sand;
     o.gully_n = gully_n;
+    o.sheet = sheet;
     return o;
 }
 
@@ -933,6 +952,8 @@ struct Terrain {
     regime: f32,
     /// the micro relief's part of `ground` (m)
     micro: f32,
+    /// ice sheet cover (`World::ice_sheet`)
+    sheet: f32,
 }
 
 // ---------------------------------------------------------------- drainage and lakes (batch data)
@@ -1202,7 +1223,10 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
             // (a kit's meanders and uneven bed: the channel's distance and half width)
             let rds = rd - cv.shift;
             let adc = abs(rds);
-            let hwc = hw * cv.hw_k;
+            // (none under ice sheets and snowfields, the kits' glacial troughs neither)
+            let icef = 1.0 - r.sheet;
+            let hwc = hw * cv.hw_k * icef;
+            let hwk = hw * cv.hw_k;
             let vnat = cv.fp_w + cv.wall_k * (h0 - cv.floor);
             let valley = min(lerp(max(valley_hit, vnat), vnat, cv.narrow), reach);
             if (h0 > cv.floor && h0 > -4.0 && adc < valley) {
@@ -1210,12 +1234,12 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                 if (dad < 0.0) {
                     dad *= 1.0 - smoothstep1(0.75 * valley, valley, adc);
                 }
-                let adw = adc + dad * smoothstep1(1.5 * hwc, 1.5 * hwc + 150.0, adc);
+                let adw = adc + dad * smoothstep1(1.5 * hwk, 1.5 * hwk + 150.0, adc);
                 var wall = smoothstep1(cv.fp_w, valley, adw);
                 wall = wall * wall * (3.0 - 2.0 * wall);
                 let fpl = max(cv.floor + 0.8, cv.fp_min) + 0.4 * abs(micro);
                 var tgt = fpl;
-                if (adc < hwc) {
+                if (adc < hwk) {
                     tgt = cv.floor - 0.8 - 0.02 * width;
                 }
                 // (kits: U-shaped walls and stepped walls)
@@ -1236,7 +1260,7 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                     }
                     wall = w;
                 }
-                let keep = smoothstep1(hwc, hwc + 60.0, adc);
+                let keep = smoothstep1(hwk, hwk + 60.0, adc);
                 var carved = min(h0, lerp(tgt, h0 - r.dv, wall) + r.dv * keep);
                 if (cv.rough > 0.0 && h0 > tgt) {
                     let rr = (1.0 - abs(perlin3(0x0C4A9E01lu, p / 13.0lf))) * band(13.0, 2.5 * gsd) * 0.65 + (1.0 - abs(perlin3(0x0C4A9E02lu, p / 5.0lf))) * band(5.0, 2.5 * gsd) * 0.35;
@@ -1252,8 +1276,8 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                     fade = smoothstep1(0.25, 0.5, valley_hit / gsd);
                 }
                 let shelf = smoothstep1(-4.0, 0.5, h0);
-                h = min(h, h0 + (carved - h0) * fade * land_fade * shelf);
-                floodplain = max(floodplain, (1.0 - wall) * land_fade * smoothstep1(20.0, 120.0, width) * fade);
+                h = min(h, h0 + (carved - h0) * fade * land_fade * shelf * icef);
+                floodplain = max(floodplain, (1.0 - wall) * land_fade * smoothstep1(20.0, 120.0, width) * fade * icef);
             }
             // a kit's small lake in the channel's head (a tarn): a bowl and a water level
             if (cv.lake_r > 0.0 && adc < cv.lake_r && h0 > cv.lake_level) {
@@ -1479,7 +1503,7 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
     }
 
     t.ground = h;
-    t.gully = r.gully_n;
+    t.gully = r.gully_n * (1.0 - r.sheet);
     t.temp = temp;
     t.moist = moist;
     t.mountain = mountain;
@@ -1501,5 +1525,6 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
     t.temp_range = m.temp_range;
     t.regime = m.regime;
     t.micro = micro;
+    t.sheet = r.sheet;
     return t;
 }

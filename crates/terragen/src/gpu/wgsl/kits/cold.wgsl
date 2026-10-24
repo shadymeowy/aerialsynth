@@ -79,7 +79,7 @@ fn cold_ice(s: ptr<function, Stack>, c: ColdClimate) -> ColdIce {
             n += 0.25 * perlin3(COLD_SEED_SNOW + 1lu, p * (1.0lf / 18.0lf)) * b18;
         }
     }
-    let pi = base - 2.0 * hollow + 0.8 * spur + 1.2 * n + 1.5 * clamp(cold_sunny(s), -1.0, 1.0);
+    let pi = base - 2.0 * hollow + 0.8 * spur + 1.2 * n + 1.5 * clamp(cold_sunny(s), -1.0, 1.0) - 4.0 * t.sheet;
     var rv = 0.0;
     if (l.river_hw > 0.0) {
         rv = 1.0 - smoothstep1(l.river_hw + 80.0, l.river_hw + 500.0, abs(l.river_d));
@@ -421,7 +421,7 @@ fn cold_slot_water(s: ptr<function, Stack>) {
         return;
     }
     let c = cold_climate(s);
-    if (c.date > -1.0 && c.summer > -1.0) {
+    if (c.date > 2.0 && c.summer > 2.0) {
         return;
     }
     let p = (*s).c.p;
@@ -429,7 +429,8 @@ fn cold_slot_water(s: ptr<function, Stack>) {
     let fw = l.fw;
     let depth = l.water - l.ground;
     if (l.water_kind == W_OCEAN) {
-        let con = max(smoothstep1(-1.5, -8.0, c.date), smoothstep1(0.0, -2.0, c.summer));
+        let nz = 0.8 * perlin3(COLD_SEED_FLOE + 5lu, p * (1.0lf / 150000.0lf)) + 0.4 * perlin3(COLD_SEED_FLOE + 6lu, p * (1.0lf / 45000.0lf));
+        let con = max(smoothstep1(-3.4, -4.6, c.date + 2.0 * nz), smoothstep1(-0.2, -1.4, c.summer + 1.5 * nz));
         if (con <= 0.02) {
             return;
         }
@@ -653,7 +654,7 @@ fn cold_snow(s: ptr<function, Stack>, c: ColdClimate, g: ColdIce) {
             n += 0.25 * perlin3(COLD_SEED_SNOW + 3lu, p * (1.0lf / 12.0lf)) * b12;
         }
     }
-    var x = date + n + 2.5 * clamp(cold_sunny(s), -1.0, 1.0);
+    var x = date + n + 2.5 * clamp(cold_sunny(s), -1.0, 1.0) - 4.0 * t.sheet;
     if (x > -3.2 && x < 1.0) {
         let b4 = band(4.0, gsd);
         if (b4 > 0.0) {

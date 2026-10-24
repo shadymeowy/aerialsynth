@@ -1177,7 +1177,7 @@ fn snow_prepare(s: ptr<function, Stack>) {
     let t = (*s).t;
     let p = (*s).c.p;
     let gsd = (*s).c.gsd;
-    let snow_base = t.temp + 1.0 * (*s).pf.f[PF_SNOW] - 1.6 * smoothstep1(0.1, 0.8, -t.gully) + 0.6 * smoothstep1(0.2, 0.8, t.gully);
+    let snow_base = t.temp + 1.0 * (*s).pf.f[PF_SNOW] - 4.0 * t.sheet - 1.6 * smoothstep1(0.1, 0.8, -t.gully) + 0.6 * smoothstep1(0.2, 0.8, t.gully);
     var snow = 0.0;
     // (the noise terms add at most ~1.3 · 0.75)
     if (snow_base - 1.5 < -2.6) {

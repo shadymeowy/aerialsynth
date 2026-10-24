@@ -168,7 +168,8 @@ pub(crate) fn ice(s: &Stack, c: &ColdClimate) -> Ice {
         }
     }
     // (shady slopes keep their snow: cirques face the pole)
-    let pi = base - 2.0 * hollow + 0.8 * spur + 1.2 * n + 1.5 * sunny(s).clamp(-1.0, 1.0);
+    // (an ice sheet is white: `Terrain::sheet`)
+    let pi = base - 2.0 * hollow + 0.8 * spur + 1.2 * n + 1.5 * sunny(s).clamp(-1.0, 1.0) - 4.0 * t.sheet;
     let rv = if l.river_hw > 0.0 { 1.0 - smoothstep(l.river_hw + 80.0, l.river_hw + 500.0, l.river_d.abs()) } else { 0.0 };
     // (valley glaciers flow down mountain valleys: in the lowlands the rivers and hollows drew
     // ice tongues along every stream of a tundra plain)
@@ -768,7 +769,7 @@ pub fn water(s: &mut Stack) {
         return;
     }
     let c = climate(s);
-    if c.date > -1.0 && c.summer > -1.0 {
+    if c.date > 2.0 && c.summer > 2.0 {
         return;
     }
     let p = s.ctx.p;
@@ -776,9 +777,12 @@ pub fn water(s: &mut Stack) {
     let fw = l.fw;
     let depth = l.water - l.ground;
     if l.water_kind == crate::world::water::OCEAN {
-        // concentration: forming below −2 °C, pack ice below ~−8 °C, perennial where the summer
-        // stays below freezing
-        let con = smoothstep(-1.5, -8.0, c.date).max(smoothstep(0.0, -2.0, c.summer));
+        // concentration: forming below −3.4 °C, pack ice below ~−4.6 °C, perennial where the
+        // summer stays below freezing; the edge ragged with tongues and bays of ~45-150 km
+        // (round 16: over the smooth climate, a margin from −1.5 to −8 °C was a smeared blur
+        // hundreds of km wide seen from orbit)
+        let nz = 0.8 * perlin3(SEED_FLOE + 5, p / 150_000.0) + 0.4 * perlin3(SEED_FLOE + 6, p / 45_000.0);
+        let con = smoothstep(-3.4, -4.6, c.date + 2.0 * nz).max(smoothstep(-0.2, -1.4, c.summer + 1.5 * nz));
         if con <= 0.02 {
             return;
         }
@@ -1010,7 +1014,8 @@ fn snow(s: &mut Stack, c: &ColdClimate, g: &Ice) {
         }
     }
     // (slopes facing the equator lose their snow first)
-    let mut x = date + n + 2.5 * sunny(s).clamp(-1.0, 1.0);
+    // (an ice sheet is white: `Terrain::sheet`)
+    let mut x = date + n + 2.5 * sunny(s).clamp(-1.0, 1.0) - 4.0 * t.sheet;
     // late melt: the edges ragged with fine noise (a net of snow in the troughs of 18 m frost
     // polygons, and polygons bare or white one by one, drew a white net and a crisp patchwork
     // of cells over the land)
