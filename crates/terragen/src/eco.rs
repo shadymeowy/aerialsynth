@@ -356,14 +356,8 @@ pub fn compute(w: &World, reg: &Registry, id: u64, site: DVec3) -> EcoParams {
     // gallery's places; the styles and the field systems' weights are the smooth draws)
     let biome = reg.pick(kb as u32, temp, s.precip_mm, dry, s.regime, s.temp_range_c, s.litho as u8, u01k(id, 0xB10), |_| 1.0);
     let style = draw_style(w.seed(), id, site, &s, arch, temp);
-    let agri_w = std::array::from_fn(|i| {
-        let u = coherent_u(w.seed(), site, if i < 15 { 0xA600 + i as u64 } else { 0xA6FF }, 0.0, id);
-        if i < 15 {
-            0.4 + 1.2 * u
-        } else {
-            u
-        }
-    });
+    // (the ecoregion's own draws, as in v0.3.0: the field systems a place shows)
+    let agri_w = std::array::from_fn(|i| if i < 15 { 0.4 + 1.2 * u01k(id, 0xA600 + i as u64) } else { u01k(id, 0xA6FF) });
     EcoParams { id, site: surface, climate, biome, culture: s.culture, style, agri_w }
 }
 
@@ -413,8 +407,14 @@ fn noise_cdf() -> &'static [f64] {
 
 /// The style of an ecoregion: lithology colours, tints and its culture's draws.
 fn draw_style(seed: u64, id: u64, site: DVec3, s: &atlas::AtlasSample, arch: usize, temp: f64) -> EcoStyle {
+    // colours: draws that vary smoothly across the ecoregions (round 16: drawn per ecoregion,
+    // neighbouring soils and tints jumped from polygon to polygon seen from orbit); what the
+    // land holds (tree density, agriculture, field systems, towns, season) stays the
+    // ecoregion's own draw, as in v0.3.0 (smooth draws there turned farmland into forest at a
+    // third of the A/B places; the wide blend softens their borders)
     let u = |k: u64| coherent_u(seed, site, 0x5700 + k, 0.15, id);
-    let r = |k: u64, a: [f64; 2]| a[0] + (a[1] - a[0]) * u(k);
+    let own = |k: u64| u01k(id, 0x5700 + k);
+    let r = |k: u64, a: [f64; 2]| a[0] + (a[1] - a[0]) * own(k);
     let lit = s.litho as usize;
     let lc = &LITHO_COL[lit];
     let pick = |a: [f64; 3], b: [f64; 3], t: f64| crate::surface::srgb(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t);
@@ -434,7 +434,7 @@ fn draw_style(seed: u64, id: u64, site: DVec3, s: &atlas::AtlasSample, arch: usi
     // draws by them)
     let mut fields = ar.fields;
     for (i, f) in fields.iter_mut().enumerate() {
-        *f *= 0.6 + 0.8 * u(20 + i as u64);
+        *f *= 0.6 + 0.8 * own(20 + i as u64);
     }
     let ft: f64 = fields.iter().sum();
     let fields = if ft > 0.0 { fields.map(|f| f / ft) } else { [0.5, 0.38, 0.0, 0.12] };
@@ -445,10 +445,10 @@ fn draw_style(seed: u64, id: u64, site: DVec3, s: &atlas::AtlasSample, arch: usi
         rock_w: 0.45 + 0.4 * u(4),
         grass: tint(5, 0.14),
         crown: tint(10, 0.10),
-        trees: r(13, ar.trees) * (0.75 + 0.5 * u(14)),
-        conifer: 0.5 * (u(15) - 0.5),
-        shrubs: 0.6 + 0.8 * u(16),
-        woodlots: 0.6 + 0.9 * u(17),
+        trees: r(13, ar.trees) * (0.75 + 0.5 * own(14)),
+        conifer: 0.5 * (own(15) - 0.5),
+        shrubs: 0.6 + 0.8 * own(16),
+        woodlots: 0.6 + 0.9 * own(17),
         season: r(18, ar.season),
         agri: r(19, ar.agri),
         towns: r(25, ar.towns) * (0.7 + 0.6 * s.development),
