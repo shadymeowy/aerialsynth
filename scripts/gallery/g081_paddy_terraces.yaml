@@ -1,9 +1,9 @@
-# title: white-water river (nadir)
-# category: tropical
-# landcover: tropical dry forest and savanna
-# look: nadir: a rocky river with white rapids through dry forest
-# target: 21.21200 -20.26200
-# local solar time 11:00 on 2026-03-20
+# title: contour paddy terraces
+# category: agriculture
+# landcover: monsoon paddy hills (1.0-1.3 km)
+# look: bunded paddy terraces on the contours of green hills, a hamlet, evening light
+# target: 18.34500 160.81000
+# local solar time 17:30 on 2026-06-15
 world:
   seed: 1
   generator: next
@@ -16,19 +16,19 @@ trajectory:
   synth:
     rate_hz: 400
     speed_mps: 50.0
-    altitude_m: 800.0
-    heading_deg: 0.0
+    altitude_m: 500.0
+    heading_deg: 60.0
     kind: line
-    lat: 21.21110
-    lon: -20.26200
+    lat: 18.34066
+    lon: 160.80207
     duration_s: 3.0
 render:
   supersample: 2
   shading: relit
   lighting:
     mode: clock
-    date: '2026-03-20'
-    time_utc: '12:21:00'
+    date: '2026-06-15'
+    time_utc: '06:47:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
@@ -46,8 +46,8 @@ cameras:
     - 639.5
     - 359.5
   extrinsics:
-    mount: nadir
-    pitch_deg: 0
+    mount: forward
+    pitch_deg: -30.0
   frame_rate: 1.0
   rgb:
     sensor:

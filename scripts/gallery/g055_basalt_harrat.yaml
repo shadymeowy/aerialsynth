@@ -1,9 +1,9 @@
-# title: gas flares at night
-# category: settlements
-# landcover: desert scrub oil field
-# look: orange gas flares and lit pads scattered across a dark desert
-# target: 24.03100 -57.48300
-# local solar time 21:30 on 2026-02-15
+# title: basalt desert with a playa
+# category: desert
+# landcover: basalt desert (harrat), oasis culture
+# look: a dark basalt plain (harrat biome) with a white playa and desert tracks; the boulder fields do not read from 800 m
+# target: 26.50000 40.50000
+# local solar time 15:45 on 2026-12-10
 world:
   seed: 1
   generator: next
@@ -16,19 +16,19 @@ trajectory:
   synth:
     rate_hz: 400
     speed_mps: 50.0
-    altitude_m: 1500.0
-    heading_deg: 0.0
+    altitude_m: 800.0
+    heading_deg: 300.0
     kind: line
-    lat: 24.00117
-    lon: -57.48300
+    lat: 26.49278
+    lon: 40.51396
     duration_s: 3.0
 render:
   supersample: 2
   shading: relit
   lighting:
     mode: clock
-    date: '2026-02-16'
-    time_utc: '01:20:00'
+    date: '2026-12-10'
+    time_utc: '13:03:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
@@ -47,28 +47,26 @@ cameras:
     - 359.5
   extrinsics:
     mount: forward
-    pitch_deg: -25.0
+    pitch_deg: -28.0
   frame_rate: 1.0
   rgb:
     sensor:
       exposure:
         mode: auto
         tau_s: 0.4
-        target: 0.03
-        max_gain: 64
-        max_time_s: 0.008
+        target: 0.13
       motion_blur:
         enabled: true
         max_samples: 24
       optics:
-        defocus_px: 0.0
-        chromatic_aberration_px: 0.0
+        defocus_px: 0.25
+        chromatic_aberration_px: 0.3
         vignette: 0.25
-        bloom: 0.02
+        bloom: 0.06
       noise:
         enabled: true
-        read: 0.04
-        shot: 0.06
+        read: 0.08
+        shot: 0.1
       tone:
         curve: filmic
         saturation: 0.92

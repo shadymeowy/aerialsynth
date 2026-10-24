@@ -1,9 +1,9 @@
-# title: dry stone terraces
-# category: agriculture
-# landcover: Mediterranean hills: grain, olives and orchards on terraces
-# look: stone-walled benches on the contours with grain, olives and orchards
-# target: -38.49600 176.29200
-# local solar time 16:30 on 2026-04-10
+# title: kraal village in the dry season
+# category: settlements
+# landcover: dry highland savanna (smallholder culture)
+# look: round huts and cattle kraals among dry-season grass and scattered trees
+# target: -15.97110 62.83640
+# local solar time 08:00 on 2026-09-15
 world:
   seed: 1
   generator: next
@@ -16,19 +16,19 @@ trajectory:
   synth:
     rate_hz: 400
     speed_mps: 50.0
-    altitude_m: 600.0
-    heading_deg: 30.0
+    altitude_m: 300.0
+    heading_deg: 60.0
     kind: line
-    lat: -38.50487
-    lon: 176.28545
+    lat: -15.97305
+    lon: 62.83289
     duration_s: 3.0
 render:
   supersample: 2
   shading: relit
   lighting:
     mode: clock
-    date: '2026-04-10'
-    time_utc: '04:45:00'
+    date: '2026-09-15'
+    time_utc: '03:49:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
@@ -47,7 +47,7 @@ cameras:
     - 359.5
   extrinsics:
     mount: forward
-    pitch_deg: -30.0
+    pitch_deg: -42.0
   frame_rate: 1.0
   rgb:
     sensor:

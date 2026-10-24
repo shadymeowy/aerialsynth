@@ -1,9 +1,9 @@
-# title: yardangs
-# category: desert
-# landcover: hyper-arid bare plain (98 mm)
-# look: wind-streamlined yardang ridges on a bare plain, low sun across them
-# target: 19.50000 -129.25000
-# local solar time 16:40 on 2026-02-10
+# title: river through tropical dry forest (nadir)
+# category: tropical
+# landcover: tropical dry forest and savanna
+# look: nadir: a river through dry forest and savanna with burn scars (the documented white-water place; no rapids show)
+# target: 21.21200 -20.26200
+# local solar time 11:00 on 2026-03-20
 world:
   seed: 1
   generator: next
@@ -16,19 +16,19 @@ trajectory:
   synth:
     rate_hz: 400
     speed_mps: 50.0
-    altitude_m: 400.0
-    heading_deg: 200.0
+    altitude_m: 800.0
+    heading_deg: 0.0
     kind: line
-    lat: 19.50809
-    lon: -129.24687
+    lat: 21.21110
+    lon: -20.26200
     duration_s: 3.0
 render:
   supersample: 2
   shading: relit
   lighting:
     mode: clock
-    date: '2026-02-11'
-    time_utc: '01:17:00'
+    date: '2026-03-20'
+    time_utc: '12:21:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
@@ -46,8 +46,8 @@ cameras:
     - 639.5
     - 359.5
   extrinsics:
-    mount: forward
-    pitch_deg: -25.0
+    mount: nadir
+    pitch_deg: 0
   frame_rate: 1.0
   rgb:
     sensor:
