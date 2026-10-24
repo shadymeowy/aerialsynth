@@ -2,7 +2,10 @@
 """A gallery of stills of the next generator's world (one 1280 x 720 still per scene).
 
 `scripts/gallery/<scene>.yaml` are complete scenarios (`world.generator: next`), one per image,
-named `gNN_<name>`. Their header comments describe the image for the index:
+named `gNN_<name>` (`gNNN_<name>` from 37 on); `--section classic` (before the command) works on
+`scripts/gallery/classic/cNN_<name>.yaml` instead, stills of the default `classic` generator
+(v0.2.0's world: its own places). The JPEGs are numbered per section: `n001_<name>.jpg` (next),
+`c01_<name>.jpg` (classic). Their header comments describe the image for the index:
 
     # title: alpine peaks at golden hour
     # category: mountains
@@ -41,6 +44,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CFG = ROOT / "scripts" / "gallery"
+# per section: config folder, generator, JPEG prefix and digits, index title
+SECTIONS = {
+    "next": (ROOT / "scripts" / "gallery", "next", "n", 3, "Gallery of the next generator"),
+    "classic": (ROOT / "scripts" / "gallery" / "classic", "classic", "c", 2, "Gallery of the classic generator"),
+}
+SECTION = "next"
 W, H, FX = 1280, 720, 914.0  # 70 deg horizontal field of view
 T_STILL = 2.0  # s: the still's time on the trajectory (auto exposure settled)
 
@@ -63,7 +72,7 @@ NOISE = {"night": "        read: 0.04\n        shot: 0.06\n", "other": "        
 TEMPLATE = """\
 {header}world:
   seed: 1
-  generator: next
+  generator: {generator}
 tiles:
   file: out/world.h5
   max_zoom: 18
@@ -130,13 +139,24 @@ output:
 HEAD_KEYS = ["title", "category", "landcover", "look", "target"]
 
 
+def num(s):
+    """The scene's number (g07_x, g037_x, c03_x -> 7, 37, 3)."""
+    return int(re.match(r"[a-z]+(\d+)", s).group(1))
+
+
+def jpg(s):
+    """The scene's JPEG name: its section's prefix and its number (g07_x -> n007_x.jpg)."""
+    _, _, pre, digits, _ = SECTIONS[SECTION]
+    return f"{pre}{num(s):0{digits}d}_{s.split('_', 1)[1]}.jpg"
+
+
 def scenes(names):
-    all_ = sorted(p.stem for p in CFG.glob("*.yaml"))
+    all_ = sorted((p.stem for p in CFG.glob("*.yaml")), key=num)
     if not names:
         return all_
     out = []
     for n in names:
-        m = [s for s in all_ if s == n or s.split("_")[0] == n]
+        m = [s for s in all_ if s == n or s.split("_")[0] == n or (n.isdigit() and num(s) == int(n))]
         if not m:
             sys.exit(f"no scene {n!r} (have: {', '.join(all_)})")
         out += m
@@ -185,6 +205,7 @@ def new(a):
     mode = a.mode
     text = TEMPLATE.format(
         header=header,
+        generator=SECTIONS[SECTION][1],
         speed=a.speed,
         alt=a.alt,
         heading=a.heading,
@@ -252,8 +273,8 @@ def jpeg(a):
         log = (run / s / "run.log").read_text(errors="replace")
         with h5py.File(h5, "r") as f:
             im = f["cam0/rgb"][0]
-        Image.fromarray(im).save(out / f"{s}.jpg", quality=a.quality)
-        print(f"{s}.jpg{' (RENDERED ON THE CPU)' if 'on the CPU' in log else ''}")
+        Image.fromarray(im).save(out / jpg(s), quality=a.quality)
+        print(f"{jpg(s)}{' (RENDERED ON THE CPU)' if 'on the CPU' in log else ''}")
 
 
 def label(im, text, size):
@@ -273,7 +294,7 @@ def sheet(a):
     from PIL import Image
 
     out = Path(a.out)
-    names = [s for s in scenes(a.scenes) if (out / f"{s}.jpg").exists()]
+    names = [s for s in scenes(a.scenes) if (out / jpg(s)).exists()]
     w, h = a.width, a.width * H // W
     per, ncol = a.per_sheet, a.cols
     for k in range(0, len(names), per):
@@ -281,9 +302,9 @@ def sheet(a):
         nrow = (len(chunk) + ncol - 1) // ncol
         sh = Image.new("RGB", (w * ncol, h * nrow), (20, 20, 20))
         for i, s in enumerate(chunk):
-            t = Image.open(out / f"{s}.jpg").convert("RGB").resize((w, h), Image.LANCZOS)
+            t = Image.open(out / jpg(s)).convert("RGB").resize((w, h), Image.LANCZOS)
             title = header(s).get("title", "")
-            label(t, f"{s.split('_')[0]}  {title}", max(12, w // 32))
+            label(t, f"{jpg(s).split('_')[0]}  {title}", max(12, w // 32))
             sh.paste(t, ((i % ncol) * w, (i // ncol) * h))
         p = out / f"sheet{k // per + 1}.jpg"
         sh.save(p, quality=88)
@@ -297,7 +318,11 @@ def pose(s):
     syn, light, cam = c["trajectory"]["synth"], c["render"]["lighting"], c["cameras"][0]["extrinsics"]
     pitch = -90.0 if cam.get("mount") == "nadir" else float(cam["pitch_deg"])
     hh, mm, _ = map(int, str(light["time_utc"]).split(":"))
-    loc = (hh + mm / 60.0 + float(syn["lon"]) / 15.0) % 24.0
+    raw = hh + mm / 60.0 + float(syn["lon"]) / 15.0
+    loc = raw % 24.0
+    import datetime
+
+    local_date = (datetime.date.fromisoformat(str(light["date"])) + datetime.timedelta(days=int(raw // 24))).isoformat()
     return {
         "lat": f"{syn['lat']:.4f}",
         "lon": f"{syn['lon']:.4f}",
@@ -306,6 +331,7 @@ def pose(s):
         "pitch_deg": pitch,
         "date_utc": light["date"],
         "time_utc": light["time_utc"],
+        "date_local": local_date,
         "local_solar": f"{int(loc):02d}:{int(round(loc % 1 * 60)) % 60:02d}",
     }
 
@@ -322,8 +348,9 @@ def index(a):
         tgt = h.get("target", "").split()
         rows.append(
             {
-                "n": s.split("_")[0][1:],
+                "n": jpg(s).split("_")[0][1:],
                 "scene": s,
+                "image": jpg(s),
                 "title": h.get("title", ""),
                 "category": h.get("category", ""),
                 **p,
@@ -339,22 +366,24 @@ def index(a):
         wr.writeheader()
         wr.writerows(rows)
     with open(out / "index.md", "w") as f:
-        f.write("# Gallery of the next generator\n\n")
-        f.write("Stills of `world.generator: next` (1280 x 720, supersample 2, GPU renders). Camera position (lat, lon), ")
+        cfg, gen, _, _, title = SECTIONS[SECTION]
+        f.write(f"# {title}\n\n")
+        f.write(f"Stills of `world.generator: {gen}` (1280 x 720, supersample 2, GPU renders). Camera position (lat, lon), ")
         f.write("altitude above the ground, heading / pitch (-90: nadir), date and local solar time; the target is the ")
-        f.write("ground point at the image centre. Configs: `scripts/gallery/<scene>.yaml`.\n\n")
+        f.write(f"ground point at the image centre. Configs: `{cfg.relative_to(ROOT)}/<scene>.yaml`.\n\n")
         f.write("| # | image | category | lat, lon | alt AGL | hdg / pitch | date, local time | biome / landcover | look at | artefacts noticed |\n")
         f.write("|---|---|---|---|---|---|---|---|---|---|\n")
         for r in rows:
             f.write(
-                f"| {r['n']} | [{r['title']}]({r['scene']}.jpg) | {r['category']} | {r['lat']}, {r['lon']} | {r['alt_agl_m']} m | "
-                f"{r['heading_deg']} / {r['pitch_deg']:g} | {r['date_utc']} {r['local_solar']} | {r['landcover']} | {r['look']} | {r['artefacts']} |\n"
+                f"| {r['n']} | [{r['title']}]({r['image']}) | {r['category']} | {r['lat']}, {r['lon']} | {r['alt_agl_m']} m | "
+                f"{r['heading_deg']} / {r['pitch_deg']:g} | {r['date_local']} {r['local_solar']} | {r['landcover']} | {r['look']} | {r['artefacts']} |\n"
             )
     print(out / "index.md")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--section", choices=list(SECTIONS), default="next", help="next (scripts/gallery) or classic (scripts/gallery/classic)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     n = sub.add_parser("new", help="write scripts/gallery/NAME.yaml")
     n.add_argument("name")
@@ -392,6 +421,8 @@ def main():
     i.add_argument("--notes")
     i.add_argument("scenes", nargs="*")
     a = ap.parse_args()
+    global SECTION, CFG
+    SECTION, CFG = a.section, SECTIONS[a.section][0]
     {"new": new, "render": render, "jpeg": jpeg, "sheet": sheet, "index": index}[a.cmd](a)
 
 
