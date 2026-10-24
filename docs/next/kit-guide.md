@@ -200,9 +200,7 @@ changes only the keys given).
 ecoregion's site the planetary atlas (`src/atlas/`) gives the climate (Köppen class at the
 site's smooth elevation, mean temperature, annual precipitation, dry months, precipitation
 regime, temperature range), lithology and culture; the biomes whose `koppen`, `envelope` and
-`lithology` fit are drawn by `weight` (none fits: the nearest envelope; a Gumbel-max choice
-over per-biome draws that vary smoothly across the ecoregions, `eco::coherent_u`: neighbours in a
-similar climate pick the same biome). A sample takes its
+`lithology` fit are drawn by `weight` (none fits: the nearest envelope). A sample takes its
 ecoregion's biome, then that biome's `zonation` entry by its own temperature (lapse rate)
 shifted by the continentality (`registry::zone_temp`: + (range / 2 − 10) °C, clamped −6..8),
 with a dithered ±2 °C transition. Within 25 km of an ecoregion border each ~220 m patch belongs

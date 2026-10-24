@@ -96,10 +96,11 @@ landscapes but looks worse in places, which is why it is not the default:
   from orbit, the user's "huge problem": a camouflage of polygonal cells, one ecoregion each):
   the styles, palettes, vegetation densities and site climates of the three nearest
   ecoregions blend over ~¼ cell on each side of a border at every zoom, neighbouring
-  ecoregions in a similar climate pick the same biome and alike styles (draws that vary smoothly
-  over 250–600 km), and the field systems' mix varies smoothly too. What remains of an
-  ecoregion's outline is a 50 km soft band where the biome itself changes with the climate
-  (crowns and kernel layers of two biomes cannot blend; their mosaic does).
+  ecoregions draw alike styles and field-system mixes (draws that vary smoothly over
+  250–600 km; each ecoregion keeps its own biome, as before), and the crowns' colours blend
+  where two biomes do. What remains of an ecoregion's outline is a 50 km soft band where its
+  biome differs from its neighbour's (crowns and kernel layers of two biomes cannot blend;
+  their mosaic does): soft blotches, no polygons of their own tone.
 - **Planet zooms** (round 16): coarse tiles (zooms 3–9) agree with the mean of their children
   (z4 against z5 per row of tiles: mean |ΔL| 2–3 poleward of 41°, was 4–10): the ridged
   mountains keep the mean of their octaves below the pixel (the ranges of zoom 4 were up to 3 km
@@ -155,8 +156,7 @@ river network, lakes filled to their spill level, tree crowns, towns, night ligh
   (volcanoes, karst, atolls, …) and can reshape the valley carve (troughs, fjords, canyons).
 - **Climate and biomes:** temperature from the atlas lowered by the lapse rate, moisture from
   its precipitation (Köppen's dry threshold). **Ecoregions** (~100 km, `world.ecoregions`) pick
-  a biome from the climate at their site (Köppen class, envelope, lithology, weights; a
-  Gumbel-max choice over draws that vary smoothly across the ecoregions, round 16) and draw a
+  a biome from the climate at their site (Köppen class, envelope, lithology, weights) and draw a
   style (soil and rock colours, tints, tree density and species mix). Their **culture** (12
   archetypes) sets field systems, hedges, roofs, building heights, lamps and town density.
   Borders blend in a 25 km mosaic (`world.ecoregions.ecotone_km`): each sample picks one of
@@ -166,8 +166,8 @@ river network, lakes filled to their spill level, tree crowns, towns, night ligh
   climates, palettes, vegetation densities and agriculture of the **three nearest
   ecoregions** blend wider (round 16, `eco::wide_weights`: ½ / ½ on a border, the nearest
   alone from ~¼ cell inside it, continuous where the second nearest changes), and an
-  ecoregion's biome, style and field-system weights are draws that vary smoothly across the
-  ecoregions (`eco::coherent_u`), so neighbours in a similar climate look alike.
+  ecoregion's style and field-system weights are draws that vary smoothly across the
+  ecoregions (`eco::coherent_u`), so neighbours look alike unless their biomes differ.
 - **Composite stack:** pass B is a fixed stack of layers (zonal ground, altitudinal zone,
   azonal overrides, disturbance, agriculture, canopy, linear infrastructure, built, water,
   seasonal). **Biomes are data** (`crates/terragen/biomes/*.yaml`) over a **kernel library**
