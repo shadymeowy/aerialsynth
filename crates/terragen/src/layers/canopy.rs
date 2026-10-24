@@ -383,7 +383,9 @@ pub fn layer(s: &mut crate::stack::Stack) {
         // (round 15: the class by the canopy's cover, dithered on a 1.5 m lattice, not where it
         // covers half the pixel: the mean of unresolved crowns (cover ~0.6-1) made a stand all
         // forest, its resolved crowns only their own share; LOD of the class shares)
-        let u = u01k(hash2(0xC1A55, (s.q_loc.x / 1.5).floor() as i64, (s.q_loc.y / 1.5).floor() as i64), 1);
+        // (the lattice of the ECEF point in f64, identical on the GPU; the local frame is f32 there)
+        let ql = (p * (1.0 / 1.5)).floor();
+        let u = u01k(hash3(0xC1A55, ql.x as i64, ql.y as i64, ql.z as i64), 1);
         if u < tcov {
             s.class = cls;
             s.instance = inst;

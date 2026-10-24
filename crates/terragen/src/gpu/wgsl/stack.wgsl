@@ -1056,9 +1056,10 @@ fn layer_canopy(s: ptr<function, Stack>) {
             ly.hmode = HM_MAX;
         }
         composite(s, ly);
-        // (the class by the canopy's cover, dithered on a 1.5 m lattice: `layers::canopy::layer`)
-        let ql = floor((*s).q_loc / 1.5);
-        if (u01k(hash2(0xC1A55lu, i64(ql.x), i64(ql.y)), 1lu) < tr.cov) {
+        // (the class by the canopy's cover, dithered on a 1.5 m lattice of the ECEF point in f64,
+        // as `layers::canopy::layer`: the f32 local frame differed from the CPU's at low zooms)
+        let ql = floor((*s).c.p * (1.0lf / 1.5lf));
+        if (u01k(hash3(0xC1A55lu, i64(ql.x), i64(ql.y), i64(ql.z)), 1lu) < tr.cov) {
             (*s).cls = cls;
             (*s).inst = select(instance_id(stand), 0u, cls == LC_SHRUB);
         }
