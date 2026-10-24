@@ -139,6 +139,7 @@ struct EcoV {
     dev: f32,
     scale: f32,
     hedges: f32,
+    aw: array<vec4<f32>, 4>,
 }
 
 struct Plan {
@@ -231,10 +232,10 @@ fn agri_weights(e: EcoV) -> array<f32, 15> {
     m[13] *= (0.4 + 1.0 * dev) * (0.1 + 0.9 * (1.0 - smoothstep1(700.0, 1200.0, e.precip)));
     var total = 0.0;
     for (var i = 0u; i < AG_N; i++) {
-        w[i] *= m[i] * (0.4 + 1.2 * u01k(e.id, 0xA600lu + u64(i)));
+        w[i] *= m[i] * e.aw[i / 4u][i % 4u];
         total += w[i];
     }
-    let v = u01k(e.id, 0xA6FFlu) * total;
+    let v = e.aw[3].w * total;
     var acc = 0.0;
     for (var i = 0u; i < AG_N; i++) {
         acc += w[i];
@@ -310,6 +311,7 @@ fn agri_plan(s: ptr<function, Stack>) -> Plan {
     e.dev = eo.misc.y;
     e.scale = eo.land.w;
     e.hedges = eo.town.x;
+    e.aw = eo.aw;
     let sy = agri_pick_system(e, (*s).t.region_id);
     if (sy == AG_CORE) {
         return pl;

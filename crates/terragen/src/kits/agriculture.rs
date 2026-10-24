@@ -240,6 +240,8 @@ pub struct EcoV {
     pub dev: f64,
     pub scale: f64,
     pub hedges: f64,
+    /// `EcoParams::agri_w`
+    pub aw: [f64; 16],
 }
 
 impl EcoV {
@@ -253,6 +255,7 @@ impl EcoV {
             dev: e.style.development,
             scale: e.style.field_scale,
             hedges: e.style.hedges,
+            aw: e.agri_w,
         }
     }
 }
@@ -342,11 +345,13 @@ pub fn weights(e: &EcoV) -> [f64; sys::N] {
     m[PIVOT as usize] *= (0.4 + 1.0 * dev) * (0.1 + 0.9 * (1.0 - smoothstep(700.0, 1200.0, e.precip)));
     let mut total = 0.0;
     for (i, wi) in w.iter_mut().enumerate() {
-        *wi *= m[i] * (0.4 + 1.2 * u01k(e.id, 0xA600 + i as u64));
+        // (round 16: draws that vary smoothly across the ecoregions, `EcoParams::agri_w`: drawn per
+        // ecoregion, the field systems' mix jumped from one ecoregion's polygon to the next)
+        *wi *= m[i] * e.aw[i];
         total += *wi;
     }
     // one dominant system per ecoregion
-    let v = u01k(e.id, 0xA6FF) * total;
+    let v = e.aw[15] * total;
     let mut acc = 0.0;
     for wi in w.iter_mut() {
         acc += *wi;
@@ -1858,6 +1863,7 @@ mod tests {
                     dev: u01k(h, 4),
                     scale: 1.0,
                     hedges: 0.4,
+                    aw: std::array::from_fn(|j| if j < 15 { 0.4 + 1.2 * u01k(h, 0xA600 + j as u64) } else { u01k(h, 0xA6FF) }),
                 };
                 for r in 0..8u64 {
                     let s = pick_system(&e, mix64(h ^ r));

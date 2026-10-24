@@ -82,6 +82,8 @@ struct Eco {
     misc: vec4<f32>,
     /// temperature range, dry months, Köppen
     clim: vec4<f32>,
+    /// the agriculture kit's system weight multipliers, dominant draw (`EcoParams::agri_w`)
+    aw: array<vec4<f32>, 4>,
 }
 
 @group(0) @binding(6) var<storage, read> biomes: array<Biome>;
@@ -161,18 +163,91 @@ struct Bio {
     a: u32,
     b: u32,
     w: f32,
-    /// the other ecoregion's biome where the mosaic picked one (its palette blends in by `wst`;
-    /// `a` elsewhere)
+    /// the other ecoregion's biome where the mosaic picked one (its flat layers blend in by
+    /// `wst`; `a` elsewhere)
     c: u32,
     edge_km: f32,
     st: EcoStyle,
-    /// site temperature, precipitation, temperature range, dry months
+    /// site temperature, precipitation, temperature range, dry months (the wide blend)
     site: vec4<f32>,
-    /// the style's ecoregions (`eco_vals` indices, -1: none) and blend: pass B's later stages
-    /// rebuild the sample's `Bio` from them (`bio_from`) instead of `bio_at`
+    /// the mosaic's ecoregions (`eco_vals` indices, -1: none) and ecotone probability: pass B's
+    /// later stages rebuild the sample's `Bio` from them (`bio_from`) instead of `bio_at`
     k1: i32,
     k2: i32,
     wst: f32,
+    /// the wide blend of the three nearest ecoregions (`BioSample::pm`): zone | partner << 16,
+    /// partner weight, weight (0: unused)
+    pz: vec3<u32>,
+    pwz: vec3<f32>,
+    pw: vec3<f32>,
+}
+
+/// The wide blend of the pixel's three nearest ecoregions (`BioSample::at`): their styles,
+/// site climates and zones' palettes by the weights `t.eco_w`; archetype and lithology the
+/// mosaic's ecoregion's (`k1`).
+fn bio_wide(o: ptr<function, Bio>, t: Terrain, c: Ctx) {
+    let tz = t.temp + clamp(0.5 * t.temp_range - 10.0, -6.0, 8.0);
+    let ids = array<u64, 3>(t.eco_id, t.eco_id2, t.eco_id3);
+    let wts = vec3<f32>(1.0 - t.eco_w.x - t.eco_w.y, t.eco_w.x, t.eco_w.y);
+    var acc = 0.0;
+    var n = 0u;
+    var st: EcoStyle;
+    var site = vec4<f32>(0.0);
+    (*o).pz = vec3<u32>(0u);
+    (*o).pwz = vec3<f32>(0.0);
+    (*o).pw = vec3<f32>(0.0);
+    for (var k = 0u; k < 3u; k++) {
+        let id = ids[k];
+        let wk = wts[k];
+        if (wk <= 0.0 || id == 0lu || (k > 0u && id == ids[0]) || (k > 1u && id == ids[1])) {
+            continue;
+        }
+        let ke = eco_find(id);
+        if (ke < 0) {
+            surface_missing |= MISS_ECO;
+            continue;
+        }
+        let e = eco_vals[ke];
+        acc += wk;
+        let f = wk / acc;
+        let es = eco_style(e);
+        let ec = vec4<f32>(e.misc.z, e.misc.w, e.clim.x, e.clim.y);
+        if (acc == wk) {
+            st = es;
+            site = ec;
+        } else {
+            st = style_mix(st, es, f);
+            site = mix(site, ec, f);
+        }
+        let z = zone_of(e.biome, tz, c.p, c.gsd);
+        let key = z.z | (z.partner << 16u);
+        var merged = false;
+        for (var m = 0u; m < n; m++) {
+            if ((*o).pz[m] == key) {
+                (*o).pw[m] += wk;
+                merged = true;
+            }
+        }
+        if (!merged) {
+            (*o).pz[n] = key;
+            (*o).pwz[n] = z.w;
+            (*o).pw[n] = wk;
+            n += 1u;
+        }
+    }
+    if (n == 0u) {
+        (*o).pz[0] = (*o).a;
+        (*o).pw[0] = 1.0;
+        return;
+    }
+    (*o).pw = (*o).pw / acc;
+    if ((*o).k1 >= 0) {
+        let e1 = eco_vals[(*o).k1];
+        st.arch = e1.arch;
+        st.litho = e1.litho;
+    }
+    (*o).st = st;
+    (*o).site = site;
 }
 
 /// `eco::ecotone_prob`: probability (0..½) of the ecoregion across the border at `edge` m.
@@ -265,6 +340,9 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
         o.k1 = -1;
         o.k2 = -1;
         o.wst = 0.0;
+        o.pz = vec3<u32>(0u);
+        o.pwz = vec3<f32>(0.0);
+        o.pw = vec3<f32>(1.0, 0.0, 0.0);
         return o;
     }
     let ea = eco_vals[ka];
@@ -316,24 +394,21 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
             o.c = zone_of(e2.biome, tz, c.p, c.gsd).z;
         }
     }
-    if (ws > 0.0) {
-        o.st = style_mix(eco_style(e1), eco_style(e2), ws);
-        o.wst = ws;
-    } else {
-        o.st = eco_style(e1);
-        o.wst = 0.0;
-    }
+    o.wst = max(ws, 0.0);
     if (o.a == o.b) {
         o.w = 0.0;
     }
     o.edge_km = edge / 1000.0;
+    o.st = eco_style(e1);
     o.site = vec4<f32>(e1.misc.z, e1.misc.w, e1.clim.x, e1.clim.y);
+    bio_wide(&o, t, c);
     return o;
 }
 
-/// The `Bio` that `bio_at` made, from its zones (`a`, `b`, `w`), its style's ecoregions and blend
-/// (`k1`, `k2`, `wst`) and the border distance `edge` (m).
-fn bio_from(a: u32, bc: u32, w: f32, k1: i32, k2: i32, wst: f32, edge: f32) -> Bio {
+/// The `Bio` that `bio_at` made, from its zones (`a`, `b`, `w`), its mosaic's ecoregions and
+/// ecotone probability (`k1`, `k2`, `wst`), the border distance `edge` (m) and the pixel's
+/// pass-A terrain (the wide blend).
+fn bio_from(a: u32, bc: u32, w: f32, k1: i32, k2: i32, wst: f32, edge: f32, t: Terrain, c: Ctx) -> Bio {
     var o: Bio;
     o.a = a;
     o.b = bc & 0xffffu;
@@ -348,28 +423,33 @@ fn bio_from(a: u32, bc: u32, w: f32, k1: i32, k2: i32, wst: f32, edge: f32) -> B
         o.st.crown = vec4<f32>(1.0);
         o.st.veg = vec4<f32>(1.0, 0.0, 1.0, 1.0);
         o.st.land = vec4<f32>(0.5, 1.0, 1.0, 1.0);
+        o.pz = vec3<u32>(0u);
+        o.pwz = vec3<f32>(0.0);
+        o.pw = vec3<f32>(1.0, 0.0, 0.0);
         return o;
     }
     let e1 = eco_vals[k1];
-    if (wst > 0.0) {
-        o.st = style_mix(eco_style(e1), eco_style(eco_vals[k2]), wst);
-    } else {
-        o.st = eco_style(e1);
-    }
+    o.st = eco_style(e1);
     o.site = vec4<f32>(e1.misc.z, e1.misc.w, e1.clim.x, e1.clim.y);
+    bio_wide(&o, t, c);
     return o;
 }
 
-/// A palette colour of the sample's biome(s).
+/// A palette colour of the sample's biome(s): the wide blend of the nearest ecoregions' zones.
 fn bio_pal(b: Bio, i: u32) -> vec3<f32> {
-    var a = biomes[b.a].pal[i].xyz;
-    if (b.w > 0.0) {
-        a += (biomes[b.b].pal[i].xyz - a) * b.w;
+    var acc = vec3<f32>(0.0);
+    for (var k = 0u; k < 3u; k++) {
+        if (b.pw[k] <= 0.0) {
+            continue;
+        }
+        let z = b.pz[k];
+        var c = biomes[z & 0xffffu].pal[i].xyz;
+        if (b.pwz[k] > 0.0) {
+            c += (biomes[z >> 16u].pal[i].xyz - c) * b.pwz[k];
+        }
+        acc += c * b.pw[k];
     }
-    if (b.c != b.a && b.wst > 0.0) {
-        a += (biomes[b.c].pal[i].xyz - a) * b.wst;
-    }
-    return a;
+    return acc;
 }
 
 /// Vegetation parameter `k` (0..11: trees, conifer, shrubs, savanna, groves, woodlots, tall,
@@ -384,14 +464,36 @@ fn veg_of(bi: u32, k: u32) -> f32 {
 }
 
 fn bio_veg(b: Bio, k: u32) -> f32 {
-    var a = veg_of(b.a, k);
-    if (b.w > 0.0) {
-        a += (veg_of(b.b, k) - a) * b.w;
+    var acc = 0.0;
+    for (var j = 0u; j < 3u; j++) {
+        if (b.pw[j] <= 0.0) {
+            continue;
+        }
+        let z = b.pz[j];
+        var v = veg_of(z & 0xffffu, k);
+        if (b.pwz[j] > 0.0) {
+            v += (veg_of(z >> 16u, k) - v) * b.pwz[j];
+        }
+        acc += v * b.pw[j];
     }
-    if (b.c != b.a && b.wst > 0.0) {
-        a += (veg_of(b.c, k) - a) * b.wst;
+    return acc;
+}
+
+/// The biomes' agriculture (`Biome::agriculture`), blended like the palette.
+fn bio_agri(b: Bio) -> f32 {
+    var acc = 0.0;
+    for (var j = 0u; j < 3u; j++) {
+        if (b.pw[j] <= 0.0) {
+            continue;
+        }
+        let z = b.pz[j];
+        var v = biomes[z & 0xffffu].land.x;
+        if (b.pwz[j] > 0.0) {
+            v += (biomes[z >> 16u].land.x - v) * b.pwz[j];
+        }
+        acc += v * b.pw[j];
     }
-    return a;
+    return acc;
 }
 
 const VEG_TREES: u32 = 0u;

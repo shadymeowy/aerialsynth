@@ -968,24 +968,31 @@ impl Registry {
     /// The biome picked for an ecoregion: those whose Köppen classes, envelope and lithology
     /// fit, drawn by weight (× `pref`) with `u` ∈ [0, 1); none fitting: the nearest envelope.
     #[allow(clippy::too_many_arguments)]
-    pub fn pick(&self, k: u32, temp: f64, precip: f64, dry: f64, regime: f64, trange: f64, litho: u8, u: f64, pref: impl Fn(&Biome) -> f64) -> u16 {
+    /// `u(i)`: a draw 0..1 per biome (the Gumbel-max choice: each fitting biome wins with the
+    /// probability of its weight; with draws that vary smoothly over the ecoregions, neighbours
+    /// in a similar climate pick the same biome, and a biome that stops fitting changes only the
+    /// ecoregions it had won).
+    #[allow(clippy::too_many_arguments)]
+    pub fn pick(&self, k: u32, temp: f64, precip: f64, dry: f64, regime: f64, trange: f64, litho: u8, u: impl Fn(usize) -> f64, pref: impl Fn(&Biome) -> f64) -> u16 {
         let x = [temp, precip, dry, regime, trange];
         let fits = |b: &Biome| {
             (b.koppen == 0 || b.koppen & (1 << k) != 0)
                 && (b.litho == 0 || b.litho & (1 << litho) != 0)
                 && (0..5).all(|i| (b.env[i][0]..=b.env[i][1]).contains(&x[i]))
         };
-        let w: Vec<f64> = self.biomes.iter().map(|b| if fits(b) { b.weight * pref(b) } else { 0.0 }).collect();
-        let total: f64 = w.iter().sum();
-        if total > 0.0 {
-            let mut acc = 0.0;
-            for (i, wi) in w.iter().enumerate() {
-                acc += wi / total;
-                if u < acc && *wi > 0.0 {
-                    return i as u16;
-                }
+        let mut best: Option<(f64, usize)> = None;
+        for (i, b) in self.biomes.iter().enumerate() {
+            let wi = if fits(b) { b.weight * pref(b) } else { 0.0 };
+            if wi <= 0.0 {
+                continue;
             }
-            return w.iter().rposition(|x| *x > 0.0).unwrap_or(0) as u16;
+            let g = wi.ln() - (-(u(i).clamp(1e-12, 1.0 - 1e-12)).ln()).ln();
+            if best.is_none_or(|(bg, _)| g > bg) {
+                best = Some((g, i));
+            }
+        }
+        if let Some((_, i)) = best {
+            return i as u16;
         }
         // nearest envelope (normalized distance), Köppen-matching first
         let dist = |b: &Biome| {
@@ -1035,20 +1042,25 @@ pub struct SiteClimate {
 /// The biome(s) of a sample and the resolved style of its ecoregion.
 #[derive(Clone, Copy, Debug)]
 pub struct BioSample {
-    /// the biome (index into `Registry::biomes`)
+    /// the biome (index into `Registry::biomes`): its crowns, landforms and kernel layers
     pub a: u16,
     /// the biome blended in (coarse pixels at ecotones / zone borders) and its weight 0..1
     pub b: u16,
     pub w: f64,
     /// the other ecoregion's biome where the mosaic picked one of two (within the ecotone) and
-    /// the weight its palette blends in by (the ecotone's probability; `a` and 0 elsewhere)
+    /// the weight its flat layers blend in by (the ecotone's probability; `a` and 0 elsewhere)
     pub c: u16,
     pub wc: f64,
-    /// style of the ecoregion (blended by the ecotone's probability)
+    /// style of the ecoregions (blended by their wide weights; archetype and lithology the
+    /// sample's ecoregion's)
     pub style: crate::eco::EcoStyle,
     pub site: SiteClimate,
     /// distance to the ecoregion border (km)
     pub edge_km: f64,
+    /// the palettes and vegetation of the three nearest ecoregions' zones (zone, partner across
+    /// the nearest zone border, partner weight, the ecoregion's wide weight; equal zones merged)
+    pub pm: [(u16, u16, f64, f64); 3],
+    pub npm: usize,
 }
 
 impl BioSample {
@@ -1078,15 +1090,10 @@ impl BioSample {
         let pb = if two { crate::eco::ecotone_prob(world, ctx.gsd, edge) } else { 0.0 };
         let wb = if two { crate::eco::ecotone_pick(world, ctx.p, ctx.gsd, edge) } else { 0.0 };
         let eb = if pb > 0.0 { sm.eco.params(world, reg, cache, ib, cb) } else { ea };
-        // the sample's ecoregion and the one blended in (where the mosaic is below the pixel);
-        // the styles (soil, rock, grass and crown tints …) blend by the ecotone's probability at
-        // any pixel size: picked by the mosaic, two ecoregions' soils drew a camouflage of crisp
-        // ~220 m patches over the ecotones (a third of the land)
+        // the sample's ecoregion and the one blended in (where the mosaic is below the pixel)
         let (e1, e2, w, ws) = if wb > 0.5 { (eb, ea, 1.0 - wb, 1.0 - pb) } else { (ea, eb, wb, pb) };
         let tz = zone_temp(t.temp, t.temp_range);
         let z1 = zone(reg, e1.biome, tz, ctx.p, ctx.gsd);
-        // (the palettes, too, blend by the probability where the mosaic picked one biome: two
-        // biomes' soils and grasses drew a camouflage of crisp patches over the ecotones)
         let (a, b, wz, c, wc) = if w > 0.0 {
             let z2 = zone(reg, e2.biome, tz, ctx.p, ctx.gsd);
             (z1.0, z2.0, w, z1.0, 0.0)
@@ -1096,39 +1103,95 @@ impl BioSample {
         } else {
             (z1.0, z1.1, z1.2, z1.0, 0.0)
         };
-        let style = if ws > 0.0 { e1.style.mix(&e2.style, ws) } else { e1.style };
         let wc = if c == a { 0.0 } else { wc };
-        BioSample { a, b, w: if a == b { 0.0 } else { wz }, c, wc, style, site: e1.climate, edge_km: edge / 1000.0 }
+        // the wide blend of the three nearest ecoregions (the pixel's): styles, site climates,
+        // palettes and vegetation (continuous everywhere: no polygon of its own tone per
+        // ecoregion at any zoom)
+        let ids = [(t.eco.id, t.eco.center, t.eco_w[0]), (t.eco.id2, t.eco.center2, t.eco_w[1]), (t.eco3, t.eco3_center, t.eco_w[2])];
+        let mut pm = [(a, a, 0.0, 0.0); 3];
+        let mut npm = 0;
+        let mut style = e1.style;
+        let mut site = e1.climate;
+        let mut acc = 0.0;
+        for (k, &(id, c3, wk)) in ids.iter().enumerate() {
+            if wk <= 0.0 || id == 0 || (k > 0 && ids[..k].iter().any(|x| x.0 == id)) {
+                continue;
+            }
+            let e = if id == e1.id {
+                e1
+            } else if id == e2.id {
+                e2
+            } else {
+                sm.eco.params(world, reg, cache, id, c3)
+            };
+            acc += wk;
+            let f = wk / acc;
+            if acc == wk {
+                style = e.style;
+                site = e.climate;
+            } else {
+                style = style.mix(&e.style, f);
+                site.temp_c += (e.climate.temp_c - site.temp_c) * f;
+                site.precip_mm += (e.climate.precip_mm - site.precip_mm) * f;
+                site.temp_range_c += (e.climate.temp_range_c - site.temp_range_c) * f;
+                site.dry_months += (e.climate.dry_months - site.dry_months) * f;
+            }
+            let z = zone(reg, e.biome, tz, ctx.p, ctx.gsd);
+            match pm[..npm].iter_mut().find(|m| m.0 == z.0 && m.1 == z.1) {
+                Some(m) => m.3 += wk,
+                None => {
+                    pm[npm] = (z.0, z.1, z.2, wk);
+                    npm += 1;
+                }
+            }
+        }
+        if npm == 0 {
+            pm[0] = (z1.0, z1.1, z1.2, 1.0);
+            npm = 1;
+        } else {
+            for m in &mut pm[..npm] {
+                m.3 /= acc;
+            }
+        }
+        style.archetype = e1.style.archetype;
+        style.litho = e1.style.litho;
+        site.koppen = e1.climate.koppen;
+        BioSample { a, b, w: if a == b { 0.0 } else { wz }, c, wc, style, site, edge_km: edge / 1000.0, pm, npm }
     }
 
-    /// A palette colour of the sample's biome(s).
+    /// A palette colour of the sample's biome(s): the wide blend of the nearest ecoregions'
+    /// zones (each with its partner across the nearest zone border).
     #[inline]
     pub fn pal(&self, reg: &Registry, i: usize) -> DVec3 {
-        let mut a = reg.biomes[self.a as usize].pal.c[i];
-        if self.w > 0.0 {
-            let b = reg.biomes[self.b as usize].pal.c[i];
-            a += (b - a) * self.w;
+        let mut acc = DVec3::ZERO;
+        for &(z, zp, wz, w) in &self.pm[..self.npm] {
+            let mut c = reg.biomes[z as usize].pal.c[i];
+            if wz > 0.0 {
+                c += (reg.biomes[zp as usize].pal.c[i] - c) * wz;
+            }
+            acc += c * w;
         }
-        if self.wc > 0.0 {
-            let c = reg.biomes[self.c as usize].pal.c[i];
-            a += (c - a) * self.wc;
-        }
-        a
+        acc
     }
 
-    /// A vegetation parameter of the sample's biome(s) (blended like the palette: where the
-    /// ecotone's mosaic picked one of two biomes, their tree, shrub and savanna densities drew a
-    /// patchwork of forest and steppe over the ecotone).
+    /// A vegetation parameter of the sample's biome(s) (blended like the palette).
     #[inline]
     pub fn veg(&self, reg: &Registry, f: impl Fn(&Veg) -> f64) -> f64 {
-        let mut a = f(&reg.biomes[self.a as usize].veg);
-        if self.w > 0.0 {
-            a += (f(&reg.biomes[self.b as usize].veg) - a) * self.w;
+        self.biome_mean(reg, |b| f(&b.veg))
+    }
+
+    /// A continuous parameter of the sample's biome(s) (blended like the palette).
+    #[inline]
+    pub fn biome_mean(&self, reg: &Registry, f: impl Fn(&Biome) -> f64) -> f64 {
+        let mut acc = 0.0;
+        for &(z, zp, wz, w) in &self.pm[..self.npm] {
+            let mut v = f(&reg.biomes[z as usize]);
+            if wz > 0.0 {
+                v += (f(&reg.biomes[zp as usize]) - v) * wz;
+            }
+            acc += v * w;
         }
-        if self.wc > 0.0 {
-            a += (f(&reg.biomes[self.c as usize].veg) - a) * self.wc;
-        }
-        a
+        acc
     }
 }
 

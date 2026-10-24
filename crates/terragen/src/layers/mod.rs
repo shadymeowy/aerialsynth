@@ -52,8 +52,8 @@ impl Stack<'_> {
     /// agriculture.
     pub fn agri(&self) -> f64 {
         let reg = &self.sm.registry;
-        let b = reg.biomes[self.bio.a as usize].agriculture;
-        let b = if self.bio.w > 0.0 { b + (reg.biomes[self.bio.b as usize].agriculture - b) * self.bio.w } else { b };
+        // (the wide blend of the nearest ecoregions' biomes, as their palettes: continuous)
+        let b = self.bio.biome_mean(reg, |b| b.agriculture);
         (self.t.agri * b * self.bio.style.agri).clamp(0.0, 1.0)
     }
 }

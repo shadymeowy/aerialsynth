@@ -116,6 +116,11 @@ pub struct Terrain {
     /// Ecoregion (`crate::eco`): the two nearest sites of the warped lattice, the distance to
     /// their border.
     pub eco: Site,
+    /// The third nearest ecoregion site (id, point) and the smooth weights of the three nearest
+    /// (`eco::wide_weights`: their styles, palettes and vegetation blend by them over tens of km)
+    pub eco3: u64,
+    pub eco3_center: DVec3,
+    pub eco_w: [f64; 3],
     /// Planetary atlas fields at the pixel (interpolated; see [`Macro`]).
     pub uplift: f64,
     pub coast_km: f64,
@@ -728,7 +733,6 @@ impl World {
             let pw = ctx.p + self.region_warp(ctx.p);
             pre.sites[SITE_REGION] = Some(worley3_sites(self.seed ^ 0x5E61, pw, region_cell, 0.9));
             pre.sites[SITE_TOWN] = Some(worley3_sites(self.seed ^ 0x70E1, ctx.p, self.cfg.landuse.town_cell_km * KM, 0.8));
-            pre.sites[SITE_ECO] = Some(crate::eco::sites(self, ctx.p));
         }
         // the long gully octaves (they follow the low-passed relief gradient above)
         if let (Some(cut), Some([ge, gn])) = (relief_cut, pre.gully) {
@@ -1511,8 +1515,14 @@ impl World {
                 None => crate::eco::warp(self, p),
             };
             let pw = p + wq;
-            let wc = self.site_cell(m, SITE_ECO, crate::eco::ECO_KEY, pw, self.cfg.ecoregions.cell_km * KM, 0.9);
+            let cell = self.cfg.ecoregions.cell_km * KM;
+            // (the three nearest sites: the wide blend's weights need the third; the nearest
+            // two are the 2-site lattice's, bit for bit)
+            let (wc, id3, p3, f3) = worley3_3(self.seed ^ crate::eco::ECO_KEY, pw, cell, 0.9);
             t.eco = Site { id: wc.id, id2: wc.id2, center: wc.point, center2: wc.point2, dist: wc.f1, edge: worley_edge_dist(&wc, pw) };
+            t.eco3 = id3;
+            t.eco3_center = p3;
+            t.eco_w = crate::eco::wide_weights(self, wc.f1, wc.f2, f3);
         }
         let town_cell = self.cfg.landuse.town_cell_km * KM;
         if mode != Mode::Relief && gsd < town_cell * 0.25 && self.cfg.landuse.towns > 0.0 && crate::kits::legacy_towns() {

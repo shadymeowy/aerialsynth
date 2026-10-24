@@ -140,6 +140,9 @@ pub struct EcoParams {
     pub biome: u16,
     pub culture: u32,
     pub style: EcoStyle,
+    /// the agriculture kit's per-system weight multipliers (0.4..1.6) and its draw of the
+    /// dominant system (`[15]`), varying smoothly across the ecoregions (`coherent_u`)
+    pub agri_w: [f64; 16],
 }
 
 /// Culture archetypes as distributions of parameters.
@@ -226,6 +229,29 @@ pub fn warp(w: &World, p: DVec3) -> DVec3 {
 /// the grid's cut.
 pub fn warp_min_wavelength(w: &World) -> f64 {
     0.17 * w.cfg.ecoregions.cell_km * KM
+}
+
+/// The width of the wide blend in differences of site distance, per cell size: the
+/// ecoregions' styles, palettes and vegetation blend over ~¼ cell on each side of a border
+/// (`d₂ − d₁` is about twice the distance to the border).
+pub const BLEND_CELLS: f64 = 0.5;
+
+/// Weights (sum 1) of the three nearest ecoregion sites at distances `d1 <= d2 <= d3` (m, in the
+/// warped lattice): ½ / ½ on a border, the nearest alone from ~¼ cell inside it, continuous
+/// everywhere (where the second nearest changes, the third's weight is the same). Their
+/// continuous parameters (styles, palettes, vegetation densities, site climate) blend by them
+/// at every zoom (round 16: the 10 km ecotones left each ecoregion a polygon of its own tone,
+/// a camouflage seen from orbit); the crowns, landforms and kernel layers stay the ecotone
+/// mosaic's ([`ecotone_pick`]).
+pub fn wide_weights(w: &World, d1: f64, d2: f64, d3: f64) -> [f64; 3] {
+    let wd = BLEND_CELLS * w.cfg.ecoregions.cell_km * KM;
+    if wd <= 0.0 {
+        return [1.0, 0.0, 0.0];
+    }
+    let phi = |x: f64| 1.0 - smoothstep(0.0, wd, x);
+    let (w2, w3) = (phi(d2 - d1), phi(d3 - d1));
+    let s = 1.0 + w2 + w3;
+    [1.0 / s, w2 / s, w3 / s]
 }
 
 /// Probability (0..½) of the ecoregion across the border at `edge` m from it: ½ at the border,
@@ -325,14 +351,34 @@ pub fn compute(w: &World, reg: &Registry, id: u64, site: DVec3) -> EcoParams {
     // cold continental interiors, Yakutia, interior Alaska, "arid"): their biome is the
     // subarctic forest's
     let kb = if matches!(k, atlas::Koppen::BSk | atlas::Koppen::BWk) && temp < 3.0 && s.precip_mm > 150.0 { atlas::Koppen::Dfc } else { k };
-    let biome = reg.pick(kb as u32, temp, s.precip_mm, dry, s.regime, s.temp_range_c, s.litho as u8, u01k(id, 0xB10), |_| 1.0);
-    let style = draw_style(id, &s, arch, temp);
-    EcoParams { id, site: surface, climate, biome, culture: s.culture, style }
+    let biome = reg.pick(kb as u32, temp, s.precip_mm, dry, s.regime, s.temp_range_c, s.litho as u8, |i| coherent_u(w.seed(), site, 0xB100 + i as u64, 0.0, id), |_| 1.0);
+    let style = draw_style(w.seed(), id, site, &s, arch, temp);
+    let agri_w = std::array::from_fn(|i| {
+        let u = coherent_u(w.seed(), site, if i < 15 { 0xA600 + i as u64 } else { 0xA6FF }, 0.0, id);
+        if i < 15 {
+            0.4 + 1.2 * u
+        } else {
+            u
+        }
+    });
+    EcoParams { id, site: surface, climate, biome, culture: s.culture, style, agri_w }
+}
+
+/// A draw 0..1 (about uniform) of the ecoregion at `site` that varies smoothly across the
+/// ecoregions (noise of the site's position over ~600 and ~250 km), with a share `own` of the
+/// ecoregion's own hash: neighbouring ecoregions draw alike, so their biomes and styles do not
+/// jump from cell to cell (round 16: a camouflage of polygonal cells seen from orbit).
+pub fn coherent_u(seed: u64, site: DVec3, key: u64, own: f64, id: u64) -> f64 {
+    let n = perlin3(seed ^ 0xC0E0 ^ key.rotate_left(17), site / 600_000.0) + 0.35 * perlin3(seed ^ 0xC0E1 ^ key.rotate_left(23), site / 250_000.0);
+    let n = n / (0.3504 * (1.0f64 + 0.35 * 0.35).sqrt());
+    let n = (1.0 - own) * n + own * 1.7 * (u01k(id, key) - 0.5) * 2.0;
+    let sd = ((1.0 - own) * (1.0 - own) + own * own * 0.96).sqrt();
+    1.0 / (1.0 + (-1.7 * n / sd).exp())
 }
 
 /// The style of an ecoregion: lithology colours, tints and its culture's draws.
-fn draw_style(id: u64, s: &atlas::AtlasSample, arch: usize, temp: f64) -> EcoStyle {
-    let u = |k: u64| u01k(id, 0x5700 + k);
+fn draw_style(seed: u64, id: u64, site: DVec3, s: &atlas::AtlasSample, arch: usize, temp: f64) -> EcoStyle {
+    let u = |k: u64| coherent_u(seed, site, 0x5700 + k, 0.15, id);
     let r = |k: u64, a: [f64; 2]| a[0] + (a[1] - a[0]) * u(k);
     let lit = s.litho as usize;
     let lc = &LITHO_COL[lit];
@@ -522,6 +568,8 @@ pub mod gpu {
         pub misc: [f32; 4],
         /// temp range, dry months, koppen, -
         pub clim: [f32; 4],
+        /// `EcoParams::agri_w`
+        pub aw: [f32; 16],
     }
 
     impl GEco {
@@ -545,6 +593,7 @@ pub mod gpu {
                 town: [s.hedges as f32, s.roof as f32, s.height as f32, s.block as f32],
                 misc: [s.sodium as f32, s.development as f32, e.climate.temp_c as f32, e.climate.precip_mm as f32],
                 clim: [e.climate.temp_range_c as f32, e.climate.dry_months as f32, e.climate.koppen as f32, 0.0],
+                aw: e.agri_w.map(|v| v as f32),
             }
         }
     }
@@ -552,7 +601,7 @@ pub mod gpu {
     #[cfg(test)]
     #[test]
     fn size() {
-        assert_eq!(std::mem::size_of::<GEco>(), 32 + 10 * 16);
+        assert_eq!(std::mem::size_of::<GEco>(), 32 + 14 * 16);
     }
 }
 

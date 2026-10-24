@@ -258,11 +258,8 @@ fn sveg(s: ptr<function, Stack>, k: u32) -> f32 {
 
 /// The sample's agricultural intensity (`Stack::agri`).
 fn s_agri(s: ptr<function, Stack>) -> f32 {
-    var b = biomes[(*s).bio.a].land.x;
-    if ((*s).bio.w > 0.0) {
-        b = b + (biomes[(*s).bio.b].land.x - b) * (*s).bio.w;
-    }
-    return clamp((*s).t.agri * b * (*s).bio.st.land.y, 0.0, 1.0);
+    // (the wide blend of the nearest ecoregions' biomes, as their palettes: continuous)
+    return clamp((*s).t.agri * bio_agri((*s).bio) * (*s).bio.st.land.y, 0.0, 1.0);
 }
 
 /// A named field at the sample (`Stack::field`).

@@ -187,6 +187,8 @@ const P_SITE_TOWN: u32 = 32768u;
 const P_ECO_WARP: u32 = 65536u;
 const P_SITE_ECO: u32 = 131072u;
 const ECO_KEY: u64 = 0xEC0Elu;
+/// `eco::BLEND_CELLS`
+const ECO_BLEND: f32 = 0.5;
 
 fn pre_none() -> Pre {
     var p: Pre;
@@ -844,6 +846,17 @@ struct ReliefIn {
 }
 
 /// Pass-A result at a pixel centre (`Terrain`; the land-use sites as ids and edge distance).
+/// `eco::wide_weights`: the weights of the second and third nearest ecoregions.
+fn eco_wide_weights(d1: f32, d2: f32, d3: f32) -> vec2<f32> {
+    let wd = ECO_BLEND * cfg.eco_cell;
+    if (wd <= 0.0) {
+        return vec2<f32>(0.0);
+    }
+    let w2 = 1.0 - smoothstep1(0.0, wd, d2 - d1);
+    let w3 = 1.0 - smoothstep1(0.0, wd, d3 - d1);
+    return vec2<f32>(w2, w3) / (1.0 + w2 + w3);
+}
+
 struct Terrain {
     ground: f32,
     water: f32,
@@ -875,6 +888,10 @@ struct Terrain {
     /// the ecoregion and its neighbour across the nearest border
     eco_id: u64,
     eco_id2: u64,
+    /// the third nearest ecoregion and the wide weights of the second and third
+    /// (`eco::wide_weights`; the nearest's is 1 − both)
+    eco_id3: u64,
+    eco_w: vec2<f32>,
     /// atlas fields at the pixel (`Terrain`)
     uplift: f32,
     coast_km: f32,
@@ -1387,19 +1404,20 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
     // the ecoregion (every zoom)
     t.eco_id = 0lu;
     t.eco_id2 = 0lu;
+    t.eco_id3 = 0lu;
+    t.eco_w = vec2<f32>(0.0);
     t.eco_edge = NONE_F;
     if (mode != MODE_RELIEF) {
         let pe = p + vec3<f64>(eco_warp_at(p, pre));
-        var wc: Cell3;
         let cell = f64(cfg.eco_cell);
-        if ((pre.flags & P_SITE_ECO) != 0u) {
-            wc = worley3_from(pe, cell, 1.0lf / cell, pre.site_eco);
-        } else {
-            wc = worley3(cfg.seed ^ ECO_KEY, pe, cell, 0.9);
-        }
+        // (the three nearest sites: the wide blend's weights need the third)
+        let s3 = worley3_sites3(cfg.seed ^ ECO_KEY, pe, 1.0lf / cell, 0.9);
+        let wc = worley3_from(pe, cell, 1.0lf / cell, s3.s);
         t.eco_id = wc.id;
         t.eco_id2 = wc.id2;
+        t.eco_id3 = s3.id3;
         t.eco_edge = worley_edge_dist(wc, pe);
+        t.eco_w = eco_wide_weights(wc.f1, wc.f2, s3.f3 * cfg.eco_cell);
     }
     t.town = 0u;
     let town_cell = f32(cfg.town_cell);
