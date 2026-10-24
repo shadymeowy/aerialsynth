@@ -515,7 +515,9 @@ const SEED_FIRE: u64 = 0x7E3C_0003;
 
 fn disturbance(s: &mut Stack) {
     let t = s.t;
-    if t.moist < 0.2 || t.temp < -7.0 || s.region.is_none() {
+    // (without a land-use region, coarse pixels: the stands' mean and the windthrow; round 16:
+    // the managed forests changed tone where the regions end, z4 against z5)
+    if t.moist < 0.2 || t.temp < -7.0 {
         return;
     }
     let fe = forest_est(s);
@@ -527,7 +529,9 @@ fn disturbance(s: &mut Stack) {
         stands(s, fe);
         windthrow(s, fe);
     }
-    firebreaks(s, fe, dry);
+    if s.region.is_some() {
+        firebreaks(s, fe, dry);
+    }
 }
 
 /// Managed forest: rectangular stands (a brick pattern of columns 150–300 m wide in the land-use
@@ -539,6 +543,18 @@ fn stands(s: &mut Stack, fe: f64) {
         return;
     }
     let (p, gsd, fw) = (s.ctx.p, s.ctx.gsd, s.l.fw);
+    let inside = smoothstep(0.35, 0.65, fe);
+    let pc = (0.07 * fi).min(0.09);
+    // stands below the pixel (~150-300 m): their mean, the share cut by the mean colour of the
+    // cuts' ages with their young trees (round 16: picked stand by stand, coarse pixels drew a
+    // speckle of bright cuts, and none without a region)
+    let km = if s.region.is_some() { band(225.0, gsd) } else { 0.0 };
+    if km < 1.0 && inside > 0.0 {
+        s.composite(Layer { cov: (1.0 - km) * pc * inside, albedo: rgb(80.0, 93.0, 57.0), cls: lc::CLEAR_CUT, clear: 1.0, ..Default::default() });
+    }
+    if s.region.is_none() {
+        return;
+    }
     // (the stands' frame warped by ~25 m: straight-edged rectangles read as a plan, not a forest)
     // (the pixel fields' noise: no extra noise evaluations, pass B's compile time is at its limit)
     let q = s.q_rot + DVec2::new(s.pf.warp2, s.pf.patch) * 24.0;
@@ -553,19 +569,17 @@ fn stands(s: &mut Stack, fe: f64) {
     let fx = xc - cx;
     let fy = yr - cy;
     let bid = hash2(seed, cx as i64, cy as i64);
-    let inside = smoothstep(0.35, 0.65, fe);
     // the stand's state: cut `age` years ago (0..16) with a probability by the forestry
     // (~0.5 % of the stands a year, most of the cuts years old and greening: 42 % cut within
     // 16 years, a fifth of them fresh, made the taiga a patchwork of bright rectangles)
-    let pc = (0.07 * fi).min(0.09);
     let uc = u01k(bid, 3);
-    if uc < pc && inside > 0.0 {
+    if uc < pc && inside > 0.0 && km > 0.0 {
         let age = 16.0 * (uc / pc).powf(0.6);
         let ex = fx.min(1.0 - fx) * wc;
         let ey = fy.min(1.0 - fy) * hr;
         // ragged edges: seed trees and uncut corners left along the border
         let en = 18.0 * s.pf.detail;
-        let inside = inside * ((ex.min(ey) - 8.0 + en) / fw + 0.5).clamp(0.0, 1.0);
+        let inside = inside * km * ((ex.min(ey) - 8.0 + en) / fw + 0.5).clamp(0.0, 1.0);
         let mot = perlin3(SEED_STAND ^ 0x11, p / 6.0) * band(6.0, gsd) + 0.5 * perlin3(SEED_STAND ^ 0x12, p / 2.0) * band(2.0, gsd);
         let (col, clear) = if age < 3.0 {
             // fresh: slash (brown, reddish dead needles), skid trails along the stand, a landing

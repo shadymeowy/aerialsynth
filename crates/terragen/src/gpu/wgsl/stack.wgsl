@@ -685,6 +685,12 @@ fn finish_ground(s: ptr<function, Stack>) {
     }
 }
 
+/// `kits::agriculture::handover`: the share of the land-use regions' expected look.
+fn agri_handover(gsd: f32) -> f32 {
+    let rc = f32(cfg.region_cell);
+    return smoothstep1(0.25 * rc, 0.5 * rc, gsd);
+}
+
 /// Slot 5 (`layers::agriculture::layer`).
 fn layer_agriculture(s: ptr<function, Stack>) {
     let t = (*s).t;
@@ -705,7 +711,7 @@ fn layer_agriculture(s: ptr<function, Stack>) {
         return;
     }
     let keep = m.natural_ok * m.flat_ok * (1.0 - m.riparian) * (1.0 - m.woodlot) * m.shore_keep;
-    let a = fr.cov * smoothstep1(0.45, 0.55, keep);
+    let a = fr.cov * smoothstep1(0.45, 0.55, keep) * (1.0 - agri_handover((*s).c.gsd));
     (*s).m.field_cov = a;
     var cls = LC_CROP;
     if (fr.kind == 1u) {

@@ -358,7 +358,7 @@ const T_SEED_FIRE: u64 = 0x7E3C0003lu;
 
 fn temperate_slot_disturbance(s: ptr<function, Stack>) {
     let t = (*s).t;
-    if (t.moist < 0.2 || t.temp < -7.0 || !(*s).has_region) {
+    if (t.moist < 0.2 || t.temp < -7.0) {
         return;
     }
     let fe = temperate_forest_est(s);
@@ -370,7 +370,9 @@ fn temperate_slot_disturbance(s: ptr<function, Stack>) {
         temperate_stands(s, fe);
         temperate_windthrow(s, fe);
     }
-    temperate_firebreaks(s, fe, dry);
+    if ((*s).has_region) {
+        temperate_firebreaks(s, fe, dry);
+    }
 }
 
 fn temperate_stands(s: ptr<function, Stack>, fe: f32) {
@@ -381,6 +383,19 @@ fn temperate_stands(s: ptr<function, Stack>, fe: f32) {
     let p = (*s).c.p;
     let gsd = (*s).c.gsd;
     let fw = (*s).l.fw;
+    let inside = smoothstep1(0.35, 0.65, fe);
+    let pc = min(0.07 * fi, 0.09);
+    // (stands below the pixel: their mean)
+    var km = 0.0;
+    if ((*s).has_region) {
+        km = band(225.0, gsd);
+    }
+    if (km < 1.0 && inside > 0.0) {
+        composite(s, temperate_layer((1.0 - km) * pc * inside, srgb(80.0, 93.0, 57.0), LC_CLEAR_CUT, 1.0));
+    }
+    if (!(*s).has_region) {
+        return;
+    }
     let q = (*s).q_rot + vec2<f32>((*s).pf.f[PF_WARP2], (*s).pf.f[PF_PATCH]) * 24.0;
     let seed = mix64((*s).t.region_id ^ T_SEED_STAND);
     let wc = 150.0 + 150.0 * u01k(seed, 1lu);
@@ -393,15 +408,13 @@ fn temperate_stands(s: ptr<function, Stack>, fe: f32) {
     let fx = xc - cx;
     let fy = yr - cy;
     let bid = hash2(seed, i64(cx), i64(cy));
-    let inside = smoothstep1(0.35, 0.65, fe);
-    let pc = min(0.07 * fi, 0.09);
     let uc = u01k(bid, 3lu);
-    if (uc < pc && inside > 0.0) {
+    if (uc < pc && inside > 0.0 && km > 0.0) {
         let age = 16.0 * pow(uc / pc, 0.6);
         let ex = min(fx, 1.0 - fx) * wc;
         let ey = min(fy, 1.0 - fy) * hr;
         let en = 18.0 * (*s).pf.f[PF_DETAIL];
-        let inside = inside * clamp((min(ex, ey) - 8.0 + en) / fw + 0.5, 0.0, 1.0);
+        let inside = inside * km * clamp((min(ex, ey) - 8.0 + en) / fw + 0.5, 0.0, 1.0);
         let mot = perlin3(T_SEED_STAND ^ 0x11lu, p * (1.0lf / 6.0lf)) * band(6.0, gsd) + 0.5 * perlin3(T_SEED_STAND ^ 0x12lu, p * (1.0lf / 2.0lf)) * band(2.0, gsd);
         var col: vec3<f32>;
         var clear: f32;

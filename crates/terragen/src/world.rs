@@ -390,8 +390,8 @@ impl World {
     }
 
     /// Ridged multifractal mountains, 0..~1 (`fine`: [`ridged_fine`] of the amplitude).
-    fn ridged(&self, p: DVec3, gsd: f64, sharp: f64, fine: f64) -> (f64, f64) {
-        let st = self.ridged_part(p, gsd, sharp, 0.0, true, [0.0, 0.0, 1.0], fine);
+    fn ridged(&self, p: DVec3, gsd: f64, sharp: f64, fine: f64, fill: bool) -> (f64, f64) {
+        let st = self.ridged_part(p, gsd, sharp, 0.0, true, [0.0, 0.0, 1.0], fine, fill);
         (st[0] * 0.5, st[1] * 0.5)
     }
 
@@ -399,29 +399,50 @@ impl World {
     /// (not `low`, continuing from the state `st` of the long ones). State: sum, low-passed sum,
     /// weight of the next octave (before the final scaling).
     #[allow(clippy::too_many_arguments)]
-    fn ridged_part(&self, p: DVec3, gsd: f64, sharp: f64, cut: f64, low: bool, st: [f64; 3], fine: f64) -> [f64; 3] {
+    /// `fill`: the octaves below the pixel count with their mean (the tiles; not the drainage
+    /// network's heights, whose valleys keep their depths).
+    #[allow(clippy::too_many_arguments)]
+    fn ridged_part(&self, p: DVec3, gsd: f64, sharp: f64, cut: f64, low: bool, st: [f64; 3], fine: f64, fill: bool) -> [f64; 3] {
         let [mut sum, mut low_sum, mut weight] = st;
         let mut lam = 14.0 * KM;
         let mut amp = 1.0;
-        for i in 0..self.mtn_frames.rot.len() {
+        let n_oct = self.mtn_frames.rot.len();
+        // (round 16: the octaves below the pixel count with their mean, `ridged_mean`; dropped,
+        // the ridged mountains of zooms 4-9 were up to 3 km lower than their children: no ice
+        // caps on the coarse tiles, z4 against z5 poleward of ~41 degrees)
+        let m = if fill { ridged_mean(sharp) } else { 0.0 };
+        for i in 0..n_oct {
             if low && lam < cut {
                 break;
             }
             // ridges contain harmonics above the octave frequency: band-limit more strictly
             let wb = band(lam, 1.6 * gsd);
+            let own = low || lam < cut;
             if wb <= 0.0 {
+                if own && fill {
+                    let (ts, tl) = ridged_tail(n_oct - i, lam, amp, weight, m, fine);
+                    sum += ts;
+                    low_sum += tl;
+                }
                 break;
             }
-            if low || lam < cut {
+            if own {
                 let q = self.mtn_frames.rot[i] * (p / lam) + self.mtn_frames.off[i];
                 let n = perlin3(self.mtn_frames.seeds[i], q);
                 let mut r = (1.0 - n.abs()).max(0.0);
                 r = r.powf(sharp);
+                let fill_e = (1.0 - wb) * m * weight;
                 r *= weight;
                 weight = (r * 1.8).clamp(0.0, 1.0);
                 sum += r * amp * wb * if lam < 1.8 * KM { fine } else { 1.0 };
                 if lam > 6.0 * KM {
                     low_sum += r * amp * wb;
+                }
+                if fill_e > 0.0 {
+                    sum += fill_e * amp * if lam < 1.8 * KM { fine } else { 1.0 };
+                    if lam > 6.0 * KM {
+                        low_sum += fill_e * amp;
+                    }
                 }
             }
             lam *= 0.5;
@@ -686,7 +707,7 @@ impl World {
             let wp = DVec2::new(m.mtn_warp[0], m.mtn_warp[1]) * 9.0 * KM;
             let pw = ctx.p + ctx.east * wp.x + ctx.north * wp.y;
             let fine = ridged_fine(self.mountain_mask(m).1);
-            let [rs, rl, rw] = self.ridged_part(pw, ctx.gsd, 1.6 + 0.8 * m.style[2], cut[0], true, [0.0, 0.0, 1.0], fine);
+            let [rs, rl, rw] = self.ridged_part(pw, ctx.gsd, 1.6 + 0.8 * m.style[2], cut[0], true, [0.0, 0.0, 1.0], fine, true);
             let [hs, hl] = self.hills_part(ctx.p, ctx.gsd, 0.47 + 0.08 * m.rough, cut[1], true);
             pre.relief = Some([rs, rl, rw, hs, hl]);
             pre.relief_cut = cut;
@@ -753,7 +774,7 @@ impl World {
             let mut v = hill_amp * self.hills(q, gl, gain).0;
             if amp_m > 0.0 {
                 let wp = DVec2::new(m.mtn_warp[0], m.mtn_warp[1]) * 9.0 * KM;
-                v += amp_m * self.ridged(q + ctx.east * wp.x + ctx.north * wp.y, gl, 1.6 + 0.8 * m.style[2], ridged_fine(amp_m)).0;
+                v += amp_m * self.ridged(q + ctx.east * wp.x + ctx.north * wp.y, gl, 1.6 + 0.8 * m.style[2], ridged_fine(amp_m), false).0;
             }
             v
         };
@@ -1068,10 +1089,10 @@ impl World {
             match m.pre.and_then(|p| p.relief.map(|r| (r, p.relief_cut[0]))) {
                 // the long octaves from the tile's coarse grid
                 Some((r, cut)) => {
-                    let st = self.ridged_part(pw, gsd, sharp, cut, false, [r[0], r[1], r[2].clamp(0.0, 1.0)], fine);
+                    let st = self.ridged_part(pw, gsd, sharp, cut, false, [r[0], r[1], r[2].clamp(0.0, 1.0)], fine, mode != Mode::Relief);
                     (st[0] * 0.5, st[1] * 0.5)
                 }
-                None => self.ridged(pw, gsd, sharp, fine),
+                None => self.ridged(pw, gsd, sharp, fine, mode != Mode::Relief),
             }
         } else {
             (0.0, 0.0)

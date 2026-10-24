@@ -343,6 +343,18 @@ pub fn band_cov(d: f64, hw: f64, fw: f64) -> f64 {
     ((hw - d.abs()) / fw + 0.5).clamp(0.0, 1.0)
 }
 
+/// Coverage of a line of half width `hw` at distance `d` in a box filter of width `fw`: as
+/// [`band_cov`] where the line is at least the filter's width, its share of the filter where it
+/// is narrower (`band_cov` is an edge's: a thin line kept up to half a pixel's cover there, its
+/// coarse pixels many times its area).
+pub fn line_cov(d: f64, hw: f64, fw: f64) -> f64 {
+    if fw <= 2.0 * hw {
+        return band_cov(d, hw, fw);
+    }
+    let a = d.abs();
+    ((a + 0.5 * fw).min(hw) - (a - 0.5 * fw).max(-hw)).max(0.0) / fw
+}
+
 pub struct SurfaceModel {
     pub pal: Palette,
     pub(crate) detail: Fbm,

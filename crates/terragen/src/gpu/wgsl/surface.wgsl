@@ -241,6 +241,15 @@ fn band_cov(d: f32, hw: f32, fw: f32) -> f32 {
     return clamp((hw - abs(d)) / fw + 0.5, 0.0, 1.0);
 }
 
+/// `surface::line_cov`: a line's share of the box filter.
+fn line_cov(d: f32, hw: f32, fw: f32) -> f32 {
+    if (fw <= 2.0 * hw) {
+        return band_cov(d, hw, fw);
+    }
+    let a = abs(d);
+    return max(min(a + 0.5 * fw, hw) - max(a - 0.5 * fw, -hw), 0.0) / fw;
+}
+
 fn rem_euclid(x: f32, m: f32) -> f32 {
     return x - m * floor(x / m);
 }
