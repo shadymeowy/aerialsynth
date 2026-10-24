@@ -403,7 +403,7 @@ fn noise_cdf() -> &'static [f64] {
             .map(|i| {
                 let h = mix64(0xCDF0 ^ i);
                 let d = DVec3::new(u01k(h, 1) - 0.5, u01k(h, 2) - 0.5, u01k(h, 3) - 0.5).normalize_or(DVec3::X);
-                coherent_n(0x5EED_CDF, d * 6_371_000.0, h)
+                coherent_n(0x05EE_DCDF, d * 6_371_000.0, h)
             })
             .collect();
         v.sort_by(|a, b| a.total_cmp(b));
