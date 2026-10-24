@@ -46,12 +46,13 @@ T_STILL = 2.0  # s: the still's time on the trajectory (auto exposure settled)
 
 # sensor exposure per lighting mode (night: the night@type still's; dusk: dusk@type's, a little
 # darker: the street lamps of a city filling the frame burnt out white, gallery g29; night a
-# little brighter than night@type's 0.012: a dark city over black water read as muddy, g34)
+# little brighter than night@type's 0.012: a dark city over black water read as muddy, g34;
+# round 15: 0.03, the night city readable)
 EXPOSURE = {
     "day": "        mode: auto\n        tau_s: 0.4\n        target: 0.13\n",
     "golden": "        mode: auto\n        tau_s: 0.4\n        target: 0.13\n",
     "dusk": "        mode: auto\n        tau_s: 0.25\n        target: 0.10\n        max_gain: 160\n        max_time_s: 0.04\n",
-    "night": "        mode: auto\n        tau_s: 0.4\n        target: 0.02\n        max_gain: 64\n        max_time_s: 0.008\n",
+    "night": "        mode: auto\n        tau_s: 0.4\n        target: 0.03\n        max_gain: 64\n        max_time_s: 0.008\n",
 }
 OPTICS = {
     "night": "        defocus_px: 0.0\n        chromatic_aberration_px: 0.0\n        vignette: 0.25\n        bloom: 0.02\n",

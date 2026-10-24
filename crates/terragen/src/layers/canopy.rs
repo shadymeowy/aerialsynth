@@ -48,8 +48,10 @@ impl SurfaceModel {
             let explicit = smoothstep(1.2 * gsd, 3.0 * gsd, rc);
             let contrast = smoothstep(2.5 * gsd, 6.0 * gsd, rc);
             // expected coverage when unresolved
-            let mean_r = layer.cell * 0.48;
-            let cov_mean = (layer.density * std::f64::consts::PI * mean_r * mean_r / (layer.cell * layer.cell)).min(1.0);
+            // (round 15: the crowns' area grown with the stand's closure and age, as the explicit
+            // crowns; it was the ungrown disc of 0.48 cells: a closed stand's mean showed a third
+            // of pale floor, the far forest a pale smear above the dark resolved one, z14 / z15)
+            let cov_mean = mean_cover(layer);
             if explicit < 1.0 {
                 let w = cov_mean * (1.0 - explicit);
                 // stochastic canopy texture (gaps, crown clusters) at scales just above the pixel
@@ -133,6 +135,50 @@ impl SurfaceModel {
         let h = best_h.max(mean_h);
         (col, h, cov)
     }
+}
+
+/// The expected coverage of a crown layer's crowns: discs of the crowns' mean area (radius
+/// 0.36–0.6 cells, grown with the stand's closure and age as the explicit crowns), linear in the
+/// density (a parent pixel's mean of its children's, LOD), a closed canopy at a density of 0.9.
+pub(crate) fn mean_cover(ly: &TreeLayer) -> f64 {
+    let grow = (1.0 + 0.55 * smoothstep(0.35, 0.9, ly.closure)) * ly.scale.max(0.0);
+    (ly.density * (0.739 * grow * grow).min(1.11)).min(1.0)
+}
+
+/// The shading a crown layer's relief adds where its crowns are not drawn one by one (their
+/// mean): the darkening of the pixel by the crowns' shaded sides and their shadows, as the
+/// renderer shows the resolved crowns, at a sun- and view-independent mean. Calibrated (round
+/// 15, `round15/tools/lodp.py`, `band.py`) with renders without haze: nadir at one zoom each
+/// (pixel = texel), where a flat broadleaf canopy rendered 2.3× as bright as its resolved crowns
+/// (conifers 1.7×, the tropics' closed canopy 1.3×), and oblique views from 1.5 km (pitch -22°),
+/// where they appear less dark (crowns hide the shadows between them): a compromise between the
+/// two. The mean's share fades out as the crowns span 1.5–4.5 pixels (their shading shows only
+/// then; the tropics' big closed crowns from 1.2–3), in proportion to the layer's cover. Shrubs
+/// are left out: they are their mean down to ~1 m pixels, where their low relief hardly
+/// shades.
+pub(crate) fn crown_relief(share: u32, shape: u32, ly: &TreeLayer, gsd: f64) -> f64 {
+    use crate::registry::share as sh;
+    if ly.density <= 1e-4 || share == sh::SHRUB {
+        return 0.0;
+    }
+    let x = ly.cell * ly.resolve / gsd;
+    let cone = shape == crate::kernels::shape::CONE;
+    // (the crowns' shading shows only once they span 3-5 pixels: their mean's shading stays
+    // until then; the tropics' big closed crowns shade from 1.5-3)
+    let mean =
+        if share == sh::TROPICAL { 0.85 * (1.0 - smoothstep(1.2, 3.0, x)) + 0.15 * (1.0 - smoothstep(2.0, 8.0, x)) } else { 1.0 - smoothstep(1.5, 4.5, x) };
+    if mean <= 0.0 {
+        return 0.0;
+    }
+    let d = if share == sh::TROPICAL {
+        0.2
+    } else if cone {
+        0.6
+    } else {
+        0.33
+    };
+    // in proportion to the layer's cover (linear: LOD)
+    d * mean_cover(ly) * mean
 }
 
 /// The canopy: the trees and shrubs of the biome's crown layers, by the canopy model (forest
@@ -277,6 +323,12 @@ pub fn layer(s: &mut crate::stack::Stack) {
         };
     }
     let layers = &layers[..n];
+    // (round 15) the relief of crowns not yet drawn one by one: resolved, they are domes and
+    // cones the renderer shades (sunlit and shaded sides, shadows on their neighbours and the
+    // ground); as their mean, a flat canopy, up to twice as bright: forests stepped from light
+    // to dark where the view passed from one zoom to the next (z14 → z15). Their mean carries
+    // the expected shading instead (`crown_relief`).
+    let relief = layers.iter().zip(crowns).map(|(ly, c)| crown_relief(c.share, c.shape, ly, gsd)).sum::<f64>().min(0.65);
     // riparian belts: lush grass and scrub under their trees (the dry land's bare soil between
     // them read as brown streaks along the streams)
     if m.riparian > 0.0 {
@@ -285,17 +337,19 @@ pub fn layer(s: &mut crate::stack::Stack) {
     // forest floor: shaded litter and understory, not sunlit grass, between the crowns
     let floor = smoothstep(0.25, 0.8, dens_c);
     s.composite(Layer::paint(floor * 0.85, s.pal(pal::FLOOR) * 0.7));
-    // (round 13) closed stands where the crowns are drawn one by one: the gaps between them
-    // show shaded lower crowns and understorey, not the pale floor (the crowns read as dark
-    // specks on the lichen or the grass, audit a26 a22); colour only, in clusters (a smooth
-    // sheet read as plastic); the mean of unresolved crowns keeps its floor (LOD)
+    // (round 13) closed stands: the gaps between the crowns show shaded lower crowns and
+    // understorey, not the pale floor (the crowns read as dark specks on the lichen or the grass,
+    // audit a26 a22); colour only, in clusters (a smooth sheet read as plastic); round 15: also
+    // under the mean of unresolved crowns (the same gaps)
     {
         let (mut fill_w, mut fill_col, mut fill_n) = (0.0f64, DVec3::ZERO, 0.0);
         for layer in layers {
             if layer.density <= 1e-4 {
                 continue;
             }
-            let fe = smoothstep(0.55, 0.9, layer.closure) * smoothstep(1.2 * gsd, 3.0 * gsd, layer.cell * layer.resolve);
+            // (round 15: at every zoom: the mean's gaps showed the pale floor, a far boreal forest
+            // a pale smear over the lichen above its dark resolved crowns)
+            let fe = smoothstep(0.55, 0.9, layer.closure);
             if fe > 0.0 {
                 fill_w = fill_w.max(fe);
                 fill_col += layer.color * layer.tone * (layer.density * fe);
@@ -325,7 +379,20 @@ pub fn layer(s: &mut crate::stack::Stack) {
         let hm = if veg.trees_in_dsm { hmode::MAX } else { hmode::NONE };
         // (the forest stand is the instance: not for shrubs)
         let inst = if cls == lc::SHRUB { 0 } else { crate::stack::instance_id(stand_id) };
-        s.composite(Layer { cov: tcov, albedo: tc, dh: th, hmode: hm, cls, inst, ..Default::default() });
+        s.composite(Layer { cov: tcov, albedo: tc, dh: th, hmode: hm, ..Default::default() });
+        // (round 15: the class by the canopy's cover, dithered on a 1.5 m lattice, not where it
+        // covers half the pixel: the mean of unresolved crowns (cover ~0.6-1) made a stand all
+        // forest, its resolved crowns only their own share; LOD of the class shares)
+        // (the lattice of the ECEF point in f64, identical on the GPU; the local frame is f32 there)
+        let ql = (p * (1.0 / 1.5)).floor();
+        let u = u01k(hash3(0xC1A55, ql.x as i64, ql.y as i64, ql.z as i64), 1);
+        if u < tcov {
+            s.class = cls;
+            s.instance = inst;
+        }
+    }
+    if relief > 0.0 {
+        s.tint(DVec3::splat(1.0 - relief));
     }
     // cast shadows from neighbouring trees onto the ground / other crowns
     if world.cfg.satellite.shadows && tcov < 0.99 {

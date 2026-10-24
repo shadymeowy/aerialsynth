@@ -106,6 +106,14 @@
   unchanged); airfields culvert small streams; fewer, duller flowering crowns; tower glass in its
   roof's tint; a pixel's channel by its distance relative to the half width (a braided wash's band
   ended square on a tributary's bisector); fainter creeks on arid flats, near the sea only.
+- `next` polish round 15: forests keep their brightness where a view passes from one zoom to
+  the next ("light to dark at z14 / z15": unresolved crowns cover a closed stand as their grown
+  crowns do, with shaded gaps and the shading of their relief; next's renders shade from the
+  same mip levels as the colour; a broadleaf forest's z14 2.3x -> 1.4x as bright as its z16 from
+  nadir, far and near halves within 5 % in oblique views); street lamps with small heads and
+  most of their light along the street, mostly neutral LEDs, coming on through the twilight; a
+  little more light on a night town; no burn scars under towns; the ring boulevard's edge a
+  paved promenade with trees instead of a belt of park lots.
 - **Optional tile layers** (tile store format 2; `next` only): `tiles.layers: [dtm, instance]`
   adds the bare ground and instance ids (building lots, fields, forest stands) to a new store;
   the viewer's map shadings *Height above ground* and *Instances* show them. Format-1 stores

@@ -561,6 +561,14 @@ pub struct Renderer {
     star_field: std::sync::OnceLock<crate::stars::StarField>,
 }
 
+/// The share of the street lights at a sun elevation (degrees) for next's worlds
+/// (`RenderSettings::next_lights`): 30 % at -3°, ramping to full at -12° (the end of nautical
+/// twilight).
+pub fn next_dusk_lights(el_deg: f64) -> f64 {
+    let x = ((-3.0 - el_deg) / 9.0).clamp(0.0, 1.0);
+    0.3 + 0.7 * x * x * (3.0 - 2.0 * x)
+}
+
 impl Renderer {
     pub fn new(model: Arc<dyn CameraModel>, mut settings: RenderSettings, ell: Ellipsoid, cache: Arc<TileCache>) -> Self {
         settings.backend = settings.backend.resolve();
@@ -836,6 +844,16 @@ impl Renderer {
     /// Render one frame for camera pose `cam` under the given sun / light state; fails when the
     /// GPU backend does (device lost, out of memory).
     pub fn try_render(&self, cam: &CamPose, sun_state: &SunState) -> anyhow::Result<FrameOut> {
+        // (next: street lights come on through the twilight, at 30 % while the sky still lights
+        // the land (sun above -3°), in full below -12°: at dusk they burnt as a field of bright
+        // dots over the twilit town, g29)
+        let dusk;
+        let sun_state = if self.settings.next_lights {
+            dusk = SunState { lights: sun_state.lights * next_dusk_lights(sun_state.elevation.to_degrees()), ..*sun_state };
+            &dusk
+        } else {
+            sun_state
+        };
         let mut frame = self.render_terrain(cam, sun_state)?;
         if sun_state.stars && !self.geometry_only && self.stars_in_render {
             self.stars().render(&mut frame, self.model.as_ref(), cam, sun_state.unix, &self.ell, &self.settings.atmosphere);
@@ -1009,7 +1027,27 @@ impl Renderer {
                         // height of the sample (wall patterns)
                         let hs = walls::sample_height(cam_geo.h, dir_w.dot(cam_up), range);
                         if !reuse {
-                            let shadow = if do_shadow { self.sun_visibility(&view, z, gx, gy, sun_state) } else { 1.0 };
+                            let shadow = if !do_shadow {
+                                1.0
+                            } else if self.settings.next_lights {
+                                // (next: the shadow of the colour's two mip levels, as the normal in
+                                // `pixel_shade`: the finer tile's crowns cast their shadows in full
+                                // where its colour still came from the coarser one)
+                                let lam = self.foot_lam(z, gy, range, alpha).max(0.0);
+                                let (l0, tt) = (lam.floor(), lam - lam.floor());
+                                let mut v = 0.0;
+                                for (lvl, wl) in [(l0, 1.0 - tt), (l0 + 1.0, tt)] {
+                                    if wl <= 1e-4 {
+                                        continue;
+                                    }
+                                    let k = (lvl as u8).min(z);
+                                    let s = 0.5f64.powi(k as i32);
+                                    v += wl * self.sun_visibility(&view, z - k, gx * s, gy * s, sun_state);
+                                }
+                                v
+                            } else {
+                                self.sun_visibility(&view, z, gx, gy, sun_state)
+                            };
                             let n_geo = if self.settings.walls { cam.r_ecef_cam * self.geo_normal(&gbuf, x, y) } else { DVec3::ZERO };
                             let pc = self.pixel_shade(&view, &atmo, sun_state, z, gx, gy, range, dir_w, alpha, cam.pos, cam_geo.h, shadow, n_geo, hs);
                             if ctx.is_none() {
@@ -1197,6 +1235,16 @@ impl Renderer {
 
     /// Shading context of one pixel: texture footprint and the affine colour transform
     /// `radiance = tex * mul + add + emission * emis` (lighting and atmosphere folded in).
+    /// The footprint's mip level relative to zoom `z` at global pixel row `gy` (`pixel_shade`'s
+    /// `lam`).
+    fn foot_lam(&self, z: u8, gy: f64, range: f64, alpha: f64) -> f64 {
+        let sl = lat_of(gy, z).sin();
+        let cl = (1.0 - sl * sl).sqrt();
+        let nrad = self.ell.a / (1.0 - self.ell.e2() * sl * sl).sqrt();
+        let texel = 2.0 * PI * nrad * cl / (256.0 * (1u64 << z) as f64);
+        (range * alpha / texel).log2()
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn pixel_shade(
         &self,
@@ -1307,7 +1355,31 @@ impl Renderer {
                 (DVec3::splat(day), DVec3::ZERO)
             }
             Shading::Relit => {
-                let n_enu = view.sample3(z, gx, gy, Which::Normal).unwrap_or(DVec3::Z);
+                let n_enu = if self.settings.next_lights {
+                    // (next: the normal from the colour's levels (the footprint's two mip levels,
+                    // coarser tiles): where a view passed from one zoom to the next, the finer
+                    // tile's relief (tree crowns, explicit from z15) was shaded at full strength
+                    // while its colour still came from the coarser one: forests stepped from light
+                    // to dark along the switch; shade.wgsl)
+                    let lam = lam.max(0.0);
+                    let (l0, tt) = (lam.floor(), lam - lam.floor());
+                    let mut acc = DVec3::ZERO;
+                    for (lvl, wl) in [(l0, 1.0 - tt), (l0 + 1.0, tt)] {
+                        if wl <= 1e-4 {
+                            continue;
+                        }
+                        let k = (lvl as u8).min(z);
+                        let s = 0.5f64.powi(k as i32);
+                        acc += view.sample3(z - k, gx * s, gy * s, Which::Normal).unwrap_or(DVec3::Z) * wl;
+                    }
+                    if acc.length_squared() > 1e-12 {
+                        acc.normalize()
+                    } else {
+                        DVec3::Z
+                    }
+                } else {
+                    view.sample3(z, gx, gy, Which::Normal).unwrap_or(DVec3::Z)
+                };
                 let n = (east * n_enu.x + north * n_enu.y + up * n_enu.z).normalize();
                 // on walls the rendered face's own normal
                 let n = (n * (1.0 - w.weight) + n_geo * w.weight).normalize();
@@ -1346,7 +1418,9 @@ impl Renderer {
                         }
                     };
                     let f = 1.0 / (1.0 + (rel.max(0.0) / 8.0).powi(2));
-                    mul += e * (0.2 * sun_state.lights * f);
+                    // (round 15: 0.3, was 0.2 as classic's: the night town dark between its
+                    // lamps, g34, night@type)
+                    mul += e * (0.3 * sun_state.lights * f);
                 } else {
                     mul += e * (0.2 * sun_state.lights);
                 }

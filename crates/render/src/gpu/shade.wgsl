@@ -832,6 +832,14 @@ struct PS {
     wtan: u32,
 };
 
+// the footprint's mip level relative to the sample's zoom (`pixel_shade`'s `lam`)
+fn foot_lam(p: GP, range: f32) -> f32 {
+    let sl = sin(gp_lat(p));
+    let cl = cos(gp_lat(p));
+    let texel = 2.0 * PI * prime_vertical(sl) * cl / (256.0 * exp2(f32(p.z)));
+    return log2(range * u.cam_up.w / texel);
+}
+
 fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32>, hs: f32) -> PS {
     let lat = gp_lat(p);
     let lon = gp_lon(p);
@@ -913,9 +921,30 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32
     var add = vec3<f32>(0.0);
     if has(F_RELIT) {
         var n_enu = vec3<f32>(0.0, 0.0, 1.0);
-        let ns = sample3(p, 1u);
-        if ns.w > 0.0 {
-            n_enu = ns.xyz;
+        if WALLS && has(F_NEXT) {
+            // (next: the normal from the colour's two mip levels, raster.rs; WALLS: coarser
+            // lookups compiled out on DX12, as the walls)
+            let lm = max(lam, 0.0);
+            let l0 = floor(lm);
+            let tt = lm - l0;
+            var acc = vec3<f32>(0.0);
+            for (var li = 0; li < 2; li++) {
+                let wl = select(1.0 - tt, tt, li == 1);
+                if wl <= 1e-4 {
+                    continue;
+                }
+                let k = min(i32(l0) + li, p.z);
+                let ns = sample3(gp_coarser(p, k), 1u);
+                acc += select(vec3<f32>(0.0, 0.0, 1.0), ns.xyz, ns.w > 0.0) * wl;
+            }
+            if dot(acc, acc) > 1e-12 {
+                n_enu = normalize(acc);
+            }
+        } else {
+            let ns = sample3(p, 1u);
+            if ns.w > 0.0 {
+                n_enu = ns.xyz;
+            }
         }
         let n = normalize(normalize(east * n_enu.x + north * n_enu.y + up * n_enu.z) * (1.0 - ww) + n_geo * ww);
         let ndl = max(dot(n, u.sun_dir.xyz), 0.0);
@@ -947,7 +976,8 @@ fn pixel_shade(p: GP, range: f32, dir_w: vec3<f32>, shadow: f32, n_geo: vec3<f32
                     rel = select(0.0, ea.x - eb.x, ea.y > 0.0 && eb.y > 0.0);
                 }
                 let r8 = max(rel, 0.0) / 8.0;
-                mul += e.xyz * (0.2 * u.sun.z / (1.0 + r8 * r8));
+                // (round 15: 0.3, raster.rs)
+                mul += e.xyz * (0.3 * u.sun.z / (1.0 + r8 * r8));
             } else {
                 mul += e.xyz * (0.2 * u.sun.z);
             }
@@ -1194,7 +1224,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         } else {
             var shadow = 1.0;
             if has(F_SHADOWS) {
-                shadow = sun_visibility(p);
+                // (next: the shadow of the colour's two mip levels, raster.rs; one call site)
+                var lm = 0.0;
+                if WALLS && has(F_NEXT) {
+                    lm = max(foot_lam(p, range), 0.0);
+                }
+                let l0 = floor(lm);
+                let tt = lm - l0;
+                shadow = 0.0;
+                for (var li = 0; li < 2; li++) {
+                    let wl = select(1.0 - tt, tt, li == 1);
+                    if wl <= 1e-4 {
+                        continue;
+                    }
+                    shadow += wl * sun_visibility(gp_coarser(p, min(i32(l0) + li, p.z)));
+                }
             }
             var n_geo = vec3<f32>(0.0);
             if WALLS && has(F_WALLS) {

@@ -76,7 +76,18 @@ landscapes but looks worse in places, which is why it is not the default:
   mean otherwise; the gaps of a closed canopy show shaded lower crowns, not the pale floor: the
   isolated dark dots of the audit (`round13/tools/dots.py`) fell from 2.24× classic's to 0.92×.
   Dense forests keep their crowns' relief (at 2–4 pixels each crown still casts a small shadow:
-  forest places count 10–26k dots/MP, like v0.2.0's own forest stills, 9–21k); the highest ranges (5–7 km)
+  forest places count 10–26k dots/MP, like v0.2.0's own forest stills, 9–21k); round 15: forests keep their
+  brightness where a view passes from one zoom to the next (the user's "forests go from light
+  to dark at the z14 / z15 switch"): the mean of unresolved crowns covers a closed stand as its
+  grown crowns do, its gaps are shaded, and it carries the shading the renderer gives resolved
+  crowns (`layers::canopy::crown_relief`), its land-cover class dithered by its cover; the
+  renderer shades next's terrain from the same mip levels as its colour. Seen from nadir a
+  broadleaf forest's z14 was 2.3× as bright as its z16, now 1.4×, a conifer forest 1.65× →
+  1.1× (z15 1.5× → 1.2×), a tropical one 1.3× → 1.1×; in oblique views from 1.5 km a broadleaf
+  forest's far and near halves now match within 5 % (were 1.4×). The correction is a
+  compromise between nadir and oblique views (resolved crowns hide their shadows when seen
+  obliquely), and sparse conifer woodland over pale lichen still lightens into the distance
+  (its lone crowns' long shadows: far / near 3.9× in that view, unchanged); the highest ranges (5–7 km)
   are as steep as the Himalaya (mean slope ~31° at 30 m, round 7); under perennial snow their gullies
   fill in (round 12), still greyer than v0.2.0's smooth snowfields under a low sun.
 - **Ecotones:** the 10 km borders of ecoregions are a mosaic of the two biomes' crowns and
@@ -184,6 +195,13 @@ glass walls reflect the ground below the horizon and take more of their roof's t
 near lit banks reflects their lights. The CBD's towers were flat white blocks at dusk (the
 horizon's glow in their glass, street light to their tops) and pale grey ghosts at night
 (gallery g29, g34).
+
+Round 15 (`next` only, as above): the shading normal and the sun shadow come from the same two
+mip levels (coarser tiles) as the colour, so a zoom switch no longer shades the finer tile's
+relief at full strength under the coarser tile's colour; street lights come on through the
+twilight (30 % with the sun at −3°, full at −12°) and light their surroundings a little more
+(0.3 of the emission, was 0.2); the towns' and roads' lamp heads are small (most of their light
+in the pool along the street) and their white LEDs mostly neutral.
 
 ![walls: CBD](images/render_walls_cbd.jpg)
 ![walls: tower karst](images/render_walls_karst.jpg)

@@ -167,7 +167,7 @@ fn glow(s: &mut Stack) {
     }
     let (pop, dev) = (t.population, t.development);
     let arch = s.bio.style.archetype as usize;
-    const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.68, 0.40), DVec3::new(1.0, 0.84, 0.64), DVec3::new(0.86, 0.92, 1.0)];
+    const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.68, 0.40), DVec3::new(1.0, 0.84, 0.64), town::LED_MEAN];
     let sodium = 0.25 + 0.25 * (1.0 - dev);
     // (round 13: a share of white LED, as the towns' streets)
     let lamp = mixc3(mixc3(LAMPS[1], LAMPS[2], 0.4), LAMPS[0], sodium);
@@ -282,6 +282,17 @@ fn place(s: &mut Stack, pl: &town::Pl, rel: f64, n: f64, q: DVec2, sun: DVec3) {
     let strips = in_strips(pl, q);
     if dens <= 0.0 && !strips {
         return;
+    }
+    // (round 15: no burn scars in a settlement: the charred ground showed between its lots as a
+    // dark lake under the houses, g32, audit a22; the biome's unburnt grass instead)
+    if s.class == crate::landcover::BURN_SCAR {
+        let w = smoothstep(0.0, 0.15, dens.max(if strips { 0.15 } else { 0.0 }));
+        use crate::registry::pal;
+        let unburnt = mixc3(s.pal(pal::GRASS_DRY), s.pal(pal::GRASS_WET), smoothstep(0.3, 0.6, t.moist));
+        s.col = mixc3(s.col, unburnt * (0.92 + 0.1 * s.pf.detail), w);
+        if w > 0.5 {
+            s.class = crate::landcover::GRASS;
+        }
     }
     let env = Env { gsd, fw, n, moist: t.moist, detail: s.pf.detail, ground: s.col };
     let city = pl.form == crate::kits::settlements::places::form::CITY as u32;

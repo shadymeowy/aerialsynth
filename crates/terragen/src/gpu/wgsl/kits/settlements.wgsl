@@ -949,6 +949,17 @@ fn st_lattice_points(pl: StPl, cg: vec2<f32>, cb: vec2<f32>, theta: f32, warp: f
     return f;
 }
 
+/// `town::ring_along`.
+fn st_ring_along(pl: StPl, q: vec2<f32>) -> f32 {
+    let se = sqrt(pl.elong);
+    let qe = vec2<f32>(q.x / se, q.y * se);
+    let c = st_core_ring(pl, q);
+    if (c.y < 0.0) {
+        return 0.0;
+    }
+    return atan2(qe.y, qe.x) * c.y;
+}
+
 /// `town::ring_signed`.
 fn st_ring_signed(pl: StPl, q: vec2<f32>) -> f32 {
     let r = st_core_ring(pl, q);
@@ -2284,6 +2295,20 @@ fn st_place_eval(pl: StPl, q: vec2<f32>, d: StDist, e: StEnv) -> StEv {
             tree = st_aa(3.0 + 1.5 * u01k(th, 4lu) - length(ublk - tp), fw);
             tree_h = 8.0 + 6.0 * u01k(th, 5lu);
         }
+        // (the ring boulevard's paved edge: `town::place_eval`)
+        if (bd.ok && !bd.mixed && !bd.buf) {
+            let kerb = st_ring_dist(pl, q) - (art_hw + 2.0);
+            col = mixc(srgb(150.0, 146.0, 138.0), yard, 0.25) * (0.94 + 0.08 * e.detail);
+            cls = LC_PARKING;
+            tree = 0.0;
+            if (kerb < 13.0) {
+                let dt = kerb - select(10.0, 4.0, kerb < 7.0);
+                let al = st_ring_along(pl, q);
+                let da = al - round(al / 9.0) * 9.0;
+                tree = st_aa(2.6 - sqrt(dt * dt + da * da), fw);
+                tree_h = 10.0;
+            }
+        }
     }
     // ---- street trees
     let ar = pl.arch;
@@ -2438,7 +2463,8 @@ fn st_zone_mean(pl: StPl, d: StDist, moist: f32) -> vec4<f32> {
 fn st_lamps(pl: StPl, o: StEv, dens: f32, gsd: f32, fw: f32, block: f32, resolved: f32) -> vec3<f32> {
     let l0 = vec3<f32>(1.0, 0.68, 0.40);
     let l1 = vec3<f32>(1.0, 0.84, 0.64);
-    let l2 = vec3<f32>(0.86, 0.92, 1.0);
+    // (`town::LED_MEAN`; a street's LED: `LED_WARM` / `LED_COOL`)
+    let l2 = vec3<f32>(0.97, 0.9225, 0.85);
     let sodium = 0.25 + 0.5 * (1.0 - pl.dev) * u01k(pl.seed, 20lu);
     let sp = o.lamp_sp;
     if (sp <= 0.0) {
@@ -2458,12 +2484,15 @@ fn st_lamps(pl: StPl, o: StEv, dens: f32, gsd: f32, fw: f32, block: f32, resolve
         let lh = hash2(o.sid ^ 0x1A3Blu, i64(k), 0li);
         if (u01k(lh, 1lu) < present) {
             let sa = 0.28 * sp;
-            let pool = 0.03 * exp(-(dp * dp) / (2.0 * 3.5 * 3.5) - (da * da) / (2.0 * sa * sa));
-            let core = point_light(d2, 6.0, 0.4, fwl);
-            let u = u01k(hash1(o.sid, 3li), 1lu);
-            var lc = l2;
+            // (`town::LAMP_CORE`, `LAMP_POOL_K`)
+            let pool = (0.03 + 0.65306122 / sp) * exp(-(dp * dp) / (2.0 * 3.5 * 3.5) - (da * da) / (2.0 * sa * sa));
+            let core = point_light(d2, 2.0, 0.4, fwl);
+            let hs = hash1(o.sid, 3li);
+            let u = u01k(hs, 1lu);
+            let led = select(vec3<f32>(0.88, 0.93, 1.0), vec3<f32>(1.0, 0.92, 0.80), u01k(hs, 2lu) < 0.75);
+            var lc = led;
             if (o.zone == SZ_CBD || (o.major && u < 0.45)) {
-                lc = l2;
+                lc = led;
             } else if (o.pattern == SP_INDUSTRIAL || u < sodium) {
                 lc = l0;
             } else if (u < 0.62) {
@@ -3128,7 +3157,7 @@ fn st_glow(s: ptr<function, Stack>) {
     var aw_t = array<f32, 12>(1.0, 0.85, 0.7, 0.8, 0.6, 1.2, 1.05, 0.9, 1.25, 0.6, 0.25, 0.85);
     var spr = array<f32, 12>(0.95, 0.9, 0.9, 0.8, 0.95, 0.82, 0.92, 1.3, 0.85, 1.05, 0.85, 0.85);
     let sodium = 0.25 + 0.25 * (1.0 - dev);
-    let lamp = mixc(mixc(vec3<f32>(1.0, 0.84, 0.64), vec3<f32>(0.86, 0.92, 1.0), 0.4), vec3<f32>(1.0, 0.68, 0.40), sodium);
+    let lamp = mixc(mixc(vec3<f32>(1.0, 0.84, 0.64), vec3<f32>(0.97, 0.9225, 0.85), 0.4), vec3<f32>(1.0, 0.68, 0.40), sodium);
     let devm = (0.5 + 0.45 * min(dev, 1.0)) * (0.55 + 0.9 * dev);
     let sprawl2 = pow(spr[arch] * (0.85 + 0.3 * dev), 2.0) * (1.0 + 0.04 / 12.0);
     var cover = 0.0;
@@ -3155,7 +3184,7 @@ fn st_glow(s: ptr<function, Stack>) {
         let r2 = r0[l] * r0[l] * c1[l] * exp(0.27 * a * sv) * g * sprawl2;
         let ar = n * r2 * cal[l] * habitable;
         cover += ar * kj[l];
-        emit += (vec3<f32>(0.86, 0.92, 1.0) * kc[l] + lamp * kr[l]) * (ar * devm);
+        emit += (vec3<f32>(0.97, 0.9225, 0.85) * kc[l] + lamp * kr[l]) * (ar * devm);
     }
     if (cover <= 0.0) {
         return;
@@ -3261,6 +3290,15 @@ fn st_place(s: ptr<function, Stack>, pl: StPl, rel: f32, n: f32, q: vec2<f32>, s
     let strips = st_in_strips(pl, q);
     if (dens0 <= 0.0 && !strips) {
         return;
+    }
+    // (no burn scars in a settlement: `settlements::place`)
+    if ((*s).cls == LC_BURN_SCAR) {
+        let w = smoothstep1(0.0, 0.15, max(dens0, select(0.0, 0.15, strips)));
+        let unburnt = mixc(spal(s, BP_GRASS_DRY), spal(s, BP_GRASS_WET), smoothstep1(0.3, 0.6, t.moist));
+        (*s).col = mixc((*s).col, unburnt * (0.92 + 0.1 * (*s).pf.f[PF_DETAIL]), w);
+        if (w > 0.5) {
+            (*s).cls = LC_GRASS;
+        }
     }
     var env: StEnv;
     env.gsd = gsd;

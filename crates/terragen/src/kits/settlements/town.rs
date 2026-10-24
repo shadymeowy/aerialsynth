@@ -222,6 +222,16 @@ fn core_ring(pl: &Pl, q: DVec2) -> Option<(f64, f64)> {
     Some((qe.length(), rr))
 }
 
+/// The arc length (m, in the elongated place frame) along the ring boulevard at `q`.
+fn ring_along(pl: &Pl, q: DVec2) -> f64 {
+    let se = pl.elong.sqrt();
+    let qe = DVec2::new(q.x / se, q.y * se);
+    match core_ring(pl, q) {
+        Some((_, rr)) => qe.y.atan2(qe.x) * rr,
+        None => 0.0,
+    }
+}
+
 /// Signed distance (m, in the elongated place frame) from the ring boulevard around a big city's
 /// old core, positive outside (1e9: none).
 fn ring_signed(pl: &Pl, q: DVec2) -> f64 {
@@ -2255,6 +2265,22 @@ pub fn place_eval(pl: &Pl, q: DVec2, d: &Dist, e: &Env) -> Ev {
             tree = aa(3.0 + 1.5 * u01k(th, 4) - (ublk - tp).length(), fw);
             tree_h = 8.0 + 6.0 * u01k(th, 5);
         }
+        // (round 15: the lots across the ring boulevard (no district edge there) its paved
+        // edge: a promenade with two rows of trees along the kerb, forecourts behind; a belt of
+        // park lots with tree clumps drew a green ring through the city, dusk@type)
+        if bd.ok && !bd.mixed && !bd.buf {
+            let kerb = ring_dist(pl, q) - ring_hw;
+            col = mixc(srgb(150.0, 146.0, 138.0), yard, 0.25) * (0.94 + 0.08 * e.detail);
+            cls = crate::landcover::PARKING;
+            tree = 0.0;
+            if kerb < 13.0 {
+                let dt = kerb - if kerb < 7.0 { 4.0 } else { 10.0 };
+                let al = ring_along(pl, q);
+                let da = al - (al / 9.0).round() * 9.0;
+                tree = aa(2.6 - (dt * dt + da * da).sqrt(), fw);
+                tree_h = 10.0;
+            }
+        }
     }
     // ---- street trees (residential streets of tree-lined cultures; some of the streets: a
     // crown every 11 m along every street drew a busy sawtooth around every block, v0.2.0's towns
@@ -2387,24 +2413,38 @@ pub fn zone_mean(pl: &Pl, d: &Dist, moist: f64) -> (DVec3, f64) {
     (col, hm)
 }
 
+/// White LED street lights: neutral (~4000 K) and cool, the share of neutral streets, their mean.
+pub const LED_WARM: DVec3 = DVec3::new(1.0, 0.92, 0.80);
+pub const LED_COOL: DVec3 = DVec3::new(0.88, 0.93, 1.0);
+pub const LED_NEUTRAL: f64 = 0.75;
+pub const LED_MEAN: DVec3 = DVec3::new(0.97, 0.9225, 0.85);
+/// A street lamp's head (amplitude of its point light, σ 0.4 m) and its pool's share of the
+/// rest of the energy (the pool's amplitude 0.03 + LAMP_POOL_K / spacing): a head of 6 with a
+/// pool of 0.03 before round 15.
+pub const LAMP_CORE: f64 = 2.0;
+pub const LAMP_POOL_K: f64 = (6.0 - LAMP_CORE) * 0.16 / (3.5 * 0.28);
+
 /// The street-lamp light of a place at a sample: resolved lamp heads and pools along the
 /// nearest street (thinned with their energy kept where they would merge), or their mean.
 #[allow(clippy::too_many_arguments)]
 pub fn lamps(pl: &Pl, o: &Ev, dens: f64, gsd: f64, fw: f64, block: f64, resolved: f64) -> DVec3 {
     // (round 13: sodium and amber less saturated: a garish orange night, night@type's saturation
     // 0.59 against v0.2.0's 0.31; every lamp colour of next likewise: sodium (1, .68, .40), amber (1, .84, .64))
-    const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.68, 0.40), DVec3::new(1.0, 0.84, 0.64), DVec3::new(0.86, 0.92, 1.0)];
+    // (round 15: white LED a mix of neutral (4000 K) and cool streets: a field of blue-white dots
+    // at dusk, g29)
+    const LAMPS: [DVec3; 3] = [DVec3::new(1.0, 0.68, 0.40), DVec3::new(1.0, 0.84, 0.64), LED_MEAN];
     // sodium share by development (and culture), white LED in CBDs and on main streets
     let sodium = 0.25 + 0.5 * (1.0 - pl.dev) * u01k(pl.seed, 20);
+    let led = if u01k(hash1(o.sid, 3), 2) < LED_NEUTRAL { LED_WARM } else { LED_COOL };
     let pick = |u: f64, major: bool| -> DVec3 {
         if o.zone == zone::CBD || (major && u < 0.45) {
-            LAMPS[2]
+            led
         } else if o.pattern == pat::INDUSTRIAL || u < sodium {
             LAMPS[0]
         } else if u < 0.62 {
             LAMPS[1]
         } else {
-            LAMPS[2]
+            led
         }
     };
     let sp = o.lamp_sp;
@@ -2427,11 +2467,14 @@ pub fn lamps(pl: &Pl, o: &Ev, dens: f64, gsd: f64, fw: f64, block: f64, resolved
         let lh = hash2(o.sid ^ 0x1A3B, k as i64, 0);
         if u01k(lh, 1) < present {
             let sa = 0.28 * sp;
-            let pool = 0.03 * (-(dp * dp) / (2.0 * 3.5 * 3.5) - (da * da) / (2.0 * sa * sa)).exp();
-            let core = point_light(d2, 6.0, 0.4, fwl);
+            // (round 15: two thirds of the head's light moved into its pool, the energy kept: the
+            // heads were bright dots dominating dusk and night, the streets between them dark)
+            let pool = (0.03 + LAMP_POOL_K / sp) * (-(dp * dp) / (2.0 * 3.5 * 3.5) - (da * da) / (2.0 * sa * sa)).exp();
+            let core = point_light(d2, LAMP_CORE, 0.4, fwl);
             e = pick(u01k(hash1(o.sid, 3), 1), o.major) * ((pool + core) * m * (0.75 + 0.5 * u01k(lh, 2)));
         }
     }
+    // (the head's and the pool's energy: LAMP_CORE · 0.16 + (0.03 + LAMP_POOL_K / sp) · 3.5 · 0.28 · sp)
     let lamp_e = present * (std::f64::consts::TAU * (6.0 * 0.16 + 0.03 * 3.5 * 0.28 * sp));
     let zf = [1.6, 1.2, 1.0, 0.75, 0.45][o.zone as usize];
     let lamp_mean = lamp_e * 2.0 / (block * sp) * zf;
