@@ -203,7 +203,7 @@ struct Lattice {
 }
 
 /// The size of a `PointMid` (points.wgsl; `point_mid_size` checks it).
-const POINT_MID_BYTES: u64 = 176;
+const POINT_MID_BYTES: u64 = 192;
 
 /// Lattice table slots (~50 bytes each).
 const LAT_CAP: usize = 1 << 23;

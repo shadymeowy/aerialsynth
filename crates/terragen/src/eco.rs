@@ -351,7 +351,17 @@ pub fn compute(w: &World, reg: &Registry, id: u64, site: DVec3) -> EcoParams {
     // cold continental interiors, Yakutia, interior Alaska, "arid"): their biome is the
     // subarctic forest's
     let kb = if matches!(k, atlas::Koppen::BSk | atlas::Koppen::BWk) && temp < 3.0 && s.precip_mm > 150.0 { atlas::Koppen::Dfc } else { k };
-    let biome = reg.pick(kb as u32, temp, s.precip_mm, dry, s.regime, s.temp_range_c, s.litho as u8, |i| coherent_u(w.seed(), site, 0xB100 + i as u64, 0.0, id), |_| 1.0);
+    let biome = reg.pick(
+        kb as u32,
+        temp,
+        s.precip_mm,
+        dry,
+        s.regime,
+        s.temp_range_c,
+        s.litho as u8,
+        |i| coherent_u(w.seed(), site, 0xB100 + i as u64, 0.0, id),
+        |_| 1.0,
+    );
     let style = draw_style(w.seed(), id, site, &s, arch, temp);
     let agri_w = std::array::from_fn(|i| {
         let u = coherent_u(w.seed(), site, if i < 15 { 0xA600 + i as u64 } else { 0xA6FF }, 0.0, id);

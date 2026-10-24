@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Terrain generators
+
+- `next` (experimental; generator version 4 → 5: its stores take no new tiles of this
+  version) seen from orbit (round 16):
+  - no camouflage of ecoregion cells: the ecoregions' styles, palettes and vegetation blend
+    over tens of km (the three nearest by smooth weights), neighbouring ecoregions in a similar
+    climate pick the same biome and alike styles, and the ecotone mosaic is 25 km wide
+    (`world.ecoregions.ecotone_km`, was 10);
+  - coarse tiles (zooms 3–9) agree with their children: the ridged mountains keep the mean of
+    their octaves below the pixel (the ranges were up to 3 km low), the fields of the land-use
+    regions hand over to their expected look where the regions end, managed forest stands
+    below the pixel are their mean, and thin section-line tracks no longer cover a tenth of
+    the land at coarse pixels;
+  - ice sheets and polar ranges are white without valleys, gullies or channels (rivers start
+    at the ice margin); the sea-ice edge is ragged, not a blur hundreds of km wide.
+- `classic` is unchanged (v0.2.0's, bit-identical).
+
 ## 0.3.0 — 2026-10-24
 
 ### Highlights

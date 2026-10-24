@@ -200,12 +200,18 @@ changes only the keys given).
 ecoregion's site the planetary atlas (`src/atlas/`) gives the climate (Köppen class at the
 site's smooth elevation, mean temperature, annual precipitation, dry months, precipitation
 regime, temperature range), lithology and culture; the biomes whose `koppen`, `envelope` and
-`lithology` fit are drawn by `weight` (none fits: the nearest envelope). A sample takes its
+`lithology` fit are drawn by `weight` (none fits: the nearest envelope; a Gumbel-max choice
+over per-biome draws that vary smoothly across the ecoregions, `eco::coherent_u`: neighbours in a
+similar climate pick the same biome). A sample takes its
 ecoregion's biome, then that biome's `zonation` entry by its own temperature (lapse rate)
 shifted by the continentality (`registry::zone_temp`: + (range / 2 − 10) °C, clamped −6..8),
-with a dithered ±2 °C transition. Within 10 km of an ecoregion border each ~220 m patch belongs
+with a dithered ±2 °C transition. Within 25 km of an ecoregion border each ~220 m patch belongs
 to one side or the other (a mosaic of ragged patches, not a gradient). Where that mosaic is below the pixel the two
-sides blend; a sample then has two biomes `a`, `b` with weight `w` (≤ 2 biomes per sample).
+sides blend; a sample then has two biomes `a`, `b` with weight `w` (≤ 2 biomes per sample) for its
+kernel layers and crowns. Palettes (`s.pal`), vegetation (`s.veg`), the biomes' agriculture, the
+style (`s.bio.style`) and the site climate (`s.bio.site`) are the wide blend of the pixel's three
+nearest ecoregions instead (`BioSample::pm`, `eco::wide_weights`; WGSL `bio_wide`): continuous at
+every zoom, so a kit that reads them draws no ecoregion outline.
 
 **Ecoregion style and culture.** Every ecoregion also draws a style (`eco::EcoStyle`): soil and
 rock colours by its lithology, grass and crown tints, tree density, conifer bias, shrubs,

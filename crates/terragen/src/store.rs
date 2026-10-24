@@ -19,8 +19,10 @@ use tilestore::{Layer, StoreMeta, TileStore};
 /// supersampling); 3: the grid / exact choices depend on the zoom only (version 2 decided them
 /// per tile from its centre latitude: north-south seams at the switch latitudes; tiles centred
 /// between 35.2° and 49.1° are unchanged); 4: the composite stack over a biome registry,
-/// ecoregions and cultures (`docs/design/terrain-next.md`).
-pub const GENERATOR_VERSION: u32 = 4;
+/// ecoregions and cultures (`docs/design/terrain-next.md`); 5: round 16's planet-scale fixes
+/// (ecoregions blended over tens of km, coarse tiles that agree with their children, ice
+/// sheets without valleys).
+pub const GENERATOR_VERSION: u32 = 5;
 
 /// Version of the classic generator's output (`world.generator: classic`): v0.2.0's version 3,
 /// frozen (the classic generator is v0.2.0's, unchanged).
@@ -358,12 +360,15 @@ mod tests {
         classic.open_store_rw(&v020).unwrap();
         let e = next.open_store_ro(&v020).err().expect("a v0.2.0 store opened with next").to_string();
         assert!(e.contains("holds tiles of the classic generator"), "{e}");
-        // master before the switch: version 4
+        // master before the switch: version 4 (next; an older next version now: it reads with a
+        // warning, takes no new tiles)
         let v4 = dir.join("v4.h5");
         let st = TileStore::create(&v4, StoreMeta { generator_config: strip(&next), generator_version: 4, ..next.store_meta() }).unwrap();
         st.write_tiles(&[dummy_tile(id)]).unwrap();
         drop(st);
-        next.open_store_rw(&v4).unwrap();
+        next.open_store_ro(&v4).unwrap();
+        let e = next.open_store_rw(&v4).err().expect("a version-4 store took new tiles").to_string();
+        assert!(e.contains("generator version 4"), "{e}");
         let e = classic.open_store_ro(&v4).err().expect("a version-4 store opened with classic").to_string();
         assert!(e.contains("holds tiles of the next generator"), "{e}");
         // the next generator's own settings are not part of a classic world
