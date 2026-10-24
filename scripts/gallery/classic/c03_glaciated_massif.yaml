@@ -1,12 +1,11 @@
-# title: folded ridges from 8 km
+# title: glaciated massif (33 S)
 # category: mountains
-# landcover: semi-arid grass and shrub on an old fold belt, fields in the valleys
-# look: wide view: parallel ridges and valleys of an old fold belt under a low morning sun
-# target: 27.89900 42.87000
-# local solar time 08:00 on 2026-03-20
+# landcover: glaciers, snow, rock
+# look: v0.2.0 showcase 'Glaciated massif': glaciers and snowfields in winter afternoon light
+# local solar time 15:30 on 2026-06-21
 world:
   seed: 1
-  generator: next
+  generator: classic
 tiles:
   file: out/world.h5
   max_zoom: 18
@@ -16,23 +15,23 @@ trajectory:
   synth:
     rate_hz: 400
     speed_mps: 50.0
-    altitude_m: 8000.0
-    heading_deg: 30.0
+    altitude_m: 1200.0
+    heading_deg: 60.0
     kind: line
-    lat: 27.79028
-    lon: 42.79906
+    lat: -33.50000
+    lon: -171.00000
     duration_s: 3.0
 render:
   supersample: 2
   shading: relit
   lighting:
     mode: clock
-    date: '2026-03-20'
-    time_utc: '05:09:00'
+    date: '2026-06-22'
+    time_utc: '02:54:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
-    visibility_km: 80.0
+    visibility_km: 40.0
     inscatter: 1.0
 cameras:
 - path: /cam0

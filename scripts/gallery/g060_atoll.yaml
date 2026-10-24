@@ -1,9 +1,9 @@
-# title: atoll from 8 km
+# title: atoll rim from 2 km
 # category: coast
-# landcover: atoll: reef ring, motus, lagoon
-# look: wide view: a ring of reef with sandy motus around a deep lagoon
-# target: 7.13100 87.71700
-# local solar time 11:00 on 2026-04-15
+# landcover: atoll: reef ring R ~14 km, motus, lagoon
+# look: the reef ring of a large atoll curving away around its lagoon, sandy motus, high sun
+# target: 7.23900 87.73500
+# local solar time 11:30 on 2026-04-15
 world:
   seed: 1
   generator: next
@@ -16,11 +16,11 @@ trajectory:
   synth:
     rate_hz: 400
     speed_mps: 50.0
-    altitude_m: 8000.0
-    heading_deg: 0.0
+    altitude_m: 2000.0
+    heading_deg: 180.0
     kind: line
-    lat: 7.06973
-    lon: 87.71700
+    lat: 7.27105
+    lon: 87.73500
     duration_s: 3.0
 render:
   supersample: 2
@@ -28,7 +28,7 @@ render:
   lighting:
     mode: clock
     date: '2026-04-15'
-    time_utc: '05:09:00'
+    time_utc: '05:39:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
@@ -47,7 +47,7 @@ cameras:
     - 359.5
   extrinsics:
     mount: forward
-    pitch_deg: -50.0
+    pitch_deg: -30.0
   frame_rate: 1.0
   rgb:
     sensor:

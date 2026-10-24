@@ -1,12 +1,11 @@
-# title: qanat lines (nadir)
-# category: desert
-# landcover: desert steppe at a mountain foot
-# look: nadir: dotted lines of qanat shaft mounds converging downslope to an oasis
-# target: 27.04900 34.40100
-# local solar time 09:30 on 2026-03-20
+# title: high altitude (10 km)
+# category: wide
+# landcover: temperate plateau and mountains
+# look: v0.2.0 showcase 'High altitude': the land from cruise height
+# local solar time 10:57 on 2026-06-21
 world:
   seed: 1
-  generator: next
+  generator: classic
 tiles:
   file: out/world.h5
   max_zoom: 18
@@ -16,23 +15,23 @@ trajectory:
   synth:
     rate_hz: 400
     speed_mps: 50.0
-    altitude_m: 800.0
-    heading_deg: 0.0
+    altitude_m: 9000.0
+    heading_deg: 70.0
     kind: line
-    lat: 27.04810
-    lon: 34.40100
+    lat: 39.00000
+    lon: 33.35000
     duration_s: 3.0
 render:
   supersample: 2
   shading: relit
   lighting:
     mode: clock
-    date: '2026-03-20'
-    time_utc: '07:12:00'
+    date: '2026-06-21'
+    time_utc: '08:44:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
-    visibility_km: 40.0
+    visibility_km: 80.0
     inscatter: 1.0
 cameras:
 - path: /cam0
@@ -46,8 +45,8 @@ cameras:
     - 639.5
     - 359.5
   extrinsics:
-    mount: nadir
-    pitch_deg: 0
+    mount: forward
+    pitch_deg: -22.0
   frame_rate: 1.0
   rgb:
     sensor:

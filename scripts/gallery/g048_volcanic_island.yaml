@@ -1,9 +1,9 @@
 # title: volcanic island
 # category: volcanic
 # landcover: volcanic barren island, black-sand beaches
-# look: a cone rising from the sea, gullied flanks and black beaches in the evening sun
+# look: a cone rising from the sea, gullied flanks and black beaches, evening sun from the left
 # target: 27.06900 -174.18100
-# local solar time 18:00 on 2026-05-10
+# local solar time 17:30 on 2026-05-10
 world:
   seed: 1
   generator: next
@@ -17,10 +17,10 @@ trajectory:
     rate_hz: 400
     speed_mps: 50.0
     altitude_m: 1500.0
-    heading_deg: 60.0
+    heading_deg: 0.0
     kind: line
-    lat: 27.04779
-    lon: -174.22225
+    lat: 27.02106
+    lon: -174.18100
     duration_s: 3.0
 render:
   supersample: 2
@@ -28,7 +28,7 @@ render:
   lighting:
     mode: clock
     date: '2026-05-11'
-    time_utc: '05:37:00'
+    time_utc: '05:07:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
@@ -47,7 +47,7 @@ cameras:
     - 359.5
   extrinsics:
     mount: forward
-    pitch_deg: -18.0
+    pitch_deg: -16.0
   frame_rate: 1.0
   rgb:
     sensor:

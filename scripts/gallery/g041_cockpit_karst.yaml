@@ -1,9 +1,9 @@
-# title: cockpit karst
+# title: cockpit karst at sunrise
 # category: mountains
 # landcover: broadleaf forest on carbonate, fields in the hollows
-# look: forested cone hills and star-shaped hollows with small fields
+# look: forested cone hills and star-shaped hollows with small fields, picked out by the low sun
 # target: 41.95800 -21.18800
-# local solar time 08:15 on 2026-06-10
+# local solar time 06:40 on 2026-06-10
 world:
   seed: 1
   generator: next
@@ -16,11 +16,11 @@ trajectory:
   synth:
     rate_hz: 400
     speed_mps: 50.0
-    altitude_m: 900.0
-    heading_deg: 0.0
+    altitude_m: 600.0
+    heading_deg: 340.0
     kind: line
-    lat: 41.94308
-    lon: -21.18800
+    lat: 41.94322
+    lon: -21.18077
     duration_s: 3.0
 render:
   supersample: 2
@@ -28,7 +28,7 @@ render:
   lighting:
     mode: clock
     date: '2026-06-10'
-    time_utc: '09:40:00'
+    time_utc: '08:05:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
@@ -47,7 +47,7 @@ cameras:
     - 359.5
   extrinsics:
     mount: forward
-    pitch_deg: -30.0
+    pitch_deg: -20.0
   frame_rate: 1.0
   rgb:
     sensor:

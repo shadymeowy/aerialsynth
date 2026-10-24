@@ -1,9 +1,9 @@
-# title: valley glacier at midsummer noon
-# category: cold
-# landcover: polar range: firn, glacier ice, moraines
-# look: firn basin, dirty ice with crevasses and moraine stripes, midsummer noon light
-# target: -66.09500 123.28800
-# local solar time 12:00 on 2026-12-21
+# title: upland moor
+# category: temperate
+# landcover: moorland (Dfb, 1464 mm): heather, bog pools
+# look: open heather moor with bog pools and tracks on rolling uplands
+# target: 48.50000 -145.50000
+# local solar time 15:30 on 2026-09-20
 world:
   seed: 1
   generator: next
@@ -16,19 +16,19 @@ trajectory:
   synth:
     rate_hz: 400
     speed_mps: 50.0
-    altitude_m: 1500.0
-    heading_deg: 150.0
+    altitude_m: 600.0
+    heading_deg: 60.0
     kind: line
-    lat: -66.07225
-    lon: 123.25561
+    lat: 48.49448
+    lon: -145.51444
     duration_s: 3.0
 render:
   supersample: 2
   shading: relit
   lighting:
     mode: clock
-    date: '2026-12-21'
-    time_utc: '03:47:00'
+    date: '2026-09-21'
+    time_utc: '01:12:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:

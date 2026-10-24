@@ -1,9 +1,9 @@
-# title: cinder-cone field (nadir)
+# title: cinder-cone field
 # category: volcanic
 # landcover: grass and broadleaf with fields, cinder cones and maars
-# look: nadir: cinder cones with dark craters and pale rims, maar lakes, an ash apron, fields between
+# look: dark cinder cones with craters, maars and an ash apron among fields, late sun
 # target: 21.94800 71.40800
-# local solar time 10:30 on 2026-03-20
+# local solar time 16:45 on 2026-03-20
 world:
   seed: 1
   generator: next
@@ -17,10 +17,10 @@ trajectory:
     rate_hz: 400
     speed_mps: 50.0
     altitude_m: 1500.0
-    heading_deg: 0.0
+    heading_deg: 300.0
     kind: line
-    lat: 21.94710
-    lon: 71.40800
+    lat: 21.93587
+    lon: 71.43065
     duration_s: 3.0
 render:
   supersample: 2
@@ -28,7 +28,7 @@ render:
   lighting:
     mode: clock
     date: '2026-03-20'
-    time_utc: '05:44:00'
+    time_utc: '11:59:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
@@ -46,8 +46,8 @@ cameras:
     - 639.5
     - 359.5
   extrinsics:
-    mount: nadir
-    pitch_deg: 0
+    mount: forward
+    pitch_deg: -30.0
   frame_rate: 1.0
   rgb:
     sensor:

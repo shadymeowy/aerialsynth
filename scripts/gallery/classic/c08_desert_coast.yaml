@@ -1,12 +1,11 @@
-# title: barchans on a gravel plain
-# category: desert
-# landcover: stony fringe of an erg: gravel, scrub
-# look: crescent barchan dunes on dark varnished gravel, sand streaks, long shadows
-# target: 20.84000 -50.06000
-# local solar time 17:10 on 2026-04-10
+# title: desert coast
+# category: coast
+# landcover: arid coast
+# look: v0.2.0 showcase 'Desert coast'
+# local solar time 09:29 on 2026-06-21
 world:
   seed: 1
-  generator: next
+  generator: classic
 tiles:
   file: out/world.h5
   max_zoom: 18
@@ -16,19 +15,19 @@ trajectory:
   synth:
     rate_hz: 400
     speed_mps: 50.0
-    altitude_m: 350.0
-    heading_deg: 300.0
+    altitude_m: 900.0
+    heading_deg: 255.0
     kind: line
-    lat: 20.83618
-    lon: -50.05291
+    lat: -21.53610
+    lon: -45.01480
     duration_s: 3.0
 render:
   supersample: 2
   shading: relit
   lighting:
     mode: clock
-    date: '2026-04-10'
-    time_utc: '20:30:00'
+    date: '2026-06-21'
+    time_utc: '12:29:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
@@ -47,7 +46,7 @@ cameras:
     - 359.5
   extrinsics:
     mount: forward
-    pitch_deg: -25.0
+    pitch_deg: -30.0
   frame_rate: 1.0
   rgb:
     sensor:

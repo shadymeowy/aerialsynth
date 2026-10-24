@@ -1,12 +1,12 @@
-# title: salt ponds on an arid coast
-# category: coast
-# landcover: arid coast: tidal flats, sabkha, salt ponds
-# look: rectangular salt evaporation ponds in pink and white beside tidal creeks
-# target: 26.53800 -5.41400
-# local solar time 10:30 on 2026-02-10
+# title: arid highland town
+# category: settlements
+# landcover: arid plateau (2.1 km), town
+# look: classic place found by terrain survey: a town on a dry plateau in the late sun
+# target: 23.07280 -120.85750
+# local solar time 16:45 on 2026-04-10
 world:
   seed: 1
-  generator: next
+  generator: classic
 tiles:
   file: out/world.h5
   max_zoom: 18
@@ -16,19 +16,19 @@ trajectory:
   synth:
     rate_hz: 400
     speed_mps: 50.0
-    altitude_m: 700.0
-    heading_deg: 30.0
+    altitude_m: 900.0
+    heading_deg: 300.0
     kind: line
-    lat: 26.52944
-    lon: -5.41953
+    lat: 23.06587
+    lon: -120.84446
     duration_s: 3.0
 render:
   supersample: 2
   shading: relit
   lighting:
     mode: clock
-    date: '2026-02-10'
-    time_utc: '10:52:00'
+    date: '2026-04-11'
+    time_utc: '00:48:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
@@ -47,7 +47,7 @@ cameras:
     - 359.5
   extrinsics:
     mount: forward
-    pitch_deg: -35.0
+    pitch_deg: -32.0
   frame_rate: 1.0
   rgb:
     sensor:

@@ -1,12 +1,11 @@
-# title: drumlin field under snow (nadir 6 km)
-# category: cold
-# landcover: boreal farmland under winter snow
-# look: nadir: streamlined drumlins under snow with fields, hedges and spruce stands
-# target: 57.31400 -26.17700
-# local solar time 12:00 on 2026-01-25
+# title: sand sea (15 N)
+# category: desert
+# landcover: erg
+# look: v0.2.0 showcase 'Sand sea': dunes in the late sun
+# local solar time 17:29 on 2026-06-21
 world:
   seed: 1
-  generator: next
+  generator: classic
 tiles:
   file: out/world.h5
   max_zoom: 18
@@ -16,19 +15,19 @@ trajectory:
   synth:
     rate_hz: 400
     speed_mps: 50.0
-    altitude_m: 6000.0
-    heading_deg: 0.0
+    altitude_m: 700.0
+    heading_deg: 120.0
     kind: line
-    lat: 57.31310
-    lon: -26.17700
+    lat: 15.00000
+    lon: -111.38000
     duration_s: 3.0
 render:
   supersample: 2
   shading: relit
   lighting:
     mode: clock
-    date: '2026-01-25'
-    time_utc: '13:45:00'
+    date: '2026-06-22'
+    time_utc: '00:55:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
@@ -46,8 +45,8 @@ cameras:
     - 639.5
     - 359.5
   extrinsics:
-    mount: nadir
-    pitch_deg: 0
+    mount: forward
+    pitch_deg: -25.0
   frame_rate: 1.0
   rgb:
     sensor:

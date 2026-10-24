@@ -1,9 +1,9 @@
 # title: skerry coast
 # category: coast
 # landcover: glaciated rocky coast, taiga
-# look: hundreds of bare rock islets and coves with kelp, taiga on the mainland, evening sun
+# look: bare rock islets and coves with kelp, taiga on the mainland, midday
 # target: 62.33300 21.76000
-# local solar time 19:30 on 2026-07-01
+# local solar time 11:30 on 2026-07-01
 world:
   seed: 1
   generator: next
@@ -16,11 +16,11 @@ trajectory:
   synth:
     rate_hz: 400
     speed_mps: 50.0
-    altitude_m: 1000.0
-    heading_deg: 200.0
+    altitude_m: 800.0
+    heading_deg: 0.0
     kind: line
-    lat: 62.34974
-    lon: 21.77313
+    lat: 62.32183
+    lon: 21.76000
     duration_s: 3.0
 render:
   supersample: 2
@@ -28,7 +28,7 @@ render:
   lighting:
     mode: clock
     date: '2026-07-01'
-    time_utc: '18:03:00'
+    time_utc: '10:03:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:
@@ -47,7 +47,7 @@ cameras:
     - 359.5
   extrinsics:
     mount: forward
-    pitch_deg: -28.0
+    pitch_deg: -35.0
   frame_rate: 1.0
   rgb:
     sensor:
