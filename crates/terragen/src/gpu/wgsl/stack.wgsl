@@ -955,6 +955,23 @@ fn layer_canopy(s: ptr<function, Stack>) {
     let conifer_c = clumped_at(conifer, 1.0, vec3<f32>(-cf.x, cf.y, cf.z));
     let bm = biomes[(*s).bio.a];
     let n = min(bm.r0.y, MAX_CROWNS);
+    // the other biome's crown colours where the two blend (per share, density-weighted)
+    var bcol = array<vec4<f32>, 6>(vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0));
+    var wbl = 0.0;
+    if ((*s).bio.w > 0.0 && (*s).bio.b != (*s).bio.a) {
+        wbl = (*s).bio.w;
+        let bb = biomes[(*s).bio.b];
+        for (var k = 0u; k < min(bb.r0.y, MAX_CROWNS); k++) {
+            let cb = crowns[bb.r0.x + k];
+            var cc = cb.colour.xyz;
+            if ((cb.flags & 4u) != 0u) {
+                cc = mixc(cb.colour.xyz, cb.colour_dry.xyz, dry);
+            }
+            let sh = min(cb.share, 4u);
+            bcol[sh] += vec4<f32>(cc * cb.density, cb.density);
+            bcol[5] += vec4<f32>(cc * cb.density, cb.density);
+        }
+    }
     var layers: array<TreeLayer, 6>;
     var relief = 0.0;
     for (var k = 0u; k < n; k++) {
@@ -971,6 +988,15 @@ fn layer_canopy(s: ptr<function, Stack>) {
         var colour = cr.colour.xyz;
         if ((cr.flags & 4u) != 0u) {
             colour = mixc(cr.colour.xyz, cr.colour_dry.xyz, dry);
+        }
+        if (wbl > 0.0) {
+            var bc = bcol[min(cr.share, 4u)];
+            if (bc.w <= 0.0) {
+                bc = bcol[5];
+            }
+            if (bc.w > 0.0) {
+                colour = mixc(colour, bc.xyz / bc.w, wbl);
+            }
         }
         if (cr.share == 3u) {
             colour = mixc(colour, (*s).col, 0.35);

@@ -29,8 +29,7 @@ fn cold_climate(s: ptr<function, Stack>) -> ColdClimate {
     var c: ColdClimate;
     c.t = ts;
     c.summer = ts + 0.95 * half;
-    let mid = cos(TAU * (cold_year_date(0.5) - 0.04));
-    c.date = ts - half * lerp(mid, cos(TAU * (d - 0.04)), smoothstep1(0.0, 10.0, (*s).bio.edge_km));
+    c.date = ts - half * cos(TAU * (d - 0.04));
     return c;
 }
 

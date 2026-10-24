@@ -287,6 +287,24 @@ pub fn layer(s: &mut crate::stack::Stack) {
     let conifer_c = clumped_at(conifer, 1.0, cf.map(|(z, u2)| (-z, u2)));
     let reg = &s.sm.registry;
     let crowns = &reg.biomes[s.bio.a as usize].crowns;
+    // the other biome's crown colours where the two blend (coarse pixels at an ecotone or a zone
+    // border): per share, density-weighted (round 16: the crowns were the first biome's alone,
+    // a line where the forest's tone flipped along the border at planet zooms)
+    let mut bcol = [(DVec3::ZERO, 0.0); 6];
+    let wb = if s.bio.w > 0.0 && s.bio.b != s.bio.a { s.bio.w } else { 0.0 };
+    if wb > 0.0 {
+        for c in &reg.biomes[s.bio.b as usize].crowns {
+            let col = match c.colour_dry {
+                Some(d) => mixc(c.colour, d, dry),
+                None => c.colour,
+            };
+            let k = (c.share as usize).min(4);
+            bcol[k].0 += col * c.density;
+            bcol[k].1 += c.density;
+            bcol[5].0 += col * c.density;
+            bcol[5].1 += c.density;
+        }
+    }
     let mut layers =
         [TreeLayer { cell: 1.0, seed: 0, density: 0.0, closure: 0.0, height: 0.0, color: DVec3::ZERO, shape: 0, scale: 1.0, tone: DVec3::ONE, resolve: 1.0 };
             crate::registry::MAX_CROWNS];
@@ -303,6 +321,16 @@ pub fn layer(s: &mut crate::stack::Stack) {
         let colour = match c.colour_dry {
             Some(d) => mixc(c.colour, d, dry),
             None => c.colour,
+        };
+        let colour = if wb > 0.0 {
+            let (bc, bw) = if bcol[(c.share as usize).min(4)].1 > 0.0 { bcol[(c.share as usize).min(4)] } else { bcol[5] };
+            if bw > 0.0 {
+                mixc(colour, bc / bw, wb)
+            } else {
+                colour
+            }
+        } else {
+            colour
         };
         // (shrubs a third of the way to the ground's colour: dark dots of 1-2 pixels over bright
         // grass read as noise rather than texture)
