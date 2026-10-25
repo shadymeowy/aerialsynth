@@ -360,7 +360,8 @@ fn agriculture_slot_agriculture(s: ptr<function, Stack>) {
     }
 }
 
-/// `expected`: the land-use regions' expected fields.
+/// `expected`: the land-use regions' expected fields (`EcoParams::agri_mean` of the three
+/// nearest ecoregions by their wide weights).
 fn agri_expected(s: ptr<function, Stack>, f: f32) {
     if (cfg.agriculture <= 0.0) {
         return;
@@ -372,38 +373,15 @@ fn agri_expected(s: ptr<function, Stack>, f: f32) {
     let cult = smoothstep1(0.02, 0.45, agri);
     let m = (*s).m;
     let t = (*s).t;
-    let p = (*s).c.p;
-    let gsd = (*s).c.gsd;
-    let slope = (*s).l.slope;
-    let fvar = s_pf_lazy(s, PF_FIELD_VAR);
-    let tropic = smoothstep1(19.0, 25.0, t.temp) * smoothstep1(0.5, 0.7, t.moist);
-    var ft = macro_tone(p, gsd, t.gully);
-    let b70 = band(70.0, 2.0 * gsd);
-    if (b70 > 0.0) {
-        ft += 0.3 * perlin3(0x70E4lu, p * (1.0lf / 70.0lf)) * b70;
+    if (m.natural_ok * m.flat_ok <= 0.3) {
+        return;
     }
-    let core_col = toned(mixc(pal3(PAL_CROP_MEAN), srgb(78.0, 100.0, 58.0), tropic) * (1.0 + 0.10 * fvar), ft, 1.0);
-    var core_keep = 0.0;
-    if (m.natural_ok * m.flat_ok > 0.3) {
-        core_keep = smoothstep1(0.45, 0.55, m.natural_ok * m.flat_ok * (1.0 - m.riparian) * (1.0 - m.woodlot) * m.shore_keep);
-    }
-    let fv = 1.0 + 0.09 * fvar;
-    var px: AgPx;
-    px.p = p;
-    px.gsd = gsd;
-    px.fw = gsd;
-    px.moist = t.moist;
-    px.slope = slope;
-    px.ground = (*s).l.ground;
-    let soil0 = mixc(mixc(spal(s, BP_SOIL), spal(s, BP_SOIL + 2u), 0.5), spal(s, BP_SOIL + 1u), 0.3);
-    px.soil = mixc(mixc(soil0, vec3<f32>(dot(soil0, vec3<f32>(0.2126, 0.7152, 0.0722))), 0.3), vec3<f32>(0.2016, 0.15, 0.0976), 0.4);
-    px.grass = spal(s, BP_GRASS_WET);
-    px.grass_dry = spal(s, BP_GRASS_DRY);
-    px.crown = spal(s, BP_CROWN_DECID);
+    let keep = smoothstep1(0.45, 0.55, m.natural_ok * m.flat_ok * (1.0 - m.riparian) * (1.0 - m.woodlot) * m.shore_keep);
     let ids = array<u64, 3>(t.eco_id, t.eco_id2, t.eco_id3);
     let wts = vec3<f32>(1.0 - t.eco_w.x - t.eco_w.y, t.eco_w.x, t.eco_w.y);
     var ca = 0.0;
     var cc = vec3<f32>(0.0);
+    var wsum = 0.0;
     for (var k = 0u; k < 3u; k++) {
         let id = ids[k];
         let wk = wts[k];
@@ -414,90 +392,24 @@ fn agri_expected(s: ptr<function, Stack>, f: f32) {
         if (ke < 0) {
             continue;
         }
-        let eo = eco_vals[ke];
-        var e: EcoV;
-        e.id = eo.id;
-        e.arch = eo.arch;
-        e.koppen = u32(eo.clim.z + 0.5);
-        e.temp = eo.misc.z;
-        e.precip = eo.misc.w;
-        e.dev = eo.misc.y;
-        e.scale = eo.land.w;
-        e.hedges = eo.town.x;
-        e.aw = eo.aw;
-        let w = agri_weights(e);
-        var total = 0.0;
-        for (var i = 0u; i < AG_N; i++) {
-            total += w[i];
-        }
-        if (total <= 0.0) {
-            continue;
-        }
-        var flags = 0u;
-        if ((e.koppen >= 7u && e.koppen <= 9u) || (e.temp > 13.0 && e.precip < 900.0 && e.koppen > 6u)) {
-            flags |= AF_MED;
-        }
-        if (e.temp > 18.0 && e.precip < 350.0) {
-            flags |= AF_DESERT;
-        }
-        if (e.temp > 20.0 && e.precip > 900.0) {
-            flags |= AF_TROPIC;
-        }
-        let season = clamp(0.5 * (0.7 * t.style.w + 0.15) + 0.5 * eo.land.x, 0.0, 1.0);
-        var pl: Plan;
-        pl.ok = true;
-        pl.sys = AG_CORE;
-        pl.e = e;
-        pl.seed = 0lu;
-        pl.mix = agri_crop_mix(e);
-        pl.flags = flags;
-        pl.season = season;
-        pl.scale = 1.0;
-        px.season = season;
-        px.flags = flags;
-        let gh = smoothstep1(13.0, 18.0, e.temp);
-        for (var i = 0u; i < AG_N; i++) {
-            if (w[i] <= 0.0) {
-                continue;
-            }
-            var pi = w[i] / total;
-            var pcore = 0.0;
-            if (i == AG_GREENH) {
-                pcore = pi * (1.0 - gh);
-                pi *= gh;
-            }
-            var a = 0.0;
-            var col = core_col;
-            if (i == AG_CORE) {
-                a = cult * 0.9 * core_keep;
-            } else {
-                let d = agri_sys(i);
-                let slope_ok = 1.0 - smoothstep1(d.slope.x, d.slope.y, slope);
-                var rip = m.riparian;
-                if (i == AG_PADDY) {
-                    rip = 0.0;
-                }
-                let keep = smoothstep1(0.45, 0.55, m.natural_ok * slope_ok * (1.0 - rip) * (1.0 - m.woodlot) * m.shore_keep);
-                var inside_mean = 1.0;
-                if (d.part == AP_PIVOT) {
-                    inside_mean = 0.82 * 0.69;
-                } else if (d.part == AP_SECTION) {
-                    inside_mean = 1.0 - 0.21 * agri_pivot_share(e);
-                }
-                a = cult * 0.9 * inside_mean * keep;
-                let mc = agri_sys_mean(pl, d, px);
-                col = mixc(mc, vec3<f32>(dot(mc, vec3<f32>(0.2126, 0.7152, 0.0722))), 0.25) * fv;
-            }
-            let ac = cult * 0.9 * core_keep * pcore;
-            ca += wk * (pi * a + ac);
-            cc += (col * (pi * a) + core_col * ac) * wk;
-        }
+        let am = eco_vals[ke].am;
+        wsum += wk;
+        ca += wk * am.w;
+        cc += am.xyz * (wk * am.w);
     }
     if (ca <= 0.0) {
         return;
     }
-    (*s).m.field_cov = max((*s).m.field_cov, f * ca);
-    var ly = layer_paint(f * ca, cc / ca, LC_CROP);
+    let p = (*s).c.p;
+    let gsd = (*s).c.gsd;
+    var ft = macro_tone(p, gsd, t.gully);
+    let b70 = band(70.0, 2.0 * gsd);
+    if (b70 > 0.0) {
+        ft += 0.3 * perlin3(0x70E4lu, p * (1.0lf / 70.0lf)) * b70;
+    }
+    let a = f * cult * keep * ca / wsum;
+    (*s).m.field_cov = max((*s).m.field_cov, a);
+    var ly = layer_paint(a, toned(cc / ca, ft, 1.0), LC_CROP);
     ly.dh = -0.6 * m.micro;
     ly.hmode = HM_ADD;
     composite(s, ly);

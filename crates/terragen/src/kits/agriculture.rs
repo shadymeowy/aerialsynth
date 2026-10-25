@@ -495,10 +495,8 @@ pub(crate) fn handover(w: &crate::world::World, gsd: f64) -> f64 {
 }
 
 /// The expected look of the land-use regions' fields at the sample (composited with cover `f`
-/// times theirs): every field system by its weight (`weights`, `pick_system`) with its mean
-/// colour and cover where the regions' fields are below the pixel (`draw`'s means, the core's
-/// fields' `SurfaceModel::field`), at the regions' mean season, for the three nearest
-/// ecoregions by their wide weights.
+/// times theirs): the three nearest ecoregions' expected fields (`EcoParams::agri_mean`) by
+/// their wide weights, toned like the core's fields, where the ground takes fields.
 fn expected(s: &mut Stack, f: f64) {
     if s.world.cfg.landuse.agriculture <= 0.0 {
         return;
@@ -509,82 +507,123 @@ fn expected(s: &mut Stack, f: f64) {
     }
     let cult = smoothstep(0.02, 0.45, agri);
     let (m, t) = (s.m, s.t);
-    let (p, gsd, slope) = (s.ctx.p, s.ctx.gsd, s.l.slope);
-    let fvar = s.sm.pf_lazy(s.pf, crate::surface::PF_FIELD_VAR);
-    // the core's fields (their regional mean)
-    let tropic = smoothstep(19.0, 25.0, t.temp) * smoothstep(0.5, 0.7, t.moist);
-    let ft = crate::layers::ground::macro_tone(p, gsd, t.gully) + 0.3 * perlin3(0x70E4, p / 70.0) * band(70.0, 2.0 * gsd);
-    let core_col = crate::layers::ground::toned(mixc(s.sm.pal.crop_mean, srgb(78.0, 100.0, 58.0), tropic) * (1.0 + 0.10 * fvar), ft, 1.0);
-    let core_keep = if m.natural_ok * m.flat_ok > 0.3 {
-        smoothstep(0.45, 0.55, m.natural_ok * m.flat_ok * (1.0 - m.riparian) * (1.0 - m.woodlot) * m.shore_keep)
-    } else {
-        0.0
-    };
-    let fv = 1.0 + 0.09 * fvar;
-    let soil = mixc(field_soil(mixc(mixc(s.pal(pal::SOIL), s.pal(pal::SOIL + 2), 0.5), s.pal(pal::SOIL + 1), 0.3)), PLOUGH, 0.4);
-    let (grass, grass_dry, crown) = (s.pal(pal::GRASS_WET), s.pal(pal::GRASS_DRY), s.pal(pal::CROWN_DECID));
+    if m.natural_ok * m.flat_ok <= 0.3 {
+        return;
+    }
+    let keep = smoothstep(0.45, 0.55, m.natural_ok * m.flat_ok * (1.0 - m.riparian) * (1.0 - m.woodlot) * m.shore_keep);
     let ids = [(t.eco.id, t.eco.center, t.eco_w[0]), (t.eco.id2, t.eco.center2, t.eco_w[1]), (t.eco3, t.eco3_center, t.eco_w[2])];
-    let (mut ca, mut cc) = (0.0, DVec3::ZERO);
+    let (mut ca, mut cc, mut wsum) = (0.0, DVec3::ZERO, 0.0);
     for (k, &(id, c3, wk)) in ids.iter().enumerate() {
         if wk <= 0.0 || id == 0 || (k > 0 && ids[..k].iter().any(|x| x.0 == id)) {
             continue;
         }
-        let ep = s.sm.eco.params(s.world, &s.sm.registry, s.cache, id, c3);
-        let e = EcoV::of(&ep);
-        let w = weights(&e);
-        let total: f64 = w.iter().sum();
-        if total <= 0.0 {
-            continue;
-        }
-        let mut flags = 0;
-        if (7..=9).contains(&e.koppen) || (e.temp > 13.0 && e.precip < 900.0 && e.koppen > 6) {
-            flags |= F_MED;
-        }
-        if e.temp > 18.0 && e.precip < 350.0 {
-            flags |= F_DESERT;
-        }
-        if e.temp > 20.0 && e.precip > 900.0 {
-            flags |= F_TROPIC;
-        }
-        // the regions' mean season (`eco::region_style`)
-        let season = (0.5 * (0.7 * t.style[3] + 0.15) + 0.5 * ep.style.season).clamp(0.0, 1.0);
-        let pl = Plan { sys: sys::CORE, e, seed: 0, mix: crop_mix(&e), flags, season, scale: 1.0 };
-        let px = Px { p, gsd, fw: gsd, season, moist: t.moist, slope, ground: s.l.ground, soil, grass, grass_dry, crown, flags };
-        let gh = smoothstep(13.0, 18.0, e.temp);
-        for (i, &wi) in w.iter().enumerate() {
-            if wi <= 0.0 {
-                continue;
-            }
-            let pi = wi / total;
-            let i = i as u32;
-            // (greenhouse seas in warm climates only: elsewhere the core's fields)
-            let (pi, pcore) = if i == sys::GREENH { (pi * gh, pi * (1.0 - gh)) } else { (pi, 0.0) };
-            let (a, col) = if i == sys::CORE {
-                (cult * 0.9 * core_keep, core_col)
-            } else {
-                let d = SYS[i as usize];
-                let slope_ok = 1.0 - smoothstep(d.slope[0], d.slope[1], slope);
-                let rip = if i == sys::PADDY { 0.0 } else { m.riparian };
-                let keep = smoothstep(0.45, 0.55, m.natural_ok * slope_ok * (1.0 - rip) * (1.0 - m.woodlot) * m.shore_keep);
-                let inside_mean = if d.part == part::PIVOT {
-                    0.82 * 0.69
-                } else if d.part == part::SECTION {
-                    1.0 - 0.21 * pivot_share(&e)
-                } else {
-                    1.0
-                };
-                (cult * 0.9 * inside_mean * keep, field_tone(sys_mean(&pl, &d, &px)) * fv)
-            };
-            let ac = cult * 0.9 * core_keep * pcore;
-            ca += wk * (pi * a + ac);
-            cc += (col * (pi * a) + core_col * ac) * wk;
-        }
+        let am = s.sm.eco.params(s.world, &s.sm.registry, s.cache, id, c3).agri_mean;
+        wsum += wk;
+        ca += wk * am[3];
+        cc += DVec3::new(am[0], am[1], am[2]) * (wk * am[3]);
     }
     if ca <= 0.0 {
         return;
     }
-    s.m.field_cov = s.m.field_cov.max(f * ca);
-    s.composite(Layer { cov: f * ca, albedo: cc / ca, dh: -0.6 * m.micro, hmode: hmode::ADD, cls: crate::landcover::CROP, ..Default::default() });
+    let (p, gsd) = (s.ctx.p, s.ctx.gsd);
+    let ft = crate::layers::ground::macro_tone(p, gsd, t.gully) + 0.3 * perlin3(0x70E4, p / 70.0) * band(70.0, 2.0 * gsd);
+    let col = crate::layers::ground::toned(cc / ca, ft, 1.0);
+    let a = f * cult * keep * ca / wsum;
+    s.m.field_cov = s.m.field_cov.max(a);
+    s.composite(Layer { cov: a, albedo: col, dh: -0.6 * m.micro, hmode: hmode::ADD, cls: crate::landcover::CROP, ..Default::default() });
+}
+
+/// The expected fields of ecoregion `e` (`EcoParams::agri_mean`: mean colour, linear, and the
+/// share of cultivable ground its land-use regions cover): every field system by its weight
+/// (`weights`, `pick_system`) with its mean colour and cover where the parcels are below the
+/// pixel (`draw`'s means, the core's fields' `SurfaceModel::field`), at the regions' mean season,
+/// with the palette of the ecoregion's biome and style on flat ground. Host code, both backends.
+pub fn expected_mean(w: &crate::world::World, reg: &crate::registry::Registry, e: &crate::eco::EcoParams) -> [f64; 4] {
+    let pal_of = |i: usize| {
+        let c = reg.biomes[e.biome as usize].pal.c[i];
+        let st = &e.style;
+        match i {
+            pal::SOIL..=3 => c + (st.soil - c) * (st.soil_w * 0.9).min(1.0),
+            pal::GRASS_WET | pal::GRASS_DRY => c * st.grass,
+            pal::CROWN_DECID => c * st.crown,
+            _ => c,
+        }
+    };
+    let ev = EcoV::of(e);
+    let temp = e.climate.temp_c;
+    let moist = crate::world::World::moisture_index(e.climate.precip_mm, temp).clamp(0.0, 1.0);
+    let tropic = smoothstep(19.0, 25.0, temp) * smoothstep(0.5, 0.7, moist);
+    let core_col = mixc(crate::surface::Palette::new().crop_mean, srgb(78.0, 100.0, 58.0), tropic);
+    let soil = mixc(field_soil(mixc(mixc(pal_of(pal::SOIL), pal_of(pal::SOIL + 2), 0.5), pal_of(pal::SOIL + 1), 0.3)), PLOUGH, 0.4);
+    let mut flags = 0;
+    if (7..=9).contains(&ev.koppen) || (ev.temp > 13.0 && ev.precip < 900.0 && ev.koppen > 6) {
+        flags |= F_MED;
+    }
+    if ev.temp > 18.0 && ev.precip < 350.0 {
+        flags |= F_DESERT;
+    }
+    if ev.temp > 20.0 && ev.precip > 900.0 {
+        flags |= F_TROPIC;
+    }
+    // (the regions' season, `eco::region_style`, at the mean style channel and draw)
+    let season = (0.25 + 0.5 * e.style.season).clamp(0.0, 1.0);
+    let px = Px {
+        p: e.site,
+        gsd: 1000.0,
+        fw: 1000.0,
+        season,
+        moist,
+        slope: 0.0,
+        ground: 0.0,
+        soil,
+        grass: pal_of(pal::GRASS_WET),
+        grass_dry: pal_of(pal::GRASS_DRY),
+        crown: pal_of(pal::CROWN_DECID),
+        flags,
+    };
+    let pl = Plan { sys: sys::CORE, e: ev, seed: 0, mix: crop_mix(&ev), flags, season, scale: 1.0 };
+    let wts = weights(&ev);
+    let total: f64 = wts.iter().sum();
+    let _ = w;
+    if total <= 0.0 {
+        return [core_col.x, core_col.y, core_col.z, 0.9];
+    }
+    let gh = smoothstep(13.0, 18.0, ev.temp);
+    let (mut ca, mut cc) = (0.0, DVec3::ZERO);
+    for (i, &wi) in wts.iter().enumerate() {
+        if wi <= 0.0 {
+            continue;
+        }
+        let pi = wi / total;
+        let i = i as u32;
+        // (greenhouse seas in warm climates only: elsewhere the core's fields)
+        let (pk, pcore) = if i == sys::GREENH {
+            (pi * gh, pi * (1.0 - gh))
+        } else if i == sys::CORE {
+            (0.0, pi)
+        } else {
+            (pi, 0.0)
+        };
+        if pk > 0.0 {
+            let d = SYS[i as usize];
+            let inside_mean = if d.part == part::PIVOT {
+                0.82 * 0.69
+            } else if d.part == part::SECTION {
+                1.0 - 0.21 * pivot_share(&ev)
+            } else {
+                1.0
+            };
+            let a = 0.9 * inside_mean * pk;
+            ca += a;
+            cc += field_tone(sys_mean(&pl, &d, &px)) * a;
+        }
+        if pcore > 0.0 {
+            ca += 0.9 * pcore;
+            cc += core_col * (0.9 * pcore);
+        }
+    }
+    let c = if ca > 0.0 { cc / ca } else { core_col };
+    [c.x, c.y, c.z, ca]
 }
 
 /// Slot 6: section-line farm tracks (every mile, east / north); the feedlots of ranches.

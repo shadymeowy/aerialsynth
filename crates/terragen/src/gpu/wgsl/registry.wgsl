@@ -84,6 +84,8 @@ struct Eco {
     clim: vec4<f32>,
     /// the agriculture kit's system weight multipliers, dominant draw (`EcoParams::agri_w`)
     aw: array<vec4<f32>, 4>,
+    /// the expected fields (`EcoParams::agri_mean`): colour, cover share
+    am: vec4<f32>,
 }
 
 @group(0) @binding(6) var<storage, read> biomes: array<Biome>;
@@ -180,19 +182,41 @@ struct Bio {
     pz: vec3<u32>,
     pwz: vec3<f32>,
     pw: vec3<f32>,
+    /// the packed zones (`bio_zones`), carried in the stage state
+    zk: vec3<u32>,
+}
+
+/// The zones of the pixel's three nearest ecoregions (`BioSample::at`), packed per ecoregion:
+/// zone | partner << 8 | partner weight (unorm16) << 16 (0: none). Computed once (`bio_at`);
+/// pass B's later stages read them from the stage state (`st_save`) instead of `zone_of`.
+fn bio_zones(t: Terrain, c: Ctx) -> vec3<u32> {
+    let tz = t.temp + clamp(0.5 * t.temp_range - 10.0, -6.0, 8.0);
+    let ids = array<u64, 3>(t.eco_id, t.eco_id2, t.eco_id3);
+    var out = vec3<u32>(0u);
+    for (var k = 0u; k < 3u; k++) {
+        if (ids[k] == 0lu) {
+            continue;
+        }
+        let ke = eco_find(ids[k]);
+        if (ke < 0) {
+            continue;
+        }
+        let z = zone_of(eco_vals[ke].biome, tz, c.p, c.gsd);
+        out[k] = (z.z & 0xffu) | ((z.partner & 0xffu) << 8u) | (u32(clamp(z.w, 0.0, 1.0) * 65535.0 + 0.5) << 16u);
+    }
+    return out;
 }
 
 /// The wide blend of the pixel's three nearest ecoregions (`BioSample::at`): their styles,
-/// site climates and zones' palettes by the weights `t.eco_w`; archetype and lithology the
-/// mosaic's ecoregion's (`k1`).
-fn bio_wide(o: ptr<function, Bio>, t: Terrain, c: Ctx) {
-    let tz = t.temp + clamp(0.5 * t.temp_range - 10.0, -6.0, 8.0);
+/// site climates and zones' palettes (`zk`: `bio_zones`) by the weights `t.eco_w`; archetype and
+/// lithology the mosaic's ecoregion's (`k1`).
+fn bio_wide(o: ptr<function, Bio>, t: Terrain, zk: vec3<u32>) {
     let ids = array<u64, 3>(t.eco_id, t.eco_id2, t.eco_id3);
     let wts = vec3<f32>(1.0 - t.eco_w.x - t.eco_w.y, t.eco_w.x, t.eco_w.y);
     var acc = 0.0;
-    var n = 0u;
     var st: EcoStyle;
     var site = vec4<f32>(0.0);
+    (*o).zk = zk;
     (*o).pz = vec3<u32>(0u);
     (*o).pwz = vec3<f32>(0.0);
     (*o).pw = vec3<f32>(0.0);
@@ -219,24 +243,14 @@ fn bio_wide(o: ptr<function, Bio>, t: Terrain, c: Ctx) {
             st = style_mix(st, es, f);
             site = mix(site, ec, f);
         }
-        let z = zone_of(e.biome, tz, c.p, c.gsd);
-        let key = z.z | (z.partner << 16u);
-        var merged = false;
-        for (var m = 0u; m < n; m++) {
-            if ((*o).pz[m] == key) {
-                (*o).pw[m] += wk;
-                merged = true;
-            }
-        }
-        if (!merged) {
-            (*o).pz[n] = key;
-            (*o).pwz[n] = z.w;
-            (*o).pw[n] = wk;
-            n += 1u;
-        }
+        let kz = zk[k];
+        (*o).pz[k] = (kz & 0xffu) | (((kz >> 8u) & 0xffu) << 16u);
+        (*o).pwz[k] = f32(kz >> 16u) / 65535.0;
+        (*o).pw[k] = wk;
     }
-    if (n == 0u) {
+    if (acc <= 0.0) {
         (*o).pz[0] = (*o).a;
+        (*o).pwz[0] = 0.0;
         (*o).pw[0] = 1.0;
         return;
     }
@@ -401,14 +415,14 @@ fn bio_at(t: Terrain, eco_edge: f32, c: Ctx) -> Bio {
     o.edge_km = edge / 1000.0;
     o.st = eco_style(e1);
     o.site = vec4<f32>(e1.misc.z, e1.misc.w, e1.clim.x, e1.clim.y);
-    bio_wide(&o, t, c);
+    bio_wide(&o, t, bio_zones(t, c));
     return o;
 }
 
 /// The `Bio` that `bio_at` made, from its zones (`a`, `b`, `w`), its mosaic's ecoregions and
 /// ecotone probability (`k1`, `k2`, `wst`), the border distance `edge` (m) and the pixel's
 /// pass-A terrain (the wide blend).
-fn bio_from(a: u32, bc: u32, w: f32, k1: i32, k2: i32, wst: f32, edge: f32, t: Terrain, c: Ctx) -> Bio {
+fn bio_from(a: u32, bc: u32, w: f32, k1: i32, k2: i32, wst: f32, edge: f32, t: Terrain, zk: vec3<u32>) -> Bio {
     var o: Bio;
     o.a = a;
     o.b = bc & 0xffffu;
@@ -431,7 +445,7 @@ fn bio_from(a: u32, bc: u32, w: f32, k1: i32, k2: i32, wst: f32, edge: f32, t: T
     let e1 = eco_vals[k1];
     o.st = eco_style(e1);
     o.site = vec4<f32>(e1.misc.z, e1.misc.w, e1.clim.x, e1.clim.y);
-    bio_wide(&o, t, c);
+    bio_wide(&o, t, zk);
     return o;
 }
 

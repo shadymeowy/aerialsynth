@@ -143,6 +143,9 @@ pub struct EcoParams {
     /// the agriculture kit's per-system weight multipliers (0.4..1.6) and its draw of the
     /// dominant system (`[15]`), varying smoothly across the ecoregions (`coherent_u`)
     pub agri_w: [f64; 16],
+    /// the expected fields of its land-use regions (`kits::agriculture::expected_mean`): mean
+    /// colour (linear) and cover share
+    pub agri_mean: [f64; 4],
 }
 
 /// Culture archetypes as distributions of parameters.
@@ -358,7 +361,9 @@ pub fn compute(w: &World, reg: &Registry, id: u64, site: DVec3) -> EcoParams {
     let style = draw_style(w.seed(), id, site, &s, arch, temp);
     // (the ecoregion's own draws, as in v0.3.0: the field systems a place shows)
     let agri_w = std::array::from_fn(|i| if i < 15 { 0.4 + 1.2 * u01k(id, 0xA600 + i as u64) } else { u01k(id, 0xA6FF) });
-    EcoParams { id, site: surface, climate, biome, culture: s.culture, style, agri_w }
+    let mut e = EcoParams { id, site: surface, climate, biome, culture: s.culture, style, agri_w, agri_mean: [0.0; 4] };
+    e.agri_mean = crate::kits::agriculture::expected_mean(w, reg, &e);
+    e
 }
 
 /// A draw 0..1 (about uniform) of the ecoregion at `site` that varies smoothly across the
@@ -605,6 +610,8 @@ pub mod gpu {
         pub clim: [f32; 4],
         /// `EcoParams::agri_w`
         pub aw: [f32; 16],
+        /// `EcoParams::agri_mean`
+        pub am: [f32; 4],
     }
 
     impl GEco {
@@ -629,6 +636,7 @@ pub mod gpu {
                 misc: [s.sodium as f32, s.development as f32, e.climate.temp_c as f32, e.climate.precip_mm as f32],
                 clim: [e.climate.temp_range_c as f32, e.climate.dry_months as f32, e.climate.koppen as f32, 0.0],
                 aw: e.agri_w.map(|v| v as f32),
+                am: e.agri_mean.map(|v| v as f32),
             }
         }
     }
@@ -636,7 +644,7 @@ pub mod gpu {
     #[cfg(test)]
     #[test]
     fn size() {
-        assert_eq!(std::mem::size_of::<GEco>(), 32 + 14 * 16);
+        assert_eq!(std::mem::size_of::<GEco>(), 32 + 15 * 16);
     }
 }
 

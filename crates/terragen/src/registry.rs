@@ -1380,6 +1380,8 @@ pub mod gpu {
 
     impl Registry {
         pub fn gpu(&self) -> Tables {
+            // (pass B carries the zones of a sample's ecoregions in 8 bits each: `bio_zones`)
+            assert!(self.biomes.len() <= 256, "the GPU generator supports up to 256 biomes ({})", self.biomes.len());
             let mut t = Tables { biomes: vec![], crowns: vec![], zones: vec![], layers: vec![], band_ranges: vec![], band_idx: vec![] };
             for b in &self.biomes {
                 let c0 = t.crowns.len() as u32;
