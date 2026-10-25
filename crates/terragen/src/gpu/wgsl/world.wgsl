@@ -187,6 +187,8 @@ const P_SITE_TOWN: u32 = 32768u;
 const P_ECO_WARP: u32 = 65536u;
 const P_SITE_ECO: u32 = 131072u;
 const ECO_KEY: u64 = 0xEC0Elu;
+/// `eco::BLEND_CELLS`
+const ECO_BLEND: f32 = 0.5;
 
 fn pre_none() -> Pre {
     var p: Pre;
@@ -220,7 +222,7 @@ fn continent(p: vec3<f64>, gsd: f32) -> f32 {
 
 /// Octaves of the ridged mountains of wavelength >= `cut` (`low`) or < `cut` (not `low`,
 /// continuing from `st`): sum, low-passed sum, weight (`World::ridged_part`).
-fn ridged_part(p: vec3<f64>, gsd: f32, sharp: f32, cut: f32, low: bool, st: vec3<f32>, fine: f32) -> vec3<f32> {
+fn ridged_part(p: vec3<f64>, gsd: f32, sharp: f32, cut: f32, low: bool, st: vec3<f32>, fine: f32, fill: bool) -> vec3<f32> {
     var sum = st.x;
     var low_sum = st.y;
     var weight = st.z;
@@ -228,6 +230,7 @@ fn ridged_part(p: vec3<f64>, gsd: f32, sharp: f32, cut: f32, low: bool, st: vec3
     var inv = 1.0lf / 14000.0lf;
     var amp = 1.0;
     let fb = fbms[FBM_MTN];
+    let m = select(0.0, 1.0 / (1.0 + 0.389 * sharp), fill);
     for (var i = 0u; i < fb.n; i++) {
         let lamf = f32(lam);
         if (low && lamf < cut) {
@@ -235,21 +238,45 @@ fn ridged_part(p: vec3<f64>, gsd: f32, sharp: f32, cut: f32, low: bool, st: vec3
         }
         // ridges contain harmonics above the octave frequency: band-limit more strictly
         let wb = band(lamf, 1.6 * gsd);
+        let own = low || lamf < cut;
         if (wb <= 0.0) {
+            if (own && fill) {
+                // (`ridged_tail`: the octaves below the pixel count with their mean)
+                var tl = lamf;
+                var ta = amp;
+                var tw = weight;
+                for (var j = i; j < fb.n; j++) {
+                    let e = tw * m * ta;
+                    sum += e * select(1.0, fine, tl < 1800.0);
+                    if (tl > 6.0 * KM) {
+                        low_sum += e;
+                    }
+                    tw = min(0.95 * 1.8 * m * tw, 1.0);
+                    tl *= 0.5;
+                    ta *= select(0.42, 0.58, tl > 1000.0);
+                }
+            }
             break;
         }
-        if (low || lamf < cut) {
+        if (own) {
             let o = octs[fb.first + i];
             let s = p * inv;
             let q = o.ax.xyz * s.x + o.ay.xyz * s.y + o.az.xyz * s.z + o.off.xyz;
             let n = perlin3(o.seed, q);
             var r = max(1.0 - abs(n), 0.0);
             r = pow(r, sharp);
+            let fill_e = (1.0 - wb) * m * weight;
             r *= weight;
             weight = clamp(r * 1.8, 0.0, 1.0);
             sum += r * amp * wb * select(1.0, fine, lamf < 1800.0);
             if (lamf > 6.0 * KM) {
                 low_sum += r * amp * wb;
+            }
+            if (fill_e > 0.0) {
+                sum += fill_e * amp * select(1.0, fine, lamf < 1800.0);
+                if (lamf > 6.0 * KM) {
+                    low_sum += fill_e * amp;
+                }
             }
         }
         lam *= 0.5lf;
@@ -259,8 +286,8 @@ fn ridged_part(p: vec3<f64>, gsd: f32, sharp: f32, cut: f32, low: bool, st: vec3
     return vec3<f32>(sum, low_sum, weight);
 }
 
-fn ridged(p: vec3<f64>, gsd: f32, sharp: f32, fine: f32) -> vec2<f32> {
-    let st = ridged_part(p, gsd, sharp, 0.0, true, vec3<f32>(0.0, 0.0, 1.0), fine);
+fn ridged(p: vec3<f64>, gsd: f32, sharp: f32, fine: f32, fill: bool) -> vec2<f32> {
+    let st = ridged_part(p, gsd, sharp, 0.0, true, vec3<f32>(0.0, 0.0, 1.0), fine, fill);
     return st.xy * 0.5;
 }
 
@@ -502,6 +529,22 @@ fn hill_amplitude(m: Macro) -> f32 {
 }
 
 /// Climate (temperature °C, moisture 0..1) at a given elevation.
+/// `World::ice_sheet`: ice sheet and perennial snowfield cover of the land.
+fn ice_sheet(m: Macro, temp0: f32, moist: f32, mountain: f32) -> f32 {
+    let tela = -2.0 + 5.0 * smoothstep1(0.15, 0.85, moist);
+    let half = 0.475 * m.temp_range;
+    let ice_s = ice_index(temp0, half, tela);
+    if (ice_s <= 0.0) {
+        return 0.0;
+    }
+    let polar = smoothstep1(0.0, -6.0, m.temp);
+    return smoothstep1(0.0, 0.5, ice_s * (1.0 - smoothstep1(0.3, 0.7, mountain) * (1.0 - polar)));
+}
+
+fn ice_index(t: f32, half: f32, tela: f32) -> f32 {
+    return max(smoothstep1(-0.5, -3.0, t + half - tela), smoothstep1(-8.0, -12.0, t) * smoothstep1(8.0, 3.0, t + half - tela));
+}
+
 /// Climate at an elevation (`World::climate`): the atlas' sea-level temperature by the lapse
 /// rate, its moisture index.
 fn climate(m: Macro, lat: f32, elev: f32) -> vec2<f32> {
@@ -514,7 +557,7 @@ fn low_relief(c: Ctx, m: Macro, q: vec3<f64>, mountain: f32, amp_m: f32, hill_am
     var v = hill_amp * hills(q, gl, gain).x;
     if (amp_m > 0.0) {
         let wp = m.mtn_warp * 9.0 * KM;
-        v += amp_m * ridged(q + vec3<f64>(c.east * wp.x + c.north * wp.y), gl, 1.6 + 0.8 * m.style.z, ridged_fine(amp_m)).x;
+        v += amp_m * ridged(q + vec3<f64>(c.east * wp.x + c.north * wp.y), gl, 1.6 + 0.8 * m.style.z, ridged_fine(amp_m), false).x;
     }
     return v;
 }
@@ -566,7 +609,7 @@ fn pre_at(c: Ctx, m: Macro, gully: bool, roads: bool, has_cut: bool, cut: vec2<f
     if (has_cut) {
         let wp = m.mtn_warp * 9.0 * KM;
         let pw = c.p + vec3<f64>(c.east * wp.x + c.north * wp.y);
-        let r = ridged_part(pw, c.gsd, 1.6 + 0.8 * m.style.z, cut.x, true, vec3<f32>(0.0, 0.0, 1.0), ridged_fine(mountain_mask(m).y));
+        let r = ridged_part(pw, c.gsd, 1.6 + 0.8 * m.style.z, cut.x, true, vec3<f32>(0.0, 0.0, 1.0), ridged_fine(mountain_mask(m).y), true);
         let hl = hills_part(c.p, c.gsd, 0.47 + 0.08 * m.rough, cut.y, true);
         pre.relief = vec4<f32>(r, hl.x);
         pre.relief4 = hl.y;
@@ -642,18 +685,22 @@ struct Relief {
     mesa: f32,
     sand: f32,
     gully_n: f32,
+    /// ice sheet and perennial snowfield cover (`World::ice_sheet`)
+    sheet: f32,
     /// the volcanic kit's share of the kits' relief (`kits::relief`)
     dv: f32,
 }
 
 fn relief(c: Ctx, m: Macro, pre: Pre, blk: u32) -> Relief {
-    return relief_kits(c, m, relief_core(c, m, pre), blk);
+    return relief_kits(c, m, relief_core(c, m, pre, true), blk);
 }
 
 /// The relief before the kits' operators (`relief_kits`). The point queries run the two halves
 /// in pipelines of their own (each compiles in about half the time; in pass A1 a pipeline of
 /// its own for the kits' operators made pass A1 1.5x slower on a P4).
-fn relief_core(c: Ctx, m: Macro, pre: Pre) -> Relief {
+/// `fill`: the ridged octaves below the pixel count with their mean (not for the drainage
+/// network's heights, `World::ridged_part`).
+fn relief_core(c: Ctx, m: Macro, pre: Pre, fill: bool) -> Relief {
     let p = c.p;
     let gsd = c.gsd;
     let s = m.cont;
@@ -673,10 +720,10 @@ fn relief_core(c: Ctx, m: Macro, pre: Pre) -> Relief {
         let sharp = 1.6 + 0.8 * m.style.z;
         if ((pre.flags & P_RELIEF) != 0u) {
             // the long octaves from the tile's coarse grid
-            let st = ridged_part(pw, gsd, sharp, pre.relief_cut.x, false, vec3<f32>(pre.relief.x, pre.relief.y, clamp(pre.relief.z, 0.0, 1.0)), ridged_fine(amp_m));
+            let st = ridged_part(pw, gsd, sharp, pre.relief_cut.x, false, vec3<f32>(pre.relief.x, pre.relief.y, clamp(pre.relief.z, 0.0, 1.0)), ridged_fine(amp_m), fill);
             rg = st.xy * 0.5;
         } else {
-            rg = ridged(pw, gsd, sharp, ridged_fine(amp_m));
+            rg = ridged(pw, gsd, sharp, ridged_fine(amp_m), fill);
         }
     }
     let uplift = 0.22 * amp_m;
@@ -736,8 +783,10 @@ fn relief_core(c: Ctx, m: Macro, pre: Pre) -> Relief {
     let temp0 = cl.x;
     let moist = cl.y;
     let firn = smoothstep1(-4.0, -10.0, temp0);
-    if (firn > 0.0) {
-        h -= firn * (0.6 * gully + 0.4 * micro);
+    let sheet = ice_sheet(m, temp0, moist, mountain);
+    let gfill = max(0.6 * firn, sheet);
+    if (gfill > 0.0) {
+        h -= gfill * gully + 0.4 * firn * micro;
     }
 
     // mesas (arid terraces)
@@ -776,6 +825,7 @@ fn relief_core(c: Ctx, m: Macro, pre: Pre) -> Relief {
     o.mesa = mesa;
     o.sand = sand;
     o.gully_n = gully_n;
+    o.sheet = sheet;
     return o;
 }
 
@@ -844,6 +894,17 @@ struct ReliefIn {
 }
 
 /// Pass-A result at a pixel centre (`Terrain`; the land-use sites as ids and edge distance).
+/// `eco::wide_weights`: the weights of the second and third nearest ecoregions.
+fn eco_wide_weights(d1: f32, d2: f32, d3: f32) -> vec2<f32> {
+    let wd = ECO_BLEND * cfg.eco_cell;
+    if (wd <= 0.0) {
+        return vec2<f32>(0.0);
+    }
+    let w2 = 1.0 - smoothstep1(0.0, wd, d2 - d1);
+    let w3 = 1.0 - smoothstep1(0.0, wd, d3 - d1);
+    return vec2<f32>(w2, w3) / (1.0 + w2 + w3);
+}
+
 struct Terrain {
     ground: f32,
     water: f32,
@@ -875,6 +936,10 @@ struct Terrain {
     /// the ecoregion and its neighbour across the nearest border
     eco_id: u64,
     eco_id2: u64,
+    /// the third nearest ecoregion and the wide weights of the second and third
+    /// (`eco::wide_weights`; the nearest's is 1 − both)
+    eco_id3: u64,
+    eco_w: vec2<f32>,
     /// atlas fields at the pixel (`Terrain`)
     uplift: f32,
     coast_km: f32,
@@ -887,6 +952,8 @@ struct Terrain {
     regime: f32,
     /// the micro relief's part of `ground` (m)
     micro: f32,
+    /// ice sheet cover (`World::ice_sheet`)
+    sheet: f32,
 }
 
 // ---------------------------------------------------------------- drainage and lakes (batch data)
@@ -1156,7 +1223,10 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
             // (a kit's meanders and uneven bed: the channel's distance and half width)
             let rds = rd - cv.shift;
             let adc = abs(rds);
-            let hwc = hw * cv.hw_k;
+            // (none under ice sheets and snowfields, the kits' glacial troughs neither)
+            let icef = 1.0 - r.sheet;
+            let hwc = hw * cv.hw_k * icef;
+            let hwk = hw * cv.hw_k;
             let vnat = cv.fp_w + cv.wall_k * (h0 - cv.floor);
             let valley = min(lerp(max(valley_hit, vnat), vnat, cv.narrow), reach);
             if (h0 > cv.floor && h0 > -4.0 && adc < valley) {
@@ -1164,12 +1234,12 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                 if (dad < 0.0) {
                     dad *= 1.0 - smoothstep1(0.75 * valley, valley, adc);
                 }
-                let adw = adc + dad * smoothstep1(1.5 * hwc, 1.5 * hwc + 150.0, adc);
+                let adw = adc + dad * smoothstep1(1.5 * hwk, 1.5 * hwk + 150.0, adc);
                 var wall = smoothstep1(cv.fp_w, valley, adw);
                 wall = wall * wall * (3.0 - 2.0 * wall);
                 let fpl = max(cv.floor + 0.8, cv.fp_min) + 0.4 * abs(micro);
                 var tgt = fpl;
-                if (adc < hwc) {
+                if (adc < hwk) {
                     tgt = cv.floor - 0.8 - 0.02 * width;
                 }
                 // (kits: U-shaped walls and stepped walls)
@@ -1190,7 +1260,7 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                     }
                     wall = w;
                 }
-                let keep = smoothstep1(hwc, hwc + 60.0, adc);
+                let keep = smoothstep1(hwk, hwk + 60.0, adc);
                 var carved = min(h0, lerp(tgt, h0 - r.dv, wall) + r.dv * keep);
                 if (cv.rough > 0.0 && h0 > tgt) {
                     let rr = (1.0 - abs(perlin3(0x0C4A9E01lu, p / 13.0lf))) * band(13.0, 2.5 * gsd) * 0.65 + (1.0 - abs(perlin3(0x0C4A9E02lu, p / 5.0lf))) * band(5.0, 2.5 * gsd) * 0.35;
@@ -1206,8 +1276,8 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                     fade = smoothstep1(0.25, 0.5, valley_hit / gsd);
                 }
                 let shelf = smoothstep1(-4.0, 0.5, h0);
-                h = min(h, h0 + (carved - h0) * fade * land_fade * shelf);
-                floodplain = max(floodplain, (1.0 - wall) * land_fade * smoothstep1(20.0, 120.0, width) * fade);
+                h = min(h, h0 + (carved - h0) * fade * land_fade * shelf * icef);
+                floodplain = max(floodplain, (1.0 - wall) * land_fade * smoothstep1(20.0, 120.0, width) * fade * icef);
             }
             // a kit's small lake in the channel's head (a tarn): a bowl and a water level
             if (cv.lake_r > 0.0 && adc < cv.lake_r && h0 > cv.lake_level) {
@@ -1387,19 +1457,20 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
     // the ecoregion (every zoom)
     t.eco_id = 0lu;
     t.eco_id2 = 0lu;
+    t.eco_id3 = 0lu;
+    t.eco_w = vec2<f32>(0.0);
     t.eco_edge = NONE_F;
     if (mode != MODE_RELIEF) {
         let pe = p + vec3<f64>(eco_warp_at(p, pre));
-        var wc: Cell3;
         let cell = f64(cfg.eco_cell);
-        if ((pre.flags & P_SITE_ECO) != 0u) {
-            wc = worley3_from(pe, cell, 1.0lf / cell, pre.site_eco);
-        } else {
-            wc = worley3(cfg.seed ^ ECO_KEY, pe, cell, 0.9);
-        }
+        // (the three nearest sites: the wide blend's weights need the third)
+        let s3 = worley3_sites3(cfg.seed ^ ECO_KEY, pe, 1.0lf / cell, 0.9);
+        let wc = worley3_from(pe, cell, 1.0lf / cell, s3.s);
         t.eco_id = wc.id;
         t.eco_id2 = wc.id2;
+        t.eco_id3 = s3.id3;
         t.eco_edge = worley_edge_dist(wc, pe);
+        t.eco_w = eco_wide_weights(wc.f1, wc.f2, s3.f3 * cfg.eco_cell);
     }
     t.town = 0u;
     let town_cell = f32(cfg.town_cell);
@@ -1432,7 +1503,7 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
     }
 
     t.ground = h;
-    t.gully = r.gully_n;
+    t.gully = r.gully_n * (1.0 - r.sheet);
     t.temp = temp;
     t.moist = moist;
     t.mountain = mountain;
@@ -1454,5 +1525,6 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
     t.temp_range = m.temp_range;
     t.regime = m.regime;
     t.micro = micro;
+    t.sheet = r.sheet;
     return t;
 }

@@ -414,6 +414,62 @@ fn worley3_sites(seed: u64, p: vec3<f64>, inv_cell: f64, jitter: f32) -> Sites {
     return best;
 }
 
+/// The three nearest sites (`worley3_3`): the two nearest as `worley3_sites`, the third's id and
+/// distance (lattice units) in `id3` / `f3`.
+struct Sites3 {
+    s: Sites,
+    id3: u64,
+    f3: f32,
+}
+
+fn worley3_sites3(seed: u64, p: vec3<f64>, inv_cell: f64, jitter: f32) -> Sites3 {
+    let q = p * inv_cell;
+    let qf = floor(q);
+    let iq = vec3<i64>(i64(qf.x), i64(qf.y), i64(qf.z));
+    let fq = vec3<f32>(q - qf);
+    let half = 0.5 * abs(jitter);
+    var o: Sites3;
+    var f1 = FMAX;
+    var f2 = FMAX;
+    var f3 = FMAX;
+    for (var k = 0u; k < 27u; k++) {
+        let nb = nb3(k);
+        let gx = nb_gap(fq.x, nb.x, half);
+        let gy = nb_gap(fq.y, nb.y, half);
+        let gz = nb_gap(fq.z, nb.z, half);
+        if (gx * gx + gy * gy + gz * gz > f3 + 1e-6) {
+            continue;
+        }
+        let c = iq + vec3<i64>(i64(nb.x), i64(nb.y), i64(nb.z));
+        let h = hash3(seed, c.x, c.y, c.z);
+        let jit = jitter * (vec3<f32>(u01k(h, 1lu), u01k(h, 2lu), u01k(h, 3lu)) - 0.5);
+        let rel = vec3<f32>(f32(nb.x), f32(nb.y), f32(nb.z)) + 0.5 + jit - fq;
+        let d = dot(rel, rel);
+        let fp = vec3<f64>(f64(c.x), f64(c.y), f64(c.z)) + vec3<f64>(vec3<f32>(0.5) + jit);
+        if (d < f1) {
+            f3 = f2;
+            o.id3 = o.s.id1;
+            f2 = f1;
+            o.s.id1 = o.s.id0;
+            o.s.p1 = o.s.p0;
+            f1 = d;
+            o.s.id0 = h;
+            o.s.p0 = fp;
+        } else if (d < f2) {
+            f3 = f2;
+            o.id3 = o.s.id1;
+            f2 = d;
+            o.s.id1 = h;
+            o.s.p1 = fp;
+        } else if (d < f3) {
+            f3 = d;
+            o.id3 = h;
+        }
+    }
+    o.f3 = sqrt(f3);
+    return o;
+}
+
 /// The cell at `p` given its two nearest sites (either order) (`worley3_from`).
 fn worley3_from(p: vec3<f64>, cell: f64, inv_cell: f64, s: Sites) -> Cell3 {
     let q = p * inv_cell;

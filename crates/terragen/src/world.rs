@@ -116,6 +116,11 @@ pub struct Terrain {
     /// Ecoregion (`crate::eco`): the two nearest sites of the warped lattice, the distance to
     /// their border.
     pub eco: Site,
+    /// The third nearest ecoregion site (id, point) and the smooth weights of the three nearest
+    /// (`eco::wide_weights`: their styles, palettes and vegetation blend by them over tens of km)
+    pub eco3: u64,
+    pub eco3_center: DVec3,
+    pub eco_w: [f64; 3],
     /// Planetary atlas fields at the pixel (interpolated; see [`Macro`]).
     pub uplift: f64,
     pub coast_km: f64,
@@ -129,6 +134,33 @@ pub struct Terrain {
     /// The micro relief's part of `ground` (m): the ground less it is smooth at the scale of a
     /// pond (the kits' pass-B lakes keep their water level flat over it)
     pub micro: f64,
+    /// Ice sheet and perennial snowfield cover 0..1 (`World::ice_sheet`: no valleys or gullies
+    /// under it; the snow models whiten it)
+    pub sheet: f64,
+}
+
+/// The mean of a ridged octave `(1 − |n|)^sharp` over the noise (perlin, spread ~0.35).
+#[inline]
+pub(crate) fn ridged_mean(sharp: f64) -> f64 {
+    1.0 / (1.0 + 0.389 * sharp)
+}
+
+/// The expected sum (and the part of wavelengths over 6 km) of the `k` octaves of the ridged
+/// mountains from wavelength `lam` (amplitude `amp`, cascade weight `weight`) on, below the
+/// pixel (the weights' cascade by its mean, ~5 % low for its spread).
+pub(crate) fn ridged_tail(k: usize, mut lam: f64, mut amp: f64, mut weight: f64, m: f64, fine: f64) -> (f64, f64) {
+    let (mut s, mut l) = (0.0, 0.0);
+    for _ in 0..k {
+        let e = weight * m * amp;
+        s += e * if lam < 1.8 * KM { fine } else { 1.0 };
+        if lam > 6.0 * KM {
+            l += e;
+        }
+        weight = (0.95 * 1.8 * m * weight).min(1.0);
+        lam *= 0.5;
+        amp *= if lam > 1.0 * KM { 0.58 } else { 0.42 };
+    }
+    (s, l)
 }
 
 /// The share of the ridged mountains' fine octaves (wavelengths below 1.8 km) at mountain
@@ -385,8 +417,8 @@ impl World {
     }
 
     /// Ridged multifractal mountains, 0..~1 (`fine`: [`ridged_fine`] of the amplitude).
-    fn ridged(&self, p: DVec3, gsd: f64, sharp: f64, fine: f64) -> (f64, f64) {
-        let st = self.ridged_part(p, gsd, sharp, 0.0, true, [0.0, 0.0, 1.0], fine);
+    fn ridged(&self, p: DVec3, gsd: f64, sharp: f64, fine: f64, fill: bool) -> (f64, f64) {
+        let st = self.ridged_part(p, gsd, sharp, 0.0, true, [0.0, 0.0, 1.0], fine, fill);
         (st[0] * 0.5, st[1] * 0.5)
     }
 
@@ -394,29 +426,50 @@ impl World {
     /// (not `low`, continuing from the state `st` of the long ones). State: sum, low-passed sum,
     /// weight of the next octave (before the final scaling).
     #[allow(clippy::too_many_arguments)]
-    fn ridged_part(&self, p: DVec3, gsd: f64, sharp: f64, cut: f64, low: bool, st: [f64; 3], fine: f64) -> [f64; 3] {
+    /// `fill`: the octaves below the pixel count with their mean (the tiles; not the drainage
+    /// network's heights, whose valleys keep their depths).
+    #[allow(clippy::too_many_arguments)]
+    fn ridged_part(&self, p: DVec3, gsd: f64, sharp: f64, cut: f64, low: bool, st: [f64; 3], fine: f64, fill: bool) -> [f64; 3] {
         let [mut sum, mut low_sum, mut weight] = st;
         let mut lam = 14.0 * KM;
         let mut amp = 1.0;
-        for i in 0..self.mtn_frames.rot.len() {
+        let n_oct = self.mtn_frames.rot.len();
+        // (round 16: the octaves below the pixel count with their mean, `ridged_mean`; dropped,
+        // the ridged mountains of zooms 4-9 were up to 3 km lower than their children: no ice
+        // caps on the coarse tiles, z4 against z5 poleward of ~41 degrees)
+        let m = if fill { ridged_mean(sharp) } else { 0.0 };
+        for i in 0..n_oct {
             if low && lam < cut {
                 break;
             }
             // ridges contain harmonics above the octave frequency: band-limit more strictly
             let wb = band(lam, 1.6 * gsd);
+            let own = low || lam < cut;
             if wb <= 0.0 {
+                if own && fill {
+                    let (ts, tl) = ridged_tail(n_oct - i, lam, amp, weight, m, fine);
+                    sum += ts;
+                    low_sum += tl;
+                }
                 break;
             }
-            if low || lam < cut {
+            if own {
                 let q = self.mtn_frames.rot[i] * (p / lam) + self.mtn_frames.off[i];
                 let n = perlin3(self.mtn_frames.seeds[i], q);
                 let mut r = (1.0 - n.abs()).max(0.0);
                 r = r.powf(sharp);
+                let fill_e = (1.0 - wb) * m * weight;
                 r *= weight;
                 weight = (r * 1.8).clamp(0.0, 1.0);
                 sum += r * amp * wb * if lam < 1.8 * KM { fine } else { 1.0 };
                 if lam > 6.0 * KM {
                     low_sum += r * amp * wb;
+                }
+                if fill_e > 0.0 {
+                    sum += fill_e * amp * if lam < 1.8 * KM { fine } else { 1.0 };
+                    if lam > 6.0 * KM {
+                        low_sum += fill_e * amp;
+                    }
                 }
             }
             lam *= 0.5;
@@ -681,7 +734,7 @@ impl World {
             let wp = DVec2::new(m.mtn_warp[0], m.mtn_warp[1]) * 9.0 * KM;
             let pw = ctx.p + ctx.east * wp.x + ctx.north * wp.y;
             let fine = ridged_fine(self.mountain_mask(m).1);
-            let [rs, rl, rw] = self.ridged_part(pw, ctx.gsd, 1.6 + 0.8 * m.style[2], cut[0], true, [0.0, 0.0, 1.0], fine);
+            let [rs, rl, rw] = self.ridged_part(pw, ctx.gsd, 1.6 + 0.8 * m.style[2], cut[0], true, [0.0, 0.0, 1.0], fine, true);
             let [hs, hl] = self.hills_part(ctx.p, ctx.gsd, 0.47 + 0.08 * m.rough, cut[1], true);
             pre.relief = Some([rs, rl, rw, hs, hl]);
             pre.relief_cut = cut;
@@ -728,7 +781,6 @@ impl World {
             let pw = ctx.p + self.region_warp(ctx.p);
             pre.sites[SITE_REGION] = Some(worley3_sites(self.seed ^ 0x5E61, pw, region_cell, 0.9));
             pre.sites[SITE_TOWN] = Some(worley3_sites(self.seed ^ 0x70E1, ctx.p, self.cfg.landuse.town_cell_km * KM, 0.8));
-            pre.sites[SITE_ECO] = Some(crate::eco::sites(self, ctx.p));
         }
         // the long gully octaves (they follow the low-passed relief gradient above)
         if let (Some(cut), Some([ge, gn])) = (relief_cut, pre.gully) {
@@ -749,7 +801,7 @@ impl World {
             let mut v = hill_amp * self.hills(q, gl, gain).0;
             if amp_m > 0.0 {
                 let wp = DVec2::new(m.mtn_warp[0], m.mtn_warp[1]) * 9.0 * KM;
-                v += amp_m * self.ridged(q + ctx.east * wp.x + ctx.north * wp.y, gl, 1.6 + 0.8 * m.style[2], ridged_fine(amp_m)).0;
+                v += amp_m * self.ridged(q + ctx.east * wp.x + ctx.north * wp.y, gl, 1.6 + 0.8 * m.style[2], ridged_fine(amp_m), false).0;
             }
             v
         };
@@ -786,6 +838,29 @@ impl World {
     /// Climate (temperature °C, moisture 0..1) from macro fields at a given elevation: the
     /// atlas' sea-level temperature lowered by the lapse rate, its moisture index (rain shadows,
     /// coasts, continentality and `climate.moisture_bias` are in the atlas' precipitation).
+    /// Ice sheet and perennial snowfield cover 0..1 of the land (no valleys, rivers or gullies are
+    /// carved into it; rivers start at its margin): the summer temperature at the smooth elevation
+    /// `temp0` against the equilibrium line (the cold kit's snow model, `kits::cold::ice`, without
+    /// its local terms), or a very cold year with cool summers; in mountains only polar ones.
+    pub(crate) fn ice_sheet(&self, m: &Macro, temp0: f64, moist: f64, mountain: f64) -> f64 {
+        let tela = -2.0 + 5.0 * smoothstep(0.15, 0.85, moist);
+        let half = 0.475 * m.temp_range;
+        // perennial snow by the summer, or the dry polar interiors' ice sheets by a very cold
+        // year with cool summers (their snow index sits near the snow line: valleys carved into
+        // them, a few degrees warmer, drew snow-free dendritic streaks over the ice)
+        let ice = |t: f64| smoothstep(-0.5, -3.0, t + half - tela).max(smoothstep(-8.0, -12.0, t) * smoothstep(8.0, 3.0, t + half - tela));
+        let ice_s = ice(temp0);
+        if ice_s <= 0.0 {
+            return 0.0;
+        }
+        // (in mountains only polar ones, by the sea-level year: alpine ranges keep their valleys
+        // and valley glaciers; polar ranges are buried to their summits, outlet glaciers in
+        // their valleys)
+        let polar = smoothstep(0.0, -6.0, m.temp);
+        // (saturating: the ice is clean up to near its margin)
+        smoothstep(0.0, 0.5, ice_s * (1.0 - smoothstep(0.3, 0.7, mountain) * (1.0 - polar)))
+    }
+
     pub fn climate(&self, m: &Macro, _lat: f64, elev: f64) -> (f64, f64) {
         let c = &self.cfg.climate;
         let t = m.temp - c.lapse_rate_c_per_km * elev.max(0.0) / KM;
@@ -1064,10 +1139,10 @@ impl World {
             match m.pre.and_then(|p| p.relief.map(|r| (r, p.relief_cut[0]))) {
                 // the long octaves from the tile's coarse grid
                 Some((r, cut)) => {
-                    let st = self.ridged_part(pw, gsd, sharp, cut, false, [r[0], r[1], r[2].clamp(0.0, 1.0)], fine);
+                    let st = self.ridged_part(pw, gsd, sharp, cut, false, [r[0], r[1], r[2].clamp(0.0, 1.0)], fine, mode != Mode::Relief);
                     (st[0] * 0.5, st[1] * 0.5)
                 }
-                None => self.ridged(pw, gsd, sharp, fine),
+                None => self.ridged(pw, gsd, sharp, fine, mode != Mode::Relief),
             }
         } else {
             (0.0, 0.0)
@@ -1127,8 +1202,12 @@ impl World {
         // (round 12: firn and perennial snow fill the gullies and the micro relief of the highest
         // ranges: ribbed grey faces where v0.2.0 shows smooth snowfields, alpine_south@type)
         let firn = smoothstep(-4.0, -10.0, temp0);
-        if firn > 0.0 {
-            h -= firn * (0.6 * gully + 0.4 * micro);
+        // (round 16: ice sheets and perennial snowfields bury the gullies and the valleys of
+        // the land under them: brown dendritic streaks and herringbone ran over the polar ice)
+        let sheet = self.ice_sheet(m, temp0, moist, mountain);
+        let gfill = (0.6 * firn).max(sheet);
+        if gfill > 0.0 {
+            h -= gfill * gully + 0.4 * firn * micro;
         }
 
         // ---- mesas (arid terraces)
@@ -1262,7 +1341,10 @@ impl World {
                 let ds = rh.d - cv.shift;
                 let ad = ds.abs();
                 let hw = hw * cv.hw_k;
-                adj.push((ds, hw));
+                // (none under ice sheets and snowfields, the kits' glacial troughs neither: the
+                // ice fills them)
+                let icef = 1.0 - sheet;
+                adj.push((ds, hw * icef));
                 let vnat = fp_w + wall_k * (h0 - floor);
                 let valley = lerp(rh.valley.max(vnat), vnat, cv.narrow).min(rh.reach);
                 // no carving of the deeper seabed; floodplains stay above the sea (near the coast they were
@@ -1325,8 +1407,8 @@ impl World {
                     // the cut fades out across the shallow shelf (a channel continuing into the sea
                     // drew a dark band that ended square)
                     let shelf = smoothstep(-4.0, 0.5, h0);
-                    h = h.min(h0 + (carved - h0) * fade * land_fade * shelf);
-                    floodplain = floodplain.max((1.0 - wall) * land_fade * smoothstep(20.0, 120.0, width) * fade);
+                    h = h.min(h0 + (carved - h0) * fade * land_fade * shelf * icef);
+                    floodplain = floodplain.max((1.0 - wall) * land_fade * smoothstep(20.0, 120.0, width) * fade * icef);
                 }
                 // a kit's small lake in the channel's head (a tarn): a bowl and a water level
                 if cv.lake_r > 0.0 && ad < cv.lake_r && h0 > cv.lake_level {
@@ -1511,8 +1593,14 @@ impl World {
                 None => crate::eco::warp(self, p),
             };
             let pw = p + wq;
-            let wc = self.site_cell(m, SITE_ECO, crate::eco::ECO_KEY, pw, self.cfg.ecoregions.cell_km * KM, 0.9);
+            let cell = self.cfg.ecoregions.cell_km * KM;
+            // (the three nearest sites: the wide blend's weights need the third; the nearest
+            // two are the 2-site lattice's, bit for bit)
+            let (wc, id3, p3, f3) = worley3_3(self.seed ^ crate::eco::ECO_KEY, pw, cell, 0.9);
             t.eco = Site { id: wc.id, id2: wc.id2, center: wc.point, center2: wc.point2, dist: wc.f1, edge: worley_edge_dist(&wc, pw) };
+            t.eco3 = id3;
+            t.eco3_center = p3;
+            t.eco_w = crate::eco::wide_weights(self, wc.f1, wc.f2, f3);
         }
         let town_cell = self.cfg.landuse.town_cell_km * KM;
         if mode != Mode::Relief && gsd < town_cell * 0.25 && self.cfg.landuse.towns > 0.0 && crate::kits::legacy_towns() {
@@ -1546,7 +1634,7 @@ impl World {
         let rock_expect = (mountain * smoothstep(0.15, 0.6, ridged) + 0.25 * mesa).clamp(0.0, 1.0);
 
         t.ground = h;
-        t.gully = gully_n;
+        t.gully = gully_n * (1.0 - sheet);
         t.temp = temp;
         t.moist = moist;
         t.mountain = mountain;
@@ -1568,6 +1656,7 @@ impl World {
         t.temp_range = m.temp_range;
         t.regime = m.regime;
         t.micro = micro;
+        t.sheet = sheet;
         t
     }
 }

@@ -108,7 +108,14 @@ ponds.
   seasonal slot): the DTM and the drainage keep the valley below them; troughs and cirques come
   from the mountains kit's carve hook, not from the glaciers drawn here.
 * Sea ice is a function of the atlas' temperature at the ecoregion's date and of the depth: no
-  drift, no polynyas tied to winds or coasts; leads and pressure ridges are noise patterns.
+  drift, no polynyas tied to winds or coasts; leads and pressure ridges are noise patterns. Its
+  edge (round 16) forms over 1.2 °C of the date's temperature with tongues and bays of 45–150 km
+  (over 6.5 °C before: a smear hundreds of km wide seen from orbit).
+* Ice sheets (round 16, `World::ice_sheet`, pass A): where the summer at the smooth elevation
+  keeps perennial snow, or the year is very cold with cool summers (in mountains only polar
+  ones, by the sea-level year), no valley, trough or gully is carved and the channels narrow
+  to nothing; the snow models whiten the ice. Rivers start at its margin (no outlet glaciers
+  or meltwater fans drawn).
 * Kettle and thermokarst lakes are host-built stamps with a flat level (round 10): their mask is
   still tested per pixel, and the transport kit's routing only estimates it from pass A's values
   and the relief's slope (it avoids the whole outline, not only the water below the level).

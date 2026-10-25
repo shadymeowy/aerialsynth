@@ -64,7 +64,7 @@ fn eval_points(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workg
     let m = macro_at(ctx.p, ctx.gsd);
     var o: PointMid;
     o.m = m;
-    o.r = relief_core(ctx, m, pre_none());
+    o.r = relief_core(ctx, m, pre_none(), q.mode != MODE_RELIEF);
     pmid[i] = o;
 }
 

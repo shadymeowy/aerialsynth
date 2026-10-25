@@ -127,7 +127,7 @@ pub struct Ecoregions {
 }
 impl Default for Ecoregions {
     fn default() -> Self {
-        Ecoregions { cell_km: 100.0, ecotone_km: 10.0 }
+        Ecoregions { cell_km: 100.0, ecotone_km: 25.0 }
     }
 }
 

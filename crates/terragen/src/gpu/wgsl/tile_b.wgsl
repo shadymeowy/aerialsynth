@@ -35,7 +35,7 @@ const C_TOWN_REQ: u32 = 4u;
 const C_MISSING: u32 = 5u;
 const C_ECO_REQ: u32 = 6u;
 
-var<workgroup> wg_eco_id: array<u64, 512>;
+var<workgroup> wg_eco_id: array<u64, 768>;
 
 var<workgroup> wg_site_id: array<u64, 256>;
 var<workgroup> wg_site_pt: array<vec4<f64>, 256>;
@@ -62,13 +62,18 @@ fn region_requests(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local
     let i = gid.x;
     let j = gid.y;
     wg_site_id[li] = 0lu;
-    wg_eco_id[2u * li] = 0lu;
-    wg_eco_id[2u * li + 1u] = 0lu;
+    wg_eco_id[3u * li] = 0lu;
+    wg_eco_id[3u * li + 1u] = 0lu;
+    wg_eco_id[3u * li + 2u] = 0lu;
     if (i < NA && j < NA) {
-        // the ecoregions of the pixel (water too: its surface layers)
+        // the ecoregions of the pixel (water too: its surface layers; the third where it
+        // blends in)
         let te = terr[ti.pix0 + (j + 1u) * NA2 + (i + 1u)];
-        wg_eco_id[2u * li] = te.eco_id;
-        wg_eco_id[2u * li + 1u] = te.eco_id2;
+        wg_eco_id[3u * li] = te.eco_id;
+        wg_eco_id[3u * li + 1u] = te.eco_id2;
+        if (te.eco_w.y > 0.0) {
+            wg_eco_id[3u * li + 2u] = te.eco_id3;
+        }
     }
     if (i < NA && j < NA && !all_water(ti, i, j)) {
         // the pass-A pixel at the pass-B pixel's centre
@@ -122,7 +127,7 @@ fn region_requests(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local
         // the ecoregions (a handful per workgroup): ids only, the host finds their sites
         var eseen: array<u64, 16>;
         var ne = 0u;
-        for (var k = 0u; k < 512u; k++) {
+        for (var k = 0u; k < 768u; k++) {
             let id = wg_eco_id[k];
             if (id == 0lu) {
                 continue;
@@ -429,7 +434,9 @@ fn st_save(sp: ptr<function, Stack>, b: u32, full: bool) {
         pbw[b + 12u] = vec4<u32>(select(0u, 1u, tw.px.ok) | select(0u, 2u, tw.px.shadow_ok), bitcast<u32>(tw.px.col.x), bitcast<u32>(tw.px.col.y), bitcast<u32>(tw.px.col.z));
         pbw[b + 13u] = vec4<u32>(bitcast<u32>(tw.px.h), bitcast<u32>(tw.px.cov), tw.px.cls, bitcast<u32>(tw.px.em.x));
         pbw[b + 14u] = vec4<u32>(bitcast<u32>(tw.px.em.y), bitcast<u32>(tw.px.em.z), bitcast<u32>(tw.px.street), bitcast<u32>(tw.px.resolved));
-        pbw[b + 15u] = vec4<u32>(bitcast<u32>(tw.shadow), 0u, 0u, 0u);
+        pbw[b + 15u] = vec4<u32>(bitcast<u32>(tw.shadow), bio.zk.x, bio.zk.y, bio.zk.z);
+    } else {
+        pbw[b + 15u] = vec4<u32>(0u, bio.zk.x, bio.zk.y, bio.zk.z);
     }
 }
 
@@ -512,10 +519,10 @@ fn st_load(sp: ptr<function, Stack>, b: u32, full: bool) {
 
 /// The sample's biomes from the state of a stage before (`st_save`; `edge`: the ecoregion border
 /// distance, m).
-fn st_bio(b: u32, edge: f32) -> Bio {
+fn st_bio(b: u32, edge: f32, t: Terrain) -> Bio {
     let w7 = pbw[b + 7u];
     let w8 = pbw[b + 8u];
-    return bio_from(w7.x, w7.y, bitcast<f32>(w7.z), bitcast<i32>(w7.w), bitcast<i32>(w8.x), bitcast<f32>(w8.y), edge);
+    return bio_from(w7.x, w7.y, bitcast<f32>(w7.z), bitcast<i32>(w7.w), bitcast<i32>(w8.x), bitcast<f32>(w8.y), edge, t, pbw[b + 15u].yzw);
 }
 
 /// The sample's region index from the state of a stage before.
@@ -626,7 +633,7 @@ fn pass_b_stage(gid: vec3<u32>, stage: u32) {
         if (fresh) {
             bio = bio_at(si.t, si.l.eco_edge, si.c);
         } else {
-            bio = st_bio(sb, abs(si.l.eco_edge));
+            bio = st_bio(sb, abs(si.l.eco_edge), si.t);
         }
         var s = stack_new(si.c, si.t, si.l, pf, bio);
         if (!fresh) {

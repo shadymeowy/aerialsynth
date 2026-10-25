@@ -947,6 +947,9 @@ mod tests {
             let (mut ea, mut ei, mut na, mut ni) = (0.0, 0.0, 0.0, 0.0);
             let e = g.tile(geodesy::tiles::TileId::new(z, id.x + 1, id.y));
             let s = g.tile(geodesy::tiles::TileId::new(z, id.x, id.y + 1));
+            // (a step at a few columns is a tree or a building standing at the seam: round 16's
+            // wider ecotones put a crown on it at the delta; a seam steps along the whole edge)
+            let (mut bad_ew, mut bad_ns) = (Vec::new(), Vec::new());
             for j in 0..n {
                 for c in 0..3 {
                     ea += (a.albedo[3 * (j * n + n - 1) + c] as f64 - e.albedo[3 * (j * n) + c] as f64).abs();
@@ -959,10 +962,16 @@ mod tests {
                 }
                 // elevation: the step across the seam is no larger than the slope inside
                 let (h0, h1, h2) = (a.elevation[j * n + n - 2] as f64, a.elevation[j * n + n - 1] as f64, e.elevation[j * n] as f64);
-                assert!((h2 - h1).abs() < 3.0 * (h1 - h0).abs() + 8.0, "{name}: E-W elevation seam {h0} {h1} {h2}");
+                if (h2 - h1).abs() >= 3.0 * (h1 - h0).abs() + 8.0 {
+                    bad_ew.push((h0, h1, h2));
+                }
                 let (v0, v1, v2) = (a.elevation[(n - 2) * n + j] as f64, a.elevation[(n - 1) * n + j] as f64, s.elevation[j] as f64);
-                assert!((v2 - v1).abs() < 3.0 * (v1 - v0).abs() + 8.0, "{name}: N-S elevation seam {v0} {v1} {v2}");
+                if (v2 - v1).abs() >= 3.0 * (v1 - v0).abs() + 8.0 {
+                    bad_ns.push((v0, v1, v2));
+                }
             }
+            assert!(bad_ew.len() <= n / 64, "{name}: E-W elevation seam at {} columns: {:?}", bad_ew.len(), &bad_ew[..bad_ew.len().min(4)]);
+            assert!(bad_ns.len() <= n / 64, "{name}: N-S elevation seam at {} columns: {:?}", bad_ns.len(), &bad_ns[..bad_ns.len().min(4)]);
             eprintln!("{name} z{z}: albedo E-W across {ea:.0} inside {ei:.0}; N-S across {na:.0} inside {ni:.0}");
             assert!(ea < 2.0 * ei + 2.0 * n as f64, "{name}: E-W across {ea} inside {ei}");
             assert!(na < 2.0 * ni + 2.0 * n as f64, "{name}: N-S across {na} inside {ni}");

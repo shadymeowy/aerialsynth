@@ -33,7 +33,7 @@ mod tropical;
 
 mod temperate;
 
-mod agriculture;
+pub(crate) mod agriculture;
 
 pub mod settlements;
 

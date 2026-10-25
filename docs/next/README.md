@@ -32,7 +32,7 @@ ndsm = w.tile(16, 39117, 25113, "elevation") - w.tile(16, 39117, 25113, "dtm")  
 ids = w.tile(16, 39117, 25113, "instance")                                       # 0: no instance
 ```
 
-- **One generator per store:** a tile store records its generator (version 4 for `next`, 3 for
+- **One generator per store:** a tile store records its generator (version 5 for `next`, 3 for
   `classic`) and refuses the other one's tiles; give each its own `tiles.file`.
 - **Settings only `next` reads:** `world.ecoregions`, `world.biomes` (weight overrides),
   `world.atlas`, `world.relief.tectonic_mountains`, `world.relief.belt_mountains`
@@ -90,9 +90,28 @@ landscapes but looks worse in places, which is why it is not the default:
   (its lone crowns' long shadows: far / near 3.9× in that view, unchanged); the highest ranges (5–7 km)
   are as steep as the Himalaya (mean slope ~31° at 30 m, round 7); under perennial snow their gullies
   fill in (round 12), still greyer than v0.2.0's smooth snowfields under a low sun.
-- **Ecotones:** the 10 km borders of ecoregions are a mosaic of the two biomes' crowns and
+- **Ecotones:** the 25 km borders of ecoregions are a mosaic of the two biomes' crowns and
   landforms; their palettes, styles, vegetation densities and flat layers blend smoothly
-  (rounds 7–8), so steppe and forest no longer draw a patchwork of patches there.
+  (rounds 7–8), so steppe and forest no longer draw a patchwork of patches there. Round 16 (seen
+  from orbit, the user's "huge problem": a camouflage of polygonal cells, one ecoregion each):
+  the styles, palettes, vegetation densities and site climates of the three nearest
+  ecoregions blend over ~¼ cell on each side of a border at every zoom, neighbouring
+  ecoregions draw alike soil, rock and tint colours (draws that vary smoothly over
+  250–600 km; each ecoregion keeps its own biome, tree density, agriculture and season, as
+  before), and the crowns' colours blend
+  where two biomes do. What remains of an ecoregion's outline is a 50 km soft band where its
+  biome differs from its neighbour's (crowns and kernel layers of two biomes cannot blend;
+  their mosaic does): soft blotches, no polygons of their own tone.
+- **Planet zooms** (round 16): coarse tiles (zooms 3–9) agree with the mean of their children
+  (z4 against z5 per row of tiles: mean |ΔL| 2–3 poleward of 41°, was 4–10): the ridged
+  mountains keep the mean of their octaves below the pixel (the ranges of zoom 4 were up to 3 km
+  lower, without their ice caps), the land-use regions' fields hand over to their expected look
+  where the regions end (pixels of more than half a region, 3.5 km), managed stands below the
+  pixel are their mean, and thin section-line tracks cover their share of a coarse pixel (they
+  covered a tenth of the land and cleared its forest: pale and dark land-use regions at z5–z8).
+  Ice sheets and polar ranges are white without valleys or gullies (the brown dendritic streaks
+  and herringbone over the southern ice were glacial troughs and valleys whose seasonal snow
+  melted first); the sea-ice edge is ragged, not a blur hundreds of km wide.
 - **Cold lands** (round 8): glaciers only in mountain valleys and without contour stripes, open
   lakes in the summer datasets (frozen only below −3 °C at the ecoregion's date), no snowed-in
   ecoregion borders. Lakes and ponds have flat water and crisp shores without islets or pale
@@ -141,11 +160,15 @@ river network, lakes filled to their spill level, tree crowns, towns, night ligh
   a biome from the climate at their site (Köppen class, envelope, lithology, weights) and draw a
   style (soil and rock colours, tints, tree density and species mix). Their **culture** (12
   archetypes) sets field systems, hedges, roofs, building heights, lamps and town density.
-  Borders blend in a 10 km mosaic: each sample picks one of the two biomes (~220 m patches,
-  their probability falling from ½ at the border to 0 at 10 km), while the two styles and
-  palettes blend by that probability (round 7), and so do the vegetation densities and the
-  other biome's flat kernel layers (grass, soil, mottling; round 8): only crowns and landforms
-  stay the mosaic's.
+  Borders blend in a 25 km mosaic (`world.ecoregions.ecotone_km`): each sample picks one of
+  the two biomes (~220 m patches, their probability falling from ½ at the border to 0 at
+  25 km), and the other biome's flat kernel layers (grass, soil, mottling) blend in by that
+  probability (round 8): only crowns and landforms stay the mosaic's. The styles, site
+  climates, palettes, vegetation densities and agriculture of the **three nearest
+  ecoregions** blend wider (round 16, `eco::wide_weights`: ½ / ½ on a border, the nearest
+  alone from ~¼ cell inside it, continuous where the second nearest changes), and an
+  ecoregion's soil, rock and tint colours are draws that vary smoothly across the ecoregions
+  (`eco::coherent_u`).
 - **Composite stack:** pass B is a fixed stack of layers (zonal ground, altitudinal zone,
   azonal overrides, disturbance, agriculture, canopy, linear infrastructure, built, water,
   seasonal). **Biomes are data** (`crates/terragen/biomes/*.yaml`) over a **kernel library**

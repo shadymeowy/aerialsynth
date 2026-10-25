@@ -122,6 +122,9 @@ kit's `KITS` entry commented out (mean of two runs, shared machine, so +-3 % noi
 
 ## Known limits
 
+* Managed stands below the pixel (~150-300 m) are their mean: the share cut by the mean colour of
+  the cuts' ages (round 16; picked stand by stand, coarse pixels drew a speckle of bright cuts),
+  also beyond the land-use regions (pixels of more than 3.5 km).
 * Up to 18 % of the managed stands are cut within 16 years (42 % before: the taiga was a
   patchwork of bright rectangles); regrowth is a muted green and the young rows close within 7
   years, but a cut still reads as a flat rectangle from 1.5 km up; there is no gradient of ages

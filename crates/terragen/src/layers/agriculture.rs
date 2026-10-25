@@ -312,7 +312,8 @@ pub fn layer(s: &mut crate::stack::Stack) {
     // a field is there or not: a crisp cutoff (fields faded out over gentle valley sides left
     // washed, half-transparent bands; a noisy threshold left specks of open ground)
     let keep = m.natural_ok * m.flat_ok * (1.0 - m.riparian) * (1.0 - m.woodlot) * m.shore_keep;
-    let a = cov * smoothstep(0.45, 0.55, keep);
+    // (handing over to the regions' expected look, `kits::agriculture::expected`)
+    let a = cov * smoothstep(0.45, 0.55, keep) * (1.0 - crate::kits::agriculture::handover(world, gsd));
     s.m.field_cov = a;
     let cls = match edge_kind {
         1 => crate::registry::classes::id("hedgerow").unwrap_or(lc::FOREST),

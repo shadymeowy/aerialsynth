@@ -1088,7 +1088,10 @@ mod tests {
                 }
             }
         }
-        assert!(worst <= 0.005, "{:.2}% of the pixels differ", worst * 100.0);
+        // (0.75 %: round 16's 25 km ecotones put the mangrove coast place in the crisp ~220 m
+        // mosaic of two biomes, whose patch outlines (crowns of one biome or the other) shift by
+        // a pixel between f32 and f64: 0.53 % of its DSM, edge pixels only; was 0.000 %)
+        assert!(worst <= 0.0075, "{:.2}% of the pixels differ", worst * 100.0);
     }
 
     /// The GPU generates the kit's places at every zoom without falling back to the CPU (an

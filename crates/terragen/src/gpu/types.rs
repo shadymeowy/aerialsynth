@@ -99,6 +99,8 @@ pub struct GTerrain {
     pub region_id2: u64,
     pub eco_id: u64,
     pub eco_id2: u64,
+    pub eco_id3: u64,
+    pub eco_w: [f32; 2],
     pub uplift: f32,
     pub coast_km: f32,
     pub wind: [f32; 2],
@@ -109,7 +111,7 @@ pub struct GTerrain {
     pub temp_range: f32,
     pub regime: f32,
     pub micro: f32,
-    pub _q: f32,
+    pub sheet: f32,
 }
 
 /// `Seg` of world.wgsl.
@@ -335,7 +337,7 @@ mod tests {
     #[test]
     fn sizes_match_wgsl() {
         assert_eq!(std::mem::size_of::<GCfg>(), 448);
-        assert_eq!(std::mem::size_of::<GTerrain>(), 192);
+        assert_eq!(std::mem::size_of::<GTerrain>(), 208);
         assert_eq!(std::mem::size_of::<GSeg>(), 96);
         assert_eq!(std::mem::size_of::<GSink>(), 64);
         assert_eq!(std::mem::size_of::<GPointIn>(), 128);

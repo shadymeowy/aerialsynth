@@ -52,7 +52,7 @@ const OUT_U: usize = 8;
 const NBIN: usize = 17;
 const NODE_F: usize = 84;
 const NODE_IDS: usize = 10;
-const PIX_F: usize = 41;
+const PIX_F: usize = 42;
 /// grid node spacing (pixels)
 const G: f64 = 16.0;
 const NG: usize = N / 16 + 5;
@@ -203,7 +203,7 @@ struct Lattice {
 }
 
 /// The size of a `PointMid` (points.wgsl; `point_mid_size` checks it).
-const POINT_MID_BYTES: u64 = 176;
+const POINT_MID_BYTES: u64 = 192;
 
 /// Lattice table slots (~50 bytes each).
 const LAT_CAP: usize = 1 << 23;

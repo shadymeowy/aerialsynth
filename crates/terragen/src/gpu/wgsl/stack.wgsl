@@ -258,11 +258,8 @@ fn sveg(s: ptr<function, Stack>, k: u32) -> f32 {
 
 /// The sample's agricultural intensity (`Stack::agri`).
 fn s_agri(s: ptr<function, Stack>) -> f32 {
-    var b = biomes[(*s).bio.a].land.x;
-    if ((*s).bio.w > 0.0) {
-        b = b + (biomes[(*s).bio.b].land.x - b) * (*s).bio.w;
-    }
-    return clamp((*s).t.agri * b * (*s).bio.st.land.y, 0.0, 1.0);
+    // (the wide blend of the nearest ecoregions' biomes, as their palettes: continuous)
+    return clamp((*s).t.agri * bio_agri((*s).bio) * (*s).bio.st.land.y, 0.0, 1.0);
 }
 
 /// A named field at the sample (`Stack::field`).
@@ -688,6 +685,12 @@ fn finish_ground(s: ptr<function, Stack>) {
     }
 }
 
+/// `kits::agriculture::handover`: the share of the land-use regions' expected look.
+fn agri_handover(gsd: f32) -> f32 {
+    let rc = f32(cfg.region_cell);
+    return smoothstep1(0.25 * rc, 0.5 * rc, gsd);
+}
+
 /// Slot 5 (`layers::agriculture::layer`).
 fn layer_agriculture(s: ptr<function, Stack>) {
     let t = (*s).t;
@@ -708,7 +711,7 @@ fn layer_agriculture(s: ptr<function, Stack>) {
         return;
     }
     let keep = m.natural_ok * m.flat_ok * (1.0 - m.riparian) * (1.0 - m.woodlot) * m.shore_keep;
-    let a = fr.cov * smoothstep1(0.45, 0.55, keep);
+    let a = fr.cov * smoothstep1(0.45, 0.55, keep) * (1.0 - agri_handover((*s).c.gsd));
     (*s).m.field_cov = a;
     var cls = LC_CROP;
     if (fr.kind == 1u) {
@@ -952,6 +955,23 @@ fn layer_canopy(s: ptr<function, Stack>) {
     let conifer_c = clumped_at(conifer, 1.0, vec3<f32>(-cf.x, cf.y, cf.z));
     let bm = biomes[(*s).bio.a];
     let n = min(bm.r0.y, MAX_CROWNS);
+    // the other biome's crown colours where the two blend (per share, density-weighted)
+    var bcol = array<vec4<f32>, 6>(vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0));
+    var wbl = 0.0;
+    if ((*s).bio.w > 0.0 && (*s).bio.b != (*s).bio.a) {
+        wbl = (*s).bio.w;
+        let bb = biomes[(*s).bio.b];
+        for (var k = 0u; k < min(bb.r0.y, MAX_CROWNS); k++) {
+            let cb = crowns[bb.r0.x + k];
+            var cc = cb.colour.xyz;
+            if ((cb.flags & 4u) != 0u) {
+                cc = mixc(cb.colour.xyz, cb.colour_dry.xyz, dry);
+            }
+            let sh = min(cb.share, 4u);
+            bcol[sh] += vec4<f32>(cc * cb.density, cb.density);
+            bcol[5] += vec4<f32>(cc * cb.density, cb.density);
+        }
+    }
     var layers: array<TreeLayer, 6>;
     var relief = 0.0;
     for (var k = 0u; k < n; k++) {
@@ -968,6 +988,15 @@ fn layer_canopy(s: ptr<function, Stack>) {
         var colour = cr.colour.xyz;
         if ((cr.flags & 4u) != 0u) {
             colour = mixc(cr.colour.xyz, cr.colour_dry.xyz, dry);
+        }
+        if (wbl > 0.0) {
+            var bc = bcol[min(cr.share, 4u)];
+            if (bc.w <= 0.0) {
+                bc = bcol[5];
+            }
+            if (bc.w > 0.0) {
+                colour = mixc(colour, bc.xyz / bc.w, wbl);
+            }
         }
         if (cr.share == 3u) {
             colour = mixc(colour, (*s).col, 0.35);
@@ -1174,7 +1203,7 @@ fn snow_prepare(s: ptr<function, Stack>) {
     let t = (*s).t;
     let p = (*s).c.p;
     let gsd = (*s).c.gsd;
-    let snow_base = t.temp + 1.0 * (*s).pf.f[PF_SNOW] - 1.6 * smoothstep1(0.1, 0.8, -t.gully) + 0.6 * smoothstep1(0.2, 0.8, t.gully);
+    let snow_base = t.temp + 1.0 * (*s).pf.f[PF_SNOW] - 4.0 * t.sheet - 1.6 * smoothstep1(0.1, 0.8, -t.gully) + 0.6 * smoothstep1(0.2, 0.8, t.gully);
     var snow = 0.0;
     // (the noise terms add at most ~1.3 · 0.75)
     if (snow_base - 1.5 < -2.6) {

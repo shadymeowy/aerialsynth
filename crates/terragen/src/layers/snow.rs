@@ -13,7 +13,8 @@ pub fn prepare(s: &mut Stack) {
     let gsd = s.ctx.gsd;
     // (a transition over several degrees looked like cloud or fog lying on the land; a strong
     // noise term drew blobs unrelated to the land)
-    let snow_t = t.temp + 1.0 * s.pf.snow - 1.6 * smoothstep(0.1, 0.8, -t.gully)
+    // (an ice sheet is white: `Terrain::sheet`)
+    let snow_t = t.temp + 1.0 * s.pf.snow - 4.0 * t.sheet - 1.6 * smoothstep(0.1, 0.8, -t.gully)
         + 0.6 * smoothstep(0.2, 0.8, t.gully)
         + 0.5 * perlin3(0x5E0, p / 60.0) * band(60.0, gsd)
         + 0.25 * perlin3(0x5E1, p / 18.0) * band(18.0, gsd);

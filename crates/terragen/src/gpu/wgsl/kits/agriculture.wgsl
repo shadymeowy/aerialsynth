@@ -139,6 +139,7 @@ struct EcoV {
     dev: f32,
     scale: f32,
     hedges: f32,
+    aw: array<vec4<f32>, 4>,
 }
 
 struct Plan {
@@ -231,10 +232,10 @@ fn agri_weights(e: EcoV) -> array<f32, 15> {
     m[13] *= (0.4 + 1.0 * dev) * (0.1 + 0.9 * (1.0 - smoothstep1(700.0, 1200.0, e.precip)));
     var total = 0.0;
     for (var i = 0u; i < AG_N; i++) {
-        w[i] *= m[i] * (0.4 + 1.2 * u01k(e.id, 0xA600lu + u64(i)));
+        w[i] *= m[i] * e.aw[i / 4u][i % 4u];
         total += w[i];
     }
-    let v = u01k(e.id, 0xA6FFlu) * total;
+    let v = e.aw[3].w * total;
     var acc = 0.0;
     for (var i = 0u; i < AG_N; i++) {
         acc += w[i];
@@ -310,6 +311,7 @@ fn agri_plan(s: ptr<function, Stack>) -> Plan {
     e.dev = eo.misc.y;
     e.scale = eo.land.w;
     e.hedges = eo.town.x;
+    e.aw = eo.aw;
     let sy = agri_pick_system(e, (*s).t.region_id);
     if (sy == AG_CORE) {
         return pl;
@@ -348,11 +350,69 @@ fn agriculture_slot_disturbance(s: ptr<function, Stack>) {
 
 fn agriculture_slot_agriculture(s: ptr<function, Stack>) {
     let pl = agri_plan(s);
-    if (!pl.ok) {
+    if (pl.ok) {
+        (*s).m.flat_ok *= 4.0;
+        agri_draw(s, pl);
+    }
+    let f = agri_handover((*s).c.gsd);
+    if (f > 0.0) {
+        agri_expected(s, f);
+    }
+}
+
+/// `expected`: the land-use regions' expected fields (`EcoParams::agri_mean` of the three
+/// nearest ecoregions by their wide weights).
+fn agri_expected(s: ptr<function, Stack>, f: f32) {
+    if (cfg.agriculture <= 0.0) {
         return;
     }
-    (*s).m.flat_ok *= 4.0;
-    agri_draw(s, pl);
+    let agri = s_agri(s);
+    if (agri <= 0.02) {
+        return;
+    }
+    let cult = smoothstep1(0.02, 0.45, agri);
+    let m = (*s).m;
+    let t = (*s).t;
+    if (m.natural_ok * m.flat_ok <= 0.3) {
+        return;
+    }
+    let keep = smoothstep1(0.45, 0.55, m.natural_ok * m.flat_ok * (1.0 - m.riparian) * (1.0 - m.woodlot) * m.shore_keep);
+    let ids = array<u64, 3>(t.eco_id, t.eco_id2, t.eco_id3);
+    let wts = vec3<f32>(1.0 - t.eco_w.x - t.eco_w.y, t.eco_w.x, t.eco_w.y);
+    var ca = 0.0;
+    var cc = vec3<f32>(0.0);
+    var wsum = 0.0;
+    for (var k = 0u; k < 3u; k++) {
+        let id = ids[k];
+        let wk = wts[k];
+        if (wk <= 0.0 || id == 0lu || (k > 0u && id == ids[0]) || (k > 1u && id == ids[1])) {
+            continue;
+        }
+        let ke = eco_find(id);
+        if (ke < 0) {
+            continue;
+        }
+        let am = eco_vals[ke].am;
+        wsum += wk;
+        ca += wk * am.w;
+        cc += am.xyz * (wk * am.w);
+    }
+    if (ca <= 0.0) {
+        return;
+    }
+    let p = (*s).c.p;
+    let gsd = (*s).c.gsd;
+    var ft = macro_tone(p, gsd, t.gully);
+    let b70 = band(70.0, 2.0 * gsd);
+    if (b70 > 0.0) {
+        ft += 0.3 * perlin3(0x70E4lu, p * (1.0lf / 70.0lf)) * b70;
+    }
+    let a = f * cult * keep * ca / wsum;
+    (*s).m.field_cov = max((*s).m.field_cov, a);
+    var ly = layer_paint(a, toned(cc / ca, ft, 1.0), LC_CROP);
+    ly.dh = -0.6 * m.micro;
+    ly.hmode = HM_ADD;
+    composite(s, ly);
 }
 
 fn agriculture_slot_linear(s: ptr<function, Stack>) {
@@ -370,7 +430,7 @@ fn agriculture_slot_linear(s: ptr<function, Stack>) {
     let iy = round(q.y / AG_MILE);
     let d = min(abs(q.x - ix * AG_MILE), abs(q.y - iy * AG_MILE));
     let steep = smoothstep1(-0.02, 0.02, 0.45 - (*s).l.slope);
-    let cov = band_cov(d, 4.0, max((*s).l.fw, 0.5 * gsd)) * steep * (1.0 - (*s).m.snow);
+    let cov = line_cov(d, 4.0, max((*s).l.fw, 0.5 * gsd)) * steep * (1.0 - (*s).m.snow);
     if (cov <= 0.0 || (*s).cls == LC_LAKE) {
         return;
     }
@@ -642,7 +702,7 @@ fn agri_draw(s: ptr<function, Stack>, pl: Plan) {
     }
     let y = dot(col, vec3<f32>(0.2126, 0.7152, 0.0722));
     col = mixc(col, vec3<f32>(y), 0.25) * (fv + mottle);
-    let a = cov_m * keep;
+    let a = cov_m * keep * (1.0 - agri_handover(gsd));
     (*s).m.field_cov = a;
     var ly = layer_paint(a, col, cls);
     ly.dh = dh * k - 0.6 * m.micro;

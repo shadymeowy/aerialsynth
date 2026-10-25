@@ -545,6 +545,46 @@ pub fn worley3_sites(seed: u64, p: DVec3, cell: f64, jitter: f64) -> [(u64, DVec
     [(best.id, best.point), (best.id2, best.point2)]
 }
 
+/// The three nearest feature points of [`worley3`]: its cell (bit for bit), and the third
+/// nearest site's id, feature point and distance (meters). (The third nearest is searched in the
+/// same 3×3×3 block: exact wherever it lies within ~1 cell of the nearest's distance.)
+pub fn worley3_3(seed: u64, p: DVec3, cell: f64, jitter: f64) -> (Cell3, u64, DVec3, f64) {
+    let q = p / cell;
+    let qf = q.floor();
+    let (ix, iy, iz) = (qf.x as i64, qf.y as i64, qf.z as i64);
+    let fq = q - qf;
+    let half = 0.5 * jitter.abs();
+    let mut ids = [0u64; 3];
+    let mut pts = [DVec3::ZERO; 3];
+    let mut f = [f64::MAX; 3];
+    for &(dx, dy, dz) in &NB3 {
+        let (gx, gy, gz) = (nb_gap(fq.x, dx, half), nb_gap(fq.y, dy, half), nb_gap(fq.z, dz, half));
+        if gx * gx + gy * gy + gz * gz > f[2] + 1e-6 {
+            continue;
+        }
+        let (cx, cy, cz) = (ix + dx, iy + dy, iz + dz);
+        let h = hash3(seed, cx, cy, cz);
+        let fp = DVec3::new(
+            cx as f64 + 0.5 + jitter * (u01k(h, 1) - 0.5),
+            cy as f64 + 0.5 + jitter * (u01k(h, 2) - 0.5),
+            cz as f64 + 0.5 + jitter * (u01k(h, 3) - 0.5),
+        );
+        let d = (fp - q).length_squared();
+        if d < f[0] {
+            (ids[2], pts[2], f[2]) = (ids[1], pts[1], f[1]);
+            (ids[1], pts[1], f[1]) = (ids[0], pts[0], f[0]);
+            (ids[0], pts[0], f[0]) = (h, fp, d);
+        } else if d < f[1] {
+            (ids[2], pts[2], f[2]) = (ids[1], pts[1], f[1]);
+            (ids[1], pts[1], f[1]) = (h, fp, d);
+        } else if d < f[2] {
+            (ids[2], pts[2], f[2]) = (h, fp, d);
+        }
+    }
+    let c = worley3_from(p, cell, [(ids[0], pts[0]), (ids[1], pts[1])]);
+    (c, ids[2], pts[2] * cell, f[2].sqrt() * cell)
+}
+
 /// The [`worley3`] cell at `p` given its two nearest sites (ids, feature points in lattice
 /// units, either order), e.g. known for a whole block of pixels.
 #[inline]
