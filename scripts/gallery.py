@@ -30,7 +30,8 @@ still is the frame at t = 2 s. Usage:
 
 `render` and `jpeg` report scenes whose run.log says the renderer fell back to the CPU.
 `index` writes index.csv and index.md from the scene headers and poses; `--notes` (CSV with
-columns scene,artefacts) adds the artefacts noticed per image.
+columns scene,artefacts) adds the artefacts noticed per image; `--extra` (CSV with a scene column)
+appends its other columns; `--preface` (Markdown) goes above the table in index.md.
 """
 import argparse
 import csv
@@ -342,6 +343,12 @@ def index(a):
     if a.notes:
         with open(a.notes) as f:
             notes = {r["scene"]: r["artefacts"] for r in csv.DictReader(f)}
+    extra, xcols = {}, []
+    if a.extra:
+        with open(a.extra) as f:
+            rd = csv.DictReader(f)
+            xcols = [c for c in rd.fieldnames if c != "scene"]
+            extra = {r["scene"]: r for r in rd}
     rows = []
     for s in scenes(a.scenes):
         h, p = header(s), pose(s)
@@ -359,6 +366,7 @@ def index(a):
                 "landcover": h.get("landcover", ""),
                 "look": h.get("look", ""),
                 "artefacts": notes.get(s, ""),
+                **{c: extra.get(s, {}).get(c, "") for c in xcols},
             }
         )
     with open(out / "index.csv", "w", newline="") as f:
@@ -371,12 +379,17 @@ def index(a):
         f.write(f"Stills of `world.generator: {gen}` (1280 x 720, supersample 2, GPU renders). Camera position (lat, lon), ")
         f.write("altitude above the ground, heading / pitch (-90: nadir), date and local solar time; the target is the ")
         f.write(f"ground point at the image centre. Configs: `{cfg.relative_to(ROOT)}/<scene>.yaml`.\n\n")
-        f.write("| # | image | category | lat, lon | alt AGL | hdg / pitch | date, local time | biome / landcover | look at | artefacts noticed |\n")
-        f.write("|---|---|---|---|---|---|---|---|---|---|\n")
+        if a.preface:
+            f.write(Path(a.preface).read_text().rstrip() + "\n\n")
+        f.write("| # | image | category | lat, lon | alt AGL | hdg / pitch | date, local time | biome / landcover | look at | artefacts noticed |")
+        f.write("".join(f" {c} |" for c in xcols) + "\n")
+        f.write("|---|---|---|---|---|---|---|---|---|---|" + "---|" * len(xcols) + "\n")
         for r in rows:
             f.write(
                 f"| {r['n']} | [{r['title']}]({r['image']}) | {r['category']} | {r['lat']}, {r['lon']} | {r['alt_agl_m']} m | "
-                f"{r['heading_deg']} / {r['pitch_deg']:g} | {r['date_local']} {r['local_solar']} | {r['landcover']} | {r['look']} | {r['artefacts']} |\n"
+                f"{r['heading_deg']} / {r['pitch_deg']:g} | {r['date_local']} {r['local_solar']} | {r['landcover']} | {r['look']} | {r['artefacts']} |"
+                + "".join(f" {r[c]} |" for c in xcols)
+                + "\n"
             )
     print(out / "index.md")
 
@@ -419,6 +432,8 @@ def main():
     i = sub.add_parser("index")
     i.add_argument("--out", required=True)
     i.add_argument("--notes")
+    i.add_argument("--extra", help="CSV with a scene column: its other columns are appended to the index (e.g. relief)")
+    i.add_argument("--preface", help="a Markdown file written into index.md above the table")
     i.add_argument("scenes", nargs="*")
     a = ap.parse_args()
     global SECTION, CFG
