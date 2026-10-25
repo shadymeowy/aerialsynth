@@ -1,0 +1,79 @@
+# title: valley town
+# category: settlements
+# landcover: temperate hills (796 mm), open-field strips
+# look: a town of 18 000 on a valley floor at 380 m, wooded hills to 700 m around it
+# target: 38.10420 30.35510
+# local solar time 09:30 on 2026-12-15
+world:
+  seed: 1
+  generator: next
+tiles:
+  file: out/world.h5
+  max_zoom: 18
+  margin: 0
+  plan_every: 5
+trajectory:
+  synth:
+    rate_hz: 400
+    speed_mps: 50.0
+    altitude_m: 600.0
+    heading_deg: 285.0
+    kind: line
+    lat: 38.09836
+    lon: 30.38277
+    duration_s: 3.0
+render:
+  supersample: 2
+  shading: relit
+  lighting:
+    mode: clock
+    date: '2026-12-15'
+    time_utc: '07:28:00'
+    time_scale: 1.0
+    sky_intensity: 0.55
+  atmosphere:
+    visibility_km: 40.0
+    inscatter: 1.0
+cameras:
+- path: /cam0
+  intrinsics:
+    model: pinhole
+    width: 1280
+    height: 720
+    intrinsics:
+    - 914.0
+    - 914.0
+    - 639.5
+    - 359.5
+  extrinsics:
+    mount: forward
+    pitch_deg: -14.0
+  frame_rate: 1.0
+  rgb:
+    sensor:
+      exposure:
+        mode: auto
+        tau_s: 0.4
+        target: 0.13
+      motion_blur:
+        enabled: true
+        max_samples: 24
+      optics:
+        defocus_px: 0.25
+        chromatic_aberration_px: 0.3
+        vignette: 0.25
+        bloom: 0.06
+      noise:
+        enabled: true
+        read: 0.08
+        shot: 0.1
+      tone:
+        curve: filmic
+        saturation: 0.92
+    supersample: 2
+output:
+  start: 2.0
+  end: 2.0
+  max_frames: 1
+  compression:
+    level: 1
