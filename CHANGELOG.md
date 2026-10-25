@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 — 2026-10-25
 
 ### Terrain generators
 
@@ -18,6 +18,10 @@
     the land at coarse pixels;
   - ice sheets and polar ranges are white without valleys, gullies or channels (rivers start
     at the ice margin); the sea-ice edge is ragged, not a blur hundreds of km wide.
+  - Known limits: soft forest / open blotches remain at the ecoregions' scale (~100 km), with
+    a straight stretch of a cell border here and there at zooms 5–6; small brown flecks right at
+    some ice margins; a few places near ecoregion borders hold a different biome than in 0.3.0
+    (e.g. a bog now in taiga).
 - `classic` is unchanged (v0.2.0's, bit-identical).
 
 ## 0.3.0 — 2026-10-24
