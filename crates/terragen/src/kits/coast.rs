@@ -228,19 +228,70 @@ fn fam_atolls() -> usize {
     *F.get_or_init(|| crate::instances::families().position(|f| f.name == "coast_atolls").unwrap())
 }
 
-/// Atolls: rings of reef around lagoons in the open tropical ocean (deep sea floor, far from any
-/// coast, warmer than 25 °C; mostly on hotspot tracks). v: ring radius, rim half width, lagoon
-/// depth, motu share.
-fn atoll_exists(w: &crate::world::World, s: &InstSite) -> Option<[f32; 8]> {
-    if u01k(s.id, 1) >= 0.25 {
-        return None;
+/// Atoll chains: the sites of a coarse jittered lattice ([`CHAIN_CELL`]; as an instance
+/// family's) are, with probability [`CHAIN_P`], the centres of a chain of atolls on an old
+/// hotspot track: a great-circle segment 600–1600 km long, parallel to the other chains of its
+/// plate (the azimuth from the plate id, between NE–SW and SE–NW as most of the Pacific's, ± 17°), a single file (± 30–60 km) or a wide
+/// archipelago (± 120–280 km, Tuamotu- or Maldives-like), with gaps along it. The value is the
+/// chance that an atoll site there holds an atoll (0: open ocean, the most of it).
+const CHAIN_CELL: f64 = 1_000_000.0;
+const CHAIN_P: f64 = 0.65;
+const CHAIN_KEY: u64 = 0xA70C_C4A1;
+/// The farthest a chain reaches from its centre (km): half its length plus its half width.
+const CHAIN_REACH_KM: f64 = 1080.0;
+const EARTH_KM: f64 = 6371.0;
+
+fn atoll_chains(w: &crate::world::World, p: DVec3) -> f64 {
+    let up = p.normalize();
+    let lo = ((p - DVec3::splat(CHAIN_REACH_KM * 1000.0)) / CHAIN_CELL).floor();
+    let hi = ((p + DVec3::splat(CHAIN_REACH_KM * 1000.0)) / CHAIN_CELL).floor();
+    let mut best = 0.0f64;
+    for z in lo.z as i64..=hi.z as i64 {
+        for y in lo.y as i64..=hi.y as i64 {
+            for x in lo.x as i64..=hi.x as i64 {
+                let (h, pt) = worley3_site(w.seed() ^ CHAIN_KEY, (x, y, z), CHAIN_CELL, 0.8);
+                let len = pt.length();
+                if (len - 6_371_000.0).abs() >= 0.5 * CHAIN_CELL || u01k(h, 1) >= CHAIN_P {
+                    continue;
+                }
+                let c = pt / len;
+                let half = 300.0 + 500.0 * u01k(h, 2);
+                let wide = u01k(h, 3) < 0.35;
+                let wd = if wide { 120.0 + 160.0 * u01k(h, 4) } else { 30.0 + 30.0 * u01k(h, 4) };
+                if (up - c).length() * EARTH_KM > half + wd {
+                    continue;
+                }
+                let plate = w.atlas().sample(c).plate as u64;
+                let th = std::f64::consts::FRAC_PI_4 * (1.0 + 2.0 * u01k(mix64(CHAIN_KEY ^ plate), 1)) + 0.6 * (u01k(h, 5) - 0.5);
+                let (e, n) = frame(c);
+                let t = n * th.cos() + e * th.sin();
+                let along = up.dot(t).atan2(up.dot(c)) * EARTH_KM;
+                let across = up.dot(c.cross(t)).clamp(-1.0, 1.0).asin() * EARTH_KM;
+                let ell = (along / half).powi(2) + (across / wd).powi(2);
+                if ell >= 1.0 {
+                    continue;
+                }
+                // gaps along the chain (groups of atolls), and thinner towards the ends and edges
+                let lam = 250.0 + 250.0 * u01k(h, 6);
+                let gap = smoothstep(-0.95, -0.65, (std::f64::consts::TAU * (along / lam + u01k(h, 7))).sin());
+                let base = if wide { 0.7 } else { 0.9 };
+                best = best.max(base * gap * (1.0 - smoothstep(0.7, 1.0, ell)));
+            }
+        }
     }
+    best
+}
+
+/// Atolls: rings of reef around lagoons in the open tropical ocean (deep sea floor, far from any
+/// coast, warmer than 25 °C), in chains and archipelagos ([`atoll_chains`]) and along the
+/// atlas's hotspot tracks. v: ring radius, rim half width, lagoon depth, motu share.
+fn atoll_exists(w: &crate::world::World, s: &InstSite) -> Option<[f32; 8]> {
     let a = w.atlas().sample(s.center.normalize());
     if !(-5500.0..=-1500.0).contains(&a.elevation_m) || a.coast_km > -150.0 || a.temp_c < 25.0 {
         return None;
     }
-    let hot = a.hotspot || a.volcanism > 0.12;
-    if u01k(s.id, 2) >= if hot { 0.9 } else { 0.35 } {
+    let chance = atoll_chains(w, s.center).max(if a.hotspot { 0.4 } else { 0.0 });
+    if u01k(s.id, 2) >= chance {
         return None;
     }
     let f = |x: f64| x as f32;
@@ -866,29 +917,28 @@ mod tests {
         }
     }
 
-    /// Debug: atolls of the default world.
+    /// Debug: every atoll of the default world (a scan of the family's lattice shell), its
+    /// count and its places (`-- --ignored --nocapture find_atolls`; lines `atoll lat lon R`).
     #[test]
     #[ignore]
     fn find_atolls() {
         let w = crate::world::World::new(crate::Config::default());
-        let ell = w.ell;
-        let mut seen = std::collections::BTreeMap::new();
-        for i in 0..40_000u64 {
-            let h = mix64(0xA7 ^ i);
-            let lat = 50.0 * (2.0 * u01k(h, 1) - 1.0);
-            let lon = 360.0 * u01k(h, 2) - 180.0;
-            let p = geodesy::geodetic2ecef(geodesy::Geodetic::new(lat.to_radians(), lon.to_radians(), 0.0), &ell);
-            if w.atlas().sample(p.normalize()).temp_c < 25.0 {
-                continue;
-            }
-            for it in crate::instances::near(&w, fam_atolls(), p, 0.0) {
-                seen.entry(it.id).or_insert(it);
+        let f = crate::instances::family(fam_atolls());
+        let m = (6_400_000.0 / f.cell).ceil() as i64 + 1;
+        let mut all = Vec::new();
+        for z in -m..=m {
+            for y in -m..=m {
+                for x in -m..=m {
+                    let Some(s) = crate::instances::site(&w, f, (x, y, z)) else { continue };
+                    if let Some(v) = (f.exists)(&w, &s) {
+                        all.push((s.lat.to_degrees(), s.lon.to_degrees(), v[0]));
+                    }
+                }
             }
         }
-        eprintln!("{} atolls", seen.len());
-        for it in seen.values().take(14) {
-            let g = geodesy::ecef2geodetic(it.center, &ell);
-            eprintln!("({:.3}, {:.3}) R{:.0} wr{:.0} L{:.0}", g.lat.to_degrees(), g.lon.to_degrees(), it.v[0], it.v[1], it.v[2]);
+        eprintln!("{} atolls", all.len());
+        for (lat, lon, r) in &all {
+            eprintln!("atoll {lat:.3} {lon:.3} {r:.0}");
         }
     }
 
