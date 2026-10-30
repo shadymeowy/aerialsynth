@@ -131,7 +131,7 @@ fn coast_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
     for (var i = 0u; i < l.n; i++) {
         let a = co_atoll_at(l.items[i], c.p, c.gsd);
         if (a.ok) {
-            let k = 1.0 - smoothstep1(5500.0, 7000.0, a.d - a.wre);
+            let k = 1.0 - smoothstep1(5500.0, 7000.0, a.out);
             *h += (max(*h, a.z) - *h) * k;
         }
     }
@@ -231,6 +231,7 @@ struct CoAt {
     z: f32,
     d: f32,
     wre: f32,
+    out: f32,
 }
 
 /// `coast::atoll_at`.
@@ -255,27 +256,37 @@ fn co_atoll_at(it: Inst, p: vec3<f64>, gsd: f32) -> CoAt {
     }
     let th = atan2(y, x);
     let edge = 1.0 + 0.10 * sin(3.0 * th + TAU * u01k(it.id, 10lu)) + 0.06 * sin(5.0 * th + TAU * u01k(it.id, 11lu)) + 0.04 * sin(8.0 * th + TAU * u01k(it.id, 12lu));
-    let d = r / edge - r0;
     let wre = max(wr, 1.5 * gsd);
-    if (d > wre + 7000.0) {
+    let out = r / edge - r0 - wr;
+    if (out > 7000.0) {
         return o;
     }
+    let grow = min(0.5 * max(gsd - 90.0, 0.0), 23000.0 - 1.2 * r0 - wr);
+    let d = out + wre - grow;
+    var s = 1.0;
+    if (wre > wr) {
+        let ro = r0 + wr;
+        let inner = max(ro - 2.0 * wre, 0.0);
+        s = min(4.0 * r0 * wr / (ro * ro - inner * inner), 1.0);
+    }
+    let zb = -l + (l - 0.3) * s;
     let ad = abs(d);
     var z = 0.0;
     if (d < -wre) {
         let t = smoothstep1(0.0, 1.0, (-d - wre) / (350.0 + 0.04 * r0));
-        z = -l + (l - 0.3) * (1.0 - t);
+        z = -l + (zb + l) * (1.0 - t);
     } else if (d <= wre) {
         let thr = 0.45 - it.v[3];
         let motu = smoothstep1(thr, thr + 0.12, co_nz(CO_SEED ^ it.id ^ 0x80lu, p, 700.0, gsd));
-        z = -0.3 + 2.2 * motu * (1.0 - smoothstep1(0.4 * wre, wre, ad));
+        z = zb + 2.2 * s * motu * (1.0 - smoothstep1(0.4 * wre, wre, ad));
     } else {
-        z = -0.3 - 0.5 * (d - wre);
+        z = zb - 0.5 * (d - wre);
     }
     o.ok = true;
     o.z = z;
     o.d = d;
     o.wre = wre;
+    o.out = out;
     return o;
 }
 

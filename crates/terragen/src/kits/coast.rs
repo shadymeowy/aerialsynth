@@ -321,6 +321,8 @@ pub(crate) struct At {
     pub z: f64,
     pub d: f64,
     pub wre: f64,
+    /// the distance beyond the true outer edge (m; the flank's fade)
+    pub out: f64,
 }
 
 pub(crate) fn atoll_at(it: &Instance, p: DVec3, gsd: f64) -> Option<At> {
@@ -339,29 +341,45 @@ pub(crate) fn atoll_at(it: &Instance, p: DVec3, gsd: f64) -> Option<At> {
         + 0.10 * (3.0 * th + tau * u01k(it.id, 10)).sin()
         + 0.06 * (5.0 * th + tau * u01k(it.id, 11)).sin()
         + 0.04 * (8.0 * th + tau * u01k(it.id, 12)).sin();
-    let d = r / edge - r0;
+    // a rim narrower than 1.5 pixels is widened inwards only: the outer edge stays at r0 + wr
+    // (the atoll's footprint is its true area at every zoom), and the band's height is the
+    // area mean of reef flat and lagoon (`s`: the rim's share of the band). Coarse pixels
+    // (> 90 m) grow the edge by half a pixel beyond that: their colour samples interpolate the
+    // heights of the pixel grid, which shrinks a plateau above a steep flank by that much.
     let wre = wr.max(1.5 * gsd);
-    if d > wre + 7000.0 {
+    let out = r / edge - r0 - wr;
+    if out > 7000.0 {
         return None;
     }
+    // (within the family's reach)
+    let grow = (0.5 * (gsd - 90.0).max(0.0)).min(23_000.0 - 1.2 * r0 - wr);
+    let d = out + wre - grow;
+    let s = if wre > wr {
+        let ro = r0 + wr;
+        let inner = (ro - 2.0 * wre).max(0.0);
+        (4.0 * r0 * wr / (ro * ro - inner * inner)).min(1.0)
+    } else {
+        1.0
+    };
+    let zb = -l + (l - 0.3) * s;
     let ad = d.abs();
     let z = if d < -wre {
         let t = smoothstep(0.0, 1.0, (-d - wre) / (350.0 + 0.04 * r0));
-        -l + (l - 0.3) * (1.0 - t)
+        -l + (zb + l) * (1.0 - t)
     } else if d <= wre {
         let thr = 0.45 - v[3];
         let motu = smoothstep(thr, thr + 0.12, nz(SEED ^ it.id ^ 0x80, p, 700.0, gsd));
-        -0.3 + 2.2 * motu * (1.0 - smoothstep(0.4 * wre, wre, ad))
+        zb + 2.2 * s * motu * (1.0 - smoothstep(0.4 * wre, wre, ad))
     } else {
-        -0.3 - 0.5 * (d - wre)
+        zb - 0.5 * (d - wre)
     };
-    Some(At { z, d, wre })
+    Some(At { z, d, wre, out })
 }
 
 fn atolls_relief(w: &crate::world::World, r: &ReliefIn, h: &mut f64) {
     for it in r.instances(w, fam_atolls()).iter() {
         if let Some(a) = atoll_at(it, r.ctx.p, r.ctx.gsd) {
-            let k = 1.0 - smoothstep(5500.0, 7000.0, a.d - a.wre);
+            let k = 1.0 - smoothstep(5500.0, 7000.0, a.out);
             *h += (h.max(a.z) - *h) * k;
         }
     }
