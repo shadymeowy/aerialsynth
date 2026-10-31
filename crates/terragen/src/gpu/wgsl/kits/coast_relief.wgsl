@@ -131,7 +131,7 @@ fn coast_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
     for (var i = 0u; i < l.n; i++) {
         let a = co_atoll_at(l.items[i], c.p, c.gsd);
         if (a.ok) {
-            let k = 1.0 - smoothstep1(5500.0, 7000.0, a.d - a.wre);
+            let k = 1.0 - smoothstep1(5500.0, 7000.0, a.out);
             *h += (max(*h, a.z) - *h) * k;
         }
     }
@@ -148,23 +148,77 @@ fn coast_relief(c: Ctx, m: Macro, r: ReliefIn, h: ptr<function, f32>) {
 
 // ---------------------------------------------------------------- atolls
 
+/// `coast::CHAIN_CELL` …
+const CO_CHAIN_CELL: f64 = 1000000.0lf;
+const CO_CHAIN_KEY: u64 = 0xA70CC4A1lu;
+const CO_EARTH_KM: f32 = 6371.0;
+
+/// `coast::atoll_chains`.
+fn co_atoll_chains(p: vec3<f64>) -> f32 {
+    let up = vec3<f32>(normalize(p));
+    let lo = floor((p - vec3<f64>(1080000.0lf)) / CO_CHAIN_CELL);
+    let hi = floor((p + vec3<f64>(1080000.0lf)) / CO_CHAIN_CELL);
+    var best = 0.0;
+    for (var z = i64(lo.z); z <= i64(hi.z); z++) {
+        for (var y = i64(lo.y); y <= i64(hi.y); y++) {
+            for (var x = i64(lo.x); x <= i64(hi.x); x++) {
+                let h = hash3(cfg.seed ^ CO_CHAIN_KEY, x, y, z);
+                let pt = (vec3<f64>(f64(x), f64(y), f64(z)) + 0.5lf + 0.8lf * (vec3<f64>(u01kd(h, 1lu), u01kd(h, 2lu), u01kd(h, 3lu)) - 0.5lf)) * CO_CHAIN_CELL;
+                let len = sqrt(dot(pt, pt));
+                if (abs(len - 6371000.0lf) >= 0.5lf * CO_CHAIN_CELL || u01k(h, 1lu) >= 0.65) {
+                    continue;
+                }
+                let c = vec3<f32>(pt / len);
+                let half = 300.0 + 500.0 * u01k(h, 2lu);
+                let wide = u01k(h, 3lu) < 0.35;
+                var wd = 30.0 + 30.0 * u01k(h, 4lu);
+                if (wide) {
+                    wd = 120.0 + 160.0 * u01k(h, 4lu);
+                }
+                if (length(up - c) * CO_EARTH_KM > half + wd) {
+                    continue;
+                }
+                let plate = u64(atlas_plate_id(atlas_sample(c)));
+                let th = 0.7853981633974483 * (1.0 + 2.0 * u01k(mix64(CO_CHAIN_KEY ^ plate), 1lu)) + 0.6 * (u01k(h, 5lu) - 0.5);
+                var e = vec3<f32>(1.0, 0.0, 0.0);
+                if (abs(c.z) <= 0.999) {
+                    e = normalize(cross(vec3<f32>(0.0, 0.0, 1.0), c));
+                }
+                let n = cross(c, e);
+                let t = n * cos(th) + e * sin(th);
+                let along = atan2(dot(up, t), dot(up, c)) * CO_EARTH_KM;
+                let across = asin(clamp(dot(up, cross(c, t)), -1.0, 1.0)) * CO_EARTH_KM;
+                let ell = (along / half) * (along / half) + (across / wd) * (across / wd);
+                if (ell >= 1.0) {
+                    continue;
+                }
+                let lam = 250.0 + 250.0 * u01k(h, 6lu);
+                let gap = smoothstep1(-0.95, -0.65, sin(TAU * (along / lam + u01k(h, 7lu))));
+                var base = 0.9;
+                if (wide) {
+                    base = 0.7;
+                }
+                best = max(best, base * gap * (1.0 - smoothstep1(0.7, 1.0, ell)));
+            }
+        }
+    }
+    return best;
+}
+
 /// `coast::atoll_exists`.
 fn coast_atolls_exists(s: InstSite) -> InstOut {
     var o: InstOut;
     o.ok = false;
-    if (u01k(s.id, 1lu) >= 0.25) {
-        return o;
-    }
     let a = atlas_sample(vec3<f32>(normalize(s.center)));
     if (a.elevation > -1500.0 || a.elevation < -5500.0 || a.coast_km > -150.0 || a.temp_c < 25.0) {
         return o;
     }
-    let hot = atlas_hotspot(a) || a.volcanism > 0.12;
-    var need = 0.35;
-    if (hot) {
-        need = 0.9;
+    var hot = 0.0;
+    if (atlas_hotspot(a)) {
+        hot = 0.4;
     }
-    if (u01k(s.id, 2lu) >= need) {
+    let chance = max(co_atoll_chains(s.center), hot);
+    if (u01k(s.id, 2lu) >= chance) {
         return o;
     }
     o.ok = true;
@@ -177,6 +231,7 @@ struct CoAt {
     z: f32,
     d: f32,
     wre: f32,
+    out: f32,
 }
 
 /// `coast::atoll_at`.
@@ -201,27 +256,37 @@ fn co_atoll_at(it: Inst, p: vec3<f64>, gsd: f32) -> CoAt {
     }
     let th = atan2(y, x);
     let edge = 1.0 + 0.10 * sin(3.0 * th + TAU * u01k(it.id, 10lu)) + 0.06 * sin(5.0 * th + TAU * u01k(it.id, 11lu)) + 0.04 * sin(8.0 * th + TAU * u01k(it.id, 12lu));
-    let d = r / edge - r0;
     let wre = max(wr, 1.5 * gsd);
-    if (d > wre + 7000.0) {
+    let out = r / edge - r0 - wr;
+    if (out > 7000.0) {
         return o;
     }
+    let grow = min(0.5 * max(gsd - 90.0, 0.0), 23000.0 - 1.2 * r0 - wr);
+    let d = out + wre - grow;
+    var s = 1.0;
+    if (wre > wr) {
+        let ro = r0 + wr;
+        let inner = max(ro - 2.0 * wre, 0.0);
+        s = min(4.0 * r0 * wr / (ro * ro - inner * inner), 1.0);
+    }
+    let zb = -l + (l - 0.3) * s;
     let ad = abs(d);
     var z = 0.0;
     if (d < -wre) {
         let t = smoothstep1(0.0, 1.0, (-d - wre) / (350.0 + 0.04 * r0));
-        z = -l + (l - 0.3) * (1.0 - t);
+        z = -l + (zb + l) * (1.0 - t);
     } else if (d <= wre) {
         let thr = 0.45 - it.v[3];
         let motu = smoothstep1(thr, thr + 0.12, co_nz(CO_SEED ^ it.id ^ 0x80lu, p, 700.0, gsd));
-        z = -0.3 + 2.2 * motu * (1.0 - smoothstep1(0.4 * wre, wre, ad));
+        z = zb + 2.2 * s * motu * (1.0 - smoothstep1(0.4 * wre, wre, ad));
     } else {
-        z = -0.3 - 0.5 * (d - wre);
+        z = zb - 0.5 * (d - wre);
     }
     o.ok = true;
     o.z = z;
     o.d = d;
     o.wre = wre;
+    o.out = out;
     return o;
 }
 
