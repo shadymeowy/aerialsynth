@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Terrain generators
+
+- `next` (experimental; generator version 5 → 6: its stores take no new tiles of this
+  version): atolls form a few chains and archipelagos (~340 in the default world, plate-parallel
+  pseudo hotspot tracks and the atlas's hotspot tracks) with open ocean between them, instead of
+  a uniform speckle of ~670 over the whole warm open ocean; at coarse zooms an atoll covers its
+  true area (it drew ~3× its colour at zoom 5 and 1.5× at zoom 7, more at zooms 3–4). The atoll
+  place of the coast kit's docs and gallery scene g061 moved to (12.999, 33.006) (the old atoll is open ocean now).
+- `classic` is unchanged (v0.2.0's, bit-identical).
+
 ## 0.3.1 — 2026-10-25
 
 ### Terrain generators

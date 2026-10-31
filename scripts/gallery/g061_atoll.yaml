@@ -2,8 +2,9 @@
 # category: coast
 # landcover: atoll: reef ring R ~14 km, motus, lagoon
 # look: the reef ring of a large atoll curving away around its lagoon, sandy motus, high sun
-# target: 7.23900 87.73500
+# target: 13.11900 33.02400
 # local solar time 11:30 on 2026-04-15
+# status: round 17 moved it from 7.239 87.735 (that atoll is open ocean now: atolls in chains), same framing
 world:
   seed: 1
   generator: next
@@ -19,8 +20,8 @@ trajectory:
     altitude_m: 2000.0
     heading_deg: 180.0
     kind: line
-    lat: 7.27105
-    lon: 87.73500
+    lat: 13.15105
+    lon: 33.02400
     duration_s: 3.0
 render:
   supersample: 2
@@ -28,7 +29,7 @@ render:
   lighting:
     mode: clock
     date: '2026-04-15'
-    time_utc: '05:39:00'
+    time_utc: '09:18:00'
     time_scale: 1.0
     sky_intensity: 0.55
   atmosphere:

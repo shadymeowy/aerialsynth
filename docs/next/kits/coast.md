@@ -27,7 +27,7 @@ the atlas coast distance (−100..30 km) and on a window of `h0` before any nois
 | barrier islands, lagoons | bump at -6 m (8.7 m, width 2.8 m), inlets where a 3.2 km noise closes it | the core's beach on the island, green-sand lagoon water |
 | reefs | bump at -7 m (fringing) or -28 m (barrier reef) up to -0.9 m, passes where a noise closes it | turquoise sand by depth, coral heads, the core's surf on the crest |
 | salt / aquaculture ponds | | on the high flats and marsh, in the land-use region's field frame: 150 × 85 m ponds with dykes; salt (pink, white, turquoise, green) where moist < 0.45, aquaculture (blue-greens) elsewhere, muted 30 % towards their mean; patches on about a quarter of the flats by a 2.4 km noise |
-| atolls | family `coast_atolls` (cell 80 km, reach 24 km): ring of reef R 2-14 km, rim 180-400 m wide at -0.3 m, motus (+1.9 m, noise > threshold), lagoon 12-30 m, outer slope 0.5 to the sea floor; ocean floor 1.5-5.5 km deep, > 150 km from any coast, SST > 25 °C, mostly hotspot tracks | turquoise lagoon with coral, scrub on the motus (the core's beach is the sand) |
+| atolls | family `coast_atolls` (cell 80 km, reach 24 km): ring of reef R 2-14 km, rim 180-400 m wide at -0.3 m, motus (+1.9 m, noise > threshold), lagoon 12-30 m, outer slope 0.5 to the sea floor; ocean floor 1.5-5.5 km deep, > 150 km from any coast, SST > 25 °C; only in chains and archipelagos (`atoll_chains`: a 1000 km lattice, 65 % of its sites a chain 600-1600 km long on a great circle, parallel to the other chains of its plate (azimuth NE-SE ± 17°), a single file ± 30-60 km or a wide archipelago ± 120-280 km, gaps along it) and on the atlas's hotspot tracks: ~340 atolls in the default world, open ocean between the groups. A rim below 1.5 pixels is widened inwards only, at the area mean of reef flat and lagoon, and coarse pixels grow the edge by half a pixel (the height grid's interpolation takes it): the atoll covers its true area at every zoom | turquoise lagoon with coral, scrub on the motus (the core's beach is the sand) |
 
 **Deltas** (`kits/coast/delta.rs`, WGSL `coast_delta_shape`, `coast_astamp`): fan (arcuate,
 65 %) and bird's-foot deltas (35 %) at the mouths of the major rivers (drainage level 0), radius
@@ -71,7 +71,7 @@ across zooms and backends. Atolls are an instance family (existence at the site 
 Places (default world, `PLACES` in the tests): cliff coast (-21.804, -43.364), Adriatic tidal flats
 (44.107, 11.756), arid tidal flats and creeks (26.538, -5.414), barrier / lagoon coast
 (19.379, -14.658), fringing reef (11.859, 81.198), glaciated skerry coast (61.882, 19.636), atoll
-(7.131, 87.717), plain coast (-41.129, -152.831), fan delta (44.2101, 176.6552), bird's-foot delta
+(12.999, 33.006; in a chain, R 13.8 km), plain coast (-41.129, -152.831), fan delta (44.2101, 176.6552), bird's-foot delta
 (35.1942, 73.4256), tropical delta with mangroves (-1.4670, 173.6521). Find more with the ignored tests
 `find_coast_places` (atlas), `find_coast_crossings` (pass-A coast crossings by type) and
 `find_atolls`; the deltas of 24 coastal regions with `deltas_sit_at_river_mouths -- --nocapture`.
@@ -127,7 +127,7 @@ shallows over the platform.
 ![aquaculture](images/coast_aquaculture_10km.jpg)
 
 **Barrier / lagoon coast** (19.379, -14.658, 1.5 km); **skerry coast** with kelp (62.333, 21.760,
-1.5 km); **atoll** (7.131, 87.717, 10 km: ring of reef, motus, lagoon).
+1.5 km); **atoll** (12.999, 33.006; its north rim from 10 km: ring of reef, motus, lagoon).
 ![barrier](images/coast_barrier_1500m.jpg)
 ![skerry](images/coast_skerry_1500m.jpg)
 ![atoll](images/coast_atoll_10km.jpg)
