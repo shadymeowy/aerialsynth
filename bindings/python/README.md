@@ -149,7 +149,7 @@ zlib are linked statically; nothing else to install besides numpy):
 
 ```sh
 python3 -m venv .venv          # PEP 668 distributions refuse a system-wide pip install (Debian / Ubuntu: apt install python3-venv)
-.venv/bin/pip install https://github.com/shadymeowy/aerialsynth/releases/download/v0.3.1/aerialsynth-0.3.1-cp310-abi3-manylinux_2_28_x86_64.whl
+.venv/bin/pip install https://github.com/shadymeowy/aerialsynth/releases/download/v0.3.2/aerialsynth-0.3.2-cp310-abi3-manylinux_2_28_x86_64.whl
 .venv/bin/python -c "import aerialsynth; print(aerialsynth.__version__)"
 ```
 

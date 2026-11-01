@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.2 — 2026-11-01
 
 ### Terrain generators
 
@@ -11,6 +11,12 @@
   true area (it drew ~3× its colour at zoom 5 and 1.5× at zoom 7, more at zooms 3–4). The atoll
   place of the coast kit's docs and gallery scene g061 moved to (12.999, 33.006) (the old atoll is open ocean now).
 - `classic` is unchanged (v0.2.0's, bit-identical).
+
+### Tools
+
+- `scripts/gallery/`: 30 more `next` gallery places on hilly ground (g105–g134: hill towns,
+  valley farms, slope vineyards and terraces, forested ridges, karst, gorges, canyons, uplands);
+  `scripts/gallery.py index --extra / --preface`.
 
 ## 0.3.1 — 2026-10-25
 
