@@ -67,3 +67,23 @@ fn point_queries_match_the_configured_generators_tiles() {
     let own = cc.1.max(nn.1).max(10.0);
     assert!(cn > 4.0 * own, "classic tiles vs next points: mean gap {cn:.1} m (own: {:.1}, {:.1} m)", cc.1, nn.1);
 }
+
+/// A tarn (the mountains kit's lake at a glaciated channel head) whose bowl a deeper valley cuts
+/// through holds no water above the cut: its level came from the channel's floor, ~260 m above
+/// the valley here, and the water filled the whole cut (a disc of water standing in the forest,
+/// gallery scene mountain_lake at 49.262, 160.819).
+#[test]
+fn tarns_hold_no_water_far_above_the_ground() {
+    let g = generator(GeneratorKind::Next);
+    let mut pts = vec![];
+    for i in -4..=4 {
+        for j in -4..=4 {
+            let (lat, lon) = (49.26253 + i as f64 * 0.0006, 160.81961 + j as f64 * 0.0008);
+            pts.push((lat.to_radians(), lon.to_radians(), 5.0));
+        }
+    }
+    for (t, p) in g.terrain_points(&pts).unwrap().iter().zip(&pts) {
+        let above = t.surface() - t.ground;
+        assert!(above < 15.0, "water {above:.0} m above the ground at {:.5} {:.5} (kind {})", p.0.to_degrees(), p.1.to_degrees(), t.water_kind);
+    }
+}

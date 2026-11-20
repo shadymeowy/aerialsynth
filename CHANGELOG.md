@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Terrain generators
+
+- `next` (experimental; generator version 6 → 7: its stores take no new tiles of this
+  version): no discs of water standing in the air. A tarn (the small lake at the head of a
+  glaciated channel) where a deeper valley cuts through its bowl filled the whole cut up to its
+  level, hundreds of metres above the valley floor: a dark flat-topped cylinder in the forest or
+  on a fjord wall (gallery scenes mountain_lake and fjord walls). Its water is now decided on the
+  final ground, in its bowl only.
+- `classic` is unchanged (v0.2.0's, bit-identical).
+
 ## 0.3.2 — 2026-11-01
 
 ### Terrain generators

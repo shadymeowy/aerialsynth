@@ -22,8 +22,9 @@ use tilestore::{Layer, StoreMeta, TileStore};
 /// ecoregions and cultures (`docs/design/terrain-next.md`); 5: round 16's planet-scale fixes
 /// (ecoregions blended over tens of km, coarse tiles that agree with their children, ice
 /// sheets without valleys); 6: atolls in chains and archipelagos (~340, was a uniform speckle of
-/// ~670), drawn at their true area at coarse zooms.
-pub const GENERATOR_VERSION: u32 = 6;
+/// ~670), drawn at their true area at coarse zooms; 7: tarns hold no water above a valley cut through
+/// their bowls (discs of water standing hundreds of metres above the ground).
+pub const GENERATOR_VERSION: u32 = 7;
 
 /// Version of the classic generator's output (`world.generator: classic`): v0.2.0's version 3,
 /// frozen (the classic generator is v0.2.0's, unchanged).
