@@ -329,6 +329,9 @@ pub struct World {
 }
 
 const KM: f64 = 1000.0;
+/// Depth (m) below its level that a tarn's water reaches: its bowl (4 m) and the channel's floor
+/// under it, with a margin; ground cut deeper by another valley stays dry (`world.wgsl` TARN_BOWL).
+const TARN_BOWL: f64 = 10.0;
 
 impl World {
     pub fn new(cfg: Config) -> Self {
@@ -1283,6 +1286,9 @@ impl World {
             let mut fp_noise: [Option<f64>; 4] = m.pre.map_or([None; 4], |p| p.floodplain);
             // (the channels' distances and half widths after the kits' carve hooks)
             let mut adj: Vec<(f64, f64)> = Vec::with_capacity(hits.len());
+            // the highest level of the tarns whose bowls reach the point (their water is decided on
+            // the final ground, after every channel's carve)
+            let mut tarn = f64::NEG_INFINITY;
             for rh in &hits {
                 let lc = &self.cfg.hydro.levels[rh.level as usize];
                 let ad = rh.d.abs();
@@ -1415,10 +1421,7 @@ impl World {
                     let x = ad / cv.lake_r;
                     let bowl = cv.lake_level - 4.0 * (1.0 - x * x);
                     h = h.min(lerp(h, bowl, smoothstep(1.0, 0.7, x)));
-                    if h < cv.lake_level {
-                        t.water = t.water.max(cv.lake_level);
-                        t.water_kind = water::LAKE;
-                    }
+                    tarn = tarn.max(cv.lake_level);
                 }
             }
             // channel attributes from the nearest channel: the distance beyond its edge relative to
@@ -1427,6 +1430,15 @@ impl World {
             // ended square on the bisector: the braided wash's rectangular edges, gallery g18;
             // relative to the half width alone, a big river 400 m away took the small streams'
             // riparian bands)
+            // the tarns' water, on the final ground and only in their bowls: a deeper valley that
+            // crosses a tarn cuts the ground far below its level, and the water filled the whole cut
+            // (decided before the later channels' carves, against the ground so far): a disc of water
+            // hundreds of metres above the valley floor, a dark cylinder in the forest, gallery
+            // mountain_lake and fjord walls
+            if h < tarn && h > tarn - TARN_BOWL {
+                t.water = t.water.max(tarn);
+                t.water_kind = water::LAKE;
+            }
             let rel = |a: &(f64, f64)| (a.0.abs() - a.1) / a.1.max(25.0);
             if let Some((rh, &(d, hw))) = hits.iter().zip(&adj).min_by(|a, b| rel(a.1).total_cmp(&rel(b.1))) {
                 let lc = &self.cfg.hydro.levels[rh.level as usize];

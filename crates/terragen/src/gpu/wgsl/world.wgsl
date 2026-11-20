@@ -64,6 +64,8 @@ struct Cfg {
     _t2: f32,
 }
 
+// depth below its level that a tarn's water reaches (`world.rs` TARN_BOWL)
+const TARN_BOWL: f32 = 10.0;
 const CF_RIVERS: u32 = 1u;
 const CF_TREES_DSM: u32 = 2u;
 const CF_BUILDINGS_DSM: u32 = 4u;
@@ -1136,6 +1138,8 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
         var best_hw = 0.0;
         var best_floor = 0.0;
         var best_lvl = 0u;
+        // the highest level of the tarns whose bowls reach the point (`world.rs`)
+        var tarn = -1e30;
         for (var k = 0u; k < dr.nseg; k++) {
             let si = drain_seg(dr, k, p);
             if (si == 0xffffffffu) {
@@ -1284,10 +1288,7 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                 let x = adc / cv.lake_r;
                 let bowl = cv.lake_level - 4.0 * (1.0 - x * x);
                 h = min(h, lerp(h, bowl, smoothstep1(1.0, 0.7, x)));
-                if (h < cv.lake_level) {
-                    t.water = max(t.water, cv.lake_level);
-                    t.water_kind = W_LAKE;
-                }
+                tarn = max(tarn, cv.lake_level);
             }
             let key = (adc - hwc) / max(hwc, 25.0);
             if (key < best) {
@@ -1297,6 +1298,11 @@ fn terrain_rest(c: Ctx, m: Macro, pre: Pre, r: Relief, mode: u32, dr: Drain) -> 
                 best_floor = floor_h;
                 best_lvl = li;
             }
+        }
+        // the tarns' water, on the final ground and only in their bowls (`world.rs`)
+        if (h < tarn && h > tarn - TARN_BOWL) {
+            t.water = max(t.water, tarn);
+            t.water_kind = W_LAKE;
         }
         // channel attributes from the nearest channel
         if (best < NONE_F) {
