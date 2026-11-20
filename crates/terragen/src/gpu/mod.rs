@@ -215,11 +215,42 @@ struct Lattice {
     used: usize,
 }
 
+impl Lattice {
+    /// An empty table of `cap` slots.
+    fn new(d: &wgpu::Device, cap: usize) -> Lattice {
+        Lattice {
+            keys: output(d, "lattice keys", (cap * 8) as u64),
+            keys_ro: output(d, "lattice keys (copy)", (cap * 8) as u64),
+            s: output(d, "lattice points", (cap * 32) as u64),
+            h: output(d, "lattice heights", (cap * 4) as u64),
+            flags: output(d, "lattice flags", (cap * 4) as u64),
+            tgt: output(d, "lattice targets", (cap * 4) as u64),
+            mark: output(d, "lattice marks", (cap * 4) as u64),
+            work_t: output(d, "target work", (cap * 4) as u64),
+            work_s: output(d, "source work", (cap * 4) as u64),
+            cap,
+            used: 0,
+        }
+    }
+
+    /// Replace the table with an empty one of `cap` slots (the old one goes first).
+    fn remake(&mut self, d: &wgpu::Device, cap: usize) {
+        *self = Lattice::new(d, 1);
+        *self = Lattice::new(d, cap);
+    }
+}
+
 /// The size of a `PointMid` (points.wgsl; `point_mid_size` checks it).
 const POINT_MID_BYTES: u64 = 192;
 
-/// Lattice table slots (~50 bytes each).
+/// Lattice table slots (72 bytes each) at most. The table starts at `LAT_START` slots and is
+/// cleared when it is three fifths full (it caches lattice points across batches; the tiles do
+/// not depend on what it holds), and made twice as large when one batch's points do not fit
+/// an empty table.
 const LAT_CAP: usize = 1 << 23;
+/// Lattice table slots at first (144 MiB; one batch of 16 tiles needed up to ~1M points in
+/// tests, the cache over a 944-tile flight ~3.3M, cleared and filled again then).
+const LAT_START: usize = 1 << 21;
 /// Lattice cells per enumeration / gather chunk.
 const CHUNK: usize = 4096;
 
@@ -253,6 +284,9 @@ pub struct GpuGenerator {
     lat: Mutex<Lattice>,
     /// pass B's work buffer (kept: a few hundred MiB allocated per batch cost more than the stages)
     pb_work: Mutex<Option<wgpu::Buffer>>,
+    /// pass A's pixel fields and terrain (kept like `pb_work`, cleared for each batch: allocating
+    /// them per batch fragmented the memory)
+    pa_bufs: Mutex<Option<(wgpu::Buffer, wgpu::Buffer)>>,
 }
 
 /// Where each pass-B stage starts: a stack step (`stack_step_<n>` in stack.wgsl: 0..=9 on land,
@@ -653,20 +687,20 @@ impl GpuGenerator {
             l_globals,
             dk,
         };
-        let lat = Lattice {
-            keys: output(d, "lattice keys", (LAT_CAP * 8) as u64),
-            keys_ro: output(d, "lattice keys (copy)", (LAT_CAP * 8) as u64),
-            s: output(d, "lattice points", (LAT_CAP * 32) as u64),
-            h: output(d, "lattice heights", (LAT_CAP * 4) as u64),
-            flags: output(d, "lattice flags", (LAT_CAP * 4) as u64),
-            tgt: output(d, "lattice targets", (LAT_CAP * 4) as u64),
-            mark: output(d, "lattice marks", (LAT_CAP * 4) as u64),
-            work_t: output(d, "target work", (LAT_CAP * 4) as u64),
-            work_s: output(d, "source work", (LAT_CAP * 4) as u64),
-            cap: LAT_CAP,
-            used: 0,
-        };
-        Ok(GpuGenerator { world, surface, gpu, k, globals, globals_bufs, cache: Mutex::new(Cache::default()), lat: Mutex::new(lat), pb_work: Mutex::new(None) })
+        let lat = Lattice::new(d, LAT_START);
+        crate::gpu::device::vram_note(d, "generator ready");
+        Ok(GpuGenerator {
+            world,
+            surface,
+            gpu,
+            k,
+            globals,
+            globals_bufs,
+            cache: Mutex::new(Cache::default()),
+            lat: Mutex::new(lat),
+            pb_work: Mutex::new(None),
+            pa_bufs: Mutex::new(None),
+        })
     }
 
     /// Evaluate points on the GPU (pass A with exact macro fields, see `points.wgsl`): their
@@ -865,14 +899,20 @@ impl GpuGenerator {
         };
         // ---- the lattice points the queries need (a full table is cleared and filled again)
         let n_cells: usize = boxes_e.iter().map(|b| b.dims[0] as usize * b.dims[1] as usize * b.dims[2] as usize).sum();
-        let new_cap = n_cells.min(lat.cap).max(1);
-        let b_new = output(d, "new lattice points", (new_cap * 4) as u64);
         let dummy_segs = output(d, "-", 256);
         let dummy_ro = output(d, "-", 256);
         let dummy_sinks = output(d, "-", 256);
         let mut n_new = 0usize;
-        for attempt in 0..2 {
-            if lat.used > lat.cap * 3 / 5 || attempt == 1 {
+        let mut new_cap = n_cells.min(lat.cap).max(1);
+        let mut b_new = output(d, "new lattice points", (new_cap * 4) as u64);
+        // (attempt 1: the points in an empty table; then in one twice as large, up to LAT_CAP)
+        for attempt in 0.. {
+            if attempt >= 2 {
+                let cap = lat.cap * 2;
+                lat.remake(d, cap);
+                new_cap = n_cells.min(lat.cap).max(1);
+                b_new = output(d, "new lattice points", (new_cap * 4) as u64);
+            } else if lat.used > lat.cap * 3 / 5 || attempt == 1 {
                 let mut enc = d.create_command_encoder(&Default::default());
                 enc.clear_buffer(&lat.keys, 0, None);
                 enc.clear_buffer(&lat.flags, 0, None);
@@ -891,11 +931,14 @@ impl GpuGenerator {
             if c[1] == 0 && n_new <= new_cap {
                 break;
             }
-            if attempt == 1 {
+            if attempt >= 1 && lat.cap >= LAT_CAP {
                 bail!("GPU generator: the drainage lattice table is too small ({} points for one batch)", n_new);
             }
         }
         lat.used += n_new;
+        if device::vram_on() {
+            eprintln!("vram: lattice {} cells, {} new points, {} used of {}", n_cells, n_new, lat.used, lat.cap);
+        }
         let prof = std::env::var_os("TERRAGEN_PROFILE").is_some();
         let t_enum = t_drain.elapsed().as_secs_f64();
         // ---- heights, targets, sources, the queries' pieces
@@ -1298,8 +1341,19 @@ impl GpuGenerator {
         let b_node_f = output(d, "node fields", (nt * NG * NG * NODE_F * 4) as u64);
         let b_node_ids = output(d, "node ids", (nt * NG * NG * NODE_IDS * 8) as u64);
         let b_node_pts = output(d, "node points", (nt * NG * NG * NODE_IDS * 32) as u64);
-        let b_pix = output(d, "pass a1", (nt * NA2 * NA2 * PIX_F * 4) as u64);
-        let b_terr = output(d, "pass a", (nt * NA2 * NA2 * std::mem::size_of::<GTerrain>()) as u64);
+        let (pix_bytes, terr_bytes) = ((NA2 * NA2 * PIX_F * 4) as u64, (NA2 * NA2 * std::mem::size_of::<GTerrain>()) as u64);
+        let (b_pix, b_terr) = match self.pa_bufs.lock().unwrap().take() {
+            Some((p, t)) if p.size() >= nt as u64 * pix_bytes => {
+                // (as new: zeros)
+                let mut enc = d.create_command_encoder(&Default::default());
+                enc.clear_buffer(&p, 0, None);
+                enc.clear_buffer(&t, 0, None);
+                self.gpu.queue.submit([enc.finish()]);
+                (p, t)
+            }
+            // (sized for a batch of 16 tiles at least, so smaller batches reuse them)
+            _ => (output(d, "pass a1", nt.max(16) as u64 * pix_bytes), output(d, "pass a", nt.max(16) as u64 * terr_bytes)),
+        };
         let b_bins = output(d, "bins", (nt * NBIN * NBIN * 16) as u64);
         let b_segs = &drain_out.segs;
         let b_sinks = storage(d, "sinks", &sinks);
@@ -1500,6 +1554,7 @@ impl GpuGenerator {
         run_passes(&g1, &g2, &passes, true);
         if !full {
             let all: Vec<GTerrain> = read_back(&self.gpu, &b_terr, nt * NA2 * NA2)?;
+            *self.pa_bufs.lock().unwrap() = Some((b_pix.clone(), b_terr.clone()));
             return Ok((all.chunks(NA2 * NA2).map(|c| c.to_vec()).collect(), vec![]));
         }
         let mut counters: Vec<u32> = read_back(&self.gpu, &b_counters, 8)?;
@@ -1651,6 +1706,7 @@ impl GpuGenerator {
         }
         stamp("pass b");
         *self.pb_work.lock().unwrap() = Some(b_pbw.clone());
+        *self.pa_bufs.lock().unwrap() = Some((b_pix.clone(), b_terr.clone()));
         let out: Vec<u32> = read_back(&self.gpu, &b_out, nt * N * N * OUT_U)?;
         let ranges: Vec<u32> = read_back(&self.gpu, &b_ranges, nt * 2)?;
         let tiles = ids
