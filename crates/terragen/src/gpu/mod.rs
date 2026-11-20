@@ -57,17 +57,27 @@ const PIX_F: usize = 42;
 const G: f64 = 16.0;
 const NG: usize = N / 16 + 5;
 
+/// Allocation log of the big GPU buffers (`TERRAGEN_VRAM=1`; measurement aid): after a buffer of
+/// 4 MiB or more is created, its size and the allocator's totals ([`device::vram_note`]).
+pub(crate) fn vram_log(d: &wgpu::Device, label: &str, bytes: u64) {
+    if bytes >= 4 << 20 && device::vram_on() {
+        device::vram_note(d, &format!("+{:.1} MiB {label}", bytes as f64 / 1048576.0));
+    }
+}
+
 /// A storage buffer holding `data`.
 pub(crate) fn storage<T: bytemuck::Pod>(d: &wgpu::Device, label: &str, data: &[T]) -> wgpu::Buffer {
     let bytes: &[u8] = bytemuck::cast_slice(data);
     if bytes.is_empty() {
         return d.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size: 256, usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false });
     }
-    d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let b = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(label),
         contents: bytes,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    })
+    });
+    vram_log(d, label, bytes.len() as u64);
+    b
 }
 
 /// The largest storage buffer binding of the device (bytes).
@@ -78,12 +88,14 @@ fn lim_storage(d: &wgpu::Device) -> u64 {
 
 /// An output storage buffer of `size` bytes (copyable to a read-back buffer).
 pub(crate) fn output(d: &wgpu::Device, label: &str, size: u64) -> wgpu::Buffer {
-    d.create_buffer(&wgpu::BufferDescriptor {
+    let b = d.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
         size: size.max(256),
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
-    })
+    });
+    vram_log(d, label, size);
+    b
 }
 
 /// Copy `buf` back to the host (waits for the GPU).
@@ -98,6 +110,7 @@ pub(crate) fn read_back<T: bytemuck::Pod>(g: &Gpu, buf: &wgpu::Buffer, n: usize)
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
+    vram_log(&g.device, "read-back", bytes);
     let mut enc = g.device.create_command_encoder(&Default::default());
     enc.copy_buffer_to_buffer(buf, 0, &rb, 0, bytes);
     g.queue.submit([enc.finish()]);
@@ -464,6 +477,7 @@ impl GpuGenerator {
     pub fn new(cfg: Config) -> Result<Self> {
         let gpu = shared()?;
         gpu.check_generator()?;
+        device::vram_note(&gpu.device, "generator: start");
         if cfg.hydro.levels.len() > 4 {
             bail!("the GPU generator supports up to 4 drainage levels (world.hydro.levels has {})", cfg.hydro.levels.len());
         }
@@ -607,6 +621,7 @@ impl GpuGenerator {
             write: dk(),
         };
         let secs = compile.finish();
+        device::vram_note(d, "generator: pipelines");
         if std::env::var_os("TERRAGEN_PROFILE").is_some() {
             eprintln!("GPU generator: pipelines ready in {secs:.1} s");
         }
@@ -1066,7 +1081,9 @@ impl GpuGenerator {
     /// Generate tiles (one batch on the GPU; its land-use site request buffers grow with the
     /// batch, and it is halved only when they would exceed the device's storage limit).
     pub fn tiles(&self, ids: &[TileId]) -> Result<Vec<TileData>> {
-        self.gpu.scoped(|| self.tiles_split(ids))
+        let r = self.gpu.scoped(|| self.tiles_split(ids));
+        crate::gpu::device::vram_note(&self.gpu.device, "tile batch done");
+        r
     }
 
     fn tiles_split(&self, ids: &[TileId]) -> Result<Vec<TileData>> {

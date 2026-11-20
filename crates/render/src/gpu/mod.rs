@@ -207,6 +207,7 @@ impl Ctx {
         let walls = walls_compiled(gpu.info.backend);
         let (gbuf_pipe, shade_pipe) = gpu.scoped(|| Ok(Self::pipelines(d, walls))).context("the renderer's shaders")?;
         drop(compiling);
+        terragen::gpu::device::vram_note(d, "renderer: pipelines");
         Ok(Ctx {
             gpu,
             meshes: HashMap::new(),
@@ -690,6 +691,7 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
         return Err(e.context("render.backend gpu"));
     }
     let t_gpu = t0.elapsed().as_secs_f64();
+    terragen::gpu::device::vram_note(d, "frame rendered");
     // ---------------- read back into a FrameOut
     let n = (ow * oh) as usize;
     let get = |k: usize| -> anyhow::Result<Vec<[f32; 4]>> {

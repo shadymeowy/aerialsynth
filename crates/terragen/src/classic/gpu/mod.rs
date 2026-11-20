@@ -55,21 +55,25 @@ pub(crate) fn storage<T: bytemuck::Pod>(d: &wgpu::Device, label: &str, data: &[T
     if bytes.is_empty() {
         return d.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size: 256, usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false });
     }
-    d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let b = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(label),
         contents: bytes,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    })
+    });
+    crate::gpu::vram_log(d, label, bytes.len() as u64);
+    b
 }
 
 /// An output storage buffer of `size` bytes (copyable to a read-back buffer).
 pub(crate) fn output(d: &wgpu::Device, label: &str, size: u64) -> wgpu::Buffer {
-    d.create_buffer(&wgpu::BufferDescriptor {
+    let b = d.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
         size: size.max(256),
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
-    })
+    });
+    crate::gpu::vram_log(d, label, size);
+    b
 }
 
 /// Copy `buf` back to the host (waits for the GPU).
@@ -84,6 +88,7 @@ pub(crate) fn read_back<T: bytemuck::Pod>(g: &Gpu, buf: &wgpu::Buffer, n: usize)
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
+    crate::gpu::vram_log(&g.device, "read-back", bytes);
     let mut enc = g.device.create_command_encoder(&Default::default());
     enc.copy_buffer_to_buffer(buf, 0, &rb, 0, bytes);
     g.queue.submit([enc.finish()]);
@@ -363,6 +368,7 @@ impl GpuGenerator {
             cap: LAT_CAP,
             used: 0,
         };
+        crate::gpu::device::vram_note(d, "generator ready");
         Ok(GpuGenerator { world, surface, gpu, k, globals, cache: Mutex::new(Cache::default()), lat: Mutex::new(lat) })
     }
 
@@ -720,7 +726,9 @@ impl GpuGenerator {
     /// Generate tiles (one batch on the GPU; halved while its land-use sites overflow the
     /// request buffers).
     pub fn tiles(&self, ids: &[TileId]) -> Result<Vec<TileData>> {
-        self.gpu.scoped(|| self.tiles_split(ids))
+        let r = self.gpu.scoped(|| self.tiles_split(ids));
+        crate::gpu::device::vram_note(&self.gpu.device, "tile batch done");
+        r
     }
 
     fn tiles_split(&self, ids: &[TileId]) -> Result<Vec<TileData>> {

@@ -350,7 +350,61 @@ impl Gpu {
     }
 }
 
+/// GPU memory accounting, a measurement aid (`TERRAGEN_VRAM=1`): the allocator's totals (live
+/// allocations; memory blocks reserved from the driver) where [`vram_note`] is called, and their
+/// peaks over those points.
+pub fn vram_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("TERRAGEN_VRAM").is_some_and(|v| !v.is_empty() && v != "0"))
+}
+
+static VRAM_PEAK: [std::sync::atomic::AtomicU64; 2] = [std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0)];
+
+/// With `TERRAGEN_VRAM=1`: print `what` with the allocator's live and reserved MiB on `d` (and
+/// their peaks so far).
+pub fn vram_note(d: &wgpu::Device, what: &str) {
+    if !vram_on() {
+        return;
+    }
+    let Some(r) = d.generate_allocator_report() else { return };
+    let (a, b) = (r.total_allocated_bytes, r.total_reserved_bytes);
+    // TERRAGEN_VRAM=peak: at each new peak of the reserved memory, the live allocations by label
+    if b > VRAM_PEAK[1].load(std::sync::atomic::Ordering::Relaxed) && std::env::var("TERRAGEN_VRAM").is_ok_and(|v| v == "peak") {
+        let mut by: std::collections::BTreeMap<&str, (u64, usize)> = Default::default();
+        for x in &r.allocations {
+            let e = by.entry(x.name.as_str()).or_default();
+            e.0 += x.size;
+            e.1 += 1;
+        }
+        let mut v: Vec<_> = by.into_iter().collect();
+        v.sort_by_key(|x| std::cmp::Reverse(x.1 .0));
+        let blocks: Vec<u64> = r.blocks.iter().map(|k| k.size >> 20).collect();
+        eprintln!("vram peak at {what}: blocks MiB {blocks:?}");
+        for (n, (sz, k)) in v.iter().take(30) {
+            eprintln!("    {:8.1} MiB {k:4}x {n}", *sz as f64 / 1048576.0);
+        }
+    }
+    let pa = VRAM_PEAK[0].fetch_max(a, std::sync::atomic::Ordering::Relaxed).max(a);
+    let pb = VRAM_PEAK[1].fetch_max(b, std::sync::atomic::Ordering::Relaxed).max(b);
+    let mb = |x: u64| x as f64 / 1048576.0;
+    // TERRAGEN_VRAM=smi: also the GPU's memory in use (nvidia-smi; the whole GPU)
+    let smi = if !what.starts_with('+') && std::env::var("TERRAGEN_VRAM").is_ok_and(|v| v == "smi") {
+        let o = std::process::Command::new("nvidia-smi").args(["--query-gpu=memory.used", "--format=csv,noheader,nounits"]).output();
+        o.map(|o| format!(" | smi {} MiB", String::from_utf8_lossy(&o.stdout).trim())).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    eprintln!("vram: {what:<30} live {:7.1} reserved {:7.1} MiB ({} blocks) | peak {:7.1} / {:7.1}{smi}", mb(a), mb(b), r.blocks.len(), mb(pa), mb(pb));
+}
+
 static SHARED: std::sync::OnceLock<Result<std::sync::Arc<Gpu>, String>> = std::sync::OnceLock::new();
+
+/// [`vram_note`] on the process-wide device, if it was made.
+pub fn vram_note_shared(what: &str) {
+    if let Some(Ok(g)) = SHARED.get().filter(|_| vram_on()) {
+        vram_note(&g.device, what);
+    }
+}
 
 /// `AERIALSYNTH_GPU_STRICT=1` (development, CI): a GPU failure is an error, never a silent
 /// switch to the (much slower) CPU.

@@ -301,8 +301,10 @@ pub fn run(a: RunArgs) -> Result<()> {
     } else {
         None
     };
+    terragen::gpu::device::vram_note_shared("tiles step done");
     if want(Step::Render) {
         do_render(&s)?;
+        terragen::gpu::device::vram_note_shared("render step done");
     }
     let has_events = s.cameras.iter().any(|c| c.events.is_some());
     if want(Step::Events) && (has_events || !all) {
