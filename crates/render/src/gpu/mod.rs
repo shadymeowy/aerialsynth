@@ -139,8 +139,11 @@ struct Targets {
     oh: u32,
     gbuf: wgpu::Texture,
     depth: wgpu::Texture,
-    out: [wgpu::Buffer; 4],
-    read: [wgpu::Buffer; 4],
+    /// radiance, geometry and (made when a frame splits the flicker) its cos and sin parts
+    out: Vec<wgpu::Buffer>,
+    read: Vec<wgpu::Buffer>,
+    /// bound for the flicker parts when they are not written
+    dummy: wgpu::Buffer,
 }
 
 struct Ctx {
@@ -270,11 +273,21 @@ impl Ctx {
         (gbuf_pipe, shade_pipe)
     }
 
-    fn ensure_targets(&mut self, w: u32, h: u32, ow: u32, oh: u32) {
-        if matches!(&self.targets, Some(t) if (t.w, t.h, t.ow, t.oh) == (w, h, ow, oh)) {
+    fn ensure_targets(&mut self, w: u32, h: u32, ow: u32, oh: u32, split: bool) {
+        let d = &self.gpu.device;
+        let size = (ow * oh * 16) as u64;
+        let buf = |label, usage| d.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false });
+        let su = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC;
+        let ru = wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST;
+        if let Some(t) = self.targets.as_mut().filter(|t| (t.w, t.h, t.ow, t.oh) == (w, h, ow, oh)) {
+            if split && t.out.len() < 4 {
+                t.out.extend([buf("fc", su), buf("fs", su)]);
+                t.read.extend([buf("fc r", ru), buf("fs r", ru)]);
+            }
             return;
         }
-        let d = &self.gpu.device;
+        // (the old targets go first)
+        self.targets = None;
         let tex = |label, format, usage| {
             d.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
@@ -289,20 +302,14 @@ impl Ctx {
         };
         let gbuf = tex("gbuf", wgpu::TextureFormat::Rgba32Float, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
         let depth = tex("depth", wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::RENDER_ATTACHMENT);
-        let size = (ow * oh * 16) as u64;
-        let buf = |label, usage| d.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false });
-        let su = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC;
-        let ru = wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST;
-        self.targets = Some(Targets {
-            w,
-            h,
-            ow,
-            oh,
-            gbuf,
-            depth,
-            out: [buf("rad", su), buf("geo", su), buf("fc", su), buf("fs", su)],
-            read: [buf("rad r", ru), buf("geo r", ru), buf("fc r", ru), buf("fs r", ru)],
-        });
+        let mut out = vec![buf("rad", su), buf("geo", su)];
+        let mut read = vec![buf("rad r", ru), buf("geo r", ru)];
+        if split {
+            out.extend([buf("fc", su), buf("fs", su)]);
+            read.extend([buf("fc r", ru), buf("fs r", ru)]);
+        }
+        let dummy = d.create_buffer(&wgpu::BufferDescriptor { label: Some("-"), size: 16, usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false });
+        self.targets = Some(Targets { w, h, ow, oh, gbuf, depth, out, read, dummy });
     }
 }
 
@@ -393,7 +400,7 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
     c.gpu.check()?;
     c.frame += 1;
     let frame = c.frame;
-    c.ensure_targets(w, h, ow, oh);
+    c.ensure_targets(w, h, ow, oh, r.split_flicker && !r.geometry_only && sun_state.lights > 1e-3 && sun_state.flicker.enabled);
     // ---------------- meshes: build (CPU, parallel) and upload the ones not cached on the GPU
     let missing: Vec<&(usize, MeshKey, f64)> = items.iter().filter(|(_, k, _)| !c.meshes.contains_key(k)).collect();
     let built: Vec<(MeshKey, Vec<Vertex>, DVec3, usize, usize)> = missing
@@ -666,8 +673,8 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
                 wgpu::BindGroupEntry { binding: 10, resource: tvr(&vb) },
                 wgpu::BindGroupEntry { binding: 11, resource: tg.out[0].as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 12, resource: tg.out[1].as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 13, resource: tg.out[2].as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 14, resource: tg.out[3].as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 13, resource: tg.out.get(2).unwrap_or(&tg.dummy).as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 14, resource: tg.out.get(3).unwrap_or(&tg.dummy).as_entire_binding() },
             ],
         });
         let mut cp = enc.begin_compute_pass(&Default::default());
