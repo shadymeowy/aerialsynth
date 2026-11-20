@@ -397,12 +397,44 @@ pub fn vram_note(d: &wgpu::Device, what: &str) {
     eprintln!("vram: {what:<30} live {:7.1} reserved {:7.1} MiB ({} blocks) | peak {:7.1} / {:7.1}{smi}", mb(a), mb(b), r.blocks.len(), mb(pa), mb(pb));
 }
 
-static SHARED: std::sync::OnceLock<Result<std::sync::Arc<Gpu>, String>> = std::sync::OnceLock::new();
+/// The process-wide device (made on first use; [`release_shared`] drops it).
+static SHARED: std::sync::Mutex<Option<Result<std::sync::Arc<Gpu>, String>>> = std::sync::Mutex::new(None);
+
+fn shared_slot() -> std::sync::MutexGuard<'static, Option<Result<std::sync::Arc<Gpu>, String>>> {
+    SHARED.lock().unwrap_or_else(|p| p.into_inner())
+}
 
 /// [`vram_note`] on the process-wide device, if it was made.
 pub fn vram_note_shared(what: &str) {
-    if let Some(Ok(g)) = SHARED.get().filter(|_| vram_on()) {
+    if !vram_on() {
+        return;
+    }
+    let g = shared_slot().clone();
+    if let Some(Ok(g)) = g {
         vram_note(&g.device, what);
+    }
+}
+
+/// Drop the process-wide device if nothing else holds it (no generator, renderer or event
+/// sensor made on it is alive), so that the next [`shared`] makes a new one; returns whether it
+/// did. The driver keeps memory for a device's compute pipelines until the device is gone (for
+/// the next generator's ~1 GB on an RTX 2080 Ti, also after the generator is dropped), so a
+/// process that renders after generating tiles frees it this way first.
+pub fn release_shared() -> bool {
+    let g = {
+        let mut slot = shared_slot();
+        match slot.as_ref() {
+            Some(Ok(g)) if std::sync::Arc::strong_count(g) == 1 => slot.take(),
+            _ => None,
+        }
+    };
+    match g {
+        Some(Ok(g)) => {
+            let _ = g.wait_idle();
+            drop(g);
+            true
+        }
+        _ => false,
     }
 }
 
@@ -414,19 +446,19 @@ pub fn strict() -> bool {
 
 /// The process-wide device (generator, renderer and event sensor share it).
 pub fn shared() -> Result<std::sync::Arc<Gpu>> {
-    SHARED
-        .get_or_init(|| {
-            let r = Gpu::new().map(std::sync::Arc::new).map_err(|e| e.to_string());
-            if let Err(e) = &r {
-                let strict = strict();
-                if let Some(w) = no_gpu_warning(std::env::var(GPU_ENV).ok().as_deref(), strict, e) {
-                    eprintln!("{w}");
-                }
+    let mut slot = shared_slot();
+    slot.get_or_insert_with(|| {
+        let r = Gpu::new().map(std::sync::Arc::new).map_err(|e| e.to_string());
+        if let Err(e) = &r {
+            let strict = strict();
+            if let Some(w) = no_gpu_warning(std::env::var(GPU_ENV).ok().as_deref(), strict, e) {
+                eprintln!("{w}");
             }
-            r
-        })
-        .clone()
-        .map_err(|e| anyhow!("{e}"))
+        }
+        r
+    })
+    .clone()
+    .map_err(|e| anyhow!("{e}"))
 }
 
 /// The warning when the device cannot be made although a GPU was asked for (`AERIALSYNTH_GPU`

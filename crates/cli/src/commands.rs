@@ -303,6 +303,9 @@ pub fn run(a: RunArgs) -> Result<()> {
     };
     terragen::gpu::device::vram_note_shared("tiles step done");
     if want(Step::Render) {
+        // (the generator's pipelines hold driver memory until their device is gone: the renderer
+        // starts on a new one)
+        terragen::gpu::device::release_shared();
         do_render(&s)?;
         terragen::gpu::device::vram_note_shared("render step done");
     }
