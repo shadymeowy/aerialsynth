@@ -49,6 +49,7 @@ default; `stderr_observer()` gives the CLI's messages).
 | `AERIALSYNTH_GPU_STRICT=1` | a failed GPU tile batch, or a GPU generator that fails to set up (device, pipeline compile), is an error instead of a switch to the CPU (development, CI) |
 | `AERIALSYNTH_GPU_STALL_S` | seconds without a completed read-back before the GPU counts as stalled (default 120) |
 | `TERRAGEN_PROFILE=1` | prints each pipeline's compile time and each generated batch's time |
+| `TERRAGEN_VRAM=1` | prints the GPU memory the generators and the renderer allocate ([below](#gpu-memory)); `=smi` adds the GPU's memory in use (`nvidia-smi`) at each step, `=peak` the live allocations by label at each new peak |
 
 - **No suitable GPU:** many integrated GPUs, software Vulkan and Metal lack the 64-bit shaders:
   tiles are generated on the CPU while frames may still render on the GPU.
@@ -69,6 +70,41 @@ default; `stderr_observer()` gives the CLI's messages).
   display), some NVIDIA Vulkan drivers block while creating the device. Run headless work with
   `env -u DISPLAY terrain …` (the same for Python and C programs).
 
+## GPU memory
+
+A typical `terrain run` (generation and rendering in one process) fits a 4 GB GPU. Peak GPU
+memory in use (`nvidia-smi`, the desktop's 97 MiB included) on an RTX 2080 Ti, for a
+1280 × 720 frame at supersample 2 over a mountain valley from 800 m (944 + 27 tiles, z0–17):
+
+| | 0.3.2 | now |
+|---|---|---|
+| next, `terrain run` (all steps) | 4011 MiB | 2640 MiB |
+| next, `--step tiles` / `--step render` | 3305 / 2992 MiB | 2640 / 1710–1770 MiB |
+| classic, `terrain run` | 3063 MiB | 1780–1840 MiB |
+| classic, `--step tiles` / `--step render` | 1910 / 2992 MiB | 1626 / 1780 MiB |
+
+Where it goes:
+
+- **The generators' kernels:** the driver reserves local memory for every thread the GPU can
+  run at once, sized by the kernel that needs the most: next's take ~16 KiB per thread, i.e.
+  ~1 GB on an RTX 2080 Ti (68 SMs × 1024 threads), 640 MiB on a Tesla P4, ~250 MiB on a
+  GTX 1650 Ti (16 SMs); classic's ~90 MiB. The driver keeps it until the device is gone,
+  so `terrain run` renders on a new device after generating
+  (`terragen::gpu::device::release_shared`).
+- **Generation:** the drainage lattice (above), pass B's work buffer (172 MiB), pass A's
+  buffers (388 MiB per batch of 16 tiles) and per batch the drainage pieces of its queries (up
+  to ~0.2 GB each), site requests and the tiles' output. Device memory comes in blocks of
+  64 MiB, larger buffers get their own.
+- **Rendering:** the tile pool holds the frame's tiles plus a quarter (made again larger when a
+  frame needs more, or when a frame evicts tiles the frame before used: up to twice the most
+  tiles a frame needed, at most 2048 slots ≈ 2.2 GB); the scene above uses 814 tiles, a pool
+  of 1024 slots (1.1 GB). Then the cached meshes (121 MB here, at most 512 MiB), the
+  supersampled G-buffer and depth (20 B per sample: 70 MiB at 2560 × 1440) and the unit rays
+  (16 B per sample).
+
+`TERRAGEN_VRAM=1` prints the allocator's live and reserved memory after each large buffer and at
+each step.
+
 ## Rendering
 
 | stage | where |
@@ -81,9 +117,9 @@ default; `stderr_observer()` gives the CLI's messages).
 | read-back, 3D points from depth and rays | CPU |
 
 The vertex shader uses the CPU mesh builder's validity rules and interpolates u, v and range
-perspective-correctly like the CPU rasterizer. Tiles live in a fixed pool of texture-array
-slots (`POOL_SLOTS`: 2048 ≈ 2.2 GB, or the adapter's limit), each uploaded once and evicted
-least-recently-used; meshes likewise (`MESH_BUDGET`). Positions on the pyramid are kept as
+perspective-correctly like the CPU rasterizer. Tiles live in a pool of texture-array
+slots (~1.1 MB each) sized to the frames' need ([GPU memory](#gpu-memory)), each uploaded once
+and evicted least-recently-used; meshes likewise, up to 512 MiB (`MESH_BUDGET`). Positions on the pyramid are kept as
 (zoom, integer global pixel, fraction) per axis, since global pixels reach 2^27 at zoom 19;
 shading runs in f32, geometry in f64 on the CPU.
 
@@ -117,8 +153,9 @@ hashes (u64 in the shader), the CPU's octave frames and gradient tables, and f64
 coordinates. Tiles agree with the CPU's to f32 precision (at most 0.1 % of the pixels differ by
 more than 2 DN or 5 cm; `cargo test -p terragen gpu::tests`), so both backends write the same
 generator version and can share a store. Everything per pixel and per point runs on the GPU,
-in batches of 16 tiles (~25 MB of GPU memory each); the drainage network's lattice points live
-in a GPU hash table (~0.5 GB) kept across batches; only the site lists (lake levels, land-use
+in batches of 16 tiles (next: ~1.1 GB of GPU memory at their peak besides the lattice); the
+drainage network's lattice points live in a GPU hash table kept across batches (classic:
+576 MiB; next: 144 MiB, made larger when a batch needs it); only the site lists (lake levels, land-use
 regions, towns) are made on the host from batched GPU point evaluations. The classic generator's
 GPU code is v0.2.0's, unchanged: its tiles are bit-identical to v0.2.0's on the same GPU. (The
 experimental next generator has its own: [`next/`](next/README.md#how-it-works).)

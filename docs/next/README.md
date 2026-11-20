@@ -182,8 +182,9 @@ river network, lakes filled to their spill level, tree crowns, towns, night ligh
 to WGSL, agreeing with it to f32 precision (parity tests: < 0.1 % of pixels off by more than
 2 DN or 5 cm). Per-site decisions (ecoregions, regions, towns, the kits' features) are made by
 shared host Rust for both backends, so both build the same world. The drainage lattice lives
-in a GPU hash table (~0.5 GB); pass B runs the stack in three pipelines whose state sits in a
-~170 MB work buffer; batches are 16 tiles (~26 MB each). `TERRAGEN_PROFILE=1` prints pipeline
+in a GPU hash table (144 MiB, made larger when a batch needs it; [GPU memory](../gpu.md#gpu-memory));
+pass B runs the stack in three pipelines whose state sits in a ~170 MB work buffer; batches are
+16 tiles (~1.1 GB of GPU memory at their peak). `TERRAGEN_PROFILE=1` prints pipeline
 compile times, `=passes` times each kernel.
 
 ### Kits
