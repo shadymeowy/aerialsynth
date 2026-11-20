@@ -29,12 +29,19 @@ use tiles::TilePool;
 use tilestore::TileData;
 use wgpu::util::DeviceExt;
 
-/// Tile slots of the GPU pool (≈1.1 MB of VRAM each): as many as a texture array can hold, at
-/// most 2048 (≈2.2 GB). A frame never needs more than a few hundred to ~1500 tiles.
+/// Tile slots of the GPU pool at most (≈1.1 MB of VRAM each): as many as a texture array can
+/// hold, at most 2048 (≈2.2 GB). A frame never needs more than a few hundred to ~1500 tiles. The
+/// pool is sized to the frames' need ([`pool_slots`]), not to this.
 pub const POOL_SLOTS: u32 = 2048;
 
-/// Budget of GPU memory for cached meshes (bytes).
-pub const MESH_BUDGET: u64 = 1536 << 20;
+/// Budget of GPU memory for cached meshes (bytes; a frame's own meshes are always kept).
+pub const MESH_BUDGET: u64 = 512 << 20;
+
+/// The slots of a tile pool for frames of `need` tiles: a quarter more (the next frames'
+/// new tiles), in steps of 64, at least 64 and at most `max`.
+pub fn pool_slots(need: usize, max: u32) -> u32 {
+    ((need + need / 4).div_ceil(64) * 64).clamp(64, max as usize) as u32
+}
 
 /// Can the GPU backend render `model` at supersample `ss`: a GPU, the projection within the
 /// shader's parameter block, the supersampled G-buffer within the texture size limit and the ray
@@ -455,9 +462,27 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
     let t_cpu = t0.elapsed().as_secs_f64();
     // ---------------- tiles: resident slots and the frame's lookup table
     let shading = r.settings.shading;
-    if !c.pools.contains_key(&shading) {
-        let slots = POOL_SLOTS.min(c.gpu.device.limits().max_texture_array_layers);
-        let p = TilePool::new(&c.gpu.device, slots, shading);
+    let max_slots = POOL_SLOTS.min(c.gpu.device.limits().max_texture_array_layers);
+    // the pool holds this frame's tiles (at most `max_slots`); it is made, or made again larger
+    // (the old one goes first, and the frame's tiles are uploaded again), when it does not, or
+    // when the last frame evicted tiles the frame before it used (more slots save uploads: up to
+    // twice the most tiles a frame needed)
+    let grow = match c.pools.get_mut(&shading) {
+        None => Some(pool_slots(tiles.len(), max_slots)),
+        Some(p) => {
+            p.peak_need = p.peak_need.max(tiles.len());
+            let mut want = if (p.slots as usize) < tiles.len() { pool_slots(tiles.len(), max_slots) } else { p.slots };
+            if std::mem::take(&mut p.thrashed) {
+                want = want.max(((p.slots as usize * 3 / 2).min(2 * p.peak_need).div_ceil(64) * 64).min(max_slots as usize) as u32);
+            }
+            (want > p.slots).then_some(want)
+        }
+    };
+    if let Some(slots) = grow {
+        let peak = c.pools.remove(&shading).map_or(0, |p| p.peak_need).max(tiles.len());
+        let mut p = TilePool::new(&c.gpu.device, slots, shading);
+        p.peak_need = peak;
+        terragen::gpu::device::vram_note(&c.gpu.device, &format!("renderer: tile pool of {slots}"));
         c.pools.insert(shading, p);
     }
     let pool = c.pools.get_mut(&shading).unwrap();
