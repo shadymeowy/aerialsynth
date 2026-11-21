@@ -248,8 +248,10 @@ fn tex_array(device: &wgpu::Device, label: &str, layers: u32, format: wgpu::Text
     })
 }
 
-/// Tile slots the texture arrays start with (1 MiB each); they grow when a frame draws more
-/// tiles than fit next to the frame before's (`Globe::grow`), up to `--gpu-tiles`.
+/// Tile slots the texture arrays are made with by the first frame (1 MiB each); they grow when a
+/// frame draws more tiles than fit next to the frame before's (`Globe::grow`), up to
+/// `--gpu-tiles`. Before it, and while the map is hidden (`Globe::release`), they have no tile
+/// slot (one layer: the camera view needs the GPU memory).
 const START_CAPACITY: u32 = 1024;
 
 fn array_view(t: &wgpu::Texture) -> wgpu::TextureView {
@@ -259,11 +261,12 @@ fn array_view(t: &wgpu::Texture) -> wgpu::TextureView {
 impl Globe {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, ell: Ellipsoid, want_capacity: u32) -> Globe {
         let max_capacity = want_capacity.min(device.limits().max_texture_array_layers).max(64);
-        let capacity = max_capacity.min(START_CAPACITY);
-        let color = tex_array(device, "tile color", capacity, wgpu::TextureFormat::Rgba8UnormSrgb);
-        let elev = tex_array(device, "tile elevation", capacity, wgpu::TextureFormat::R32Float);
-        let grad = tex_array(device, "tile slope", capacity, wgpu::TextureFormat::Rg16Float);
-        let extra = tex_array(device, "tile optional layers", capacity, wgpu::TextureFormat::Rgba8Unorm);
+        // (no tile slots until the first frame: `Globe::render`)
+        let capacity = 0;
+        let color = tex_array(device, "tile color", 1, wgpu::TextureFormat::Rgba8UnormSrgb);
+        let elev = tex_array(device, "tile elevation", 1, wgpu::TextureFormat::R32Float);
+        let grad = tex_array(device, "tile slope", 1, wgpu::TextureFormat::Rg16Float);
+        let extra = tex_array(device, "tile optional layers", 1, wgpu::TextureFormat::Rgba8Unorm);
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals"),
             size: std::mem::size_of::<Globals>() as u64,
@@ -447,7 +450,7 @@ impl Globe {
             target: None,
             texture_id: None,
             resident: HashMap::new(),
-            free: (0..capacity).rev().collect(),
+            free: Vec::new(),
             meshes: HashMap::new(),
             geo: HashMap::new(),
             requested: HashMap::new(),
@@ -584,20 +587,29 @@ impl Globe {
     /// Half as many tile slots again (at most `max_capacity`): new arrays, the tiles copied over.
     fn grow(&mut self) {
         let cap = (self.capacity * 3 / 2).div_ceil(64) * 64;
-        let cap = cap.min(self.max_capacity);
+        self.resize(cap.min(self.max_capacity));
+    }
+
+    /// Tile arrays of `cap` slots (at least one layer), the resident tiles copied over (`cap`
+    /// is at least `capacity`, or 0 with no tile resident).
+    fn resize(&mut self, cap: u32) {
         let d = &self.device;
+        let layers = cap.max(1);
         let new = [
-            tex_array(d, "tile color", cap, wgpu::TextureFormat::Rgba8UnormSrgb),
-            tex_array(d, "tile elevation", cap, wgpu::TextureFormat::R32Float),
-            tex_array(d, "tile slope", cap, wgpu::TextureFormat::Rg16Float),
-            tex_array(d, "tile optional layers", cap, wgpu::TextureFormat::Rgba8Unorm),
+            tex_array(d, "tile color", layers, wgpu::TextureFormat::Rgba8UnormSrgb),
+            tex_array(d, "tile elevation", layers, wgpu::TextureFormat::R32Float),
+            tex_array(d, "tile slope", layers, wgpu::TextureFormat::Rg16Float),
+            tex_array(d, "tile optional layers", layers, wgpu::TextureFormat::Rgba8Unorm),
         ];
-        let mut enc = d.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("globe grow") });
-        let size = wgpu::Extent3d { width: N as u32, height: N as u32, depth_or_array_layers: self.capacity };
-        for (old, new) in [&self.color, &self.elev, &self.grad, &self.extra].into_iter().zip(&new) {
-            enc.copy_texture_to_texture(old.as_image_copy(), new.as_image_copy(), size);
+        let keep = self.capacity.min(cap);
+        if keep > 0 {
+            let mut enc = d.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("globe grow") });
+            let size = wgpu::Extent3d { width: N as u32, height: N as u32, depth_or_array_layers: keep };
+            for (old, new) in [&self.color, &self.elev, &self.grad, &self.extra].into_iter().zip(&new) {
+                enc.copy_texture_to_texture(old.as_image_copy(), new.as_image_copy(), size);
+            }
+            self.queue.submit([enc.finish()]);
         }
-        self.queue.submit([enc.finish()]);
         let [color, elev, grad, extra] = new;
         let (cv, ev, gv, xv) = (array_view(&color), array_view(&elev), array_view(&grad), array_view(&extra));
         self.bg0 = d.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -615,6 +627,21 @@ impl Globe {
         (self.color, self.elev, self.grad, self.extra) = (color, elev, grad, extra);
         self.free.extend((self.capacity..cap).rev());
         self.capacity = cap;
+    }
+
+    /// Free the map's GPU memory while it is hidden (the camera view's renderer and the generator
+    /// need it): the tile arrays, meshes and image. The next frame makes them again and loads
+    /// its tiles from the store.
+    pub fn release(&mut self, renderer: &mut egui_wgpu::Renderer) {
+        if let Some(id) = self.texture_id.take() {
+            renderer.free_texture(&id);
+        }
+        self.target = None;
+        if self.capacity > 0 {
+            (self.resident, self.meshes, self.requested) = (HashMap::new(), HashMap::new(), HashMap::new());
+            (self.free, self.pending) = (Vec::new(), Vec::new());
+            self.resize(0);
+        }
     }
 
     fn write_layer(&self, layer: u32, p: &Payload) {
@@ -678,6 +705,10 @@ impl Globe {
         self.stats.uploads = 0;
         let (w, h) = (w.max(16), h.max(16));
         self.ensure_target(w, h, renderer);
+        let start = START_CAPACITY.min(self.max_capacity);
+        if self.capacity < start {
+            self.resize(start);
+        }
 
         // ---- uploads: what was asked for recently (or the coarsest levels), a budget per frame
         let frame = self.frame;

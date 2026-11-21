@@ -250,6 +250,8 @@ struct App {
     spawn_agl: Option<f64>,
     orbit: Camera,
     globe: Globe,
+    /// eframe's GPU device and egui's renderer (the map draws into an egui texture)
+    render_state: egui_wgpu::RenderState,
     s: Settings,
     svc: Arc<Service>,
     /// started on first use
@@ -330,6 +332,7 @@ impl App {
                 target_h: 0.0,
             },
             globe: Globe::new(&rs.device, &rs.queue, ell, opts.gpu_tiles),
+            render_state: rs.clone(),
             s: map_settings(&opts),
             svc,
             camview: None,
@@ -412,10 +415,14 @@ impl App {
         if tab == Tab::Camera && self.nav == Nav::Orbit {
             self.set_nav(Nav::Free);
         }
-        if tab == Tab::Map {
-            if let Some(c) = &self.camview {
-                c.pause();
+        // (the hidden view's GPU memory goes: the camera view's renderer trims when paused)
+        match tab {
+            Tab::Map => {
+                if let Some(c) = &self.camview {
+                    c.pause();
+                }
             }
+            Tab::Camera => self.globe.release(&mut self.render_state.renderer.write()),
         }
         self.tab = tab;
     }
@@ -656,7 +663,7 @@ impl App {
         }
     }
 
-    fn map_view(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame, rect: egui::Rect, resp: &egui::Response, dt: f64, typing: bool) {
+    fn map_view(&mut self, ui: &mut egui::Ui, rect: egui::Rect, resp: &egui::Response, dt: f64, typing: bool) {
         let ppp = ui.ctx().pixels_per_point();
         let (w, h) = ((rect.width() * ppp).round() as u32, (rect.height() * ppp).round() as u32);
         let ell = self.ell();
@@ -693,11 +700,7 @@ impl App {
             self.fly_step(&inp, dt, ground);
             self.fly.as_ref().unwrap().frame(&ell, aspect, ground)
         };
-        let rs = frame.wgpu_render_state().expect("wgpu").clone();
-        {
-            let mut r = rs.renderer.write();
-            self.globe.render(&cf, &self.s, &self.svc, w, h, Some(&mut r));
-        }
+        self.globe.render(&cf, &self.s, &self.svc, w, h, Some(&mut self.render_state.renderer.write()));
         self.eye_alt = geodesy::ecef2geodetic(cf.eye, &ell).h;
         if let Some(id) = self.globe.texture_id {
             ui.painter().image(id, rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
@@ -743,7 +746,7 @@ fn fmt_dist(m: f64) -> String {
 }
 
 impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f64();
         self.frame_ms = if self.frame_ms == 0.0 { dt * 1000.0 } else { 0.9 * self.frame_ms + 100.0 * dt };
@@ -769,7 +772,7 @@ impl eframe::App for App {
             let rect = ui.available_rect_before_wrap();
             let resp = ui.allocate_rect(rect, egui::Sense::click_and_drag());
             match self.tab {
-                Tab::Map => self.map_view(ui, frame, rect, &resp, dt, typing),
+                Tab::Map => self.map_view(ui, rect, &resp, dt, typing),
                 Tab::Camera => self.camera_view(ui, rect, &resp, dt, typing),
             }
             self.hud(ui, rect);
