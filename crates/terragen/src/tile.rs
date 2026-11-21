@@ -278,6 +278,15 @@ impl NextGenerator {
         }
     }
 
+    /// Free the GPU generator's memory kept between batches, if it is set up
+    /// ([`crate::gpu::GpuGenerator::trim`]).
+    pub fn trim_gpu(&self) {
+        #[cfg(feature = "gpu")]
+        if let Some(Ok(g)) = self.gpu.get() {
+            g.trim();
+        }
+    }
+
     /// `"GPU (<adapter>)"` or `"CPU"`: where tiles are generated.
     pub fn backend_name(&self) -> String {
         #[cfg(feature = "gpu")]

@@ -115,6 +115,12 @@ impl Generator {
         each!(self, g => g.backend_name())
     }
 
+    /// Free the GPU memory the GPU generator keeps between batches (the next batch makes it
+    /// again): after a burst of tiles generated next to other GPU work.
+    pub fn trim_gpu(&self) {
+        each!(self, g => g.trim_gpu())
+    }
+
     /// Generate tiles: on the GPU in batches, or on the CPU in parallel. With `Backend::Auto`,
     /// a failed GPU batch is generated on the CPU (and so is everything after it).
     pub fn tiles(&self, ids: &[TileId]) -> anyhow::Result<Vec<TileData>> {

@@ -186,6 +186,25 @@ struct Lattice {
     used: usize,
 }
 
+impl Lattice {
+    /// An empty table of `cap` slots.
+    fn new(d: &wgpu::Device, cap: usize) -> Lattice {
+        Lattice {
+            keys: output(d, "lattice keys", (cap * 8) as u64),
+            keys_ro: output(d, "lattice keys (copy)", (cap * 8) as u64),
+            s: output(d, "lattice points", (cap * 32) as u64),
+            h: output(d, "lattice heights", (cap * 4) as u64),
+            flags: output(d, "lattice flags", (cap * 4) as u64),
+            tgt: output(d, "lattice targets", (cap * 4) as u64),
+            mark: output(d, "lattice marks", (cap * 4) as u64),
+            work_t: output(d, "target work", (cap * 4) as u64),
+            work_s: output(d, "source work", (cap * 4) as u64),
+            cap,
+            used: 0,
+        }
+    }
+}
+
 /// Lattice table slots (~50 bytes each).
 const LAT_CAP: usize = 1 << 23;
 /// Lattice cells per enumeration / gather chunk.
@@ -355,19 +374,7 @@ impl GpuGenerator {
             l_lat,
             dk,
         };
-        let lat = Lattice {
-            keys: output(d, "lattice keys", (LAT_CAP * 8) as u64),
-            keys_ro: output(d, "lattice keys (copy)", (LAT_CAP * 8) as u64),
-            s: output(d, "lattice points", (LAT_CAP * 32) as u64),
-            h: output(d, "lattice heights", (LAT_CAP * 4) as u64),
-            flags: output(d, "lattice flags", (LAT_CAP * 4) as u64),
-            tgt: output(d, "lattice targets", (LAT_CAP * 4) as u64),
-            mark: output(d, "lattice marks", (LAT_CAP * 4) as u64),
-            work_t: output(d, "target work", (LAT_CAP * 4) as u64),
-            work_s: output(d, "source work", (LAT_CAP * 4) as u64),
-            cap: LAT_CAP,
-            used: 0,
-        };
+        let lat = Lattice::new(d, LAT_CAP);
         crate::gpu::device::vram_note(d, "generator ready");
         Ok(GpuGenerator { world, surface, gpu, k, globals, cache: Mutex::new(Cache::default()), lat: Mutex::new(lat) })
     }
@@ -503,6 +510,10 @@ impl GpuGenerator {
         let chunks_g = chunks(&mut boxes_g);
         let t_drain = std::time::Instant::now();
         let mut lat = self.lat.lock().unwrap();
+        if lat.cap < LAT_CAP {
+            // (after `trim`: an empty table, as a cleared one)
+            *lat = Lattice::new(d, LAT_CAP);
+        }
         let mut seg_cap = (1usize << 18).max(queries.len() * 64);
         let mut sink_cap = 1usize << 16;
         let b_boxes_e = storage(d, "boxes", &boxes_e);
@@ -666,6 +677,14 @@ impl GpuGenerator {
     }
 
     /// The GPU's name.
+    /// Free the drainage lattice (576 MiB) until the next batch makes it again, empty. For
+    /// callers that generate in bursts next to other GPU work (lazy generation while rendering).
+    pub fn trim(&self) {
+        let mut lat = self.lat.lock().unwrap();
+        *lat = Lattice::new(&self.gpu.device, 1);
+        crate::gpu::device::vram_note(&self.gpu.device, "generator trimmed");
+    }
+
     pub fn adapter(&self) -> &str {
         &self.gpu.info.name
     }

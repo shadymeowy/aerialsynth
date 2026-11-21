@@ -852,6 +852,10 @@ impl GpuGenerator {
         let chunks_g = chunks(&mut boxes_g);
         let t_drain = std::time::Instant::now();
         let mut lat = self.lat.lock().unwrap();
+        if lat.cap < LAT_START {
+            // (after `trim`)
+            lat.remake(d, LAT_START);
+        }
         let mut seg_cap = (1usize << 18).max(queries.len() * 64);
         let mut sink_cap = 1usize << 16;
         let b_boxes_e = storage(d, "boxes", &boxes_e);
@@ -1084,6 +1088,16 @@ impl GpuGenerator {
     }
 
     /// The GPU's name.
+    /// Free the GPU memory kept between batches (pass A's and B's buffers, the drainage
+    /// lattice; ~0.7 GB): the next batch makes them again (the lattice empty). For callers that
+    /// generate in bursts next to other GPU work (lazy generation while rendering).
+    pub fn trim(&self) {
+        *self.pb_work.lock().unwrap() = None;
+        *self.pa_bufs.lock().unwrap() = None;
+        self.lat.lock().unwrap().remake(&self.gpu.device, 1);
+        device::vram_note(&self.gpu.device, "generator trimmed");
+    }
+
     pub fn adapter(&self) -> &str {
         &self.gpu.info.name
     }

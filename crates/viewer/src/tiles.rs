@@ -173,6 +173,8 @@ fn loader(sh: Arc<Shared>, store: Arc<TileStore>) {
 }
 
 fn generator(sh: Arc<Shared>, store: Arc<TileStore>, gen: Arc<Generator>, batch: usize) {
+    // generated since the GPU generator's batch memory was last freed
+    let mut busy = false;
     loop {
         let (ids, n_base) = {
             let mut s = sh.state.lock();
@@ -204,11 +206,18 @@ fn generator(sh: Arc<Shared>, store: Arc<TileStore>, gen: Arc<Generator>, batch:
                     }
                     break (ids, n_base);
                 }
+                if std::mem::take(&mut busy) {
+                    // nothing to generate: the GPU generator's batch memory goes until the next
+                    // tiles (the view and the renderer share the GPU)
+                    parking_lot::MutexGuard::unlocked(&mut s, || gen.trim_gpu());
+                    continue;
+                }
                 sh.cv.wait(&mut s);
             }
         };
         sh.stats.gen_busy.store(ids.len(), Ordering::Relaxed);
         let t0 = std::time::Instant::now();
+        busy = true;
         let tiles: Vec<TileData> = match gen.tiles(&ids) {
             Ok(t) => t,
             Err(e) => {
