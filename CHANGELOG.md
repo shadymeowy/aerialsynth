@@ -19,6 +19,12 @@ A typical `terrain run` fits a 4 GB GPU again; tiles and frames are bit-identica
   batch needs it; pass A's buffers are kept across batches instead of reallocated.
 - GPU memory comes in blocks of 64 MiB (larger buffers on their own) instead of up to
   256 MiB, which left ~0.5 GB unused at the generator's peak.
+- Generating while rendering (`tiles.lazy`, `terrain view`): the GPU generators free their
+  batch memory after each burst of tiles, `terrain run --lazy` frees the renderer's tiles
+  before generating their neighbourhood (next 5547 → 3124 MiB, classic 4214 → 2118 MiB); the
+  viewer's map tile arrays start at 1024 slots and grow up to `--gpu-tiles` (1536) when the view
+  needs them. With next on an RTX 2080 Ti these still take 3–4 GB: the driver's local memory
+  for next's kernels (~16 KiB per GPU thread) sits next to the renderer.
 - `TERRAGEN_VRAM=1` prints the GPU memory the generators and the renderer allocate.
 
 ## 0.3.2 — 2026-11-01

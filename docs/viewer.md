@@ -69,7 +69,7 @@ over SSH X forwarding it runs, but slowly.
 | `--scale F` | ≤ 960 px wide | camera resolution factor (pinhole-type models) |
 | `--supersample N` | 1 | camera supersampling |
 | `--exag`, `--mode` | 1, surface | map relief exaggeration and shading |
-| `--gpu-tiles` | 1536 | map tiles on the GPU (1 MB each) |
+| `--gpu-tiles` | 1536 | map tiles on the GPU at most (1 MB each; 1024 at first, more when the view needs them) |
 | `--snapshot PNG --view … --wait S --size WxH` | `--view 20,10,16000,0,0`, `--wait 600`, `--size 1280x800` | a headless map view into a PNG (below) |
 | `--record DIR --path FILE --fps N --until S` | 25 fps | a headless keyframed map flight into PNG frames (below) |
 

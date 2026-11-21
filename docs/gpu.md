@@ -82,13 +82,26 @@ memory in use (`nvidia-smi`, the desktop's 97 MiB included) on an RTX 2080 Ti, f
 | next, `--step tiles` / `--step render` | 3305 / 2992 MiB | 2640 / 1710–1770 MiB |
 | classic, `terrain run` | 3063 MiB | 1780–1840 MiB |
 | classic, `--step tiles` / `--step render` | 1910 / 2992 MiB | 1626 / 1780 MiB |
+| next, `terrain run --lazy` / `--step render --lazy` from an empty store | 5547 / 5224 MiB | 3124 / 3067 MiB |
+| classic, `terrain run --lazy` / `--step render --lazy` from an empty store | 4214 / 3702 MiB | 2118 / 2119 MiB |
+| `terrain view --snapshot` of the valley, next / classic (store empty) | 4654 / 3159 MiB | 4081 / 2613 MiB |
+
+Generating while rendering (`tiles.lazy`, `terrain view`) puts the generator next to the
+renderer on one device, with the next generator's kernels' local memory (below); on a GPU the
+size of an RTX 2080 Ti that does not fit 2.8 GB with next. The generators free their batch
+memory after each burst of tiles (`Generator::trim_gpu`), and `terrain run` frees the
+renderer's tiles before generating the neighbourhood of lazily generated tiles
+(`render::gpu::trim`).
 
 Where it goes:
 
 - **The generators' kernels:** the driver reserves local memory for every thread the GPU can
   run at once, sized by the kernel that needs the most: next's take ~16 KiB per thread, i.e.
-  ~1 GB on an RTX 2080 Ti (68 SMs × 1024 threads), 640 MiB on a Tesla P4, ~250 MiB on a
-  GTX 1650 Ti (16 SMs); classic's ~90 MiB. The driver keeps it until the device is gone,
+  ~1.1 GB on an RTX 2080 Ti (68 SMs × 1024 threads), 640 MiB on a Tesla P4, ~270 MiB on a
+  GTX 1650 Ti (16 SMs); classic's ~90 MiB. The largest is pass A1 with the kits' relief
+  operators inlined (`TERRAGEN_VRAM=smi` creates the pipelines one at a time and prints the
+  GPU's memory after each), then the point evaluation of the kits' operators and the drainage
+  lattice's heights (~11 KiB). The driver keeps it until the device is gone,
   so `terrain run` renders on a new device after generating
   (`terragen::gpu::device::release_shared`).
 - **Generation:** the drainage lattice (above), pass B's work buffer (172 MiB), pass A's
@@ -101,6 +114,10 @@ Where it goes:
   of 1024 slots (1.1 GB). Then the cached meshes (121 MB here, at most 512 MiB), the
   supersampled G-buffer and depth (20 B per sample: 70 MiB at 2560 × 1440) and the unit rays
   (16 B per sample).
+
+- **The viewer** (`terrain view`): the map's tiles (1 MiB each; 1024 slots at first, growing up
+  to `--gpu-tiles`, 1536) on a device of its own; the generator and the camera view's
+  renderer on the shared one.
 
 `TERRAGEN_VRAM=1` prints the allocator's live and reserved memory after each large buffer and at
 each step.
