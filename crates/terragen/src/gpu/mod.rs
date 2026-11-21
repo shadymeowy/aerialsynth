@@ -589,7 +589,12 @@ impl GpuGenerator {
             bind_group_layouts: &[Some(&l_globals), Some(&l_tables), Some(&l_tile)],
             immediate_size: 0,
         });
+        // (TERRAGEN_VRAM=smi: one pipeline at a time, with the GPU's memory after each: the
+        // driver's local memory grows with the kernel that needs the most)
+        let one_by_one = std::sync::Mutex::new(());
+        let smi = std::env::var("TERRAGEN_VRAM").is_ok_and(|v| v == "smi");
         let pipe = |module: &wgpu::ShaderModule, pl: &wgpu::PipelineLayout, entry: &str| {
+            let _one = smi.then(|| one_by_one.lock().unwrap());
             let t = std::time::Instant::now();
             let p = d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(entry),
@@ -601,6 +606,9 @@ impl GpuGenerator {
             });
             if std::env::var_os("TERRAGEN_PROFILE").is_some() {
                 eprintln!("  pipeline {entry}: {:.1} s", t.elapsed().as_secs_f64());
+            }
+            if smi {
+                device::vram_note(d, &format!("pipeline {entry}"));
             }
             p
         };
