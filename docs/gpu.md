@@ -76,7 +76,7 @@ A typical `terrain run` (generation and rendering in one process) fits a 4 GB GP
 memory in use (`nvidia-smi`, the desktop's 97 MiB included) on an RTX 2080 Ti, for a
 1280 × 720 frame at supersample 2 over a mountain valley from 800 m (944 + 27 tiles, z0–17):
 
-| | 0.3.2 | now |
+| | 0.3.2 | 0.3.3 |
 |---|---|---|
 | next, `terrain run` (all steps) | 4011 MiB | 2630 MiB |
 | next, `--step tiles` / `--step render` | 3305 / 2992 MiB | 2620 / 1710–1770 MiB |
