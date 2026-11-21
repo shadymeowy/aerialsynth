@@ -144,6 +144,8 @@ fn render_thread(
     let cache = pipeline::tile_cache(&scn, store.clone(), None);
     let mut renderer = pipeline::renderer(&scn, model.clone(), ss, ell, cache.clone());
     renderer.radiance_only = true;
+    // (the meshes of the view and little more: the generator shares the GPU)
+    renderer.mesh_budget = 128 << 20;
     let rgb_spec = spec.rgb.clone().unwrap_or_default();
     let mut sensor_cfg = rgb_spec.sensor.clone();
     sensor_cfg.motion_blur.enabled = false;
@@ -179,11 +181,18 @@ fn render_thread(
     };
     let forward_ext = Extrinsics { mount: Mount::Forward, pitch_deg: -15.0, ..Extrinsics::default() };
     let mut last_want = Instant::now() - std::time::Duration::from_secs(10);
+    let mut trimmed = false;
     while !sh.stop.load(Ordering::Relaxed) {
         let Some(req) = sh.req.lock().clone() else {
+            if !std::mem::replace(&mut trimmed, true) {
+                // hidden: the renderer's tiles and meshes leave the GPU to the map and the
+                // generator (made again by the next frame)
+                render::gpu::trim();
+            }
             std::thread::sleep(std::time::Duration::from_millis(5));
             continue;
         };
+        trimmed = false;
         let t0 = Instant::now();
         let ext = if req.forward { &forward_ext } else { &spec.extrinsics };
         let cam = req.pose.camera(ext, &ell);

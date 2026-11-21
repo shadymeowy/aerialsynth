@@ -34,9 +34,6 @@ use wgpu::util::DeviceExt;
 /// pool is sized to the frames' need ([`pool_slots`]), not to this.
 pub const POOL_SLOTS: u32 = 2048;
 
-/// Budget of GPU memory for cached meshes (bytes; a frame's own meshes are always kept).
-pub const MESH_BUDGET: u64 = 512 << 20;
-
 /// The slots of a tile pool for frames of `need` tiles: a quarter more (the next frames'
 /// new tiles), in steps of 64, at least 64 and at most `max`.
 pub fn pool_slots(need: usize, max: u32) -> u32 {
@@ -463,11 +460,11 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
         c.meshes.get_mut(k).unwrap().last = frame;
     }
     // LRU eviction beyond the budget (never this frame's meshes)
-    if c.mesh_bytes > MESH_BUDGET {
+    if c.mesh_bytes > r.mesh_budget {
         let mut old: Vec<(u64, MeshKey)> = c.meshes.iter().filter(|(_, m)| m.last != frame).map(|(k, m)| (m.last, *k)).collect();
         old.sort_unstable_by_key(|x| x.0);
         for (_, k) in old {
-            if c.mesh_bytes <= MESH_BUDGET * 3 / 4 {
+            if c.mesh_bytes <= r.mesh_budget * 3 / 4 {
                 break;
             }
             let m = c.meshes.remove(&k).unwrap();

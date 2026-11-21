@@ -217,10 +217,6 @@ struct Lattice {
     calls: usize,
 }
 
-/// A table cleared again within this many drainage calls is made twice as large instead
-/// (wide areas, e.g. the base levels: clearing that often made generation ~5 % slower).
-const LAT_THRASH_CALLS: usize = 32;
-
 impl Lattice {
     /// An empty table of `cap` slots.
     fn new(d: &wgpu::Device, cap: usize) -> Lattice {
@@ -246,6 +242,11 @@ impl Lattice {
         *self = Lattice::new(d, cap);
     }
 }
+
+/// A table cleared again within this many drainage calls is made twice as large instead
+/// (wide areas, e.g. the base levels: clearing that often made generation ~5 % slower; the
+/// classic generator's lattice too).
+pub(crate) const LAT_THRASH_CALLS: usize = 32;
 
 /// The size of a `PointMid` (points.wgsl; `point_mid_size` checks it).
 const POINT_MID_BYTES: u64 = 192;
@@ -1376,8 +1377,11 @@ impl GpuGenerator {
         let b_node_ids = output(d, "node ids", (nt * NG * NG * NODE_IDS * 8) as u64);
         let b_node_pts = output(d, "node points", (nt * NG * NG * NODE_IDS * 32) as u64);
         let (pix_bytes, terr_bytes) = ((NA2 * NA2 * PIX_F * 4) as u64, (NA2 * NA2 * std::mem::size_of::<GTerrain>()) as u64);
-        let (b_pix, b_terr) = match self.pa_bufs.lock().unwrap().take() {
-            Some((p, t)) if p.size() >= nt as u64 * pix_bytes => {
+        // (the kept ones if they hold this batch, else new ones for it: the old ones go first; made
+        // for the batch, not for 16 tiles: `terrain view` generates a few tiles at a time)
+        let kept = self.pa_bufs.lock().unwrap().take().filter(|(p, _)| p.size() >= nt as u64 * pix_bytes);
+        let (b_pix, b_terr) = match kept {
+            Some((p, t)) => {
                 // (as new: zeros)
                 let mut enc = d.create_command_encoder(&Default::default());
                 enc.clear_buffer(&p, 0, None);
@@ -1385,8 +1389,7 @@ impl GpuGenerator {
                 self.gpu.queue.submit([enc.finish()]);
                 (p, t)
             }
-            // (sized for a batch of 16 tiles at least, so smaller batches reuse them)
-            _ => (output(d, "pass a1", nt.max(16) as u64 * pix_bytes), output(d, "pass a", nt.max(16) as u64 * terr_bytes)),
+            None => (output(d, "pass a1", nt as u64 * pix_bytes), output(d, "pass a", nt as u64 * terr_bytes)),
         };
         let b_bins = output(d, "bins", (nt * NBIN * NBIN * 16) as u64);
         let b_segs = &drain_out.segs;

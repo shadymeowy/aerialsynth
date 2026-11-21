@@ -192,11 +192,12 @@ impl Gpu {
                     label: Some("terrain"),
                     required_features: features,
                     required_limits: adapter.limits(),
-                    // device memory in blocks of 64 MiB, and larger buffers and textures on their
+                    // device memory in blocks of 32 MiB, and larger buffers and textures on their
                     // own (wgpu's default blocks of up to 256 MiB, each holding one of the
                     // generator's batch buffers of 50–215 MiB and leftovers, kept ~0.5 GB more
-                    // memory than was in use; same speed)
-                    memory_hints: wgpu::MemoryHints::Manual { suballocated_device_memory_block_size: (64 << 20)..(64 << 20) },
+                    // memory than was in use; blocks of 64 MiB, partly used by the renderer's
+                    // meshes next to the generator's smaller buffers, ~0.1–0.2 GB; same speed)
+                    memory_hints: wgpu::MemoryHints::Manual { suballocated_device_memory_block_size: (32 << 20)..(32 << 20) },
                     ..Default::default()
                 })
                 .await?;

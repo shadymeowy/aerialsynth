@@ -78,13 +78,15 @@ memory in use (`nvidia-smi`, the desktop's 97 MiB included) on an RTX 2080 Ti, f
 
 | | 0.3.2 | now |
 |---|---|---|
-| next, `terrain run` (all steps) | 4011 MiB | 2640 MiB |
-| next, `--step tiles` / `--step render` | 3305 / 2992 MiB | 2640 / 1710–1770 MiB |
-| classic, `terrain run` | 3063 MiB | 1780–1840 MiB |
-| classic, `--step tiles` / `--step render` | 1910 / 2992 MiB | 1626 / 1780 MiB |
-| next, `terrain run --lazy` / `--step render --lazy` from an empty store | 5547 / 5224 MiB | 3124 / 3067 MiB |
-| classic, `terrain run --lazy` / `--step render --lazy` from an empty store | 4214 / 3702 MiB | 2118 / 2119 MiB |
-| `terrain view --snapshot` of the valley, next / classic (store empty) | 4654 / 3159 MiB | 4081 / 2613 MiB |
+| next, `terrain run` (all steps) | 4011 MiB | 2630 MiB |
+| next, `--step tiles` / `--step render` | 3305 / 2992 MiB | 2620 / 1710–1770 MiB |
+| classic, `terrain run` | 3063 MiB | 1790 MiB |
+| classic, `--step tiles` / `--step render` | 1910 / 2992 MiB | 1150–1190 / 1770–1850 MiB |
+| next, `terrain run --lazy` / `--step render --lazy` from an empty store | 5547 / 5224 MiB | 3100 / 3067 MiB |
+| classic, `terrain run --lazy` / `--step render --lazy` from an empty store | 4214 / 3702 MiB | 2100–2130 / 2119 MiB |
+| `terrain view --snapshot` of the valley, next / classic (store empty) | 4654 / 3159 MiB | 3840 / 2580 MiB |
+| `terrain view --camera-view` (960 × 540, a window), next / classic, 150 s from an empty store | 7517 / 6540 MiB | 3377 / 2044 MiB |
+| the same, switching between map and camera every 25 s (the map's own peak) | | 3925 / 2357 MiB |
 
 Generating while rendering (`tiles.lazy`, `terrain view`) puts the generator next to the
 renderer on one device, with the next generator's kernels' local memory (below); on a GPU the
@@ -104,20 +106,26 @@ Where it goes:
   lattice's heights (~11 KiB). The driver keeps it until the device is gone,
   so `terrain run` renders on a new device after generating
   (`terragen::gpu::device::release_shared`).
-- **Generation:** the drainage lattice (above), pass B's work buffer (172 MiB), pass A's
-  buffers (388 MiB per batch of 16 tiles) and per batch the drainage pieces of its queries (up
-  to ~0.2 GB each), site requests and the tiles' output. Device memory comes in blocks of
-  64 MiB, larger buffers get their own.
+- **Generation:** the drainage lattice (both generators: 144 MiB at first, made larger when a
+  batch needs it, up to 576 MiB), pass B's work buffer (172 MiB), pass A's buffers (next: 24 MiB
+  per tile of the largest batch so far, 388 MiB for 16 tiles) and per batch the drainage pieces
+  of its queries (up to ~0.3 GB each), site requests and the tiles' output. Device memory comes
+  in blocks of 32 MiB, larger buffers get their own.
 - **Rendering:** the tile pool holds the frame's tiles plus a quarter (made again larger when a
   frame needs more, or when a frame evicts tiles the frame before used: up to twice the most
   tiles a frame needed, at most 2048 slots ≈ 2.2 GB); the scene above uses 814 tiles, a pool
-  of 1024 slots (1.1 GB). Then the cached meshes (121 MB here, at most 512 MiB), the
+  of 1024 slots (1.1 GB). Then the cached meshes (121 MB here, at most 512 MiB:
+  `Renderer::mesh_budget`; the viewer's camera view keeps 128 MiB), the
   supersampled G-buffer and depth (20 B per sample: 70 MiB at 2560 × 1440) and the unit rays
   (16 B per sample).
 
-- **The viewer** (`terrain view`): the map's tiles (1 MiB each; 1024 slots at first, growing up
-  to `--gpu-tiles`, 1536) on a device of its own; the generator and the camera view's
-  renderer on the shared one.
+- **The viewer** (`terrain view`): the map's tiles (1 MiB each; 1024 slots made by the map's
+  first frame, growing up to `--gpu-tiles`, 1536) on eframe's device; the generator (batches of
+  half the cores) and the camera view's renderer on the shared one. Only the view shown keeps
+  its GPU memory: the map's tiles, meshes and image are freed while the camera view is shown
+  (and loaded from the store again), the camera view's tile pool and meshes while the map is.
+  A 960 × 540 camera view of the valley needs ~460 tiles (a pool of 512 slots, 0.55 GB) and
+  ~110 MB of meshes.
 
 `TERRAGEN_VRAM=1` prints the allocator's live and reserved memory after each large buffer and at
 each step.
@@ -136,7 +144,7 @@ each step.
 The vertex shader uses the CPU mesh builder's validity rules and interpolates u, v and range
 perspective-correctly like the CPU rasterizer. Tiles live in a pool of texture-array
 slots (~1.1 MB each) sized to the frames' need ([GPU memory](#gpu-memory)), each uploaded once
-and evicted least-recently-used; meshes likewise, up to 512 MiB (`MESH_BUDGET`). Positions on the pyramid are kept as
+and evicted least-recently-used; meshes likewise, up to 512 MiB (`Renderer::mesh_budget`). Positions on the pyramid are kept as
 (zoom, integer global pixel, fraction) per axis, since global pixels reach 2^27 at zoom 19;
 shading runs in f32, geometry in f64 on the CPU.
 
@@ -171,10 +179,10 @@ coordinates. Tiles agree with the CPU's to f32 precision (at most 0.1 % of the p
 more than 2 DN or 5 cm; `cargo test -p terragen gpu::tests`), so both backends write the same
 generator version and can share a store. Everything per pixel and per point runs on the GPU,
 in batches of 16 tiles (next: ~1.1 GB of GPU memory at their peak besides the lattice); the
-drainage network's lattice points live in a GPU hash table kept across batches (classic:
-576 MiB; next: 144 MiB, made larger when a batch needs it); only the site lists (lake levels, land-use
+drainage network's lattice points live in a GPU hash table kept across batches (144 MiB, made
+larger when a batch needs it, up to 576 MiB); only the site lists (lake levels, land-use
 regions, towns) are made on the host from batched GPU point evaluations. The classic generator's
-GPU code is v0.2.0's, unchanged: its tiles are bit-identical to v0.2.0's on the same GPU. (The
+GPU kernels are v0.2.0's, unchanged: its tiles are bit-identical to v0.2.0's on the same GPU. (The
 experimental next generator has its own: [`next/`](next/README.md#how-it-works).)
 
 | (RTX 2080 Ti; CPU: 8 threads) | CPU | GPU |

@@ -549,6 +549,10 @@ pub struct Renderer {
     /// Only the radiance is wanted (live view): the GPU backend skips reading back depth,
     /// 3D points and land cover (left empty), unless the stars of this frame need them.
     pub radiance_only: bool,
+    /// GPU memory (bytes) for the meshes the GPU backend keeps for later frames (a frame's own
+    /// are always kept): [`MESH_BUDGET`]; a live view, which seldom comes back to old meshes,
+    /// keeps less.
+    pub mesh_budget: u64,
     /// unit rays of the supersampled grid (camera frame)
     pub(crate) rays: Vec<[f32; 3]>,
     /// unique id of this renderer (GPU-side caches of its ray table)
@@ -560,6 +564,9 @@ pub struct Renderer {
     /// star catalogue and colours (loaded on the first render with stars)
     star_field: std::sync::OnceLock<crate::stars::StarField>,
 }
+
+/// GPU memory for the meshes kept for later frames, by default (`Renderer::mesh_budget`).
+pub const MESH_BUDGET: u64 = 512 << 20;
 
 /// The share of the street lights at a sun elevation (degrees) for next's worlds
 /// (`RenderSettings::next_lights`): 30 % at -3°, ramping to full at -12° (the end of nautical
@@ -608,6 +615,7 @@ impl Renderer {
             geometry_only: false,
             split_flicker: false,
             radiance_only: false,
+            mesh_budget: MESH_BUDGET,
             rays,
             id,
             stars_in_render: true,

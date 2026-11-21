@@ -184,6 +184,8 @@ struct Lattice {
     work_s: wgpu::Buffer,
     cap: usize,
     used: usize,
+    /// drainage calls since the table was made or cleared
+    calls: usize,
 }
 
 impl Lattice {
@@ -201,12 +203,24 @@ impl Lattice {
             work_s: output(d, "source work", (cap * 4) as u64),
             cap,
             used: 0,
+            calls: 0,
         }
+    }
+
+    /// Replace the table with an empty one of `cap` slots (the old one goes first).
+    fn remake(&mut self, d: &wgpu::Device, cap: usize) {
+        *self = Lattice::new(d, 1);
+        *self = Lattice::new(d, cap);
     }
 }
 
-/// Lattice table slots (~50 bytes each).
+/// Lattice table slots (72 bytes each) at most. The table starts at `LAT_START` slots and is
+/// cleared when it is three fifths full (it caches lattice points across batches; the tiles do
+/// not depend on what it holds), and made twice as large when one batch's points do not fit
+/// an empty table or it fills up again soon (`crate::gpu::LAT_THRASH_CALLS`).
 const LAT_CAP: usize = 1 << 23;
+/// Lattice table slots at first (144 MiB; the whole table, 576 MiB, used to be made at once).
+const LAT_START: usize = 1 << 21;
 /// Lattice cells per enumeration / gather chunk.
 const CHUNK: usize = 4096;
 
@@ -374,7 +388,7 @@ impl GpuGenerator {
             l_lat,
             dk,
         };
-        let lat = Lattice::new(d, LAT_CAP);
+        let lat = Lattice::new(d, LAT_START);
         crate::gpu::device::vram_note(d, "generator ready");
         Ok(GpuGenerator { world, surface, gpu, k, globals, cache: Mutex::new(Cache::default()), lat: Mutex::new(lat) })
     }
@@ -510,9 +524,9 @@ impl GpuGenerator {
         let chunks_g = chunks(&mut boxes_g);
         let t_drain = std::time::Instant::now();
         let mut lat = self.lat.lock().unwrap();
-        if lat.cap < LAT_CAP {
+        if lat.cap < LAT_START {
             // (after `trim`: an empty table, as a cleared one)
-            *lat = Lattice::new(d, LAT_CAP);
+            lat.remake(d, LAT_START);
         }
         let mut seg_cap = (1usize << 18).max(queries.len() * 64);
         let mut sink_cap = 1usize << 16;
@@ -576,19 +590,29 @@ impl GpuGenerator {
         };
         // ---- the lattice points the queries need (a full table is cleared and filled again)
         let n_cells: usize = boxes_e.iter().map(|b| b.dims[0] as usize * b.dims[1] as usize * b.dims[2] as usize).sum();
-        let new_cap = n_cells.min(lat.cap).max(1);
-        let b_new = output(d, "new lattice points", (new_cap * 4) as u64);
         let dummy_segs = output(d, "-", 256);
         let dummy_ro = output(d, "-", 256);
         let dummy_sinks = output(d, "-", 256);
         let mut n_new = 0usize;
-        for attempt in 0..2 {
-            if lat.used > lat.cap * 3 / 5 || attempt == 1 {
+        let mut new_cap = n_cells.min(lat.cap).max(1);
+        let mut b_new = output(d, "new lattice points", (new_cap * 4) as u64);
+        // (attempt 1: the points in an empty table; then in one twice as large, up to LAT_CAP)
+        for attempt in 0.. {
+            let full = lat.used > lat.cap * 3 / 5;
+            // (a table full again soon after it was cleared: a larger one instead)
+            let thrash = attempt == 0 && full && lat.calls < crate::gpu::LAT_THRASH_CALLS && lat.cap < LAT_CAP;
+            if attempt >= 2 || thrash {
+                let cap = lat.cap * 2;
+                lat.remake(d, cap);
+                new_cap = n_cells.min(lat.cap).max(1);
+                b_new = output(d, "new lattice points", (new_cap * 4) as u64);
+            } else if full || attempt == 1 {
                 let mut enc = d.create_command_encoder(&Default::default());
                 enc.clear_buffer(&lat.keys, 0, None);
                 enc.clear_buffer(&lat.flags, 0, None);
                 self.gpu.queue.submit([enc.finish()]);
                 lat.used = 0;
+                lat.calls = 0;
             }
             let mut enc = d.create_command_encoder(&Default::default());
             enc.clear_buffer(&b_count, 0, None);
@@ -602,11 +626,12 @@ impl GpuGenerator {
             if c[1] == 0 && n_new <= new_cap {
                 break;
             }
-            if attempt == 1 {
+            if attempt >= 1 && lat.cap >= LAT_CAP {
                 bail!("GPU generator: the drainage lattice table is too small ({} points for one batch)", n_new);
             }
         }
         lat.used += n_new;
+        lat.calls += 1;
         let prof = std::env::var_os("TERRAGEN_PROFILE").is_some();
         let t_enum = t_drain.elapsed().as_secs_f64();
         // ---- heights, targets, sources, the queries' pieces
@@ -677,11 +702,10 @@ impl GpuGenerator {
     }
 
     /// The GPU's name.
-    /// Free the drainage lattice (576 MiB) until the next batch makes it again, empty. For
+    /// Free the drainage lattice (144–576 MiB) until the next batch makes it again, empty. For
     /// callers that generate in bursts next to other GPU work (lazy generation while rendering).
     pub fn trim(&self) {
-        let mut lat = self.lat.lock().unwrap();
-        *lat = Lattice::new(&self.gpu.device, 1);
+        self.lat.lock().unwrap().remake(&self.gpu.device, 1);
         crate::gpu::device::vram_note(&self.gpu.device, "generator trimmed");
     }
 
