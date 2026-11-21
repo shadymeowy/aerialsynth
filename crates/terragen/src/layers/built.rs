@@ -93,7 +93,6 @@ impl SurfaceModel {
     /// Coverage is crisp: streets and built lots cover the ground fully, open land in the
     /// outskirts shows the underlying fields / nature.
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn town(
         &self,
         town: &TownInfo,

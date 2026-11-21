@@ -115,12 +115,13 @@ jobs:
       matrix:
         include:
           - { name: macOS arm64, os: macos-latest, gpu_check: pass }
-          # The Intel runner's Metal device ("Apple Paravirtual device") renders nothing (depth
-          # all non-finite, black images) where the arm64 one matches the CPU renderer. The
-          # renderer's self-check must reject it (render.backend auto then renders on the CPU);
-          # the tests run with the GPU hidden (AERIALSYNTH_GPU=none), as on Linux without a
-          # Vulkan driver, so the GPU tests skip and everything runs on the CPU.
-          - { name: macOS x86_64, os: macos-15-intel, gpu: none, gpu_check: fail }
+          # The Intel runner's Metal device ("Apple Paravirtual device") rendered nothing until
+          # 2026-11 (depth all non-finite, black images), and the renderer's self-check rejected
+          # it (render.backend auto then renders on the CPU); since then it passes. Its verdict
+          # is not asserted (no gpu_check); the tests run with the GPU hidden
+          # (AERIALSYNTH_GPU=none), as on Linux without a Vulkan driver, so the GPU tests skip
+          # and everything runs on the CPU.
+          - { name: macOS x86_64, os: macos-15-intel, gpu: none }
           - { name: Windows x86_64, os: windows-latest, gpu_check: pass }
     steps:
       - uses: actions/checkout@v5

@@ -970,10 +970,10 @@ fn emit(ctx: &mut HostCtx, area: &Area, e: &Edge, line: &Line, prof_area: bool, 
     // vertices: the route's, one per spacing bucket (and the ends of the stretch)
     let mut vs: Vec<f64> = Vec::new();
     let mut last = i64::MIN;
-    for k in lo..=hi {
-        let b = (line.s[k] / sp).floor() as i64;
+    for (k, &s) in line.s.iter().enumerate().take(hi + 1).skip(lo) {
+        let b = (s / sp).floor() as i64;
         if b != last || k == hi || k == lo {
-            vs.push(line.s[k]);
+            vs.push(s);
             last = b;
         }
     }

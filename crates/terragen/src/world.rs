@@ -428,7 +428,6 @@ impl World {
     /// The octaves of [`World::ridged`] of wavelength >= `cut` (`low`, from the start) or < `cut`
     /// (not `low`, continuing from the state `st` of the long ones). State: sum, low-passed sum,
     /// weight of the next octave (before the final scaling).
-    #[allow(clippy::too_many_arguments)]
     /// `fill`: the octaves below the pixel count with their mean (the tiles; not the drainage
     /// network's heights, whose valleys keep their depths).
     #[allow(clippy::too_many_arguments)]

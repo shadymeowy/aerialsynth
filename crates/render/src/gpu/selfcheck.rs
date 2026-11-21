@@ -203,7 +203,8 @@ mod tests {
     }
 
     /// The check on this machine's GPU (skipped without one). `AERIALSYNTH_EXPECT_GPU_CHECK=pass`
-    /// / `fail` asserts the verdict (CI: the macOS Intel runner's GPU fails, the others pass).
+    /// / `fail` asserts the verdict (CI: the runners' GPUs pass; the macOS Intel runner's, which
+    /// failed until 2026-11, is not asserted).
     #[test]
     fn self_check_on_this_gpu() {
         if super::super::device::shared().is_err() {

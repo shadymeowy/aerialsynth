@@ -15,22 +15,30 @@ const LINK_FILE: &str = if cfg!(windows) {
     "libaerialsynth.so"
 };
 
-/// The directory of the library: this test is target/<profile>/deps/c_example-<hash>; the library
-/// is in target/<profile> (after `cargo build`), or only in target/<profile>/deps (`cargo test`
-/// does not copy it up).
+/// The directory of the library, the newest of where Cargo may have put it:
+/// - this test in target/<profile>/deps/: the library there too (`cargo test` does not copy it
+///   up), or in target/<profile> (after `cargo build`);
+/// - this test in target/<profile>/build/<package>/<hash>/out/ (Cargo's build directory layout
+///   since 1.100): the library in another <hash>/out/ of the package, or in target/<profile>.
+///
+/// The newest, as a copy in target/<profile> from an earlier `cargo build` can be older than the
+/// one this `cargo test` just built.
 fn lib_dir() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
-    let deps = exe.parent().unwrap();
-    // the newer of the two: a copy in target/<profile> from an earlier `cargo build` can be
-    // older than the one this `cargo test` just built in deps/
-    let modified = |d: &std::path::Path| std::fs::metadata(d.join(LINK_FILE)).and_then(|m| m.modified()).ok();
-    let dir = [deps.parent().unwrap(), deps]
+    let dir = exe.parent().unwrap();
+    let mut candidates: Vec<PathBuf> = dir.ancestors().take(5).map(Path::to_path_buf).collect();
+    if let Some(package) = dir.parent().and_then(Path::parent) {
+        if let Ok(entries) = std::fs::read_dir(package) {
+            candidates.extend(entries.flatten().map(|e| e.path().join("out")));
+        }
+    }
+    let modified = |d: &Path| std::fs::metadata(d.join(LINK_FILE)).and_then(|m| m.modified()).ok();
+    candidates
         .into_iter()
-        .filter_map(|d| modified(d).map(|t| (t, d)))
+        .filter_map(|d| modified(&d).map(|t| (t, d)))
         .max_by_key(|(t, _)| *t)
-        .map(|(_, d)| d.to_path_buf())
-        .unwrap_or_else(|| panic!("{LINK_FILE} not built"));
-    dir
+        .map(|(_, d)| d)
+        .unwrap_or_else(|| panic!("{LINK_FILE} not built"))
 }
 
 /// The command compiling `src` into the executable `bin`, linked against the library in

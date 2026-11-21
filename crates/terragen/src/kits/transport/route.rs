@@ -546,10 +546,10 @@ fn probe(w: &World, sc: &Scene, p: DVec3, gsd: f64) -> Probe {
     o.block = sc.blocks.iter().any(|k| k.inside(p));
     o.town = sc.avoid.iter().any(|&(q, r)| (p - q).length() < r);
     if !sc.rivers.is_empty() {
-        for l in 0..2 {
+        for (l, pw) in o.pw.iter_mut().enumerate() {
             let lam = w.meander_wavelength(l);
             let [w1, w2] = w.meander_warp(l, ctx.p);
-            o.pw[l] = ctx.p + (ctx.east * w1 + ctx.north * w2) * (0.22 * lam);
+            *pw = ctx.p + (ctx.east * w1 + ctx.north * w2) * (0.22 * lam);
         }
         // the valleys (`World::terrain`'s profile without the kits' carve hooks)
         let land_fade = smoothstep(0.0, 0.1, smoothstep(-0.06, 0.05, t.cont));
