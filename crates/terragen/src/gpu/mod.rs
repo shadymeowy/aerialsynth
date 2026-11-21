@@ -213,7 +213,13 @@ struct Lattice {
     work_s: wgpu::Buffer,
     cap: usize,
     used: usize,
+    /// drainage calls since the table was made or cleared
+    calls: usize,
 }
+
+/// A table cleared again within this many drainage calls is made twice as large instead
+/// (wide areas, e.g. the base levels: clearing that often made generation ~5 % slower).
+const LAT_THRASH_CALLS: usize = 32;
 
 impl Lattice {
     /// An empty table of `cap` slots.
@@ -230,6 +236,7 @@ impl Lattice {
             work_s: output(d, "source work", (cap * 4) as u64),
             cap,
             used: 0,
+            calls: 0,
         }
     }
 
@@ -246,7 +253,7 @@ const POINT_MID_BYTES: u64 = 192;
 /// Lattice table slots (72 bytes each) at most. The table starts at `LAT_START` slots and is
 /// cleared when it is three fifths full (it caches lattice points across batches; the tiles do
 /// not depend on what it holds), and made twice as large when one batch's points do not fit
-/// an empty table.
+/// an empty table or it fills up again soon (`LAT_THRASH_CALLS`).
 const LAT_CAP: usize = 1 << 23;
 /// Lattice table slots at first (144 MiB; one batch of 16 tiles needed up to ~1M points in
 /// tests, the cache over a 944-tile flight ~3.3M, cleared and filled again then).
@@ -915,17 +922,21 @@ impl GpuGenerator {
         let mut b_new = output(d, "new lattice points", (new_cap * 4) as u64);
         // (attempt 1: the points in an empty table; then in one twice as large, up to LAT_CAP)
         for attempt in 0.. {
-            if attempt >= 2 {
+            let full = lat.used > lat.cap * 3 / 5;
+            // (a table full again soon after it was cleared: a larger one instead)
+            let thrash = attempt == 0 && full && lat.calls < LAT_THRASH_CALLS && lat.cap < LAT_CAP;
+            if attempt >= 2 || thrash {
                 let cap = lat.cap * 2;
                 lat.remake(d, cap);
                 new_cap = n_cells.min(lat.cap).max(1);
                 b_new = output(d, "new lattice points", (new_cap * 4) as u64);
-            } else if lat.used > lat.cap * 3 / 5 || attempt == 1 {
+            } else if full || attempt == 1 {
                 let mut enc = d.create_command_encoder(&Default::default());
                 enc.clear_buffer(&lat.keys, 0, None);
                 enc.clear_buffer(&lat.flags, 0, None);
                 self.gpu.queue.submit([enc.finish()]);
                 lat.used = 0;
+                lat.calls = 0;
             }
             let mut enc = d.create_command_encoder(&Default::default());
             enc.clear_buffer(&b_count, 0, None);
@@ -944,6 +955,7 @@ impl GpuGenerator {
             }
         }
         lat.used += n_new;
+        lat.calls += 1;
         if device::vram_on() {
             eprintln!("vram: lattice {} cells, {} new points, {} used of {}", n_cells, n_new, lat.used, lat.cap);
         }
