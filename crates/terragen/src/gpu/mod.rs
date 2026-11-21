@@ -217,10 +217,6 @@ struct Lattice {
     calls: usize,
 }
 
-/// A table cleared again within this many drainage calls is made twice as large instead
-/// (wide areas, e.g. the base levels: clearing that often made generation ~5 % slower).
-const LAT_THRASH_CALLS: usize = 32;
-
 impl Lattice {
     /// An empty table of `cap` slots.
     fn new(d: &wgpu::Device, cap: usize) -> Lattice {
@@ -246,6 +242,11 @@ impl Lattice {
         *self = Lattice::new(d, cap);
     }
 }
+
+/// A table cleared again within this many drainage calls is made twice as large instead
+/// (wide areas, e.g. the base levels: clearing that often made generation ~5 % slower; the
+/// classic generator's lattice too).
+pub(crate) const LAT_THRASH_CALLS: usize = 32;
 
 /// The size of a `PointMid` (points.wgsl; `point_mid_size` checks it).
 const POINT_MID_BYTES: u64 = 192;
