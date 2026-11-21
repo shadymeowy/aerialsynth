@@ -319,6 +319,8 @@ pub fn run(a: RunArgs) -> Result<()> {
         let gen = pipeline::generator(&s)?;
         let mut lazy: BTreeSet<TileId> = stored_tiles(&s, &gen)?.difference(&before).copied().collect();
         if !lazy.is_empty() {
+            // (the renderer's tiles and meshes leave the GPU to the generator)
+            render::gpu::trim();
             pipeline::with_margin_and_ancestors(&s, &mut lazy);
             eprintln!("neighbourhood of the lazily generated tiles:");
             gen_tiles(&s, &gen, lazy.into_iter().collect(), false)?;

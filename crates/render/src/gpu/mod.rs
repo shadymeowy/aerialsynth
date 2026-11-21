@@ -188,6 +188,21 @@ fn ctx() -> anyhow::Result<&'static Mutex<Ctx>> {
     }
 }
 
+/// Free the renderer's GPU memory but its pipelines: tile pools, meshes, render targets, ray
+/// tables (the next frame makes them again). For processes that do other GPU work after
+/// rendering (`terrain run` generates the neighbourhood of lazily generated tiles).
+pub fn trim() {
+    let Some(Ok(c)) = CTX.get() else { return };
+    let mut c = c.lock();
+    c.pools.clear();
+    c.meshes.clear();
+    c.mesh_bytes = 0;
+    c.indices.clear();
+    c.targets = None;
+    c.rays.clear();
+    terragen::gpu::device::vram_note(&c.gpu.device, "renderer trimmed");
+}
+
 /// Drop the GPU's copies (pool slots, meshes) of tiles `ids`, so that they are uploaded again
 /// (the self-check renders synthetic tiles under real tile ids).
 pub(crate) fn forget_tiles(ids: &[TileId]) {
