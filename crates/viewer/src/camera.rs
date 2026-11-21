@@ -144,6 +144,8 @@ fn render_thread(
     let cache = pipeline::tile_cache(&scn, store.clone(), None);
     let mut renderer = pipeline::renderer(&scn, model.clone(), ss, ell, cache.clone());
     renderer.radiance_only = true;
+    // (the meshes of the view and little more: the generator shares the GPU)
+    renderer.mesh_budget = 128 << 20;
     let rgb_spec = spec.rgb.clone().unwrap_or_default();
     let mut sensor_cfg = rgb_spec.sensor.clone();
     sensor_cfg.motion_blur.enabled = false;
