@@ -29,12 +29,19 @@ use tiles::TilePool;
 use tilestore::TileData;
 use wgpu::util::DeviceExt;
 
-/// Tile slots of the GPU pool (≈1.1 MB of VRAM each): as many as a texture array can hold, at
-/// most 2048 (≈2.2 GB). A frame never needs more than a few hundred to ~1500 tiles.
+/// Tile slots of the GPU pool at most (≈1.1 MB of VRAM each): as many as a texture array can
+/// hold, at most 2048 (≈2.2 GB). A frame never needs more than a few hundred to ~1500 tiles. The
+/// pool is sized to the frames' need ([`pool_slots`]), not to this.
 pub const POOL_SLOTS: u32 = 2048;
 
-/// Budget of GPU memory for cached meshes (bytes).
-pub const MESH_BUDGET: u64 = 1536 << 20;
+/// Budget of GPU memory for cached meshes (bytes; a frame's own meshes are always kept).
+pub const MESH_BUDGET: u64 = 512 << 20;
+
+/// The slots of a tile pool for frames of `need` tiles: a quarter more (the next frames'
+/// new tiles), in steps of 64, at least 64 and at most `max`.
+pub fn pool_slots(need: usize, max: u32) -> u32 {
+    ((need + need / 4).div_ceil(64) * 64).clamp(64, max as usize) as u32
+}
 
 /// Can the GPU backend render `model` at supersample `ss`: a GPU, the projection within the
 /// shader's parameter block, the supersampled G-buffer within the texture size limit and the ray
@@ -139,8 +146,11 @@ struct Targets {
     oh: u32,
     gbuf: wgpu::Texture,
     depth: wgpu::Texture,
-    out: [wgpu::Buffer; 4],
-    read: [wgpu::Buffer; 4],
+    /// radiance, geometry and (made when a frame splits the flicker) its cos and sin parts
+    out: Vec<wgpu::Buffer>,
+    read: Vec<wgpu::Buffer>,
+    /// bound for the flicker parts when they are not written
+    dummy: wgpu::Buffer,
 }
 
 struct Ctx {
@@ -178,6 +188,21 @@ fn ctx() -> anyhow::Result<&'static Mutex<Ctx>> {
     }
 }
 
+/// Free the renderer's GPU memory but its pipelines: tile pools, meshes, render targets, ray
+/// tables (the next frame makes them again). For processes that do other GPU work after
+/// rendering (`terrain run` generates the neighbourhood of lazily generated tiles).
+pub fn trim() {
+    let Some(Ok(c)) = CTX.get() else { return };
+    let mut c = c.lock();
+    c.pools.clear();
+    c.meshes.clear();
+    c.mesh_bytes = 0;
+    c.indices.clear();
+    c.targets = None;
+    c.rays.clear();
+    terragen::gpu::device::vram_note(&c.gpu.device, "renderer trimmed");
+}
+
 /// Drop the GPU's copies (pool slots, meshes) of tiles `ids`, so that they are uploaded again
 /// (the self-check renders synthetic tiles under real tile ids).
 pub(crate) fn forget_tiles(ids: &[TileId]) {
@@ -207,6 +232,7 @@ impl Ctx {
         let walls = walls_compiled(gpu.info.backend);
         let (gbuf_pipe, shade_pipe) = gpu.scoped(|| Ok(Self::pipelines(d, walls))).context("the renderer's shaders")?;
         drop(compiling);
+        terragen::gpu::device::vram_note(d, "renderer: pipelines");
         Ok(Ctx {
             gpu,
             meshes: HashMap::new(),
@@ -269,11 +295,21 @@ impl Ctx {
         (gbuf_pipe, shade_pipe)
     }
 
-    fn ensure_targets(&mut self, w: u32, h: u32, ow: u32, oh: u32) {
-        if matches!(&self.targets, Some(t) if (t.w, t.h, t.ow, t.oh) == (w, h, ow, oh)) {
+    fn ensure_targets(&mut self, w: u32, h: u32, ow: u32, oh: u32, split: bool) {
+        let d = &self.gpu.device;
+        let size = (ow * oh * 16) as u64;
+        let buf = |label, usage| d.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false });
+        let su = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC;
+        let ru = wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST;
+        if let Some(t) = self.targets.as_mut().filter(|t| (t.w, t.h, t.ow, t.oh) == (w, h, ow, oh)) {
+            if split && t.out.len() < 4 {
+                t.out.extend([buf("fc", su), buf("fs", su)]);
+                t.read.extend([buf("fc r", ru), buf("fs r", ru)]);
+            }
             return;
         }
-        let d = &self.gpu.device;
+        // (the old targets go first)
+        self.targets = None;
         let tex = |label, format, usage| {
             d.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
@@ -288,20 +324,14 @@ impl Ctx {
         };
         let gbuf = tex("gbuf", wgpu::TextureFormat::Rgba32Float, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
         let depth = tex("depth", wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::RENDER_ATTACHMENT);
-        let size = (ow * oh * 16) as u64;
-        let buf = |label, usage| d.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false });
-        let su = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC;
-        let ru = wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST;
-        self.targets = Some(Targets {
-            w,
-            h,
-            ow,
-            oh,
-            gbuf,
-            depth,
-            out: [buf("rad", su), buf("geo", su), buf("fc", su), buf("fs", su)],
-            read: [buf("rad r", ru), buf("geo r", ru), buf("fc r", ru), buf("fs r", ru)],
-        });
+        let mut out = vec![buf("rad", su), buf("geo", su)];
+        let mut read = vec![buf("rad r", ru), buf("geo r", ru)];
+        if split {
+            out.extend([buf("fc", su), buf("fs", su)]);
+            read.extend([buf("fc r", ru), buf("fs r", ru)]);
+        }
+        let dummy = d.create_buffer(&wgpu::BufferDescriptor { label: Some("-"), size: 16, usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false });
+        self.targets = Some(Targets { w, h, ow, oh, gbuf, depth, out, read, dummy });
     }
 }
 
@@ -392,7 +422,7 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
     c.gpu.check()?;
     c.frame += 1;
     let frame = c.frame;
-    c.ensure_targets(w, h, ow, oh);
+    c.ensure_targets(w, h, ow, oh, r.split_flicker && !r.geometry_only && sun_state.lights > 1e-3 && sun_state.flicker.enabled);
     // ---------------- meshes: build (CPU, parallel) and upload the ones not cached on the GPU
     let missing: Vec<&(usize, MeshKey, f64)> = items.iter().filter(|(_, k, _)| !c.meshes.contains_key(k)).collect();
     let built: Vec<(MeshKey, Vec<Vertex>, DVec3, usize, usize)> = missing
@@ -447,9 +477,27 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
     let t_cpu = t0.elapsed().as_secs_f64();
     // ---------------- tiles: resident slots and the frame's lookup table
     let shading = r.settings.shading;
-    if !c.pools.contains_key(&shading) {
-        let slots = POOL_SLOTS.min(c.gpu.device.limits().max_texture_array_layers);
-        let p = TilePool::new(&c.gpu.device, slots, shading);
+    let max_slots = POOL_SLOTS.min(c.gpu.device.limits().max_texture_array_layers);
+    // the pool holds this frame's tiles (at most `max_slots`); it is made, or made again larger
+    // (the old one goes first, and the frame's tiles are uploaded again), when it does not, or
+    // when the last frame evicted tiles the frame before it used (more slots save uploads: up to
+    // twice the most tiles a frame needed)
+    let grow = match c.pools.get_mut(&shading) {
+        None => Some(pool_slots(tiles.len(), max_slots)),
+        Some(p) => {
+            p.peak_need = p.peak_need.max(tiles.len());
+            let mut want = if (p.slots as usize) < tiles.len() { pool_slots(tiles.len(), max_slots) } else { p.slots };
+            if std::mem::take(&mut p.thrashed) {
+                want = want.max(((p.slots as usize * 3 / 2).min(2 * p.peak_need).div_ceil(64) * 64).min(max_slots as usize) as u32);
+            }
+            (want > p.slots).then_some(want)
+        }
+    };
+    if let Some(slots) = grow {
+        let peak = c.pools.remove(&shading).map_or(0, |p| p.peak_need).max(tiles.len());
+        let mut p = TilePool::new(&c.gpu.device, slots, shading);
+        p.peak_need = peak;
+        terragen::gpu::device::vram_note(&c.gpu.device, &format!("renderer: tile pool of {slots}"));
         c.pools.insert(shading, p);
     }
     let pool = c.pools.get_mut(&shading).unwrap();
@@ -665,8 +713,8 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
                 wgpu::BindGroupEntry { binding: 10, resource: tvr(&vb) },
                 wgpu::BindGroupEntry { binding: 11, resource: tg.out[0].as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 12, resource: tg.out[1].as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 13, resource: tg.out[2].as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 14, resource: tg.out[3].as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 13, resource: tg.out.get(2).unwrap_or(&tg.dummy).as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 14, resource: tg.out.get(3).unwrap_or(&tg.dummy).as_entire_binding() },
             ],
         });
         let mut cp = enc.begin_compute_pass(&Default::default());
@@ -690,6 +738,7 @@ pub fn render(r: &Renderer, cam: &CamPose, sun_state: &SunState) -> anyhow::Resu
         return Err(e.context("render.backend gpu"));
     }
     let t_gpu = t0.elapsed().as_secs_f64();
+    terragen::gpu::device::vram_note(d, "frame rendered");
     // ---------------- read back into a FrameOut
     let n = (ow * oh) as usize;
     let get = |k: usize| -> anyhow::Result<Vec<[f32; 4]>> {

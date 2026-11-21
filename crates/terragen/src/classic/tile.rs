@@ -243,6 +243,15 @@ impl Generator {
         }
     }
 
+    /// Free the GPU generator's drainage lattice until the next batch, if it is set up
+    /// ([`crate::classic::gpu::GpuGenerator::trim`]).
+    pub fn trim_gpu(&self) {
+        #[cfg(feature = "gpu")]
+        if let Some(Ok(g)) = self.gpu.get() {
+            g.trim();
+        }
+    }
+
     /// `"GPU (<adapter>)"` or `"CPU"`: where tiles are generated.
     pub fn backend_name(&self) -> String {
         #[cfg(feature = "gpu")]

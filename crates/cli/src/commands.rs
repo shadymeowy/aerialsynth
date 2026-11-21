@@ -301,8 +301,13 @@ pub fn run(a: RunArgs) -> Result<()> {
     } else {
         None
     };
+    terragen::gpu::device::vram_note_shared("tiles step done");
     if want(Step::Render) {
+        // (the generator's pipelines hold driver memory until their device is gone: the renderer
+        // starts on a new one)
+        terragen::gpu::device::release_shared();
         do_render(&s)?;
+        terragen::gpu::device::vram_note_shared("render step done");
     }
     let has_events = s.cameras.iter().any(|c| c.events.is_some());
     if want(Step::Events) && (has_events || !all) {
@@ -314,6 +319,8 @@ pub fn run(a: RunArgs) -> Result<()> {
         let gen = pipeline::generator(&s)?;
         let mut lazy: BTreeSet<TileId> = stored_tiles(&s, &gen)?.difference(&before).copied().collect();
         if !lazy.is_empty() {
+            // (the renderer's tiles and meshes leave the GPU to the generator)
+            render::gpu::trim();
             pipeline::with_margin_and_ancestors(&s, &mut lazy);
             eprintln!("neighbourhood of the lazily generated tiles:");
             gen_tiles(&s, &gen, lazy.into_iter().collect(), false)?;

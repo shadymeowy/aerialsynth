@@ -55,21 +55,25 @@ pub(crate) fn storage<T: bytemuck::Pod>(d: &wgpu::Device, label: &str, data: &[T
     if bytes.is_empty() {
         return d.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size: 256, usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false });
     }
-    d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let b = d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(label),
         contents: bytes,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    })
+    });
+    crate::gpu::vram_log(d, label, bytes.len() as u64);
+    b
 }
 
 /// An output storage buffer of `size` bytes (copyable to a read-back buffer).
 pub(crate) fn output(d: &wgpu::Device, label: &str, size: u64) -> wgpu::Buffer {
-    d.create_buffer(&wgpu::BufferDescriptor {
+    let b = d.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
         size: size.max(256),
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
-    })
+    });
+    crate::gpu::vram_log(d, label, size);
+    b
 }
 
 /// Copy `buf` back to the host (waits for the GPU).
@@ -84,6 +88,7 @@ pub(crate) fn read_back<T: bytemuck::Pod>(g: &Gpu, buf: &wgpu::Buffer, n: usize)
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
+    crate::gpu::vram_log(&g.device, "read-back", bytes);
     let mut enc = g.device.create_command_encoder(&Default::default());
     enc.copy_buffer_to_buffer(buf, 0, &rb, 0, bytes);
     g.queue.submit([enc.finish()]);
@@ -179,6 +184,25 @@ struct Lattice {
     work_s: wgpu::Buffer,
     cap: usize,
     used: usize,
+}
+
+impl Lattice {
+    /// An empty table of `cap` slots.
+    fn new(d: &wgpu::Device, cap: usize) -> Lattice {
+        Lattice {
+            keys: output(d, "lattice keys", (cap * 8) as u64),
+            keys_ro: output(d, "lattice keys (copy)", (cap * 8) as u64),
+            s: output(d, "lattice points", (cap * 32) as u64),
+            h: output(d, "lattice heights", (cap * 4) as u64),
+            flags: output(d, "lattice flags", (cap * 4) as u64),
+            tgt: output(d, "lattice targets", (cap * 4) as u64),
+            mark: output(d, "lattice marks", (cap * 4) as u64),
+            work_t: output(d, "target work", (cap * 4) as u64),
+            work_s: output(d, "source work", (cap * 4) as u64),
+            cap,
+            used: 0,
+        }
+    }
 }
 
 /// Lattice table slots (~50 bytes each).
@@ -350,19 +374,8 @@ impl GpuGenerator {
             l_lat,
             dk,
         };
-        let lat = Lattice {
-            keys: output(d, "lattice keys", (LAT_CAP * 8) as u64),
-            keys_ro: output(d, "lattice keys (copy)", (LAT_CAP * 8) as u64),
-            s: output(d, "lattice points", (LAT_CAP * 32) as u64),
-            h: output(d, "lattice heights", (LAT_CAP * 4) as u64),
-            flags: output(d, "lattice flags", (LAT_CAP * 4) as u64),
-            tgt: output(d, "lattice targets", (LAT_CAP * 4) as u64),
-            mark: output(d, "lattice marks", (LAT_CAP * 4) as u64),
-            work_t: output(d, "target work", (LAT_CAP * 4) as u64),
-            work_s: output(d, "source work", (LAT_CAP * 4) as u64),
-            cap: LAT_CAP,
-            used: 0,
-        };
+        let lat = Lattice::new(d, LAT_CAP);
+        crate::gpu::device::vram_note(d, "generator ready");
         Ok(GpuGenerator { world, surface, gpu, k, globals, cache: Mutex::new(Cache::default()), lat: Mutex::new(lat) })
     }
 
@@ -497,6 +510,10 @@ impl GpuGenerator {
         let chunks_g = chunks(&mut boxes_g);
         let t_drain = std::time::Instant::now();
         let mut lat = self.lat.lock().unwrap();
+        if lat.cap < LAT_CAP {
+            // (after `trim`: an empty table, as a cleared one)
+            *lat = Lattice::new(d, LAT_CAP);
+        }
         let mut seg_cap = (1usize << 18).max(queries.len() * 64);
         let mut sink_cap = 1usize << 16;
         let b_boxes_e = storage(d, "boxes", &boxes_e);
@@ -660,6 +677,14 @@ impl GpuGenerator {
     }
 
     /// The GPU's name.
+    /// Free the drainage lattice (576 MiB) until the next batch makes it again, empty. For
+    /// callers that generate in bursts next to other GPU work (lazy generation while rendering).
+    pub fn trim(&self) {
+        let mut lat = self.lat.lock().unwrap();
+        *lat = Lattice::new(&self.gpu.device, 1);
+        crate::gpu::device::vram_note(&self.gpu.device, "generator trimmed");
+    }
+
     pub fn adapter(&self) -> &str {
         &self.gpu.info.name
     }
@@ -720,7 +745,9 @@ impl GpuGenerator {
     /// Generate tiles (one batch on the GPU; halved while its land-use sites overflow the
     /// request buffers).
     pub fn tiles(&self, ids: &[TileId]) -> Result<Vec<TileData>> {
-        self.gpu.scoped(|| self.tiles_split(ids))
+        let r = self.gpu.scoped(|| self.tiles_split(ids));
+        crate::gpu::device::vram_note(&self.gpu.device, "tile batch done");
+        r
     }
 
     fn tiles_split(&self, ids: &[TileId]) -> Result<Vec<TileData>> {

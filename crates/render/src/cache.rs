@@ -160,6 +160,9 @@ impl TileCache {
                 }
             }
         }
+        // (the GPU generator's buffers kept between batches go until the next burst: the
+        // renderer needs the memory meanwhile)
+        g.trim_gpu();
         Ok(out)
     }
 

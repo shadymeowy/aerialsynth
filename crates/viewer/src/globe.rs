@@ -213,6 +213,10 @@ pub struct Globe {
     grad: wgpu::Texture,
     extra: wgpu::Texture,
     capacity: u32,
+    /// the most tile slots the arrays may grow to (`--gpu-tiles`, the adapter's limit)
+    max_capacity: u32,
+    bgl0: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
     index: wgpu::Buffer,
     index_count: u32,
     caps: [(wgpu::Buffer, wgpu::Buffer, u32, DVec3); 2],
@@ -238,10 +242,15 @@ fn tex_array(device: &wgpu::Device, label: &str, layers: u32, format: wgpu::Text
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        // (COPY_SRC: copied into larger arrays, `Globe::grow`)
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     })
 }
+
+/// Tile slots the texture arrays start with (1 MiB each); they grow when a frame draws more
+/// tiles than fit next to the frame before's (`Globe::grow`), up to `--gpu-tiles`.
+const START_CAPACITY: u32 = 1024;
 
 fn array_view(t: &wgpu::Texture) -> wgpu::TextureView {
     t.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default() })
@@ -249,7 +258,8 @@ fn array_view(t: &wgpu::Texture) -> wgpu::TextureView {
 
 impl Globe {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, ell: Ellipsoid, want_capacity: u32) -> Globe {
-        let capacity = want_capacity.min(device.limits().max_texture_array_layers).max(64);
+        let max_capacity = want_capacity.min(device.limits().max_texture_array_layers).max(64);
+        let capacity = max_capacity.min(START_CAPACITY);
         let color = tex_array(device, "tile color", capacity, wgpu::TextureFormat::Rgba8UnormSrgb);
         let elev = tex_array(device, "tile elevation", capacity, wgpu::TextureFormat::R32Float);
         let grad = tex_array(device, "tile slope", capacity, wgpu::TextureFormat::Rg16Float);
@@ -426,6 +436,9 @@ impl Globe {
             grad,
             extra,
             capacity,
+            max_capacity,
+            bgl0,
+            sampler,
             index,
             index_count: idx.len() as u32,
             caps,
@@ -520,6 +533,14 @@ impl Globe {
             self.write_layer(layer, &p);
             return;
         }
+        if self.free.is_empty() && self.capacity < self.max_capacity {
+            // full: larger arrays when the least recently used tile was drawn by the frame
+            // before (the view needs more tiles than fit)
+            let lru = self.resident.iter().filter(|(t, s)| s.last < self.frame && t.z > 2).map(|(_, s)| s.last).min();
+            if lru.is_none_or(|l| l + 1 >= self.frame) {
+                self.grow();
+            }
+        }
         let layer = match self.free.pop() {
             Some(l) => l,
             None => {
@@ -558,6 +579,42 @@ impl Globe {
         }
         self.resident.insert(p.id, Slot { layer, last: self.frame, elev_max: p.elev_max.max(p.elev_min), elev_lo: lo });
         self.stats.uploads += 1;
+    }
+
+    /// Half as many tile slots again (at most `max_capacity`): new arrays, the tiles copied over.
+    fn grow(&mut self) {
+        let cap = (self.capacity * 3 / 2).div_ceil(64) * 64;
+        let cap = cap.min(self.max_capacity);
+        let d = &self.device;
+        let new = [
+            tex_array(d, "tile color", cap, wgpu::TextureFormat::Rgba8UnormSrgb),
+            tex_array(d, "tile elevation", cap, wgpu::TextureFormat::R32Float),
+            tex_array(d, "tile slope", cap, wgpu::TextureFormat::Rg16Float),
+            tex_array(d, "tile optional layers", cap, wgpu::TextureFormat::Rgba8Unorm),
+        ];
+        let mut enc = d.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("globe grow") });
+        let size = wgpu::Extent3d { width: N as u32, height: N as u32, depth_or_array_layers: self.capacity };
+        for (old, new) in [&self.color, &self.elev, &self.grad, &self.extra].into_iter().zip(&new) {
+            enc.copy_texture_to_texture(old.as_image_copy(), new.as_image_copy(), size);
+        }
+        self.queue.submit([enc.finish()]);
+        let [color, elev, grad, extra] = new;
+        let (cv, ev, gv, xv) = (array_view(&color), array_view(&elev), array_view(&grad), array_view(&extra));
+        self.bg0 = d.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("globe bg0"),
+            layout: &self.bgl0,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: self.globals.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&cv) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&ev) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&gv) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&xv) },
+            ],
+        });
+        (self.color, self.elev, self.grad, self.extra) = (color, elev, grad, extra);
+        self.free.extend((self.capacity..cap).rev());
+        self.capacity = cap;
     }
 
     fn write_layer(&self, layer: u32, p: &Payload) {

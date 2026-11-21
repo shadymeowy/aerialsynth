@@ -32,6 +32,10 @@ pub struct TilePool {
     tick: u64,
     /// tiles uploaded so far (statistics)
     pub uploads: u64,
+    /// a tile the frame before used was evicted (the pool is too small for consecutive frames)
+    pub thrashed: bool,
+    /// the most tiles a frame needed
+    pub peak_need: usize,
 }
 
 fn tex(device: &wgpu::Device, label: &str, size: u32, layers: u32, format: wgpu::TextureFormat) -> wgpu::Texture {
@@ -71,6 +75,8 @@ impl TilePool {
             free: (0..slots).rev().collect(),
             tick: 0,
             uploads: 0,
+            thrashed: false,
+            peak_need: 0,
         }
     }
 
@@ -99,7 +105,8 @@ impl TilePool {
                 Some(s) => s,
                 None => {
                     // evict the least recently used tile not used in this frame
-                    let (&victim, _) = self.resident.iter().filter(|(_, e)| e.2 != tick).min_by_key(|(_, e)| e.2).expect("tile pool too small for one frame");
+                    let (&victim, e) = self.resident.iter().filter(|(_, e)| e.2 != tick).min_by_key(|(_, e)| e.2).expect("tile pool too small for one frame");
+                    self.thrashed |= e.2 + 1 == tick;
                     self.resident.remove(&victim).unwrap().0
                 }
             };
