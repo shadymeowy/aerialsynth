@@ -16,7 +16,7 @@
 
 A typical `terrain run` fits a 4 GB GPU again. This changes no tile or frame (classic's tiles
 stay v0.2.0's), at the same speed. Peak GPU memory of a 1280 × 720 frame over
-971 tiles on an RTX 2080 Ti: next 4011 → 2640 MiB, classic 3063 → ~1840 MiB
+971 tiles on an RTX 2080 Ti: next 4011 → 2630 MiB, classic 3063 → 1790 MiB
 ([docs/gpu.md](docs/gpu.md#gpu-memory)).
 
 - The renderer's tile pool is sized to the frames' need (it had 2048 slots, 2.2 GB, from the
@@ -25,16 +25,27 @@ stay v0.2.0's), at the same speed. Peak GPU memory of a 1280 × 720 frame over
 - `terrain run` renders on a new GPU device after generating tiles: the driver keeps ~1 GB
   (on an RTX 2080 Ti; it scales with the GPU's size) of local memory for next's generator
   kernels until their device is gone.
-- next's GPU generator: the drainage lattice starts at 144 MiB (was 576 MiB) and grows when a
-  batch needs it; pass A's buffers are kept across batches instead of reallocated.
-- GPU memory comes in blocks of 64 MiB (larger buffers on their own) instead of up to
-  256 MiB, which left ~0.5 GB unused at the generator's peak.
+- The GPU generators' drainage lattice starts at 144 MiB (was 576 MiB) and grows when a batch
+  needs it (classic too: `terrain run --step tiles` 1636 → 1189 MiB, base levels 1665 → 1410
+  MiB, same speed, same tiles); next's pass A buffers are kept across batches instead of
+  reallocated, made for the largest batch so far (they were made for 16 tiles at least: the
+  viewer generates a few at a time).
+- GPU memory comes in blocks of 32 MiB (larger buffers on their own) instead of up to
+  256 MiB, which left ~0.5 GB unused at the generator's peak (64 MiB blocks, partly used by the
+  renderer's meshes next to the generator's smaller buffers, ~0.1–0.2 GB).
 - Generating while rendering (`tiles.lazy`, `terrain view`): the GPU generators free their
   batch memory after each burst of tiles, `terrain run --lazy` frees the renderer's tiles
-  before generating their neighbourhood (next 5547 → 3124 MiB, classic 4214 → 2118 MiB); the
-  viewer's map tile arrays start at 1024 slots and grow up to `--gpu-tiles` (1536) when the view
-  needs them. With next on an RTX 2080 Ti these still take 3–4 GB: the driver's local memory
-  for next's kernels (~16 KiB per GPU thread) sits next to the renderer.
+  before generating their neighbourhood (next 5547 → 3124 MiB, classic 4214 → 2118 MiB).
+- `terrain view`: only the view shown keeps its GPU memory. The map's tile arrays (1024 slots
+  of 1 MiB, growing up to `--gpu-tiles`) are made by its first frame and freed with its meshes
+  while the camera view is shown (they were made at start, also for `--camera-view`); the
+  camera view's tile pool and meshes are freed while the map is shown; the camera view keeps
+  128 MiB of meshes for later frames (`Renderer::mesh_budget`; 512 MiB before, mostly meshes of
+  earlier levels of detail). The camera view of a fresh world (960 × 540, 150 s): next 7517 →
+  3377 MiB, classic 6540 → 2044 MiB; switching between the views now peaks at the map's own
+  memory (next 3925, classic 2357 MiB), not the sum of both. With next on an RTX 2080 Ti these
+  still take 3–4 GB: the driver's local memory for next's kernels (~16 KiB per GPU thread,
+  ~1.1 GB there, ~270 MiB on a GTX 1650 Ti) sits next to the renderer.
 - `TERRAGEN_VRAM=1` prints the GPU memory the generators and the renderer allocate.
 
 ## 0.3.2 — 2026-11-01

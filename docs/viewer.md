@@ -69,7 +69,7 @@ over SSH X forwarding it runs, but slowly.
 | `--scale F` | ≤ 960 px wide | camera resolution factor (pinhole-type models) |
 | `--supersample N` | 1 | camera supersampling |
 | `--exag`, `--mode` | 1, surface | map relief exaggeration and shading |
-| `--gpu-tiles` | 1536 | map tiles on the GPU at most (1 MB each; 1024 at first, more when the view needs them) |
+| `--gpu-tiles` | 1536 | map tiles on the GPU at most (1 MB each; 1024 from the map's first frame, more when the view needs them; none while the camera view is shown) |
 | `--snapshot PNG --view … --wait S --size WxH` | `--view 20,10,16000,0,0`, `--wait 600`, `--size 1280x800` | a headless map view into a PNG (below) |
 | `--record DIR --path FILE --fps N --until S` | 25 fps | a headless keyframed map flight into PNG frames (below) |
 
@@ -159,5 +159,12 @@ On the author's machine (RTX 2080 Ti, Xeon W-2125):
 
 - **Camera limits:** the GPU → CPU read-back and the CPU sensor (bloom, chromatic aberration,
   noise, tone).
+- **GPU memory:** only the view shown keeps its GPU memory: the map's tiles (1 MiB each),
+  meshes and image are freed while the camera view is shown, the camera view's tile pool and
+  meshes while the map is ([docs/gpu.md](gpu.md#gpu-memory)). Peak memory in use with a fresh
+  world over 150 s (RTX 2080 Ti, the desktop's ~100 MiB included): the camera view next 3377 /
+  classic 2044 MiB (0.3.2: 7517 / 6540); switching between the views every 25 s next 3925 /
+  classic 2357 MiB, the map's own peak. With next, ~1.1 GB of it is the driver's local memory
+  for the generator's kernels, which scales with the GPU (~270 MiB on a GTX 1650 Ti).
 - **Unexplored ground:** distant terrain stays coarse for the first minute or so of low flight,
   until its tiles are generated.
